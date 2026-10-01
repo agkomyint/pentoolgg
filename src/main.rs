@@ -1,4 +1,4 @@
-use pentool::{document, editing, fonts, geometry, render, server, text};
+use pentool::{agent, document, editing, fonts, geometry, render, server, text};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -18,6 +18,40 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List or search layers and objects as compact JSON.
+    Tree {
+        input: PathBuf,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, value_enum)]
+        kind: Option<agent::ObjectKind>,
+        #[arg(long)]
+        layer: Option<String>,
+    },
+    /// Search layers, object IDs, and text content as compact JSON.
+    Search {
+        input: PathBuf,
+        query: String,
+        #[arg(long, value_enum)]
+        kind: Option<agent::ObjectKind>,
+        #[arg(long)]
+        layer: Option<String>,
+    },
+    /// Partially edit, rename, duplicate, move, reorder, or remove one object.
+    Object {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: agent::ObjectAction,
+    },
+    /// Apply a JSON array of object operations as one recoverable transaction.
+    Batch {
+        input: PathBuf,
+        operations: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        revision: Option<String>,
+    },
     /// Create, update, or remove editable text.
     Text {
         input: PathBuf,
@@ -113,6 +147,93 @@ async fn main() -> Result<()> {
         host: "127.0.0.1".into(),
         port: 4711,
     }) {
+        Command::Tree {
+            input,
+            query,
+            kind,
+            layer,
+        } => {
+            let doc = read_document(&input)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&agent::inspect(
+                    &doc,
+                    query.as_deref(),
+                    kind,
+                    layer.as_deref()
+                )?)?
+            );
+            Ok(())
+        }
+        Command::Search {
+            input,
+            query,
+            kind,
+            layer,
+        } => {
+            let doc = read_document(&input)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&agent::inspect(
+                    &doc,
+                    Some(&query),
+                    kind,
+                    layer.as_deref()
+                )?)?
+            );
+            Ok(())
+        }
+        Command::Object { input, action } => {
+            let bytes = fs::read(&input)?;
+            let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let mut doc: Document = serde_json::from_value(raw.clone())?;
+            let result = agent::apply(&mut doc, &action)?;
+            agent::merge_document(&mut raw, &doc, std::slice::from_ref(&action))?;
+            let output = serde_json::to_vec_pretty(&raw)?;
+            let backup = editing::transactional_write(&input, &output)?;
+            println!(
+                "{}",
+                serde_json::json!({"ok":true,"file":input,"backup":backup,"result":result})
+            );
+            Ok(())
+        }
+        Command::Batch {
+            input,
+            operations,
+            dry_run,
+            revision,
+        } => {
+            let bytes =
+                fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
+            let current_revision = agent::revision_bytes(&bytes);
+            if let Some(expected) = revision {
+                if expected != current_revision {
+                    anyhow::bail!("revision mismatch: document changed on disk");
+                }
+            }
+            let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let mut doc: Document = serde_json::from_value(raw.clone())?;
+            let actions: Vec<agent::ObjectAction> = serde_json::from_slice(
+                &fs::read(&operations)
+                    .with_context(|| format!("could not read {}", operations.display()))?,
+            )?;
+            let changes = agent::apply_batch(&mut doc, &actions)?;
+            agent::merge_document(&mut raw, &doc, &actions)?;
+            let output = serde_json::to_vec_pretty(&raw)?;
+            if dry_run {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok":true,"dry_run":true,"revision":current_revision,"changes":changes})
+                );
+            } else {
+                let backup = editing::transactional_write(&input, &output)?;
+                println!(
+                    "{}",
+                    serde_json::json!({"ok":true,"revision_before":current_revision,"revision_after":agent::revision_bytes(&output),"backup":backup,"changes":changes})
+                );
+            }
+            Ok(())
+        }
         Command::Serve { host, port, input } => server::serve(&host, port, input).await,
         Command::Text { input, action } => editing::edit(&input, |doc| text::apply(doc, action)),
         Command::Font { input, action } => editing::edit(&input, |doc| text::font(doc, action)),
@@ -207,5 +328,7 @@ async fn main() -> Result<()> {
 
 fn read_document(path: &PathBuf) -> Result<Document> {
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
-    serde_json::from_slice(&bytes).context("invalid .pen document")
+    let doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
+    doc.validate().map_err(anyhow::Error::msg)?;
+    Ok(doc)
 }

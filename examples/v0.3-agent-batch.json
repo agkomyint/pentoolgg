@@ -1,0 +1,6 @@
+[
+  {"type":"set","id":"subtitle","layer":"typography","fill":"#b8f34a"},
+  {"type":"duplicate","id":"subtitle","layer":"typography","new_id":"subtitle-copy"},
+  {"type":"move-to-layer","id":"subtitle-copy","layer":"typography","target_layer":"layer-1"},
+  {"type":"set","id":"subtitle-copy","layer":"layer-1","content":"Edited atomically by an agent","x":105,"y":560}
+]

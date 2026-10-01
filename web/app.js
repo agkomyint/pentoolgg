@@ -13,6 +13,7 @@
   function syncInspector(){const p=selectedPath(),t=selectedText();$('pathData').value=p?.d||'';if(p){if(/^#[0-9a-f]{6}$/i.test(p.stroke))$('stroke').value=p.stroke;$('width').value=p.stroke_width;$('widthOut').textContent=`${p.stroke_width} px`;$('strokeCap').value=p.stroke_linecap||'round';$('strokeJoin').value=p.stroke_linejoin||'round';$('miterLimit').value=p.stroke_miterlimit??4;}if(t){$('textContent').value=t.content;$('textFont').value=t.font_family;$('textSize').value=t.font_size;$('textWeight').value=String(t.font_weight);$('textItalic').checked=!!t.italic;if(/^#[0-9a-f]{6}$/i.test(t.fill))$('textFill').value=t.fill;$('textAlign').value=t.align||'left';$('textSpacing').value=t.letter_spacing||0;$('textLeading').value=t.line_height||1.2;}}
   function textFields(){return{content:$('textContent').value,font:$('textFont').value,size:Number($('textSize').value),weight:Number($('textWeight').value),italic:$('textItalic').checked,fill:$('textFill').value,align:$('textAlign').value,letter_spacing:Number($('textSpacing').value),line_height:Number($('textLeading').value)};}
   async function editText(action){if(geometryBusy)return;const base=JSON.stringify(doc);geometryBusy=true;try{const r=await fetch('/api/text',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,action})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while calculating. Try again.');remember();doc=data.document;layerId=action.layer;selected=action.type==='remove'?null:action.id;editGeometry=null;syncInspector();render();return true;}catch(e){notify(e.message,true);return false;}finally{geometryBusy=false;}}
+  async function editObjects(actions,selectAfter){if(geometryBusy)return false;const base=JSON.stringify(doc);geometryBusy=true;try{const r=await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,actions})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while editing. Try again.');remember();doc=data.document;if(selectAfter!==undefined)selected=selectAfter;editGeometry=null;syncInspector();render();notify(`${actions.length} object edit${actions.length===1?'':'s'} applied`);return true;}catch(e){notify(e.message,true);return false;}finally{geometryBusy=false;}}
   $('applyText').onclick=()=>{if(!selectedText()){notify('Select an unlocked text object first',true);return;}editText({type:'set',id:selected,layer:layerId,...textFields()});};
   let loadedFontFaces=[];
   async function loadEmbeddedFonts(){for(const face of loadedFontFaces)document.fonts.delete(face);loadedFontFaces=[];for(const asset of doc.fonts||[]){try{const db=await fetch('/api/font-info',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:asset.id,data:asset.data})});const info=await db.json();if(!db.ok)throw new Error(info.error);const bytes=Uint8Array.from(atob(asset.data),c=>c.charCodeAt(0));for(const f of info.faces){const face=new FontFace(f.family,bytes.buffer,{weight:String(f.weight),style:f.italic?'italic':'normal'});await face.load();document.fonts.add(face);loadedFontFaces.push(face);addFontFamily(f.family);}}catch(e){notify(`Font load failed: ${e.message}`,true);}}render();}
@@ -97,8 +98,10 @@
   function constrain(p,origin){const dx=p.x-origin.x,dy=p.y-origin.y,length=Math.hypot(dx,dy),angle=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*Math.PI/4;return{x:origin.x+Math.cos(angle)*length,y:origin.y+Math.sin(angle)*length};}
   function near(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<10*doc.canvas.width/svg.getBoundingClientRect().width;}
   function renderLayers(){
-    const root=$('layers');root.replaceChildren();
+    const root=$('layers'),query=$('layerSearch').value.trim().toLowerCase();root.replaceChildren();
     [...doc.layers].reverse().forEach(layer=>{
+      const objects=allObjects(layer).filter(o=>!query||layer.id.toLowerCase().includes(query)||layer.name.toLowerCase().includes(query)||o.id.toLowerCase().includes(query)||(o.content||'').toLowerCase().includes(query));
+      if(query&&!objects.length&&!layer.id.toLowerCase().includes(query)&&!layer.name.toLowerCase().includes(query))return;
       const row=document.createElement('div');row.className=`layer${layer.id===layerId?' active':''}`;
       const eye=document.createElement('button');eye.setAttribute('aria-label',`${layer.visible?'Hide':'Show'} ${layer.name}`);eye.textContent=layer.visible?'◉':'○';
       eye.onclick=()=>{remember();layer.visible=!layer.visible;render()};
@@ -106,7 +109,21 @@
       name.onclick=()=>{layerId=layer.id;selected=null;editGeometry=null;$('nodeEditor').replaceChildren();syncInspector();render()};
       const lock=document.createElement('button');lock.setAttribute('aria-label',`${layer.locked?'Unlock':'Lock'} ${layer.name}`);lock.textContent=layer.locked?'🔒':'·';
       lock.onclick=()=>{remember();layer.locked=!layer.locked;editGeometry=null;syncInspector();render()};
-      row.append(eye,name,lock);root.append(row);
+      row.append(eye,name,lock);
+      const list=document.createElement('div');list.className='layer-objects';
+      objects.forEach(o=>{
+        const kind=(layer.paths||[]).includes(o)?'path':'text',stack=kind==='path'?layer.paths:layer.texts,index=stack.indexOf(o);
+        const item=document.createElement('div');item.className=`object-row${selected===o.id&&layerId===layer.id?' active':''}`;
+        const choose=document.createElement('button');choose.className='object-name';choose.innerHTML=`<span class="object-kind">${kind}</span>${escapeXml(o.id)}`;choose.title=o.content||o.id;choose.onclick=()=>{layerId=layer.id;selected=o.id;editGeometry=null;syncInspector();render()};
+        const rename=document.createElement('button');rename.textContent='✎';rename.title='Rename';rename.onclick=()=>{const next=prompt('New object ID',o.id);if(next&&next!==o.id)editObjects([{type:'rename',id:o.id,layer:layer.id,new_id:next}],next)};
+        const duplicate=document.createElement('button');duplicate.textContent='⧉';duplicate.title='Duplicate';duplicate.onclick=()=>{const next=uid(o.id);editObjects([{type:'duplicate',id:o.id,layer:layer.id,new_id:next}],next)};
+        const up=document.createElement('button');up.textContent='↑';up.title='Move forward';up.disabled=index>=stack.length-1;up.onclick=()=>editObjects([{type:'reorder',id:o.id,layer:layer.id,index:index+1}],o.id);
+        const down=document.createElement('button');down.textContent='↓';down.title='Move backward';down.disabled=index===0;down.onclick=()=>editObjects([{type:'reorder',id:o.id,layer:layer.id,index:index-1}],o.id);
+        const remove=document.createElement('button');remove.textContent='×';remove.title='Delete';remove.onclick=()=>editObjects([{type:'remove',id:o.id,layer:layer.id}],null);
+        for(const b of [rename,duplicate,up,down,remove])b.disabled=b.disabled||layer.locked;
+        item.append(choose,rename,duplicate,up,down,remove);list.append(item);
+      });
+      row.append(list);root.append(row);
     });
   }
   function download(data,name,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
@@ -128,6 +145,7 @@
     const p=selectedPath();if(p){remember();doc.version=2;p.stroke_linecap=$('strokeCap').value;p.stroke_linejoin=$('strokeJoin').value;p.stroke_miterlimit=limit;}render();
   });
   $('addLayer').onclick=()=>{remember();const layer={id:uid('layer'),name:`Layer ${doc.layers.length+1}`,visible:true,locked:false,paths:[],texts:[]};doc.layers.push(layer);layerId=layer.id;selected=null;render()};
+  $('layerSearch').oninput=renderLayers;
   function detachShared(){sharedBase=null;sharedRevision=null;$('saveBtn').textContent='Save .pen';$('reloadBtn').hidden=true;undo.length=0;redo.length=0;}
   $('newBtn').onclick=()=>{detachShared();doc=fresh();layerId=doc.layers[0].id;draft=[];selected=null;editGeometry=null;loadEmbeddedFonts();render();notify('New document')};
   async function save(){if(geometryBusy){notify('Wait for the current edit to finish',true);return;}if(draft.length)finish();if(sharedBase){try{const r=await fetch('/api/document',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({revision:sharedRevision,base:sharedBase,document:doc})});const result=await r.json();if(!r.ok)throw new Error(result.error);sharedBase=structuredClone(doc);sharedRevision=result.revision;notify('Shared document saved');}catch(e){notify(e.message,true)}return;}download(JSON.stringify(doc,null,2),`${doc.name||'untitled'}.pen`,'application/json');notify('.pen file saved')}

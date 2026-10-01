@@ -34,8 +34,9 @@ cargo install --path .
 
 ## CLI
 
-**v0.2.0** adds editable text, portable fonts, and configurable sharp stroke
-edges. These commands require v0.2.0 or newer.
+**v0.3.0** adds searchable object discovery, targeted partial edits, recoverable
+batch operations, and a searchable browser object tree. Text, fonts, and sharp
+stroke controls introduced in v0.2.0 remain fully supported.
 
 ```sh
 pentool serve --host 127.0.0.1 --port 4711
@@ -46,6 +47,46 @@ pentool export logo.pen logo.svg
 ```
 
 Running `pentool` without a command starts the server.
+
+## Agent discovery and safe editing (v0.3.0)
+
+Agents no longer need to parse or rewrite a complete `.pen` document to make a
+small change. Search returns stable IDs, bounds, stacking indexes, and layer state:
+
+```sh
+pentool tree artwork.pen
+pentool search artwork.pen composer
+pentool search artwork.pen "Open desktop app" --kind text
+pentool tree artwork.pen --kind text --layer typography
+```
+
+Target an exact layer and object ID. Unspecified properties are preserved, and
+each mutation retains the prior file as a numbered recovery snapshot:
+
+```sh
+pentool object artwork.pen set composer --layer ui --fill "#1c1c1c"
+pentool object artwork.pen rename composer --layer ui --new-id prompt-box
+pentool object artwork.pen duplicate prompt-box --layer ui --new-id prompt-copy
+pentool object artwork.pen move-to-layer prompt-copy --layer ui --target-layer variants
+pentool object artwork.pen reorder prompt-box --layer ui 0
+```
+
+For all-or-nothing edits, provide a JSON array of operations. `--dry-run` validates
+and summarizes without writing. A committed batch creates an exact numbered
+`artwork.pen.bak.N` snapshot beside the file. Pass `--revision` from a prior dry
+run to reject the batch if the file changed in between.
+
+```sh
+pentool batch artwork.pen operations.json --dry-run
+pentool batch artwork.pen operations.json --revision 0123456789abcdef
+```
+
+Unknown JSON extension fields follow objects through rename, duplicate, move,
+and reorder. Locked source/target layers reject mutations. Object matching never
+guesses: mutation commands require exact layer and object IDs. Inside a layer,
+paths render first and text renders above them; `tree` exposes explicit
+`draw_order` values. In the browser, the searchable Layers panel uses the same
+Rust editing operations for object rename, duplicate, reorder, and delete.
 
 ## Browser-free drawing and shared editing
 

@@ -129,7 +129,34 @@ pub fn edit(file: &FilePath, change: impl FnOnce(&mut Document) -> Result<()>) -
     Ok(())
 }
 
-pub(crate) fn merge(old: &mut serde_json::Value, new: serde_json::Value) {
+/// Write through a sibling file and retain the exact prior file as a numbered
+/// recovery snapshot. If the final rename fails, the original is restored.
+pub fn transactional_write(file: &FilePath, bytes: &[u8]) -> Result<std::path::PathBuf> {
+    let parent = file.parent().unwrap_or_else(|| FilePath::new("."));
+    let name = file
+        .file_name()
+        .context("document path has no filename")?
+        .to_string_lossy();
+    let temp = parent.join(format!(".{name}.pentool-tmp-{}", std::process::id()));
+    let backup = (1..=999)
+        .map(|n| parent.join(format!("{name}.bak.{n}")))
+        .find(|p| !p.exists())
+        .context("too many recovery snapshots")?;
+    fs::write(&temp, bytes)
+        .with_context(|| format!("could not write temporary file {}", temp.display()))?;
+    if let Err(e) = fs::rename(file, &backup) {
+        let _ = fs::remove_file(&temp);
+        return Err(e).context("could not create recovery snapshot");
+    }
+    if let Err(e) = fs::rename(&temp, file) {
+        let _ = fs::rename(&backup, file);
+        let _ = fs::remove_file(&temp);
+        return Err(e).context("could not replace document; original restored");
+    }
+    Ok(backup)
+}
+
+pub fn merge(old: &mut serde_json::Value, new: serde_json::Value) {
     match (old, new) {
         (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
             for (k, v) in b {

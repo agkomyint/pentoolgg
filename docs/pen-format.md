@@ -36,6 +36,12 @@ Limits enforced by the renderer:
 
 ## Version 2: editable text and embedded fonts
 
+Pentoolgg v0.3.0 keeps file format version 2 unchanged. Agent discovery and batch
+editing are tool behaviors, not a schema migration. Within every layer the
+explicit render order is the layer's `paths` array followed by its `texts` array;
+zero is the back of each stack. Use separate layers when paths and text must be
+interleaved. Unknown fields are retained by supported CLI edit operations.
+
 Version 2 paths also support `stroke_linecap` (`butt`, `round`, `square`),
 `stroke_linejoin` (`miter`, `round`, `bevel`), and `stroke_miterlimit` (1–1000,
 default 4). Omitted caps/joins default to round to preserve older artwork.

@@ -53,6 +53,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
         .route("/api/document", get(get_document).put(put_document))
         .route("/api/geometry", post(geometry_command))
         .route("/api/text", post(text_command))
+        .route("/api/edit", post(object_command))
         .route("/api/fonts", get(font_list))
         .route("/api/font", post(embed_font))
         .route("/api/font-info", post(font_info))
@@ -72,6 +73,25 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
 struct TextRequest {
     document: serde_json::Value,
     action: crate::text::TextAction,
+}
+#[derive(serde::Deserialize)]
+struct ObjectRequest {
+    document: serde_json::Value,
+    actions: Vec<crate::agent::ObjectAction>,
+}
+async fn object_command(Json(body): Json<ObjectRequest>) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let mut doc: Document = serde_json::from_value(body.document.clone())?;
+        doc.validate().map_err(anyhow::Error::msg)?;
+        let changes = crate::agent::apply_batch(&mut doc, &body.actions)?;
+        let mut raw = body.document;
+        crate::agent::merge_document(&mut raw, &doc, &body.actions)?;
+        Ok(serde_json::json!({"document":raw,"changes":changes}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
 }
 async fn text_command(Json(body): Json<TextRequest>) -> Response {
     let result = (|| -> Result<serde_json::Value> {
