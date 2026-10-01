@@ -3,4 +3,3 @@
 @media(max-width:800px){:root{--aside:220px}.badge{display:none}.actions button,.actions .button{padding:0 9px}.actions #newBtn{display:none}}
 @media(max-width:620px){body{overflow:auto}.topbar{height:auto;min-height:56px;align-items:flex-start;padding-block:8px}.actions{flex-wrap:wrap;justify-content:flex-end}.workspace{height:auto;min-height:calc(100vh - 72px);grid-template-columns:56px 1fr}.tools{grid-row:1}.stage{min-height:62vh}.inspector{grid-column:1/3;border-left:0;border-top:1px solid var(--line)}.canvas-wrap{max-width:calc(100vw - 80px);overflow:auto}.hint{display:none}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.toast{transition:none!important}}
-

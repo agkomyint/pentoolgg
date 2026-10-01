@@ -33,4 +33,3 @@ Limits enforced by the renderer:
 - layers: at most 1,000
 - paths: at most 100,000 total
 - HTTP request: at most 16 MiB
-
