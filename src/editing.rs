@@ -10,11 +10,11 @@ mod tests {
     fn merge_removes_last_text_and_font_resources() {
         let doc = Document::new(100, 100);
         let mut raw = serde_json::to_value(&doc).unwrap();
-        raw["layers"][0]["texts"] = serde_json::json!([{"id":"title","content":"old"}]);
+        raw["pages"][0]["layers"][0]["texts"] = serde_json::json!([{"id":"title","content":"old"}]);
         raw["fonts"] = serde_json::json!([{"id":"old","data":"unused"}]);
         raw["extension"] = serde_json::json!(true);
         merge(&mut raw, serde_json::to_value(doc).unwrap());
-        assert_eq!(raw["layers"][0]["texts"], serde_json::json!([]));
+        assert_eq!(raw["pages"][0]["layers"][0]["texts"], serde_json::json!([]));
         assert_eq!(raw["fonts"], serde_json::json!([]));
         assert_eq!(raw["extension"], true);
     }
@@ -116,13 +116,30 @@ pub enum PathAction {
 }
 
 pub fn edit(file: &FilePath, change: impl FnOnce(&mut Document) -> Result<()>) -> Result<()> {
+    edit_page(file, None, change)
+}
+
+pub fn edit_page(
+    file: &FilePath,
+    page: Option<&str>,
+    change: impl FnOnce(&mut Document) -> Result<()>,
+) -> Result<()> {
     // Keep extension fields when modifying the known document schema.
     let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(file)?)?;
     let mut doc: Document = serde_json::from_value(raw.clone())?;
+    if let Some(id) = page {
+        doc.select_page(id).map_err(anyhow::Error::msg)?;
+    }
     change(&mut doc)?;
     doc.validate().map_err(anyhow::Error::msg)?;
     let updated = serde_json::to_value(&doc)?;
     merge(&mut raw, updated);
+    if doc.version == 3 {
+        if let Some(object) = raw.as_object_mut() {
+            object.remove("canvas");
+            object.remove("layers");
+        }
+    }
     fs::write(file, serde_json::to_vec_pretty(&raw)?)
         .with_context(|| format!("could not write {}", file.display()))?;
     println!("{}", serde_json::json!({"ok":true,"file":file}));
@@ -309,7 +326,7 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
             } else {
                 l.paths.push(p);
             }
-            doc.version = 2;
+            doc.version = doc.version.max(2);
         }
         PathAction::Style {
             id,
@@ -337,7 +354,7 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
             if let Some(v) = miter_limit {
                 p.stroke_miterlimit = v;
             }
-            doc.version = 2;
+            doc.version = doc.version.max(2);
         }
         PathAction::Remove { id, .. } => {
             let i = l

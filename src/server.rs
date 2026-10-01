@@ -54,11 +54,12 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
         .route("/api/geometry", post(geometry_command))
         .route("/api/text", post(text_command))
         .route("/api/edit", post(object_command))
+        .route("/api/import", post(import_command))
         .route("/api/fonts", get(font_list))
         .route("/api/font", post(embed_font))
         .route("/api/font-info", post(font_info))
         .route("/fonts/:name", get(bundled_font))
-        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(Shared {
             file,
             gate: Arc::new(Mutex::new(())),
@@ -72,16 +73,36 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
 #[derive(serde::Deserialize)]
 struct TextRequest {
     document: serde_json::Value,
+    page: Option<String>,
     action: crate::text::TextAction,
 }
 #[derive(serde::Deserialize)]
 struct ObjectRequest {
     document: serde_json::Value,
+    page: Option<String>,
     actions: Vec<crate::agent::ObjectAction>,
+}
+#[derive(serde::Deserialize)]
+struct ImportRequest {
+    document: serde_json::Value,
+    source: serde_json::Value,
+    options: crate::import::ImportOptions,
+}
+async fn import_command(Json(body): Json<ImportRequest>) -> Response {
+    match crate::import::compose(body.document, body.source, &body.options) {
+        Ok(result) => {
+            Json(serde_json::json!({"document":result.document,"summary":result.summary}))
+                .into_response()
+        }
+        Err(error) => problem(error),
+    }
 }
 async fn object_command(Json(body): Json<ObjectRequest>) -> Response {
     let result = (|| -> Result<serde_json::Value> {
         let mut doc: Document = serde_json::from_value(body.document.clone())?;
+        if let Some(page) = &body.page {
+            doc.select_page(page).map_err(anyhow::Error::msg)?;
+        }
         doc.validate().map_err(anyhow::Error::msg)?;
         let changes = crate::agent::apply_batch(&mut doc, &body.actions)?;
         let mut raw = body.document;
@@ -96,6 +117,9 @@ async fn object_command(Json(body): Json<ObjectRequest>) -> Response {
 async fn text_command(Json(body): Json<TextRequest>) -> Response {
     let result = (|| -> Result<serde_json::Value> {
         let mut doc: Document = serde_json::from_value(body.document.clone())?;
+        if let Some(page) = &body.page {
+            doc.select_page(page).map_err(anyhow::Error::msg)?;
+        }
         doc.validate().map_err(anyhow::Error::msg)?;
         crate::text::apply(&mut doc, body.action)?;
         let mut raw = body.document;
@@ -172,6 +196,7 @@ async fn bundled_font(axum::extract::Path(name): axum::extract::Path<String>) ->
 #[derive(serde::Deserialize)]
 struct GeometryRequest {
     document: serde_json::Value,
+    page: Option<String>,
     layer: String,
     id: Option<String>,
     operation: crate::geometry::Operation,
@@ -179,6 +204,9 @@ struct GeometryRequest {
 async fn geometry_command(Json(body): Json<GeometryRequest>) -> Response {
     let result = (|| -> Result<serde_json::Value> {
         let mut doc: Document = serde_json::from_value(body.document.clone())?;
+        if let Some(page) = &body.page {
+            doc.select_page(page).map_err(anyhow::Error::msg)?;
+        }
         doc.validate().map_err(anyhow::Error::msg)?;
         let result = match &body.id {
             Some(id) => crate::geometry::execute(&mut doc, &body.layer, id, &body.operation)?,
@@ -270,14 +298,35 @@ fn asset(body: &'static str, kind: &'static str) -> Response {
         .into_response()
 }
 
-async fn render_png(Json(doc): Json<Document>) -> Response {
+#[derive(serde::Deserialize, Default)]
+struct PageQuery {
+    page: Option<String>,
+}
+
+async fn render_png(
+    axum::extract::Query(query): axum::extract::Query<PageQuery>,
+    Json(mut doc): Json<Document>,
+) -> Response {
+    if let Some(page) = query.page {
+        if let Err(error) = doc.select_page(&page) {
+            return problem(anyhow::Error::msg(error));
+        }
+    }
     match render::to_png(&doc, 1.0) {
         Ok(bytes) => binary(bytes, "image/png", "artwork.png"),
         Err(error) => problem(error),
     }
 }
 
-async fn render_svg(Json(doc): Json<Document>) -> Response {
+async fn render_svg(
+    axum::extract::Query(query): axum::extract::Query<PageQuery>,
+    Json(mut doc): Json<Document>,
+) -> Response {
+    if let Some(page) = query.page {
+        if let Err(error) = doc.select_page(&page) {
+            return problem(anyhow::Error::msg(error));
+        }
+    }
     match render::to_svg(&doc) {
         Ok(svg) => binary(svg.into_bytes(), "image/svg+xml", "artwork.svg"),
         Err(error) => problem(error),

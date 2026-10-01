@@ -187,10 +187,13 @@ fn serialization_keeps_empty_arrays_and_identity_for_extension_merge() {
     .unwrap();
     d.layers[0].texts[0].transform = identity();
     let raw = serde_json::to_value(&d).unwrap();
-    assert_eq!(raw["layers"][0]["texts"][0]["transform"][4], 0.0);
+    assert_eq!(
+        raw["pages"][0]["layers"][0]["texts"][0]["transform"][4],
+        0.0
+    );
     d.layers[0].texts.clear();
     d.fonts.clear();
     let raw = serde_json::to_value(&d).unwrap();
-    assert_eq!(raw["layers"][0]["texts"], serde_json::json!([]));
+    assert_eq!(raw["pages"][0]["layers"][0]["texts"], serde_json::json!([]));
     assert_eq!(raw["fonts"], serde_json::json!([]));
 }

@@ -1,14 +1,88 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Document {
     pub format: String,
     pub version: u32,
     pub name: String,
     pub canvas: Canvas,
     pub layers: Vec<Layer>,
-    #[serde(default)]
     pub fonts: Vec<FontAsset>,
+    pages: Vec<Page>,
+    active_page: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Page {
+    pub id: String,
+    pub name: String,
+    pub canvas: Canvas,
+    pub layers: Vec<Layer>,
+}
+
+#[derive(Deserialize)]
+struct DocumentWire {
+    format: String,
+    version: u32,
+    name: String,
+    #[serde(default)]
+    canvas: Option<Canvas>,
+    #[serde(default)]
+    layers: Option<Vec<Layer>>,
+    #[serde(default)]
+    pages: Vec<Page>,
+    #[serde(default)]
+    fonts: Vec<FontAsset>,
+}
+
+impl<'de> Deserialize<'de> for Document {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DocumentWire::deserialize(deserializer)?;
+        let (canvas, layers, pages) = if wire.version == 3 {
+            let first = wire
+                .pages
+                .first()
+                .ok_or_else(|| serde::de::Error::custom("version 3 document has no pages"))?;
+            (first.canvas.clone(), first.layers.clone(), wire.pages)
+        } else {
+            (
+                wire.canvas
+                    .ok_or_else(|| serde::de::Error::custom("document has no canvas"))?,
+                wire.layers
+                    .ok_or_else(|| serde::de::Error::custom("document has no layers"))?,
+                vec![],
+            )
+        };
+        Ok(Self {
+            format: wire.format,
+            version: wire.version,
+            name: wire.name,
+            canvas,
+            layers,
+            fonts: wire.fonts,
+            pages,
+            active_page: 0,
+        })
+    }
+}
+
+impl Serialize for Document {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("Document", 6)?;
+        state.serialize_field("format", &self.format)?;
+        state.serialize_field("version", &self.version)?;
+        state.serialize_field("name", &self.name)?;
+        if self.version == 3 {
+            let pages = self.current_pages();
+            state.serialize_field("pages", &pages)?;
+        } else {
+            state.serialize_field("canvas", &self.canvas)?;
+            state.serialize_field("layers", &self.layers)?;
+        }
+        state.serialize_field("fonts", &self.fonts)?;
+        state.end()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,29 +283,116 @@ fn default_width() -> f32 {
 
 impl Document {
     pub fn new(width: u32, height: u32) -> Self {
+        let canvas = Canvas {
+            width,
+            height,
+            background: "#ffffff".into(),
+        };
+        let layers = vec![Layer {
+            id: "layer-1".into(),
+            name: "Layer 1".into(),
+            visible: true,
+            locked: false,
+            paths: vec![],
+            texts: vec![],
+        }];
         Self {
             format: "pentool".into(),
-            version: 2,
+            version: 3,
             name: "Untitled".into(),
-            canvas: Canvas {
-                width,
-                height,
-                background: "#ffffff".into(),
-            },
-            layers: vec![Layer {
-                id: "layer-1".into(),
-                name: "Layer 1".into(),
-                visible: true,
-                locked: false,
-                paths: vec![],
-                texts: vec![],
-            }],
+            canvas: canvas.clone(),
+            layers: layers.clone(),
             fonts: vec![],
+            pages: vec![Page {
+                id: "page-1".into(),
+                name: "Page 1".into(),
+                canvas,
+                layers,
+            }],
+            active_page: 0,
         }
     }
 
+    fn current_pages(&self) -> Vec<Page> {
+        if self.version != 3 {
+            return vec![];
+        }
+        let mut pages = self.pages.clone();
+        if pages.is_empty() {
+            pages.push(Page {
+                id: "page-1".into(),
+                name: "Page 1".into(),
+                canvas: self.canvas.clone(),
+                layers: self.layers.clone(),
+            });
+        } else if let Some(page) = pages.get_mut(self.active_page) {
+            page.canvas = self.canvas.clone();
+            page.layers = self.layers.clone();
+        }
+        pages
+    }
+
+    pub fn pages(&self) -> Vec<Page> {
+        if self.version == 3 {
+            self.current_pages()
+        } else {
+            vec![Page {
+                id: "page-1".into(),
+                name: "Page 1".into(),
+                canvas: self.canvas.clone(),
+                layers: self.layers.clone(),
+            }]
+        }
+    }
+
+    pub fn active_page_id(&self) -> &str {
+        if self.version == 3 {
+            self.pages
+                .get(self.active_page)
+                .map(|p| p.id.as_str())
+                .unwrap_or("page-1")
+        } else {
+            "page-1"
+        }
+    }
+
+    pub fn select_page(&mut self, id: &str) -> Result<(), String> {
+        if self.version != 3 {
+            if id == "page-1" {
+                return Ok(());
+            }
+            return Err("legacy documents only expose page-1; upgrade before adding pages".into());
+        }
+        if let Some(page) = self.pages.get_mut(self.active_page) {
+            page.canvas = self.canvas.clone();
+            page.layers = self.layers.clone();
+        }
+        let index = self
+            .pages
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| format!("page not found: {id}"))?;
+        self.active_page = index;
+        self.canvas = self.pages[index].canvas.clone();
+        self.layers = self.pages[index].layers.clone();
+        Ok(())
+    }
+
+    pub fn replace_pages(&mut self, pages: Vec<Page>, active_id: &str) -> Result<(), String> {
+        let index = pages
+            .iter()
+            .position(|p| p.id == active_id)
+            .ok_or_else(|| format!("page not found: {active_id}"))?;
+        self.version = 3;
+        self.pages = pages;
+        self.active_page = index;
+        self.canvas = self.pages[index].canvas.clone();
+        self.layers = self.pages[index].layers.clone();
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        if self.format != "pentool" || !matches!(self.version, 1 | 2) {
+        if self.format != "pentool" || !matches!(self.version, 1..=3) {
             return Err("unsupported .pen format or version".into());
         }
         if self.version == 1
@@ -239,26 +400,63 @@ impl Document {
         {
             return Err("text and embedded fonts require document version 2".into());
         }
-        if self.layers.is_empty() {
-            return Err("document must contain at least one layer".into());
+        let pages = self.pages();
+        if pages.is_empty() || pages.len() > 1000 {
+            return Err("document must contain between 1 and 1000 pages".into());
         }
-        if self.canvas.width == 0
-            || self.canvas.height == 0
-            || self.canvas.width > 16384
-            || self.canvas.height > 16384
+        let mut page_ids = std::collections::HashSet::new();
+        if pages
+            .iter()
+            .any(|p| p.id.is_empty() || !page_ids.insert(&p.id))
         {
+            return Err("page IDs must be unique and nonempty".into());
+        }
+        if pages.iter().any(|p| p.layers.is_empty()) {
+            return Err("each page must contain at least one layer".into());
+        }
+        if pages.iter().any(|p| {
+            p.canvas.width == 0
+                || p.canvas.height == 0
+                || p.canvas.width > 16384
+                || p.canvas.height > 16384
+        }) {
             return Err("canvas dimensions must be between 1 and 16384".into());
         }
-        if self.layers.len() > 1000 {
-            return Err("document has too many layers".into());
+        if pages.iter().any(|p| p.layers.len() > 1000) {
+            return Err("a page has too many layers".into());
         }
-        if self.layers.iter().flat_map(|l| &l.paths).count() > 100_000 {
+        for page in &pages {
+            let mut layer_ids = std::collections::HashSet::new();
+            if page
+                .layers
+                .iter()
+                .any(|layer| layer.id.is_empty() || !layer_ids.insert(&layer.id))
+            {
+                return Err(format!(
+                    "layer IDs must be unique and nonempty within page {}",
+                    page.id
+                ));
+            }
+        }
+        if pages
+            .iter()
+            .flat_map(|p| &p.layers)
+            .flat_map(|l| &l.paths)
+            .count()
+            > 100_000
+        {
             return Err("document has too many paths".into());
         }
-        if self.layers.iter().flat_map(|l| &l.texts).count() > 100_000 {
+        if pages
+            .iter()
+            .flat_map(|p| &p.layers)
+            .flat_map(|l| &l.texts)
+            .count()
+            > 100_000
+        {
             return Err("document has too many text objects".into());
         }
-        for layer in &self.layers {
+        for layer in pages.iter().flat_map(|p| &p.layers) {
             for path in &layer.paths {
                 if !path.stroke_width.is_finite()
                     || path.stroke_width < 0.0
@@ -318,5 +516,40 @@ mod tests {
         let decoded: Document = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.canvas.width, 800);
         assert_eq!(decoded.layers.len(), 1);
+    }
+
+    #[test]
+    fn legacy_document_loads_as_one_virtual_page() {
+        let raw = r##"{"format":"pentool","version":1,"name":"Old","canvas":{"width":10,"height":20,"background":"#fff"},"layers":[{"id":"ink","name":"Ink","paths":[]}]}"##;
+        let doc: Document = serde_json::from_str(raw).unwrap();
+        doc.validate().unwrap();
+        assert_eq!(doc.pages().len(), 1);
+        assert_eq!(doc.pages()[0].id, "page-1");
+        assert_eq!(doc.layers[0].id, "ink");
+    }
+
+    #[test]
+    fn page_selection_serializes_edits_to_only_the_selected_page() {
+        let mut doc = Document::new(100, 100);
+        crate::page::apply(
+            &mut doc,
+            crate::page::PageAction::Add {
+                id: "mobile".into(),
+                name: Some("Mobile".into()),
+                width: 390,
+                height: 844,
+                background: "#000000".into(),
+            },
+        )
+        .unwrap();
+        doc.layers[0].name = "Mobile art".into();
+        doc.select_page("page-1").unwrap();
+        assert_eq!(doc.layers[0].name, "Layer 1");
+        doc.select_page("mobile").unwrap();
+        assert_eq!(doc.layers[0].name, "Mobile art");
+        let raw = serde_json::to_value(&doc).unwrap();
+        assert!(raw.get("canvas").is_none());
+        assert_eq!(raw["pages"][1]["canvas"]["width"], 390);
+        assert_eq!(raw["pages"][1]["layers"][0]["name"], "Mobile art");
     }
 }

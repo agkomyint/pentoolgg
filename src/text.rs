@@ -208,7 +208,7 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
             layer.texts.remove(i);
         }
     }
-    updated.version = 2;
+    updated.version = updated.version.max(2);
     updated.validate().map_err(anyhow::Error::msg)?;
     let db = fonts::database(&updated, true)?;
     for t in &updated.layers[layer_index].texts {
@@ -235,7 +235,7 @@ pub fn add_font(doc: &mut Document, asset: FontAsset) -> Result<()> {
         bail!("font ID already exists");
     }
     let mut updated = doc.clone();
-    updated.version = 2;
+    updated.version = updated.version.max(2);
     updated.fonts.push(asset);
     updated.validate().map_err(anyhow::Error::msg)?;
     *doc = updated;

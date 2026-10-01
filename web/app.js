@@ -1,32 +1,37 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const svg = $('canvas');
-  let doc, layerId, tool = 'pen', draft = [], selected = null, dragging = null, toastTimer, hover = null;
+  let doc, pageId, layerId, tool = 'pen', draft = [], selected = null, dragging = null, toastTimer, hover = null;
   const undo = [], redo = [];
   let sharedBase = null, sharedRevision = null;
-  let geometryBusy=false;
+  let geometryBusy=false,jobController=null;
+  $('cancelJob').onclick=()=>jobController?.abort();
   let editGeometry=null, geometryDrag=null;
   const allObjects=l=>[...(l.paths||[]),...(l.texts||[])];
-  const objectLayer=(id=selected)=>doc.layers.find(l=>l.id===layerId&&allObjects(l).some(o=>o.id===id));
+  const activePage=()=>doc.version===3?(doc.pages.find(p=>p.id===pageId)||doc.pages[0]):{id:'page-1',name:'Page 1',canvas:doc.canvas,layers:doc.layers};
+  const pageLayers=()=>activePage().layers;
+  const pageCanvas=()=>activePage().canvas;
+  const objectLayer=(id=selected)=>pageLayers().find(l=>l.id===layerId&&allObjects(l).some(o=>o.id===id));
   function selectedText(){const l=objectLayer();return l&&!l.locked?(l.texts||[]).find(t=>t.id===selected):null;}
   function selectedObject(){return selectedPath()||selectedText();}
   function syncInspector(){const p=selectedPath(),t=selectedText();$('pathData').value=p?.d||'';if(p){if(/^#[0-9a-f]{6}$/i.test(p.stroke))$('stroke').value=p.stroke;$('width').value=p.stroke_width;$('widthOut').textContent=`${p.stroke_width} px`;$('strokeCap').value=p.stroke_linecap||'round';$('strokeJoin').value=p.stroke_linejoin||'round';$('miterLimit').value=p.stroke_miterlimit??4;}if(t){$('textContent').value=t.content;$('textFont').value=t.font_family;$('textSize').value=t.font_size;$('textWeight').value=String(t.font_weight);$('textItalic').checked=!!t.italic;if(/^#[0-9a-f]{6}$/i.test(t.fill))$('textFill').value=t.fill;$('textAlign').value=t.align||'left';$('textSpacing').value=t.letter_spacing||0;$('textLeading').value=t.line_height||1.2;}}
   function textFields(){return{content:$('textContent').value,font:$('textFont').value,size:Number($('textSize').value),weight:Number($('textWeight').value),italic:$('textItalic').checked,fill:$('textFill').value,align:$('textAlign').value,letter_spacing:Number($('textSpacing').value),line_height:Number($('textLeading').value)};}
-  async function editText(action){if(geometryBusy)return;const base=JSON.stringify(doc);geometryBusy=true;try{const r=await fetch('/api/text',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,action})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while calculating. Try again.');remember();doc=data.document;layerId=action.layer;selected=action.type==='remove'?null:action.id;editGeometry=null;syncInspector();render();return true;}catch(e){notify(e.message,true);return false;}finally{geometryBusy=false;}}
-  async function editObjects(actions,selectAfter){if(geometryBusy)return false;const base=JSON.stringify(doc);geometryBusy=true;try{const r=await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,actions})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while editing. Try again.');remember();doc=data.document;if(selectAfter!==undefined)selected=selectAfter;editGeometry=null;syncInspector();render();notify(`${actions.length} object edit${actions.length===1?'':'s'} applied`);return true;}catch(e){notify(e.message,true);return false;}finally{geometryBusy=false;}}
+  async function editText(action){if(geometryBusy)return;const base=JSON.stringify(doc);geometryBusy=true;try{const r=await fetch('/api/text',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,page:pageId,action})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while calculating. Try again.');remember();doc=data.document;layerId=action.layer;selected=action.type==='remove'?null:action.id;editGeometry=null;syncInspector();render();return true;}catch(e){notify(e.message,true);return false;}finally{geometryBusy=false;}}
+  async function editObjects(actions,selectAfter){if(geometryBusy)return false;const base=JSON.stringify(doc);geometryBusy=true;try{const r=await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,page:pageId,actions})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while editing. Try again.');remember();doc=data.document;if(selectAfter!==undefined)selected=selectAfter;editGeometry=null;syncInspector();render();notify(`${actions.length} object edit${actions.length===1?'':'s'} applied`);return true;}catch(e){notify(e.message,true);return false;}finally{geometryBusy=false;}}
   $('applyText').onclick=()=>{if(!selectedText()){notify('Select an unlocked text object first',true);return;}editText({type:'set',id:selected,layer:layerId,...textFields()});};
   let loadedFontFaces=[];
   async function loadEmbeddedFonts(){for(const face of loadedFontFaces)document.fonts.delete(face);loadedFontFaces=[];for(const asset of doc.fonts||[]){try{const db=await fetch('/api/font-info',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:asset.id,data:asset.data})});const info=await db.json();if(!db.ok)throw new Error(info.error);const bytes=Uint8Array.from(atob(asset.data),c=>c.charCodeAt(0));for(const f of info.faces){const face=new FontFace(f.family,bytes.buffer,{weight:String(f.weight),style:f.italic?'italic':'normal'});await face.load();document.fonts.add(face);loadedFontFaces.push(face);addFontFamily(f.family);}}catch(e){notify(`Font load failed: ${e.message}`,true);}}render();}
   function addFontFamily(family){if(!family||[...$('fontFamilies').options].some(o=>o.value===family))return;const option=document.createElement('option');option.value=family;$('fontFamilies').append(option);}
   fetch('/api/fonts').then(r=>r.json()).then(info=>info.faces.forEach(f=>addFontFamily(f.family))).catch(()=>{});
   $('importFont').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(geometryBusy)return;const base=JSON.stringify(doc);geometryBusy=true;try{const bytes=new Uint8Array(await file.arrayBuffer());if(bytes.length>6*1024*1024)throw new Error('Font file is too large');let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));const r=await fetch('/api/font',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,id:uid('font'),data:btoa(binary)})});const info=await r.json();if(!r.ok)throw new Error(info.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while importing. Try again.');remember();doc=info.document;info.fonts.faces.forEach(f=>addFontFamily(f.family));await loadEmbeddedFonts();notify('Font embedded in document');}catch(err){notify(err.message,true);}finally{geometryBusy=false;e.target.value='';}};
+  $('importPen').onchange=async e=>{const file=e.target.files[0];if(!file||geometryBusy)return;const base=JSON.stringify(doc);geometryBusy=true;jobController=new AbortController();$('cancelJob').hidden=false;try{if(file.size>64*1024*1024)throw new Error('Import is limited to 64 MiB');const source=JSON.parse(await file.text()),prefix=$('importPrefix').value.trim();const options={destination_page:pageId,source_page:null,prefix:prefix||null,x:Number($('importX').value),y:Number($('importY').value),scale:Number($('importScale').value),rotation:Number($('importRotate').value),expand_canvas:$('importExpand').checked};const r=await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},signal:jobController.signal,body:JSON.stringify({document:doc,source,options})});const result=await r.json();if(!r.ok)throw new Error(result.error);if(JSON.stringify(doc)!==base)throw new Error('Artwork changed while importing. Try again.');remember();doc=result.document;layerId=pageLayers().at(-1)?.id;selected=null;const report=$('importResult');report.hidden=false;report.textContent=JSON.stringify(result.summary,null,2);render();await loadEmbeddedFonts();notify(`${Object.keys(result.summary.layers).length} layer(s) imported`);}catch(err){notify(err.name==='AbortError'?'Import cancelled':`Import failed: ${err.message}`,err.name!=='AbortError')}finally{geometryBusy=false;jobController=null;$('cancelJob').hidden=true;e.target.value=''}};
   async function geometryOperation(operation,id=selected){
     if(geometryBusy)return null;
     const layer=id?objectLayer(id):activeLayer();
     if(!layer || (id===null && $('geometryTarget').value!=='layer')){notify('Select a path first',true);return null;}
     const baseDocument=JSON.stringify(doc);
     geometryBusy=true;
-    try{const r=await fetch('/api/geometry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,layer:layer.id,id,operation})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==baseDocument)throw new Error('Artwork changed while calculating. Try the operation again.');if(!['bounds','nodes','hit'].includes(operation.type)){remember();doc=data.document;editGeometry=null;$('nodeEditor').replaceChildren();render();const p=selectedPath();if(p)$('pathData').value=p.d;}return data.result;}catch(e){notify(e.message,true);return null;}finally{geometryBusy=false;}
+    try{const r=await fetch('/api/geometry',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,page:pageId,layer:layer.id,id,operation})});const data=await r.json();if(!r.ok)throw new Error(data.error);if(JSON.stringify(doc)!==baseDocument)throw new Error('Artwork changed while calculating. Try the operation again.');if(!['bounds','nodes','hit'].includes(operation.type)){remember();doc=data.document;editGeometry=null;$('nodeEditor').replaceChildren();render();const p=selectedPath();if(p)$('pathData').value=p.d;}return data.result;}catch(e){notify(e.message,true);return null;}finally{geometryBusy=false;}
   }
   const targetId=()=>$('geometryTarget').value==='layer'?null:selected;
   $('moveGeometry').onclick=()=>geometryOperation({type:'translate',dx:Number($('moveX').value),dy:Number($('moveY').value)},targetId());
@@ -43,24 +48,25 @@
       for(const h of node.handles)row(`Handle ${node.element}.${h.handle}`,h.x,h.y,{type:'set-handle',element:node.element,handle:h.handle});
     }
   };
-  async function loadShared(){try{const r=await fetch('/api/document');if(!r.ok)return;const data=await r.json();sharedBase=data.document;sharedRevision=data.revision;doc=structuredClone(sharedBase);layerId=doc.layers[0]?.id;draft=[];selected=null;editGeometry=null;undo.length=0;redo.length=0;render();await loadEmbeddedFonts();$('saveBtn').textContent='Save shared';$('reloadBtn').hidden=false;notify('Shared document loaded');}catch(e){notify(`Load failed: ${e.message}`,true)}}
-  const snapshot = () => JSON.stringify({doc,layerId,draft,selected});
+  async function loadShared(){try{const r=await fetch('/api/document');if(!r.ok)return;const data=await r.json();sharedBase=data.document;sharedRevision=data.revision;doc=structuredClone(sharedBase);pageId=doc.version===3?doc.pages[0]?.id:'page-1';layerId=pageLayers()[0]?.id;draft=[];selected=null;editGeometry=null;undo.length=0;redo.length=0;render();await loadEmbeddedFonts();$('saveBtn').textContent='Save shared';$('reloadBtn').hidden=false;notify('Shared document loaded');}catch(e){notify(`Load failed: ${e.message}`,true)}}
+  const snapshot = () => JSON.stringify({doc,pageId,layerId,draft,selected});
   function remember(){undo.push(snapshot());redo.length=0;}
-  function restore(from,to){if(!from.length)return;to.push(snapshot());({doc,layerId,draft,selected}=JSON.parse(from.pop()));dragging=null;hover=null;editGeometry=null;$('nodeEditor').replaceChildren();syncInspector();render();loadEmbeddedFonts();}
+  function restore(from,to){if(!from.length)return;to.push(snapshot());({doc,pageId,layerId,draft,selected}=JSON.parse(from.pop()));dragging=null;hover=null;editGeometry=null;$('nodeEditor').replaceChildren();syncInspector();render();loadEmbeddedFonts();}
   const uid = (prefix) => `${prefix}-${crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`;
-  const fresh = () => ({format:'pentool',version:2,name:'Untitled',canvas:{width:1200,height:800,background:'#ffffff'},layers:[{id:uid('layer'),name:'Layer 1',visible:true,locked:false,paths:[],texts:[]}],fonts:[]});
-  const activeLayer = () => doc.layers.find(l => l.id === layerId) || doc.layers[0];
+  const fresh = () => {const layer={id:uid('layer'),name:'Layer 1',visible:true,locked:false,paths:[],texts:[]};return{format:'pentool',version:3,name:'Untitled',pages:[{id:'page-1',name:'Page 1',canvas:{width:1200,height:800,background:'#ffffff'},layers:[layer]}],fonts:[]}};
+  const activeLayer = () => pageLayers().find(l => l.id === layerId) || pageLayers()[0];
   const ns = 'http://www.w3.org/2000/svg';
 
   function notify(message, error=false) { const t=$('toast'); t.textContent=message; t.className=`toast show${error?' error':''}`; clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.className='toast',2600); }
   function escapeXml(s) { return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c])); }
   function render() {
-    svg.setAttribute('viewBox',`0 0 ${doc.canvas.width} ${doc.canvas.height}`);
+    const canvas=pageCanvas(),layers=pageLayers();
+    svg.setAttribute('viewBox',`0 0 ${canvas.width} ${canvas.height}`);
     const maxW=Math.max(280,document.querySelector('.stage').clientWidth-80), maxH=Math.max(240,document.querySelector('.stage').clientHeight-80);
-    const scale=Math.min(maxW/doc.canvas.width,maxH/doc.canvas.height,1);
-    svg.style.width=`${doc.canvas.width*scale}px`; svg.style.height=`${doc.canvas.height*scale}px`; svg.style.background=doc.canvas.background;
+    const scale=Math.min(maxW/canvas.width,maxH/canvas.height,1);
+    svg.style.width=`${canvas.width*scale}px`; svg.style.height=`${canvas.height*scale}px`; svg.style.background=canvas.background;
     svg.replaceChildren();
-    doc.layers.filter(l=>l.visible).forEach(layer=>{(layer.paths||[]).forEach(p=>{
+    layers.filter(l=>l.visible).forEach(layer=>{(layer.paths||[]).forEach(p=>{
       const el=document.createElementNS(ns,'path');
       for(const [k,v] of Object.entries({d:p.d,stroke:p.stroke,'stroke-width':p.stroke_width,fill:p.fill,'stroke-linecap':p.stroke_linecap||'round','stroke-linejoin':p.stroke_linejoin||'round','stroke-miterlimit':p.stroke_miterlimit??4})) el.setAttribute(k,v);
       el.dataset.id=p.id;el.dataset.layer=layer.id;if(p.id===selected&&layer.id===layerId)el.classList.add('selected');svg.append(el);
@@ -85,7 +91,7 @@
         marker('rect',{x:node.x-size,y:node.y-size,width:size*2,height:size*2,fill:'white',stroke:'#2563eb','stroke-width':1/scale},{geometry:'anchor',index:node.index});
       }
     }
-    renderLayers();
+    renderPages();renderLayers();
   }
   const n = value => value.toFixed(2);
   const pathData = points => points.map((p,i)=>{
@@ -93,14 +99,28 @@
     const prev=points[i-1], a=prev.out||prev, b=p.in||p;
     return `C ${n(a.x)} ${n(a.y)} ${n(b.x)} ${n(b.y)} ${n(p.x)} ${n(p.y)}`;
   }).join(' ');
-  function point(e){const r=svg.getBoundingClientRect();return{x:(e.clientX-r.left)*doc.canvas.width/r.width,y:(e.clientY-r.top)*doc.canvas.height/r.height};}
-  function finish(closed=false){if(draft.length>1){remember();doc.version=2;const points=closed?[...draft,draft[0]]:draft;activeLayer().paths.push({id:uid('path'),d:pathData(points)+(closed?' Z':''),stroke:$('stroke').value,stroke_width:Number($('width').value),fill:$('fill').value,stroke_linecap:$('strokeCap').value,stroke_linejoin:$('strokeJoin').value,stroke_miterlimit:Number($('miterLimit').value),closed});notify(closed?'Closed path added':'Path added');}draft=[];hover=null;dragging=null;render();}
+  function point(e){const r=svg.getBoundingClientRect(),canvas=pageCanvas();return{x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};}
+  function finish(closed=false){if(draft.length>1){remember();const points=closed?[...draft,draft[0]]:draft;activeLayer().paths.push({id:uid('path'),d:pathData(points)+(closed?' Z':''),stroke:$('stroke').value,stroke_width:Number($('width').value),fill:$('fill').value,stroke_linecap:$('strokeCap').value,stroke_linejoin:$('strokeJoin').value,stroke_miterlimit:Number($('miterLimit').value),closed});notify(closed?'Closed path added':'Path added');}draft=[];hover=null;dragging=null;render();}
   function constrain(p,origin){const dx=p.x-origin.x,dy=p.y-origin.y,length=Math.hypot(dx,dy),angle=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*Math.PI/4;return{x:origin.x+Math.cos(angle)*length,y:origin.y+Math.sin(angle)*length};}
-  function near(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<10*doc.canvas.width/svg.getBoundingClientRect().width;}
+  function near(a,b){return Math.hypot(a.x-b.x,a.y-b.y)<10*pageCanvas().width/svg.getBoundingClientRect().width;}
+  function renderPages(){
+    const root=$('pages');root.replaceChildren();
+    const pages=doc.version===3?doc.pages:[{id:'page-1',name:'Page 1'}];
+    pages.forEach((page,index)=>{const row=document.createElement('div');row.className=`page-row${page.id===pageId?' active':''}`;
+      const name=document.createElement('button');name.className='page-name';name.textContent=page.name;name.onclick=()=>{pageId=page.id;layerId=activePage().layers[0]?.id;selected=null;draft=[];editGeometry=null;render()};
+      const rename=document.createElement('button');rename.textContent='✎';rename.title='Rename page';rename.onclick=()=>{const value=prompt('Page name',page.name);if(value){remember();page.name=value;render()}};
+      const duplicate=document.createElement('button');duplicate.textContent='⧉';duplicate.title='Duplicate page';duplicate.onclick=()=>{remember();if(doc.version!==3)return;const copy=structuredClone(page);copy.id=uid('page');copy.name=`${page.name} copy`;doc.pages.splice(index+1,0,copy);pageId=copy.id;layerId=copy.layers[0]?.id;selected=null;render()};
+      const up=document.createElement('button');up.textContent='↑';up.title='Move page up';up.disabled=index===0;up.onclick=()=>{remember();doc.pages.splice(index-1,0,doc.pages.splice(index,1)[0]);render()};
+      const down=document.createElement('button');down.textContent='↓';down.title='Move page down';down.disabled=index===pages.length-1;down.onclick=()=>{remember();doc.pages.splice(index+1,0,doc.pages.splice(index,1)[0]);render()};
+      const remove=document.createElement('button');remove.textContent='×';remove.title='Delete page';remove.disabled=pages.length===1;remove.onclick=()=>{if(pages.length===1)return;remember();const i=doc.pages.findIndex(p=>p.id===page.id);doc.pages.splice(i,1);if(pageId===page.id)pageId=doc.pages[Math.min(i,doc.pages.length-1)].id;layerId=activePage().layers[0]?.id;selected=null;render()};
+      row.append(name,rename,duplicate,up,down,remove);root.append(row);
+    });
+  }
   function renderLayers(){
     const root=$('layers'),query=$('layerSearch').value.trim().toLowerCase();root.replaceChildren();
-    [...doc.layers].reverse().forEach(layer=>{
-      const objects=allObjects(layer).filter(o=>!query||layer.id.toLowerCase().includes(query)||layer.name.toLowerCase().includes(query)||o.id.toLowerCase().includes(query)||(o.content||'').toLowerCase().includes(query));
+    let renderedObjects=0,totalObjects=0;
+    [...pageLayers()].reverse().forEach(layer=>{
+      const matching=allObjects(layer).filter(o=>!query||layer.id.toLowerCase().includes(query)||layer.name.toLowerCase().includes(query)||o.id.toLowerCase().includes(query)||(o.content||'').toLowerCase().includes(query));totalObjects+=matching.length;const objects=matching.slice(0,Math.max(0,500-renderedObjects));renderedObjects+=objects.length;
       if(query&&!objects.length&&!layer.id.toLowerCase().includes(query)&&!layer.name.toLowerCase().includes(query))return;
       const row=document.createElement('div');row.className=`layer${layer.id===layerId?' active':''}`;
       const eye=document.createElement('button');eye.setAttribute('aria-label',`${layer.visible?'Hide':'Show'} ${layer.name}`);eye.textContent=layer.visible?'◉':'○';
@@ -125,10 +145,11 @@
       });
       row.append(list);root.append(row);
     });
+    if(totalObjects>renderedObjects){const note=document.createElement('p');note.className='text-help';note.textContent=`Showing ${renderedObjects} of ${totalObjects} matching objects. Refine search to inspect more.`;root.append(note)}
   }
   function download(data,name,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-  async function exportPng(){const btn=$('exportBtn');btn.disabled=true;btn.setAttribute('aria-busy','true');try{const r=await fetch('/api/render/png',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(doc)});if(!r.ok){const j=await r.json();throw new Error(j.error)}download(await r.blob(),`${doc.name || 'artwork'}.png`,'image/png');notify('PNG exported');}catch(e){notify(`Export failed: ${e.message}`,true)}finally{btn.disabled=false;btn.removeAttribute('aria-busy')}}
-  svg.addEventListener('pointerdown',e=>{if(e.button!==0||geometryBusy)return;if(tool==='text'){const l=activeLayer();if(l.locked||!l.visible){notify('Choose a visible, unlocked layer',true);return;}const p=point(e);editText({type:'put',id:uid('text'),layer:l.id,x:p.x,y:p.y,...textFields()}).then(ok=>{if(ok)setTool('select');});return;}if(tool==='pen'&&!activeLayer().locked&&activeLayer().visible){const p=point(e);if(draft.length>1&&near(p,draft[0])){finish(true);return;}remember();dragging={index:draft.length,start:p};draft.push(e.shiftKey&&draft.length?constrain(p,draft[draft.length-1]):p);hover=null;svg.setPointerCapture(e.pointerId);render()}else if(tool==='select'){const target=e.target.closest('[data-id]'),l=doc.layers.find(l=>l.id===target?.dataset.layer);selected=l&&!l.locked?target.dataset.id:null;if(l)layerId=l.id;editGeometry=null;$('nodeEditor').replaceChildren();syncInspector();render()}});
+  async function exportPng(){const btn=$('exportBtn');btn.disabled=true;btn.setAttribute('aria-busy','true');jobController=new AbortController();$('cancelJob').hidden=false;try{const r=await fetch(`/api/render/png?page=${encodeURIComponent(pageId)}`,{method:'POST',headers:{'content-type':'application/json'},signal:jobController.signal,body:JSON.stringify(doc)});if(!r.ok){const j=await r.json();throw new Error(j.error)}download(await r.blob(),`${doc.name || 'artwork'}-${pageId}.png`,'image/png');notify('PNG exported');}catch(e){notify(e.name==='AbortError'?'Export cancelled':`Export failed: ${e.message}`,e.name!=='AbortError')}finally{jobController=null;$('cancelJob').hidden=true;btn.disabled=false;btn.removeAttribute('aria-busy')}}
+  svg.addEventListener('pointerdown',e=>{if(e.button!==0||geometryBusy)return;if(tool==='text'){const l=activeLayer();if(l.locked||!l.visible){notify('Choose a visible, unlocked layer',true);return;}const p=point(e);editText({type:'put',id:uid('text'),layer:l.id,x:p.x,y:p.y,...textFields()}).then(ok=>{if(ok)setTool('select');});return;}if(tool==='pen'&&!activeLayer().locked&&activeLayer().visible){const p=point(e);if(draft.length>1&&near(p,draft[0])){finish(true);return;}remember();dragging={index:draft.length,start:p};draft.push(e.shiftKey&&draft.length?constrain(p,draft[draft.length-1]):p);hover=null;svg.setPointerCapture(e.pointerId);render()}else if(tool==='select'){const target=e.target.closest('[data-id]'),l=pageLayers().find(l=>l.id===target?.dataset.layer);selected=l&&!l.locked?target.dataset.id:null;if(l)layerId=l.id;editGeometry=null;$('nodeEditor').replaceChildren();syncInspector();render()}});
   svg.addEventListener('pointermove',e=>{if(!dragging)return;const p=point(e), anchor=draft[dragging.index], dx=p.x-dragging.start.x,dy=p.y-dragging.start.y;anchor.out={x:anchor.x+dx,y:anchor.y+dy};anchor.in={x:anchor.x-dx,y:anchor.y-dy};render()});
   svg.addEventListener('pointerup',e=>{if(dragging){dragging=null;svg.releasePointerCapture(e.pointerId)}});
   svg.addEventListener('dblclick',e=>{e.preventDefault();if(tool==='select'&&selectedText()){$('textContent').focus();$('textContent').select();}else if(tool==='pen')finish();});
@@ -142,12 +163,13 @@
   for(const id of ['strokeCap','strokeJoin','miterLimit'])$(id).addEventListener('change',()=>{
     const limit=Number($('miterLimit').value);
     if(!Number.isFinite(limit)||limit<1||limit>1000){notify('Miter limit must be 1–1000',true);return;}
-    const p=selectedPath();if(p){remember();doc.version=2;p.stroke_linecap=$('strokeCap').value;p.stroke_linejoin=$('strokeJoin').value;p.stroke_miterlimit=limit;}render();
+    const p=selectedPath();if(p){remember();p.stroke_linecap=$('strokeCap').value;p.stroke_linejoin=$('strokeJoin').value;p.stroke_miterlimit=limit;}render();
   });
-  $('addLayer').onclick=()=>{remember();const layer={id:uid('layer'),name:`Layer ${doc.layers.length+1}`,visible:true,locked:false,paths:[],texts:[]};doc.layers.push(layer);layerId=layer.id;selected=null;render()};
-  $('layerSearch').oninput=renderLayers;
+  $('addLayer').onclick=()=>{remember();const layers=pageLayers(),layer={id:uid('layer'),name:`Layer ${layers.length+1}`,visible:true,locked:false,paths:[],texts:[]};layers.push(layer);layerId=layer.id;selected=null;render()};
+  $('addPage').onclick=()=>{remember();if(doc.version!==3){doc={format:'pentool',version:3,name:doc.name,pages:[{id:'page-1',name:'Page 1',canvas:doc.canvas,layers:doc.layers}],fonts:doc.fonts||[]};pageId='page-1';}const id=uid('page');doc.pages.push({id,name:`Page ${doc.pages.length+1}`,canvas:{width:pageCanvas().width,height:pageCanvas().height,background:pageCanvas().background},layers:[{id:uid('layer'),name:'Layer 1',visible:true,locked:false,paths:[],texts:[]}]});pageId=id;layerId=activePage().layers[0].id;selected=null;draft=[];render()};
+  let searchTimer;$('layerSearch').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(renderLayers,120)};
   function detachShared(){sharedBase=null;sharedRevision=null;$('saveBtn').textContent='Save .pen';$('reloadBtn').hidden=true;undo.length=0;redo.length=0;}
-  $('newBtn').onclick=()=>{detachShared();doc=fresh();layerId=doc.layers[0].id;draft=[];selected=null;editGeometry=null;loadEmbeddedFonts();render();notify('New document')};
+  $('newBtn').onclick=()=>{detachShared();doc=fresh();pageId=doc.pages[0].id;layerId=pageLayers()[0].id;draft=[];selected=null;editGeometry=null;loadEmbeddedFonts();render();notify('New document')};
   async function save(){if(geometryBusy){notify('Wait for the current edit to finish',true);return;}if(draft.length)finish();if(sharedBase){try{const r=await fetch('/api/document',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({revision:sharedRevision,base:sharedBase,document:doc})});const result=await r.json();if(!r.ok)throw new Error(result.error);sharedBase=structuredClone(doc);sharedRevision=result.revision;notify('Shared document saved');}catch(e){notify(e.message,true)}return;}download(JSON.stringify(doc,null,2),`${doc.name||'untitled'}.pen`,'application/json');notify('.pen file saved')}
   $('reloadBtn').onclick=loadShared;
   document.addEventListener('keydown',e=>{if(/input|select|textarea/i.test(e.target.tagName))return;if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();restore(e.shiftKey?redo:undo,e.shiftKey?undo:redo);}},true);
@@ -177,7 +199,7 @@
     for(const el of svg.querySelectorAll('[data-id]'))if(el.dataset.layer===layerId&&(layer||el.dataset.id===geometryDrag.id))el.setAttribute('transform',`translate(${dx} ${dy})`);
   });
   $('saveBtn').onclick=save;$('exportBtn').onclick=exportPng;
-  $('openFile').onchange=async e=>{try{const parsed=JSON.parse(await e.target.files[0].text());if(parsed.format!=='pentool'||![1,2].includes(parsed.version)||!Array.isArray(parsed.layers)||!parsed.layers.length)throw new Error('Unsupported file');detachShared();doc=parsed;layerId=doc.layers[0]?.id;draft=[];selected=null;editGeometry=null;render();await loadEmbeddedFonts();notify('.pen file opened')}catch(err){notify(`Could not open file: ${err.message}`,true)}finally{e.target.value=''}};
-  addEventListener('resize',render); doc=fresh();layerId=doc.layers[0].id;render();
+  $('openFile').onchange=async e=>{try{const parsed=JSON.parse(await e.target.files[0].text()),legacy=[1,2].includes(parsed.version)&&Array.isArray(parsed.layers)&&parsed.layers.length,multi=parsed.version===3&&Array.isArray(parsed.pages)&&parsed.pages.length;if(parsed.format!=='pentool'||(!legacy&&!multi))throw new Error('Unsupported file');detachShared();doc=parsed;pageId=multi?doc.pages[0].id:'page-1';layerId=pageLayers()[0]?.id;draft=[];selected=null;editGeometry=null;render();await loadEmbeddedFonts();notify('.pen file opened')}catch(err){notify(`Could not open file: ${err.message}`,true)}finally{e.target.value=''}};
+  addEventListener('resize',render); doc=fresh();pageId=doc.pages[0].id;layerId=pageLayers()[0].id;render();
   loadShared();
 })();

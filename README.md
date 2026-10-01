@@ -48,6 +48,50 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Multiple pages (v0.4.0)
+
+Version 3 `.pen` documents contain ordered pages, each with its own canvas and
+layers. Existing v1/v2 files still open as `page-1`; adding another page upgrades
+them without changing their original artwork.
+
+```sh
+pentool page design.pen list
+pentool page design.pen add mobile --name "Mobile" --width 390 --height 844
+pentool page design.pen duplicate mobile mobile-alt
+pentool page design.pen move mobile-alt 0
+pentool page design.pen rename mobile-alt "Mobile alternative"
+pentool --page mobile search design.pen button
+pentool --page mobile export design.pen mobile.png
+```
+
+The browser page panel switches canvases, adds, renames, and removes pages. All
+editing and rendering API requests carry the selected page ID so an operation
+cannot accidentally target a similarly named layer on another page.
+
+### Compose `.pen` projects
+
+Import another project into the selected page without flattening its paths or
+text. Imports validate first and write atomically; the original destination is
+retained as a numbered `.bak.N` recovery snapshot.
+
+```sh
+pentool --page mobile import design.pen icons.pen \
+  --prefix icons --at 120 80 --scale 0.75 --rotate 5 --expand-canvas --dry-run
+pentool --page mobile import design.pen icons.pen \
+  --prefix icons --at 120 80 --revision 0123456789abcdef
+```
+
+Omit `--prefix` to derive one from the source filename, or pass `--no-prefix` to
+require collision-free source IDs. Byte-identical fonts are deduplicated. Import
+copies content; it does not create a live dependency.
+
+Large searches are paginated for compact agent context:
+
+```sh
+pentool --page mobile search design.pen icon --offset 100 --limit 50
+pentool benchmark --layers 1000 --objects 100000
+```
+
 ## Agent discovery and safe editing (v0.3.0)
 
 Agents no longer need to parse or rewrite a complete `.pen` document to make a

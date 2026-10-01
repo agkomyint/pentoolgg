@@ -1,4 +1,6 @@
-use pentool::{agent, document, editing, fonts, geometry, render, server, text};
+use pentool::{
+    agent, benchmark, document, editing, fonts, geometry, import, page, render, server, text,
+};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -12,12 +14,55 @@ use std::{fs, path::PathBuf};
     about = "Draw vector paths, automate them, and serve a canvas"
 )]
 struct Cli {
+    /// Select a page for page-aware commands (v3 documents).
+    #[arg(long, global = true)]
+    page: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Generate and measure a large in-memory document.
+    Benchmark {
+        #[arg(long, default_value_t = 100)]
+        layers: usize,
+        #[arg(long, default_value_t = 10_000)]
+        objects: usize,
+        #[arg(long)]
+        png: bool,
+        #[arg(long)]
+        max_ms: Option<u128>,
+    },
+    /// List, add, rename, duplicate, move, or remove pages.
+    Page {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: page::PageAction,
+    },
+    /// Copy a page from another .pen file into the selected destination page.
+    Import {
+        destination: PathBuf,
+        source: PathBuf,
+        #[arg(long)]
+        source_page: Option<String>,
+        #[arg(long)]
+        prefix: Option<String>,
+        #[arg(long, conflicts_with = "prefix")]
+        no_prefix: bool,
+        #[arg(long, num_args = 2, value_names = ["X", "Y"], default_values_t = [0.0, 0.0])]
+        at: Vec<f64>,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f64,
+        #[arg(long, default_value_t = 0.0)]
+        rotate: f64,
+        #[arg(long)]
+        expand_canvas: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        revision: Option<String>,
+    },
     /// List or search layers and objects as compact JSON.
     Tree {
         input: PathBuf,
@@ -27,6 +72,10 @@ enum Command {
         kind: Option<agent::ObjectKind>,
         #[arg(long)]
         layer: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
     },
     /// Search layers, object IDs, and text content as compact JSON.
     Search {
@@ -36,6 +85,10 @@ enum Command {
         kind: Option<agent::ObjectKind>,
         #[arg(long)]
         layer: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
     },
     /// Partially edit, rename, duplicate, move, reorder, or remove one object.
     Object {
@@ -142,25 +195,42 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let selected_page = cli.page.as_deref();
     match cli.command.unwrap_or(Command::Serve {
         input: None,
         host: "127.0.0.1".into(),
         port: 4711,
     }) {
+        Command::Benchmark {
+            layers,
+            objects,
+            png,
+            max_ms,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&benchmark::run(layers, objects, png, max_ms)?)?
+            );
+            Ok(())
+        }
         Command::Tree {
             input,
             query,
             kind,
             layer,
+            offset,
+            limit,
         } => {
-            let doc = read_document(&input)?;
+            let doc = read_document(&input, selected_page)?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&agent::inspect(
+                serde_json::to_string_pretty(&agent::inspect_paginated(
                     &doc,
                     query.as_deref(),
                     kind,
-                    layer.as_deref()
+                    layer.as_deref(),
+                    offset,
+                    limit
                 )?)?
             );
             Ok(())
@@ -170,15 +240,19 @@ async fn main() -> Result<()> {
             query,
             kind,
             layer,
+            offset,
+            limit,
         } => {
-            let doc = read_document(&input)?;
+            let doc = read_document(&input, selected_page)?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&agent::inspect(
+                serde_json::to_string_pretty(&agent::inspect_paginated(
                     &doc,
                     Some(&query),
                     kind,
-                    layer.as_deref()
+                    layer.as_deref(),
+                    offset,
+                    limit
                 )?)?
             );
             Ok(())
@@ -187,6 +261,7 @@ async fn main() -> Result<()> {
             let bytes = fs::read(&input)?;
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let mut doc: Document = serde_json::from_value(raw.clone())?;
+            select_page(&mut doc, selected_page)?;
             let result = agent::apply(&mut doc, &action)?;
             agent::merge_document(&mut raw, &doc, std::slice::from_ref(&action))?;
             let output = serde_json::to_vec_pretty(&raw)?;
@@ -213,6 +288,7 @@ async fn main() -> Result<()> {
             }
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let mut doc: Document = serde_json::from_value(raw.clone())?;
+            select_page(&mut doc, selected_page)?;
             let actions: Vec<agent::ObjectAction> = serde_json::from_slice(
                 &fs::read(&operations)
                     .with_context(|| format!("could not read {}", operations.display()))?,
@@ -235,11 +311,91 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Serve { host, port, input } => server::serve(&host, port, input).await,
-        Command::Text { input, action } => editing::edit(&input, |doc| text::apply(doc, action)),
-        Command::Font { input, action } => editing::edit(&input, |doc| text::font(doc, action)),
+        Command::Page { input, action } => {
+            if matches!(action, page::PageAction::List) {
+                let doc = read_document(&input, None)?;
+                println!("{}", serde_json::to_string_pretty(&page::list(&doc))?);
+                Ok(())
+            } else {
+                editing::edit_page(&input, None, |doc| {
+                    println!("{}", page::apply(doc, action)?);
+                    Ok(())
+                })
+            }
+        }
+        Command::Import {
+            destination,
+            source,
+            source_page,
+            prefix,
+            no_prefix,
+            at,
+            scale,
+            rotate,
+            expand_canvas,
+            dry_run,
+            revision,
+        } => {
+            const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
+            for path in [&destination, &source] {
+                if fs::metadata(path)?.len() > MAX_IMPORT_BYTES {
+                    anyhow::bail!("import files are limited to 64 MiB");
+                }
+            }
+            let destination_bytes = fs::read(&destination)?;
+            let current_revision = agent::revision_bytes(&destination_bytes);
+            if revision.as_deref().is_some_and(|r| r != current_revision) {
+                anyhow::bail!("revision mismatch: destination changed on disk");
+            }
+            let prefix = if no_prefix {
+                None
+            } else {
+                Some(prefix.unwrap_or_else(|| {
+                    source
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .replace(|c: char| c.is_whitespace(), "-")
+                }))
+            };
+            let result = import::compose(
+                serde_json::from_slice(&destination_bytes)?,
+                serde_json::from_slice(&fs::read(&source)?)?,
+                &import::ImportOptions {
+                    destination_page: selected_page.map(str::to_owned),
+                    source_page,
+                    prefix,
+                    x: at[0],
+                    y: at[1],
+                    scale,
+                    rotation: rotate,
+                    expand_canvas,
+                },
+            )?;
+            let output = serde_json::to_vec_pretty(&result.document)?;
+            if dry_run {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok":true,"dry_run":true,"revision":current_revision,"summary":result.summary})
+                );
+            } else {
+                let backup = editing::transactional_write(&destination, &output)?;
+                println!(
+                    "{}",
+                    serde_json::json!({"ok":true,"revision_before":current_revision,"revision_after":agent::revision_bytes(&output),"backup":backup,"summary":result.summary})
+                );
+            }
+            Ok(())
+        }
+        Command::Text { input, action } => {
+            editing::edit_page(&input, selected_page, |doc| text::apply(doc, action))
+        }
+        Command::Font { input, action } => {
+            editing::edit_page(&input, selected_page, |doc| text::font(doc, action))
+        }
         Command::Fonts { input } => {
             let doc = match input {
-                Some(path) => read_document(&path)?,
+                Some(path) => read_document(&path, selected_page)?,
                 None => Document::new(1, 1),
             };
             println!("{}", fonts::list(&doc)?);
@@ -249,7 +405,7 @@ async fn main() -> Result<()> {
             input,
             layer,
             operation,
-        } => editing::edit(&input, |doc| {
+        } => editing::edit_page(&input, selected_page, |doc| {
             geometry::execute_layer(doc, &layer, &operation)?;
             Ok(())
         }),
@@ -260,11 +416,11 @@ async fn main() -> Result<()> {
             operation,
         } => {
             if operation.is_query() {
-                let mut doc = read_document(&input)?;
+                let mut doc = read_document(&input, selected_page)?;
                 println!("{}", geometry::execute(&mut doc, &layer, &id, &operation)?);
                 Ok(())
             } else {
-                editing::edit(&input, |doc| {
+                editing::edit_page(&input, selected_page, |doc| {
                     geometry::execute(doc, &layer, &id, &operation)?;
                     Ok(())
                 })
@@ -276,7 +432,7 @@ async fn main() -> Result<()> {
             height,
             background,
             name,
-        } => editing::edit(&input, |doc| {
+        } => editing::edit_page(&input, selected_page, |doc| {
             if let Some(v) = width {
                 doc.canvas.width = v;
             }
@@ -292,9 +448,11 @@ async fn main() -> Result<()> {
             Ok(())
         }),
         Command::Layer { input, action } => {
-            editing::edit(&input, |doc| editing::layer(doc, action))
+            editing::edit_page(&input, selected_page, |doc| editing::layer(doc, action))
         }
-        Command::Path { input, action } => editing::edit(&input, |doc| editing::path(doc, action)),
+        Command::Path { input, action } => {
+            editing::edit_page(&input, selected_page, |doc| editing::path(doc, action))
+        }
         Command::New {
             output,
             width,
@@ -308,7 +466,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Info { input } => {
-            let doc = read_document(&input)?;
+            let doc = read_document(&input, selected_page)?;
             println!("{}", serde_json::to_string_pretty(&doc)?);
             Ok(())
         }
@@ -318,7 +476,7 @@ async fn main() -> Result<()> {
             scale,
             outline_text,
         } => {
-            let doc = read_document(&input)?;
+            let doc = read_document(&input, selected_page)?;
             render::write_export_options(&doc, &output, scale, outline_text)?;
             println!("Exported {}", output.display());
             Ok(())
@@ -326,9 +484,17 @@ async fn main() -> Result<()> {
     }
 }
 
-fn read_document(path: &PathBuf) -> Result<Document> {
+fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
-    let doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
+    let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
+    select_page(&mut doc, page)?;
     doc.validate().map_err(anyhow::Error::msg)?;
     Ok(doc)
+}
+
+fn select_page(doc: &mut Document, page: Option<&str>) -> Result<()> {
+    if let Some(id) = page {
+        doc.select_page(id).map_err(anyhow::Error::msg)?;
+    }
+    Ok(())
 }

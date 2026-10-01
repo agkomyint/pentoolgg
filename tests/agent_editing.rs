@@ -65,10 +65,24 @@ fn search_returns_stable_ids_bounds_and_layer_state() {
 }
 
 #[test]
+fn search_pagination_is_compact_and_reports_total_matches() {
+    let mut d = doc();
+    let mut second = d.layers[0].paths[0].clone();
+    second.id = "composer-two".into();
+    d.layers[0].paths.push(second);
+    let first = agent::inspect_paginated(&d, Some("composer"), None, None, 0, 1).unwrap();
+    assert_eq!(first["matches"], 2);
+    assert_eq!(first["returned"], 1);
+    assert_eq!(first["has_more"], true);
+    let second = agent::inspect_paginated(&d, Some("composer"), None, None, 1, 1).unwrap();
+    assert_eq!(second["layers"][0]["objects"][0]["id"], "composer-two");
+}
+
+#[test]
 fn partial_edit_duplicate_move_and_extensions_survive() {
     let mut d = doc();
     let mut raw = serde_json::to_value(&d).unwrap();
-    raw["layers"][0]["paths"][0]["plugin_data"] = serde_json::json!({"keep":true});
+    raw["pages"][0]["layers"][0]["paths"][0]["plugin_data"] = serde_json::json!({"keep":true});
     let actions = vec![
         set_fill("composer", "art", "#ff0000"),
         ObjectAction::Rename {
@@ -88,11 +102,17 @@ fn partial_edit_duplicate_move_and_extensions_survive() {
         },
     ];
     agent::apply_batch(&mut d, &actions).unwrap();
+    let encoded = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        encoded["pages"][0]["layers"][0]["paths"][0]["fill"],
+        "#ff0000"
+    );
     agent::merge_document(&mut raw, &d, &actions).unwrap();
-    assert_eq!(raw["layers"][0]["paths"][0]["id"], "panel");
-    assert_eq!(raw["layers"][0]["paths"][0]["fill"], "#ff0000");
-    assert_eq!(raw["layers"][0]["paths"][0]["plugin_data"]["keep"], true);
-    assert_eq!(raw["layers"][1]["paths"][0]["plugin_data"]["keep"], true);
+    let layers = &raw["pages"][0]["layers"];
+    assert_eq!(layers[0]["paths"][0]["id"], "panel");
+    assert_eq!(layers[0]["paths"][0]["fill"], "#ff0000");
+    assert_eq!(layers[0]["paths"][0]["plugin_data"]["keep"], true);
+    assert_eq!(layers[1]["paths"][0]["plugin_data"]["keep"], true);
 }
 
 #[test]

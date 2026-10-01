@@ -15,6 +15,7 @@
       <label class="button" for="openFile">Open .pen</label><input id="openFile" type="file" accept=".pen,application/json" hidden>
       <button id="saveBtn">Save .pen</button>
       <button id="reloadBtn" hidden>Reload shared</button>
+      <button id="cancelJob" hidden>Cancel job</button>
       <button id="exportBtn" class="primary">Export PNG</button>
     </div>
   </header>
@@ -32,6 +33,22 @@
       <div class="hint" id="hint">Click to place points · drag for curves · Enter to finish · Esc to cancel</div>
     </section>
     <aside class="inspector">
+      <section>
+        <div class="section-head"><h2>Pages</h2><button id="addPage" class="icon" aria-label="Add page" title="Add page">＋</button></div>
+        <div id="pages" class="page-list"></div>
+      </section>
+      <section>
+        <div class="section-head"><h2>Import .pen</h2></div>
+        <label>Prefix <input id="importPrefix" value="asset"></label>
+        <label>X <input id="importX" type="number" value="0"></label>
+        <label>Y <input id="importY" type="number" value="0"></label>
+        <label>Scale <input id="importScale" type="number" min="0.001" step="0.1" value="1"></label>
+        <label>Rotate <input id="importRotate" type="number" value="0"></label>
+        <label>Expand <input id="importExpand" type="checkbox"></label>
+        <label class="button" for="importPen">Choose and import .pen</label><input id="importPen" type="file" accept=".pen,application/json" hidden>
+        <p class="text-help">Copies editable layers into the active page. Undo is available until saving.</p>
+        <pre id="importResult" class="import-result" hidden></pre>
+      </section>
       <section>
         <div class="section-head"><h2>Text</h2></div>
         <label>Content <textarea id="textContent" rows="3" placeholder="Type your text">Your text</textarea></label>

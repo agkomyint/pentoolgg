@@ -1,4 +1,4 @@
-# `.pen` file format, versions 1 and 2
+# `.pen` file format, versions 1–3
 
 A `.pen` file is UTF-8 JSON. The format is deliberately inspectable and safe for humans, scripts, and generative agents to edit.
 
@@ -92,3 +92,47 @@ font size 0.1–4,096; weight 100–900; leading 0.1–10; at most 64 embedded f
 8 MiB base64 per font and 16 MiB total base64 font data. Geometry/typography
 numbers must be finite and text must contain XML-safe characters. Documents
 near these limits may exceed the HTTP body limit once JSON overhead is included.
+
+## Version 3: pages
+
+Version 3 replaces the single top-level `canvas` and `layers` fields with an
+ordered `pages` array. Each page owns its canvas and ordered layers. Fonts remain
+document-wide so pages can share an embedded face without duplicating its bytes.
+
+```json
+{
+  "format": "pentool",
+  "version": 3,
+  "name": "Product",
+  "pages": [{
+    "id": "desktop",
+    "name": "Desktop",
+    "canvas": { "width": 1440, "height": 1024, "background": "#ffffff" },
+    "layers": []
+  }],
+  "fonts": []
+}
+```
+
+Page IDs are unique and stable. Page order is presentation order and does not
+affect rendering. A document contains 1–1,000 pages; each page contains at least
+one layer and retains the existing per-page layer limits. The path and text limits
+apply across the complete document.
+
+Pentoolgg continues to read v1/v2 documents as a virtual `page-1`. Adding a page
+upgrades the document to v3 without changing the original canvas or artwork.
+Commands that operate on canvas content accept global `--page <id>` selection.
+
+## Import and composition rules
+
+v0.4 imports copy source layers into one destination page. A prefix is applied to
+layer and object IDs by default; disabling it makes any collision an error. Source
+layer order and object order are retained. Placement scale, rotation, and
+translation are applied to editable geometry and text transforms rather than
+flattening the result. The destination canvas remains unchanged unless
+`--expand-canvas` is supplied.
+
+Embedded fonts are document-wide. Byte-identical font data is reused; a different
+font whose resource ID collides receives a deterministic numbered ID. Unknown
+JSON fields on imported layers and objects are preserved. Imports are copies, not
+live links to the source file.

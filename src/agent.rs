@@ -8,9 +8,51 @@ use clap::{Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
 };
+
+#[derive(Debug)]
+pub struct DocumentIndex {
+    layers: HashMap<String, usize>,
+    objects: HashMap<(String, String), (ObjectKind, usize)>,
+}
+
+impl DocumentIndex {
+    pub fn build(doc: &Document) -> Result<Self> {
+        let mut layers = HashMap::with_capacity(doc.layers.len());
+        let mut objects = HashMap::new();
+        for (layer_index, layer) in doc.layers.iter().enumerate() {
+            if layers.insert(layer.id.clone(), layer_index).is_some() {
+                bail!("duplicate layer ID: {}", layer.id);
+            }
+            for (index, path) in layer.paths.iter().enumerate() {
+                objects.insert(
+                    (layer.id.clone(), path.id.clone()),
+                    (ObjectKind::Path, index),
+                );
+            }
+            for (index, text) in layer.texts.iter().enumerate() {
+                objects.insert(
+                    (layer.id.clone(), text.id.clone()),
+                    (ObjectKind::Text, index),
+                );
+            }
+        }
+        Ok(Self { layers, objects })
+    }
+
+    fn layer(&self, id: &str) -> Result<usize> {
+        self.layers.get(id).copied().context("layer not found")
+    }
+
+    fn object(&self, layer: &str, id: &str) -> Result<(ObjectKind, usize)> {
+        self.objects
+            .get(&(layer.to_owned(), id.to_owned()))
+            .copied()
+            .context("object not found")
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ValueEnum, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -97,22 +139,6 @@ pub enum ObjectAction {
     },
 }
 
-fn layer_index(doc: &Document, id: &str) -> Result<usize> {
-    doc.layers
-        .iter()
-        .position(|l| l.id == id)
-        .context("layer not found")
-}
-fn locate(doc: &Document, layer: usize, id: &str) -> Result<(ObjectKind, usize)> {
-    let l = &doc.layers[layer];
-    if let Some(i) = l.paths.iter().position(|o| o.id == id) {
-        return Ok((ObjectKind::Path, i));
-    }
-    if let Some(i) = l.texts.iter().position(|o| o.id == id) {
-        return Ok((ObjectKind::Text, i));
-    }
-    bail!("object not found")
-}
 fn id_available(doc: &Document, layer: usize, id: &str) -> bool {
     !doc.layers[layer].paths.iter().any(|o| o.id == id)
         && !doc.layers[layer].texts.iter().any(|o| o.id == id)
@@ -137,11 +163,12 @@ pub fn apply(doc: &mut Document, action: &ObjectAction) -> Result<Value> {
             | ObjectAction::Reorder { layer, .. }
             | ObjectAction::Remove { layer, .. } => layer,
         };
-        let li = layer_index(doc, layer_id)?;
+        let index_map = DocumentIndex::build(doc)?;
+        let li = index_map.layer(layer_id)?;
         if doc.layers[li].locked {
             bail!("layer is locked");
         }
-        let (kind, index) = locate(doc, li, source_id)?;
+        let (kind, index) = index_map.object(layer_id, source_id)?;
         match action {
             ObjectAction::Set {
                 d,
@@ -296,7 +323,7 @@ pub fn apply(doc: &mut Document, action: &ObjectAction) -> Result<Value> {
                 )
             }
             ObjectAction::MoveToLayer { target_layer, .. } => {
-                let ti = layer_index(doc, target_layer)?;
+                let ti = index_map.layer(target_layer)?;
                 if doc.layers[ti].locked {
                     bail!("target layer is locked");
                 }
@@ -355,7 +382,7 @@ pub fn apply(doc: &mut Document, action: &ObjectAction) -> Result<Value> {
     })();
     match result {
         Ok(summary) => {
-            doc.version = 2;
+            doc.version = doc.version.max(2);
             if let Err(e) = doc.validate() {
                 *doc = original;
                 bail!(e);
@@ -389,9 +416,24 @@ pub fn apply_batch(doc: &mut Document, actions: &[ObjectAction]) -> Result<Vec<V
 
 /// Mirror topology changes in raw JSON so unknown extension fields travel with
 /// renamed, duplicated, moved, and reordered objects.
-pub fn prepare_raw(raw: &mut Value, actions: &[ObjectAction]) -> Result<()> {
-    fn layer_mut<'a>(raw: &'a mut Value, id: &str) -> Result<&'a mut Value> {
-        raw.get_mut("layers")
+pub fn prepare_raw(raw: &mut Value, actions: &[ObjectAction], page_id: &str) -> Result<()> {
+    fn page_mut<'a>(raw: &'a mut Value, page_id: &str) -> Result<&'a mut Value> {
+        if raw.get("version").and_then(Value::as_u64) == Some(3) {
+            raw.get_mut("pages")
+                .and_then(Value::as_array_mut)
+                .and_then(|pages| {
+                    pages
+                        .iter_mut()
+                        .find(|p| p.get("id").and_then(Value::as_str) == Some(page_id))
+                })
+                .context("raw page not found")
+        } else {
+            Ok(raw)
+        }
+    }
+    fn layer_mut<'a>(raw: &'a mut Value, page_id: &str, id: &str) -> Result<&'a mut Value> {
+        page_mut(raw, page_id)?
+            .get_mut("layers")
             .and_then(Value::as_array_mut)
             .and_then(|a| {
                 a.iter_mut()
@@ -414,12 +456,12 @@ pub fn prepare_raw(raw: &mut Value, actions: &[ObjectAction]) -> Result<()> {
         match action {
             ObjectAction::Set { .. } => {}
             ObjectAction::Rename { id, layer, new_id } => {
-                let l = layer_mut(raw, layer)?;
+                let l = layer_mut(raw, page_id, layer)?;
                 let (key, i) = find(l, id)?;
                 l[key][i]["id"] = Value::String(new_id.clone());
             }
             ObjectAction::Duplicate { id, layer, new_id } => {
-                let l = layer_mut(raw, layer)?;
+                let l = layer_mut(raw, page_id, layer)?;
                 let (key, i) = find(l, id)?;
                 let mut v = l[key][i].clone();
                 v["id"] = Value::String(new_id.clone());
@@ -431,11 +473,11 @@ pub fn prepare_raw(raw: &mut Value, actions: &[ObjectAction]) -> Result<()> {
                 target_layer,
             } => {
                 let v = {
-                    let l = layer_mut(raw, layer)?;
+                    let l = layer_mut(raw, page_id, layer)?;
                     let (key, i) = find(l, id)?;
                     l[key].as_array_mut().unwrap().remove(i)
                 };
-                let target = layer_mut(raw, target_layer)?;
+                let target = layer_mut(raw, page_id, target_layer)?;
                 let key = if v.get("d").is_some() {
                     "paths"
                 } else {
@@ -451,13 +493,13 @@ pub fn prepare_raw(raw: &mut Value, actions: &[ObjectAction]) -> Result<()> {
                     .push(v);
             }
             ObjectAction::Reorder { id, layer, index } => {
-                let l = layer_mut(raw, layer)?;
+                let l = layer_mut(raw, page_id, layer)?;
                 let (key, i) = find(l, id)?;
                 let v = l[key].as_array_mut().unwrap().remove(i);
                 l[key].as_array_mut().unwrap().insert(*index, v);
             }
             ObjectAction::Remove { id, layer } => {
-                let l = layer_mut(raw, layer)?;
+                let l = layer_mut(raw, page_id, layer)?;
                 let (key, i) = find(l, id)?;
                 l[key].as_array_mut().unwrap().remove(i);
             }
@@ -467,7 +509,7 @@ pub fn prepare_raw(raw: &mut Value, actions: &[ObjectAction]) -> Result<()> {
 }
 
 pub fn merge_document(raw: &mut Value, doc: &Document, actions: &[ObjectAction]) -> Result<()> {
-    prepare_raw(raw, actions)?;
+    prepare_raw(raw, actions, doc.active_page_id())?;
     crate::editing::merge(raw, serde_json::to_value(doc)?);
     Ok(())
 }
@@ -484,10 +526,25 @@ pub fn inspect(
     kind: Option<ObjectKind>,
     layer_filter: Option<&str>,
 ) -> Result<Value> {
+    inspect_paginated(doc, query, kind, layer_filter, 0, 10_000)
+}
+
+pub fn inspect_paginated(
+    doc: &Document,
+    query: Option<&str>,
+    kind: Option<ObjectKind>,
+    layer_filter: Option<&str>,
+    offset: usize,
+    limit: usize,
+) -> Result<Value> {
+    if limit == 0 || limit > 10_000 {
+        bail!("search limit must be between 1 and 10,000");
+    }
     let needle = query.unwrap_or("").to_lowercase();
     let mut working = doc.clone();
     let mut layers = Vec::new();
     let mut matches = 0usize;
+    let mut returned = 0usize;
     for l in &doc.layers {
         if let Some(f) = layer_filter {
             if l.id != f && !l.name.to_lowercase().contains(&f.to_lowercase()) {
@@ -501,9 +558,13 @@ pub fn inspect(
         if kind != Some(ObjectKind::Text) {
             for (i, p) in l.paths.iter().enumerate() {
                 if layer_match || p.id.to_lowercase().contains(&needle) {
-                    let b = geometry::execute(&mut working, &l.id, &p.id, &Operation::Bounds)?;
-                    objects
-                        .push(json!({"id":p.id,"kind":"path","index":i,"draw_order":i,"bounds":b}));
+                    if matches >= offset && returned < limit {
+                        let b = geometry::execute(&mut working, &l.id, &p.id, &Operation::Bounds)?;
+                        objects.push(
+                            json!({"id":p.id,"kind":"path","index":i,"draw_order":i,"bounds":b}),
+                        );
+                        returned += 1;
+                    }
                     matches += 1;
                 }
             }
@@ -514,17 +575,20 @@ pub fn inspect(
                     || t.id.to_lowercase().contains(&needle)
                     || t.content.to_lowercase().contains(&needle)
                 {
-                    let b = geometry::execute(&mut working, &l.id, &t.id, &Operation::Bounds)?;
-                    objects.push(json!({"id":t.id,"kind":"text","index":i,"draw_order":l.paths.len()+i,"content":t.content,"bounds":b}));
+                    if matches >= offset && returned < limit {
+                        let b = geometry::execute(&mut working, &l.id, &t.id, &Operation::Bounds)?;
+                        objects.push(json!({"id":t.id,"kind":"text","index":i,"draw_order":l.paths.len()+i,"content":t.content,"bounds":b}));
+                        returned += 1;
+                    }
                     matches += 1;
                 }
             }
         }
-        if layer_match || !objects.is_empty() {
+        if !objects.is_empty() {
             layers.push(json!({"id":l.id,"name":l.name,"index":doc.layers.iter().position(|x|x.id==l.id).unwrap(),"visible":l.visible,"locked":l.locked,"objects":objects}));
         }
     }
     Ok(
-        json!({"document":doc.name,"version":doc.version,"matches":matches,"stacking":"layers, then paths, then text; zero is back","layers":layers}),
+        json!({"document":doc.name,"version":doc.version,"page":doc.active_page_id(),"matches":matches,"returned":returned,"offset":offset,"limit":limit,"has_more":offset.saturating_add(returned)<matches,"stacking":"layers, then paths, then text; zero is back","layers":layers}),
     )
 }
