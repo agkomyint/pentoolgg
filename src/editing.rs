@@ -7,6 +7,18 @@ use std::{fs, path::Path as FilePath};
 mod tests {
     use super::*;
     #[test]
+    fn merge_removes_last_text_and_font_resources() {
+        let doc = Document::new(100, 100);
+        let mut raw = serde_json::to_value(&doc).unwrap();
+        raw["layers"][0]["texts"] = serde_json::json!([{"id":"title","content":"old"}]);
+        raw["fonts"] = serde_json::json!([{"id":"old","data":"unused"}]);
+        raw["extension"] = serde_json::json!(true);
+        merge(&mut raw, serde_json::to_value(doc).unwrap());
+        assert_eq!(raw["layers"][0]["texts"], serde_json::json!([]));
+        assert_eq!(raw["fonts"], serde_json::json!([]));
+        assert_eq!(raw["extension"], true);
+    }
+    #[test]
     fn extensions_follow_ids_when_layers_reorder() {
         let mut old = serde_json::json!({"extra":42,"layers":[{"id":"a","custom":true},{"id":"b","custom":false}]});
         merge(
@@ -137,6 +149,7 @@ pub fn layer(doc: &mut Document, action: LayerAction) -> Result<()> {
                 visible: true,
                 locked: false,
                 paths: vec![],
+                texts: vec![],
             });
         }
         LayerAction::Set {
@@ -212,6 +225,9 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
             closed,
             ..
         } => {
+            if l.texts.iter().any(|t| t.id == id) {
+                bail!("object ID belongs to text");
+            }
             if !width.is_finite() || width < 0.0 {
                 bail!("width must be finite and nonnegative");
             }

@@ -1,0 +1,84 @@
+{
+  "canvas": {
+    "background": "#111318",
+    "height": 720,
+    "width": 1200
+  },
+  "format": "pentool",
+  "layers": [
+    {
+      "id": "layer-1",
+      "locked": false,
+      "name": "Layer 1",
+      "paths": [],
+      "visible": true
+    },
+    {
+      "id": "typography",
+      "locked": false,
+      "name": "Typography",
+      "paths": [],
+      "texts": [
+        {
+          "align": "left",
+          "content": "pentoolgg",
+          "fill": "#b8f34a",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 144.0,
+          "font_weight": 700,
+          "id": "heading",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "x": 100.0,
+          "y": 270.0
+        },
+        {
+          "align": "left",
+          "content": "Real text. Real fonts.",
+          "fill": "#f4f7ef",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 48.0,
+          "font_weight": 400,
+          "id": "subtitle",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "x": 105.0,
+          "y": 370.0
+        },
+        {
+          "align": "left",
+          "content": "CLI + canvas, one document.\nEditable type — no hand-drawn letters.",
+          "fill": "#aeb5c2",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 32.0,
+          "font_weight": 400,
+          "id": "caption",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.5,
+          "x": 105.0,
+          "y": 460.0
+        },
+        {
+          "align": "right",
+          "content": "v0.2.0 / TYPOGRAPHY",
+          "fill": "#b8f34a",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 20.0,
+          "font_weight": 700,
+          "id": "footer",
+          "italic": false,
+          "letter_spacing": 3.0,
+          "line_height": 1.2,
+          "x": 1095.0,
+          "y": 640.0
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "name": "Pentoolgg — editable typography",
+  "version": 2
+}

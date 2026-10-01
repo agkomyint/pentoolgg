@@ -34,6 +34,9 @@ cargo install --path .
 
 ## CLI
 
+The source tree is preparing **v0.2.0**, which adds real editable text and fonts.
+These commands are not available in the published v0.1.0 binary yet.
+
 ```sh
 pentool serve --host 127.0.0.1 --port 4711
 pentool new logo.pen --width 1200 --height 800
@@ -74,9 +77,78 @@ editing again. Synchronization is explicit, not automatic.
 extension fields are retained by CLI edits. Run any command with `--help` for
 its arguments.
 
-The optional shared-file server exposes `GET /api/document` and
-`PUT /api/document` with `{ "base": <loaded document>, "document": <edited document> }`.
+The optional shared-file server exposes `GET /api/document` (document and opaque
+revision token) and `PUT /api/document` with
+`{ "revision": "<loaded token>", "document": <edited document> }`.
+Retain the token from loading or the last successful save. Legacy `base` requests
+remain supported, but revision tokens avoid browser number-conversion conflicts.
 Rendering APIs also work independently of a shared document.
+
+## Editable text and fonts (v0.2.0)
+
+Text is stored as content and typography, not hand-drawn strokes. The Rust CLI
+creates, measures, transforms, and renders it without opening a browser.
+
+```sh
+pentool new typography.pen --width 1200 --height 720
+pentool text typography.pen put title --layer layer-1 --content "pentoolgg" --x 100 --y 240 --size 120 --weight 700
+pentool text typography.pen set title --layer layer-1 --content "Still editable" --italic true
+pentool geometry typography.pen --layer layer-1 --id title bounds
+pentool layer-geometry typography.pen --layer layer-1 translate 30 20
+pentool export typography.pen typography.png --scale 2
+pentool export typography.pen typography.svg
+pentool export typography.pen typography-outlined.svg --outline-text
+pentool fonts
+pentool font typography.pen add brand-font --file ./brand-font.ttf
+pentool text typography.pen set title --layer layer-1 --font "Your Font Family"
+pentool serve typography.pen
+```
+
+Use `text put` to create/replace, `text set` to change only supplied properties,
+and `text remove` to delete. Options include family, size, weight, italic, fill,
+left/center/right alignment, letter spacing, and line-height multiplier.
+`x`/`y` position the first line's baseline; explicit newlines create more lines.
+Whole-layer transforms move paths and text together; text remains editable.
+Text hit testing uses layout bounds, not pixel-perfect glyph outlines.
+
+In the browser, choose **Text (T)**, enter content/style in the inspector, and
+click the canvas. Use **Select (V)** to edit or drag text. **Embed TTF / OTF font**
+stores a font in the document; normal undo and shared saving work with text.
+
+Atkinson Hyperlegible regular, bold, italic, and bold italic are bundled in the
+binary, so the default needs no installed fonts or network. Other requested
+weights use the closest available font face. Installed fonts are also available
+for native rendering, but a remote browser might not have them: embed custom
+TTF/OTF files you are licensed to redistribute for portable artwork. Family
+names come from font metadata, not filenames. Generic family aliases resolve
+to the bundled default in native rendering; use explicit family names for
+consistent browser previews.
+
+Live SVG exports contain `<text>` plus bundled/embedded font data. Some SVG
+consumers do not support embedded fonts; `--outline-text` exports glyph paths
+instead, while the original `.pen` keeps editable text. PNG uses native font
+shaping and rasterization. System-only fonts are not embedded automatically.
+The initial text feature has no rich-text spans, automatic wrapping, text-on-path,
+variable-font axes, or text-outline editing inside `.pen`.
+
+![Editable typography demo](examples/text-demo.png)
+
+Try `pentool serve examples/text-demo.pen`. [Live SVG](examples/text-demo.svg) ·
+[Outlined SVG](examples/text-demo-outlined.svg) · [Editable document](examples/text-demo.pen)
+
+The API adds `POST /api/text` with `{ "document": {}, "action":
+{ "type": "put", "id": "title", "layer": "layer-1", "content": "Hello" } }`.
+Use `type: "set"` or `"remove"` for updates/deletion. `GET /api/fonts` lists faces;
+`POST /api/font` accepts `{ "document": {}, "id": "brand", "data": "<base64 TTF/OTF>" }`.
+These operations return the updated document without writing the shared file.
+
+### Rust dependencies
+
+`resvg`/`usvg` provide SVG rendering, font discovery/parsing (`fontdb`), and
+glyph shaping (`rustybuzz`); `tiny-skia` rasterizes PNG; `kurbo` handles vector
+geometry. `serde`/`serde_json` serialize documents, `base64` packages font data,
+`clap` supplies the CLI, and `axum`/`tokio` supply the optional HTTP server.
+No JavaScript runtime is required to use or build the native renderer.
 
 ## Shared Rust geometry engine
 
@@ -155,3 +227,6 @@ The API is intentionally simple: an AI agent can create or edit the human-readab
 ## License
 
 Dual-licensed under MIT or Apache-2.0, at your option.
+
+Bundled fonts have a separate [SIL Open Font License](assets/fonts/OFL.txt).
+See [font attribution](assets/fonts/README.md).

@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A single-binary, agent-friendly vector pen tool"
 license = "MIT OR Apache-2.0"
@@ -16,6 +16,7 @@ serde_json = "1"
 tiny-skia = "0.11"
 svgtypes = "0.15"
 kurbo = "0.11"
+base64 = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 
 [profile.release]

@@ -22,6 +22,7 @@
     <nav class="tools" aria-label="Drawing tools">
       <button class="tool active" data-tool="pen" aria-pressed="true" title="Pen (P)"><span aria-hidden="true">✒</span><small>Pen</small></button>
       <button class="tool" data-tool="select" aria-pressed="false" title="Select (V)"><span aria-hidden="true">↖</span><small>Select</small></button>
+      <button class="tool" data-tool="text" aria-pressed="false" title="Text (T)"><span aria-hidden="true">T</span><small>Text</small></button>
       <button class="tool" data-tool="hand" aria-pressed="false" title="Hand (H)"><span aria-hidden="true">✋</span><small>Hand</small></button>
     </nav>
     <section class="stage" aria-label="Vector canvas workspace">
@@ -31,6 +32,21 @@
       <div class="hint" id="hint">Click to place points · drag for curves · Enter to finish · Esc to cancel</div>
     </section>
     <aside class="inspector">
+      <section>
+        <div class="section-head"><h2>Text</h2></div>
+        <label>Content <textarea id="textContent" rows="3" placeholder="Type your text">Your text</textarea></label>
+        <label>Font <input id="textFont" list="fontFamilies" value="Atkinson Hyperlegible"><datalist id="fontFamilies"></datalist></label>
+        <label>Size <input id="textSize" type="number" min="0.1" max="4096" value="48"></label>
+        <label>Weight <select id="textWeight"><option value="100">100 · Thin</option><option value="200">200 · Extra light</option><option value="300">300 · Light</option><option value="400" selected>400 · Regular</option><option value="500">500 · Medium</option><option value="600">600 · Semibold</option><option value="700">700 · Bold</option><option value="800">800 · Extra bold</option><option value="900">900 · Black</option></select></label>
+        <label>Italic <input id="textItalic" type="checkbox"></label>
+        <label>Color <input id="textFill" type="color" value="#111827"></label>
+        <label>Align <select id="textAlign"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+        <label>Spacing <input id="textSpacing" type="number" step="0.1" value="0"></label>
+        <label>Leading <input id="textLeading" type="number" step="0.1" min="0.1" max="10" value="1.2"></label>
+        <button id="applyText">Apply to selected text</button>
+        <label class="button" for="importFont">Embed TTF / OTF font</label><input id="importFont" type="file" accept=".ttf,.otf" hidden>
+        <p class="text-help">Choose Text (T), then click the canvas to place it. Select text to edit or move it.</p>
+      </section>
       <section>
         <div class="section-head"><h2>Style</h2></div>
         <label>Stroke <input id="stroke" type="color" value="#111827"></label>
@@ -45,7 +61,7 @@
       </section>
       <section class="agent-card">
         <h2>Geometry</h2>
-        <label>Target <select id="geometryTarget"><option value="path">Selected path</option><option value="layer">Active layer</option></select></label>
+        <label>Target <select id="geometryTarget"><option value="path">Selected object</option><option value="layer">Active layer</option></select></label>
         <label>Move X <input id="moveX" type="number" value="0"></label>
         <label>Move Y <input id="moveY" type="number" value="0"></label>
         <button id="moveGeometry">Move</button>

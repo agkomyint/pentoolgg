@@ -93,11 +93,15 @@ pub fn execute_layer(doc: &mut Document, id: &str, op: &Operation) -> Result<Val
         bail!("layer is locked");
     }
     let ids: Vec<String> = layer.paths.iter().map(|p| p.id.clone()).collect();
+    let text_ids: Vec<String> = layer.texts.iter().map(|t| t.id.clone()).collect();
     for path in &ids {
         execute(&mut updated, id, path, op)?;
     }
+    for text in &text_ids {
+        execute(&mut updated, id, text, op)?;
+    }
     *doc = updated;
-    Ok(json!({"ok":true,"paths_changed":ids.len()}))
+    Ok(json!({"ok":true,"paths_changed":ids.len(),"texts_changed":text_ids.len()}))
 }
 impl Operation {
     pub fn is_query(&self) -> bool {
@@ -131,6 +135,14 @@ fn move_endpoint(els: &mut [PathEl], i: usize, delta: kurbo::Vec2) {
 }
 
 pub fn execute(doc: &mut Document, layer_id: &str, id: &str, op: &Operation) -> Result<Value> {
+    if doc
+        .layers
+        .iter()
+        .find(|l| l.id == layer_id)
+        .is_some_and(|l| l.texts.iter().any(|t| t.id == id))
+    {
+        return execute_text(doc, layer_id, id, op);
+    }
     let layer = doc
         .layers
         .iter_mut()
@@ -329,6 +341,69 @@ pub fn execute(doc: &mut Document, layer_id: &str, id: &str, op: &Operation) -> 
         return Ok(json!({"ok":true,"d":path.d}));
     }
     Ok(result)
+}
+
+fn execute_text(doc: &mut Document, layer_id: &str, id: &str, op: &Operation) -> Result<Value> {
+    let li = doc
+        .layers
+        .iter()
+        .position(|l| l.id == layer_id)
+        .context("layer not found")?;
+    if !op.is_query() && doc.layers[li].locked {
+        bail!("layer is locked");
+    }
+    let ti = doc.layers[li]
+        .texts
+        .iter()
+        .position(|t| t.id == id)
+        .context("text not found")?;
+    let text = &doc.layers[li].texts[ti];
+    match *op {
+        Operation::Bounds => {
+            let r = crate::render::text_bounds(doc, text)?;
+            Ok(
+                json!({"x":r.x0,"y":r.y0,"width":r.width(),"height":r.height(),"kind":"text","includes_stroke":false}),
+            )
+        }
+        Operation::Hit { x, y, tolerance } => {
+            if ![x, y, tolerance].iter().all(|v| v.is_finite()) || tolerance < 0.0 {
+                bail!("hit coordinates and tolerance must be finite and tolerance nonnegative");
+            }
+            let r = crate::render::text_bounds(doc, text)?.inset(tolerance);
+            Ok(
+                json!({"hit":doc.layers[li].visible&&text.fill!="none"&&r.contains((x,y)),"kind":"text","method":"text-layout-bounds"}),
+            )
+        }
+        Operation::Nodes
+        | Operation::MoveAnchor { .. }
+        | Operation::SetHandle { .. }
+        | Operation::Split { .. } => {
+            bail!("text is editable typography, not a path; use text set or export --outline-text")
+        }
+        _ => {
+            let affine = match *op {
+                Operation::Transform { a, b, c, d, e, f } => Affine::new([a, b, c, d, e, f]),
+                Operation::Translate { dx, dy } => Affine::translate((dx, dy)),
+                Operation::Rotate { degrees, cx, cy } => {
+                    Affine::translate((cx, cy))
+                        * Affine::rotate(degrees.to_radians())
+                        * Affine::translate((-cx, -cy))
+                }
+                Operation::Scale { sx, sy, cx, cy } => {
+                    Affine::translate((cx, cy))
+                        * Affine::scale_non_uniform(sx, sy)
+                        * Affine::translate((-cx, -cy))
+                }
+                _ => unreachable!(),
+            };
+            let transform = (affine * Affine::new(text.transform)).as_coeffs();
+            if !transform.iter().all(|v| v.is_finite()) {
+                bail!("transform must be finite");
+            }
+            doc.layers[li].texts[ti].transform = transform;
+            Ok(json!({"ok":true,"kind":"text","transform":transform}))
+        }
+    }
 }
 
 #[cfg(test)]

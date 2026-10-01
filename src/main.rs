@@ -1,4 +1,4 @@
-use pentool::{document, editing, geometry, render, server};
+use pentool::{document, editing, fonts, geometry, render, server, text};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -18,6 +18,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create, update, or remove editable text.
+    Text {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: text::TextAction,
+    },
+    /// Embed a custom TTF/OTF font or remove an unused font.
+    Font {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: text::FontAction,
+    },
+    /// List available bundled, embedded, and installed font faces as JSON.
+    Fonts { input: Option<PathBuf> },
     /// Transform all shapes and fills in one layer together.
     LayerGeometry {
         input: PathBuf,
@@ -85,6 +99,9 @@ enum Command {
         output: PathBuf,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// Convert text to glyph outlines for a font-independent SVG.
+        #[arg(long)]
+        outline_text: bool,
     },
 }
 
@@ -97,6 +114,16 @@ async fn main() -> Result<()> {
         port: 4711,
     }) {
         Command::Serve { host, port, input } => server::serve(&host, port, input).await,
+        Command::Text { input, action } => editing::edit(&input, |doc| text::apply(doc, action)),
+        Command::Font { input, action } => editing::edit(&input, |doc| text::font(doc, action)),
+        Command::Fonts { input } => {
+            let doc = match input {
+                Some(path) => read_document(&path)?,
+                None => Document::new(1, 1),
+            };
+            println!("{}", fonts::list(&doc)?);
+            Ok(())
+        }
         Command::LayerGeometry {
             input,
             layer,
@@ -168,9 +195,10 @@ async fn main() -> Result<()> {
             input,
             output,
             scale,
+            outline_text,
         } => {
             let doc = read_document(&input)?;
-            render::write_export(&doc, &output, scale)?;
+            render::write_export_options(&doc, &output, scale, outline_text)?;
             println!("Exported {}", output.display());
             Ok(())
         }

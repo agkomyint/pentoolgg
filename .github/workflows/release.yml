@@ -35,6 +35,10 @@ jobs:
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Smoke test CLI rendering
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/eye.pen smoke.png
+      - name: Smoke test native typography
+        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.png
+      - name: Smoke test outlined typography
+        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.svg --outline-text
       - name: Package Unix
         if: matrix.archive == 'tar.gz'
         shell: bash
@@ -42,7 +46,7 @@ jobs:
           mkdir dist
           cp target/${{ matrix.target }}/release/pentool dist/
           cp README.md LICENSE-MIT LICENSE-APACHE dist/
-          cp -R examples docs dist/
+          cp -R examples docs assets dist/
           tar -czf pentool-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C dist .
       - name: Package Windows
         if: matrix.archive == 'zip'
@@ -50,7 +54,7 @@ jobs:
         run: |
           New-Item -ItemType Directory dist
           Copy-Item target/${{ matrix.target }}/release/pentool.exe, README.md, LICENSE-MIT, LICENSE-APACHE dist/
-          Copy-Item examples, docs -Destination dist/ -Recurse
+          Copy-Item examples, docs, assets -Destination dist/ -Recurse
           Compress-Archive -Path dist/* -DestinationPath pentool-${{ github.ref_name }}-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@v4
         with:
