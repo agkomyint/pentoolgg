@@ -34,8 +34,8 @@ cargo install --path .
 
 ## CLI
 
-The source tree is preparing **v0.2.0**, which adds real editable text and fonts.
-These commands are not available in the published v0.1.0 binary yet.
+**v0.2.0** adds editable text, portable fonts, and configurable sharp stroke
+edges. These commands require v0.2.0 or newer.
 
 ```sh
 pentool serve --host 127.0.0.1 --port 4711

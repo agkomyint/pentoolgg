@@ -1,6 +1,6 @@
-# v0.2.0 — Editable typography
+# v0.2.0 — Editable typography and sharp edges
 
-Prepared for the next release; not yet published.
+Release highlights and compatibility notes.
 
 - Real editable text objects, CLI create/update/remove, and browser text tool.
 - Configurable sharp/round/beveled stroke joins, flat/round/square caps, miter limit, browser controls, and geometry-preserving CLI path styling.
