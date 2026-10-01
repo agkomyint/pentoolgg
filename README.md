@@ -14,7 +14,7 @@ general performance guarantee.
 
 ## Install
 
-Download the binary for your platform from [GitHub Releases](../../releases), put it on your `PATH`, then run:
+Download the binary for your platform from [GitHub Releases](https://github.com/agkomyint/pentoolgg/releases), put it on your `PATH`, then run:
 
 ```sh
 pentool serve
