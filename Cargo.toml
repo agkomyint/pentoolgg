@@ -1,0 +1,24 @@
+[package]
+name = "pentool"
+version = "0.1.0"
+edition = "2021"
+description = "A single-binary, agent-friendly vector pen tool"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pentoolgg/pentool"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.7", features = ["json"] }
+clap = { version = "4", features = ["derive"] }
+resvg = "0.44"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny-skia = "0.11"
+svgtypes = "0.15"
+kurbo = "0.11"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

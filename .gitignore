@@ -1,0 +1,7 @@
+/target/
+/dist/
+*.png
+*.svg
+!docs/**/*.svg
+!examples/*.png
+!examples/*.svg

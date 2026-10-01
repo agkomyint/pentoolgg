@@ -1,0 +1,107 @@
+{
+  "canvas": {
+    "background": "#0c1320",
+    "height": 700,
+    "width": 1000
+  },
+  "format": "pentool",
+  "layers": [
+    {
+      "id": "layer-1",
+      "locked": false,
+      "name": "Layer 1",
+      "paths": [],
+      "visible": true
+    },
+    {
+      "id": "sclera",
+      "locked": false,
+      "name": "Eye outline and white",
+      "paths": [
+        {
+          "closed": true,
+          "d": "M 150 350 C 310 130 690 130 850 350 C 690 570 310 570 150 350 Z",
+          "fill": "#e4f2f3",
+          "id": "eye-shape",
+          "stroke": "#74c9ce",
+          "stroke_width": 8.0
+        }
+      ],
+      "visible": true
+    },
+    {
+      "id": "iris",
+      "locked": false,
+      "name": "Iris and pupil",
+      "paths": [
+        {
+          "closed": true,
+          "d": "M 628 350 A 128 128 0 1 1 372 350 A 128 128 0 1 1 628 350 Z",
+          "fill": "#1a9299",
+          "id": "iris-disc",
+          "stroke": "#125b6c",
+          "stroke_width": 12.0
+        },
+        {
+          "closed": true,
+          "d": "M 591 350 A 91 91 0 1 1 409 350 A 91 91 0 1 1 591 350 Z",
+          "fill": "#28bac0",
+          "id": "iris-ring",
+          "stroke": "#70e3da",
+          "stroke_width": 3.0
+        },
+        {
+          "closed": false,
+          "d": "M 500 235 L 500 258 M 544 244 L 535 265 M 581 269 L 565 285 M 606 306 L 585 315 M 615 350 L 592 350 M 606 394 L 585 385 M 581 431 L 565 415 M 544 456 L 535 435 M 500 465 L 500 442 M 456 456 L 465 435 M 419 431 L 435 415 M 394 394 L 415 385 M 385 350 L 408 350 M 394 306 L 415 315 M 419 269 L 435 285 M 456 244 L 465 265",
+          "fill": "none",
+          "id": "iris-fibers",
+          "stroke": "#b4f8e7",
+          "stroke_width": 5.0
+        },
+        {
+          "closed": true,
+          "d": "M 558 350 A 58 58 0 1 1 442 350 A 58 58 0 1 1 558 350 Z",
+          "fill": "#081522",
+          "id": "pupil",
+          "stroke": "#17616b",
+          "stroke_width": 5.0
+        }
+      ],
+      "visible": true
+    },
+    {
+      "id": "detail",
+      "locked": false,
+      "name": "Reflections and lids",
+      "paths": [
+        {
+          "closed": true,
+          "d": "M 478 297 A 24 24 0 1 1 430 297 A 24 24 0 1 1 478 297 Z M 543 385 A 9 9 0 1 1 525 385 A 9 9 0 1 1 543 385 Z",
+          "fill": "#ffffff",
+          "id": "catchlight",
+          "stroke": "none",
+          "stroke_width": 0.0
+        },
+        {
+          "closed": false,
+          "d": "M 150 350 C 310 130 690 130 850 350",
+          "fill": "none",
+          "id": "upper-lid",
+          "stroke": "#081522",
+          "stroke_width": 14.0
+        },
+        {
+          "closed": false,
+          "d": "M 230 236 C 380 105 620 105 770 236 M 290 491 C 416 543 584 543 710 491",
+          "fill": "none",
+          "id": "lid-fold",
+          "stroke": "#3c6376",
+          "stroke_width": 4.0
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "name": "Eye — vector study",
+  "version": 1
+}

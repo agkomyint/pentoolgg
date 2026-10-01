@@ -1,0 +1,43 @@
+{
+  "canvas": {
+    "background": "#ffffff",
+    "height": 800,
+    "width": 800
+  },
+  "format": "pentool",
+  "layers": [
+    {
+      "id": "layer-1",
+      "locked": false,
+      "name": "Layer 1",
+      "paths": [],
+      "visible": true
+    },
+    {
+      "id": "silhouette",
+      "locked": false,
+      "name": "Apple silhouette",
+      "paths": [
+        {
+          "closed": true,
+          "d": "M 405 246 C 367 246 340 222 295 225 C 225 229 174 289 174 373 C 174 470 216 576 267 631 C 293 659 314 671 340 658 C 380 638 410 638 450 657 C 479 671 502 655 529 623 C 558 588 582 546 598 504 C 550 484 520 450 520 403 C 520 358 544 322 585 299 C 560 256 521 228 475 225 C 445 223 424 239 405 246 Z",
+          "fill": "#111111",
+          "id": "body",
+          "stroke": "none",
+          "stroke_width": 0.0
+        },
+        {
+          "closed": true,
+          "d": "M 401 218 C 396 159 436 112 498 100 C 502 154 468 210 401 218 Z",
+          "fill": "#111111",
+          "id": "leaf",
+          "stroke": "none",
+          "stroke_width": 0.0
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "name": "Apple logo",
+  "version": 1
+}
