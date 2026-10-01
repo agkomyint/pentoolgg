@@ -33,6 +33,8 @@ jobs:
           key: ${{ matrix.target }}
       - run: cargo test --all-targets --locked --target ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Smoke test CLI rendering
+        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/eye.pen smoke.png
       - name: Package Unix
         if: matrix.archive == 'tar.gz'
         shell: bash
