@@ -28,8 +28,8 @@ pub fn to_svg(doc: &Document) -> Result<String> {
         svg.push_str(&format!(r#"<g id="{}">"#, esc(&layer.id)));
         for path in &layer.paths {
             svg.push_str(&format!(
-                r#"<path d="{}" stroke="{}" stroke-width="{}" fill="{}" stroke-linecap="round" stroke-linejoin="round"/>"#,
-                esc(&path.d), esc(&path.stroke), path.stroke_width.max(0.0), esc(&path.fill)
+                r#"<path d="{}" stroke="{}" stroke-width="{}" fill="{}" stroke-linecap="{}" stroke-linejoin="{}" stroke-miterlimit="{}"/>"#,
+                esc(&path.d), esc(&path.stroke), path.stroke_width.max(0.0), esc(&path.fill), path.stroke_linecap.svg(), path.stroke_linejoin.svg(), path.stroke_miterlimit
             ));
         }
         for text in &layer.texts {

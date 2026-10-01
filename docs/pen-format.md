@@ -36,6 +36,12 @@ Limits enforced by the renderer:
 
 ## Version 2: editable text and embedded fonts
 
+Version 2 paths also support `stroke_linecap` (`butt`, `round`, `square`),
+`stroke_linejoin` (`miter`, `round`, `bevel`), and `stroke_miterlimit` (1–1000,
+default 4). Omitted caps/joins default to round to preserve older artwork.
+New paths made through the CLI/browser default to butt/miter. Native rendering
+and SVG export use these properties directly. Styling upgrades v1 files to v2.
+
 Version 1 path-only documents remain readable. New documents use version 2;
 adding text or fonts upgrades older documents. Older v0.1 binaries reject version
 2 instead of silently removing typography.

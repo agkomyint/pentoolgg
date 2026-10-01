@@ -37,6 +37,8 @@ jobs:
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/eye.pen smoke.png
       - name: Smoke test native typography
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.png
+      - name: Smoke test sharp stroke edges
+        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/stroke-edges.pen stroke-smoke.png
       - name: Smoke test outlined typography
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.svg --outline-text
       - name: Package Unix

@@ -3,6 +3,7 @@
 Prepared for the next release; not yet published.
 
 - Real editable text objects, CLI create/update/remove, and browser text tool.
+- Configurable sharp/round/beveled stroke joins, flat/round/square caps, miter limit, browser controls, and geometry-preserving CLI path styling.
 - Font family, size, weight, italic, color, alignment, spacing, and multiline leading.
 - Bundled Atkinson Hyperlegible in four styles; installed font discovery and custom TTF/OTF embedding.
 - Native browser-free text shaping, PNG rendering, live SVG with embedded fonts, and optional outlined SVG export.

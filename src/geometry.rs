@@ -517,6 +517,9 @@ mod tests {
             d: "M 0 0 C 0 100 100 100 100 0".into(),
             stroke: "black".into(),
             stroke_width: 2.0,
+            stroke_linecap: crate::document::StrokeCap::Round,
+            stroke_linejoin: crate::document::StrokeJoin::Round,
+            stroke_miterlimit: 4.0,
             fill: "none".into(),
             closed: false,
         });

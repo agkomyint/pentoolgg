@@ -84,6 +84,29 @@ Retain the token from loading or the last successful save. Legacy `base` request
 remain supported, but revision tokens avoid browser number-conversion conflicts.
 Rendering APIs also work independently of a shared document.
 
+## Stroke edges (v0.2.0)
+
+New CLI/browser paths use flat caps and sharp corners by default. Existing paths
+without edge properties retain their original round styling. Choose end caps
+(`butt`, `round`, `square`), corner joins (`miter`, `round`, `bevel`), and a miter
+limit in the browser Style inspector, JSON, or CLI:
+
+```sh
+pentool path artwork.pen put angle --layer ink --d "M 100 300 L 200 100 L 300 300" --stroke "#b8f34a" --width 20 --cap butt --join miter --miter-limit 8
+pentool path artwork.pen style angle --layer ink --cap square --join bevel
+```
+
+`path style` preserves geometry and colors. Miter joins form sharp stroke points;
+corners exceeding the miter limit fall back to beveling. Limits are finite values
+from 1 to 1000. The same settings drive browser previews, native PNG, and SVG.
+Caps/joins affect strokes, not filled silhouettes. Sharp versus smooth curve
+anchors are controlled separately by their Bézier handles. Stroke hit tests
+remain centerline-based approximations, not exact cap/join hit tests.
+
+![Round, sharp, and beveled stroke edges](examples/stroke-edges.png)
+
+Open the editable comparison with `pentool serve examples/stroke-edges.pen`.
+
 ## Editable text and fonts (v0.2.0)
 
 Text is stored as content and typography, not hand-drawn strokes. The Rust CLI

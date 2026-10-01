@@ -1,4 +1,4 @@
-use crate::document::{Document, Layer, Path};
+use crate::document::{Document, Layer, Path, StrokeCap, StrokeJoin};
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
 use std::{fs, path::Path as FilePath};
@@ -89,6 +89,24 @@ pub enum PathAction {
         fill: String,
         #[arg(long)]
         closed: bool,
+        #[arg(long, value_enum, default_value = "butt")]
+        cap: StrokeCap,
+        #[arg(long, value_enum, default_value = "miter")]
+        join: StrokeJoin,
+        #[arg(long, default_value_t = 4.0)]
+        miter_limit: f32,
+    },
+    /// Change stroke edges without replacing path geometry or colors.
+    Style {
+        id: String,
+        #[arg(long)]
+        layer: String,
+        #[arg(long, value_enum)]
+        cap: Option<StrokeCap>,
+        #[arg(long, value_enum)]
+        join: Option<StrokeJoin>,
+        #[arg(long)]
+        miter_limit: Option<f32>,
     },
     Remove {
         id: String,
@@ -205,7 +223,9 @@ pub fn layer(doc: &mut Document, action: LayerAction) -> Result<()> {
 
 pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
     let layer_id = match &action {
-        PathAction::Put { layer, .. } | PathAction::Remove { layer, .. } => layer,
+        PathAction::Put { layer, .. }
+        | PathAction::Remove { layer, .. }
+        | PathAction::Style { layer, .. } => layer,
     };
     let l = doc
         .layers
@@ -223,6 +243,9 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
             width,
             fill,
             closed,
+            cap,
+            join,
+            miter_limit,
             ..
         } => {
             if l.texts.iter().any(|t| t.id == id) {
@@ -230,6 +253,9 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
             }
             if !width.is_finite() || width < 0.0 {
                 bail!("width must be finite and nonnegative");
+            }
+            if !miter_limit.is_finite() || !(1.0..=1000.0).contains(&miter_limit) {
+                bail!("miter limit must be finite and between 1 and 1000");
             }
             if closed && !d.trim_end().ends_with(['z', 'Z']) {
                 d.push_str(" Z");
@@ -245,6 +271,9 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
                 d,
                 stroke,
                 stroke_width: width,
+                stroke_linecap: cap,
+                stroke_linejoin: join,
+                stroke_miterlimit: miter_limit,
                 fill,
                 closed,
             };
@@ -253,6 +282,35 @@ pub fn path(doc: &mut Document, action: PathAction) -> Result<()> {
             } else {
                 l.paths.push(p);
             }
+            doc.version = 2;
+        }
+        PathAction::Style {
+            id,
+            cap,
+            join,
+            miter_limit,
+            ..
+        } => {
+            if let Some(v) = miter_limit {
+                if !v.is_finite() || !(1.0..=1000.0).contains(&v) {
+                    bail!("miter limit must be finite and between 1 and 1000");
+                }
+            }
+            let p = l
+                .paths
+                .iter_mut()
+                .find(|p| p.id == id)
+                .context("path not found")?;
+            if let Some(v) = cap {
+                p.stroke_linecap = v;
+            }
+            if let Some(v) = join {
+                p.stroke_linejoin = v;
+            }
+            if let Some(v) = miter_limit {
+                p.stroke_miterlimit = v;
+            }
+            doc.version = 2;
         }
         PathAction::Remove { id, .. } => {
             let i = l

@@ -1,0 +1,177 @@
+{
+  "canvas": {
+    "background": "#111318",
+    "height": 640,
+    "width": 1200
+  },
+  "fonts": [],
+  "format": "pentool",
+  "layers": [
+    {
+      "id": "layer-1",
+      "locked": false,
+      "name": "Layer 1",
+      "paths": [
+        {
+          "closed": false,
+          "d": "M 100 350 L 240 210 L 380 350",
+          "fill": "none",
+          "id": "rounded",
+          "stroke": "#E9BC7C",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 36.0
+        },
+        {
+          "closed": false,
+          "d": "M 460 350 L 600 210 L 740 350",
+          "fill": "none",
+          "id": "sharp",
+          "stroke": "#b8f34a",
+          "stroke_linecap": "butt",
+          "stroke_linejoin": "miter",
+          "stroke_miterlimit": 8.0,
+          "stroke_width": 36.0
+        },
+        {
+          "closed": false,
+          "d": "M 820 350 L 960 210 L 1100 350",
+          "fill": "none",
+          "id": "bevel",
+          "stroke": "#f5ebdd",
+          "stroke_linecap": "square",
+          "stroke_linejoin": "bevel",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 36.0
+        },
+        {
+          "closed": false,
+          "d": "M 140 450 L 340 450",
+          "fill": "none",
+          "id": "round-cap",
+          "stroke": "#E9BC7C",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 36.0
+        },
+        {
+          "closed": false,
+          "d": "M 500 450 L 700 450",
+          "fill": "none",
+          "id": "flat-cap",
+          "stroke": "#b8f34a",
+          "stroke_linecap": "butt",
+          "stroke_linejoin": "miter",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 36.0
+        },
+        {
+          "closed": false,
+          "d": "M 860 450 L 1060 450",
+          "fill": "none",
+          "id": "square-cap",
+          "stroke": "#f5ebdd",
+          "stroke_linecap": "square",
+          "stroke_linejoin": "bevel",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 36.0
+        }
+      ],
+      "texts": [
+        {
+          "align": "left",
+          "content": "Control the edge.",
+          "fill": "#f5ebdd",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 52.0,
+          "font_weight": 400,
+          "id": "heading",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "x": 70.0,
+          "y": 100.0
+        },
+        {
+          "align": "center",
+          "content": "ROUND / ROUND",
+          "fill": "#E9BC7C",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 24.0,
+          "font_weight": 400,
+          "id": "round-label",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "x": 240.0,
+          "y": 550.0
+        },
+        {
+          "align": "center",
+          "content": "MITER / FLAT",
+          "fill": "#b8f34a",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 24.0,
+          "font_weight": 400,
+          "id": "sharp-label",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "x": 600.0,
+          "y": 550.0
+        },
+        {
+          "align": "center",
+          "content": "BEVEL / SQUARE",
+          "fill": "#f5ebdd",
+          "font_family": "Atkinson Hyperlegible",
+          "font_size": 24.0,
+          "font_weight": 400,
+          "id": "bevel-label",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          "x": 960.0,
+          "y": 550.0
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "name": "Pentoolgg stroke edges",
+  "version": 2
+}

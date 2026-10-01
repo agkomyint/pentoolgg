@@ -150,6 +150,9 @@ fn text_id_cannot_collide_with_path() {
         d: "M 0 0 L 10 10".into(),
         stroke: "black".into(),
         width: 1.0,
+        cap: pentool::document::StrokeCap::Butt,
+        join: pentool::document::StrokeJoin::Miter,
+        miter_limit: 4.0,
         fill: "none".into(),
         closed: false,
     };

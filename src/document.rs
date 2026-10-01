@@ -144,10 +144,54 @@ pub struct Path {
     pub stroke: String,
     #[serde(default = "default_width")]
     pub stroke_width: f32,
+    #[serde(default)]
+    pub stroke_linecap: StrokeCap,
+    #[serde(default)]
+    pub stroke_linejoin: StrokeJoin,
+    #[serde(default = "default_miter_limit")]
+    pub stroke_miterlimit: f32,
     #[serde(default = "default_fill")]
     pub fill: String,
     #[serde(default)]
     pub closed: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum StrokeCap {
+    Butt,
+    #[default]
+    Round,
+    Square,
+}
+impl StrokeCap {
+    pub fn svg(self) -> &'static str {
+        match self {
+            Self::Butt => "butt",
+            Self::Round => "round",
+            Self::Square => "square",
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum StrokeJoin {
+    Miter,
+    #[default]
+    Round,
+    Bevel,
+}
+impl StrokeJoin {
+    pub fn svg(self) -> &'static str {
+        match self {
+            Self::Miter => "miter",
+            Self::Round => "round",
+            Self::Bevel => "bevel",
+        }
+    }
+}
+pub fn default_miter_limit() -> f32 {
+    4.0
 }
 
 fn yes() -> bool {
@@ -215,6 +259,24 @@ impl Document {
             return Err("document has too many text objects".into());
         }
         for layer in &self.layers {
+            for path in &layer.paths {
+                if !path.stroke_width.is_finite()
+                    || path.stroke_width < 0.0
+                    || !path.stroke_miterlimit.is_finite()
+                    || !(1.0..=1000.0).contains(&path.stroke_miterlimit)
+                {
+                    return Err(
+                        "stroke width must be finite/nonnegative and miter limit must be 1–1000"
+                            .into(),
+                    );
+                }
+                if self.version == 1
+                    && (path.stroke_linecap != StrokeCap::Round
+                        || path.stroke_linejoin != StrokeJoin::Round)
+                {
+                    return Err("custom stroke caps and joins require document version 2".into());
+                }
+            }
             let mut ids = std::collections::HashSet::new();
             for id in layer
                 .paths

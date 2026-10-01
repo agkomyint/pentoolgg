@@ -52,6 +52,9 @@
         <label>Stroke <input id="stroke" type="color" value="#111827"></label>
         <label>Width <input id="width" type="range" min="1" max="32" value="3"><output id="widthOut">3 px</output></label>
         <label>Fill <select id="fill"><option value="none">None</option><option value="#111827">Ink</option><option value="#ffffff">White</option></select></label>
+        <label>End caps <select id="strokeCap"><option value="butt">Butt · flat</option><option value="round">Round</option><option value="square">Square</option></select></label>
+        <label>Corners <select id="strokeJoin"><option value="miter">Miter · sharp</option><option value="round">Round</option><option value="bevel">Bevel · cut</option></select></label>
+        <label>Miter limit <input id="miterLimit" type="number" min="1" max="1000" step="0.1" value="4"></label>
         <label>Path <textarea id="pathData" rows="4" placeholder="Select a path to edit its SVG geometry"></textarea></label>
         <button id="applyPath">Apply path geometry</button>
       </section>
