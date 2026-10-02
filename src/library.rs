@@ -125,7 +125,11 @@ pub fn add(root: &Path, config: &Path, name: &str, folder: &Path) -> Result<Valu
         bail!("library folder already registered");
     }
     let stored = if config.starts_with(root) {
-        pathdiff(root, &canonical).unwrap_or(canonical.clone())
+        // macOS temp directories are commonly reached through /var while
+        // canonicalize returns /private/var. Diff canonical paths so project
+        // library entries do not accidentally point outside the project.
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+        pathdiff(&canonical_root, &canonical).unwrap_or(canonical.clone())
     } else {
         canonical.clone()
     };
