@@ -1,5 +1,9 @@
 # Performance and document limits
 
+The v0.6.0 renderer baseline and v0.6.1 optimization plan are documented in
+[`render-benchmark-v0.6.0.md`](render-benchmark-v0.6.0.md) and
+[`roadmap/v0.6.1/TASKS.md`](roadmap/v0.6.1/TASKS.md).
+
 Pentool validates documents before editing or rendering. Current hard limits are
 1,000 pages, 1,000 layers per page, 100,000 paths, 100,000 text objects, 16,384
 canvas units per axis, 64 embedded fonts, and 16 MiB total base64 font data. CLI
