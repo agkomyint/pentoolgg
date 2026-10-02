@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.4.0"
+version = "0.6.0"
 edition = "2021"
 description = "A single-binary, agent-friendly vector pen tool"
 license = "MIT OR Apache-2.0"
@@ -18,6 +18,17 @@ svgtypes = "0.15"
 kurbo = "0.11"
 base64 = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+sha2 = "0.10"
+hex = "0.4"
+directories = "6"
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+semver = { version = "1", features = ["serde"] }
+reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls"] }
+url = "=2.4.1"
+encoding_rs = "=0.8.35"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [profile.release]
 lto = true

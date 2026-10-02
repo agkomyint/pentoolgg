@@ -48,6 +48,62 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Open design libraries and packages (v0.5–v0.6)
+
+Reusable assets remain ordinary editable `.pen` documents. Save a document, page,
+layer, object list, or rectangular selection, then register its folder as a local
+library:
+
+```sh
+pentool asset create design.pen assets/card.pen --id ui/card --name "Card" --layer card
+pentool asset create design.pen assets/icons.pen --id icons/navigation --name "Navigation icons" --rect 20 20 400 240
+pentool library add ./assets --name project-assets
+pentool library refresh project-assets
+pentool explore card --category layout
+pentool asset preview project-assets/ui/card --output card.png
+```
+
+Place an editable copy or an offline-safe instance. Instances retain materialized
+content, so documents continue to render when the source library is unavailable.
+
+```sh
+pentool add poster.pen project-assets/ui/card --mode copy --at 100 80
+pentool add poster.pen project-assets/ui/card --mode instance --at 400 80
+pentool instance poster.pen list
+pentool instance poster.pen detach instance-1
+```
+
+Versioned libraries use deterministic, data-only `.penpkg` archives. Filesystem
+registries are fully functional static registries and can be hosted or mirrored by
+ordinary file synchronization; the protocol does not depend on an official server.
+
+```sh
+pentool package init ./open-ui --name open-design/ui
+pentool package pack ./open-ui --output open-ui-0.1.0.penpkg
+pentool package verify open-ui-0.1.0.penpkg
+pentool package keygen ./publisher
+pentool package sign open-ui-0.1.0.penpkg --key publisher.key
+pentool package verify open-ui-0.1.0.penpkg --signature open-ui-0.1.0.penpkg.sig.json --public-key publisher.pub
+pentool package publish open-ui-0.1.0.penpkg --registry ./registry
+pentool registry search ./registry open-design
+pentool package install open-design/ui@0.1.0 --registry ./registry
+pentool lock verify
+pentool lock sync --offline
+```
+
+Installation verifies the archive and asset hashes, writes `pentool.lock`, and
+activates the installed package in the project asset index. Package versions are
+immutable. See the open, host-independent [asset and package protocol](docs/PROTOCOL.md).
+
+Instance changes are always reviewed and explicit:
+
+```sh
+pentool instance design.pen updates instance-1 --source card-v2.pen
+pentool instance design.pen update instance-1 --source card-v2.pen --dry-run
+pentool instance design.pen update instance-1 --source card-v2.pen
+pentool instance design.pen rollback instance-1
+```
+
 ## Multiple pages (v0.4.0)
 
 Version 3 `.pen` documents contain ordered pages, each with its own canvas and

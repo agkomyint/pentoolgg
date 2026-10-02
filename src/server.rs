@@ -17,6 +17,7 @@ use std::{
 #[derive(Clone)]
 struct Shared {
     file: Option<PathBuf>,
+    project_root: PathBuf,
     gate: Arc<Mutex<()>>,
 }
 
@@ -58,16 +59,135 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
         .route("/api/fonts", get(font_list))
         .route("/api/font", post(embed_font))
         .route("/api/font-info", post(font_info))
+        .route("/api/assets", get(asset_search))
+        .route("/api/asset", get(asset_document))
+        .route("/api/registry/search", get(registry_search))
+        .route("/api/registry/install", post(registry_install))
         .route("/fonts/:name", get(bundled_font))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(Shared {
             file,
+            project_root: std::env::current_dir()?,
             gate: Arc::new(Mutex::new(())),
         });
     println!("Pentool listening on http://{address}");
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[derive(serde::Deserialize, Default)]
+struct AssetQuery {
+    query: Option<String>,
+    library: Option<String>,
+    tag: Option<String>,
+    category: Option<String>,
+    kind: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+async fn asset_search(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<AssetQuery>,
+) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let project = crate::library::project_index(&state.project_root);
+        let user = crate::library::user_index().ok();
+        let index = crate::library::merged_indexes(Some(&project), user.as_deref())?;
+        Ok(crate::library::search(
+            &index,
+            &crate::library::SearchOptions {
+                query: q.query.as_deref(),
+                library: q.library.as_deref(),
+                tag: q.tag.as_deref(),
+                category: q.category.as_deref(),
+                kind: q.kind.as_deref(),
+                offset: q.offset.unwrap_or(0),
+                limit: q.limit.unwrap_or(50),
+            },
+        ))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+#[derive(serde::Deserialize)]
+struct AssetDocumentQuery {
+    spec: String,
+}
+async fn asset_document(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<AssetDocumentQuery>,
+) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let project = crate::library::project_index(&state.project_root);
+        let user = crate::library::user_index().ok();
+        let index = crate::library::merged_indexes(Some(&project), user.as_deref())?;
+        let item = crate::library::resolve(&index, &q.spec)?;
+        let document: serde_json::Value = serde_json::from_slice(&std::fs::read(&item.path)?)?;
+        Ok(serde_json::json!({"asset":item,"document":document}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+#[derive(serde::Deserialize)]
+struct RegistryQuery {
+    source: String,
+    query: String,
+}
+async fn registry_search(axum::extract::Query(q): axum::extract::Query<RegistryQuery>) -> Response {
+    match crate::package::registry_search(&q.source, &q.query) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => problem(e),
+    }
+}
+#[derive(serde::Deserialize)]
+struct RegistryInstall {
+    source: String,
+    spec: String,
+}
+async fn registry_install(
+    State(state): State<Shared>,
+    Json(body): Json<RegistryInstall>,
+) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let mut report =
+            crate::package::install_from_registry(&body.source, &body.spec, &state.project_root)?;
+        let folder = report
+            .get("installed")
+            .and_then(serde_json::Value::as_str)
+            .map(PathBuf::from)
+            .context("install path missing")?;
+        let name = report
+            .get("package")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("package");
+        let version = report
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("0");
+        let library_name = format!("pkg-{}-{version}", name.replace('/', "-"));
+        let config = crate::library::project_config(&state.project_root);
+        match crate::library::add(&state.project_root, &config, &library_name, &folder) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("already registered") => {}
+            Err(e) => return Err(e),
+        };
+        report["index_refresh"] = crate::library::refresh(
+            &state.project_root,
+            &config,
+            &crate::library::project_index(&state.project_root),
+            None,
+        )?;
+        Ok(report)
+    })();
+    match result {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => problem(e),
+    }
 }
 
 #[derive(serde::Deserialize)]

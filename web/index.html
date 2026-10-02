@@ -34,6 +34,18 @@
     </section>
     <aside class="inspector">
       <section>
+        <div class="section-head"><h2>Asset Explorer</h2><button id="refreshAssets" class="icon" title="Refresh results">↻</button></div>
+        <input id="assetSearch" type="search" placeholder="Search local and installed assets" aria-label="Search assets">
+        <label>Place <select id="assetMode"><option value="copy">Editable copy</option><option value="instance">Instance</option></select></label>
+        <div id="assetResults" class="asset-results"><p class="text-help">Register a library with the CLI, then search here.</p></div>
+        <label>Asset ID <input id="assetExportId" value="local/component"></label>
+        <label>Name <input id="assetExportName" value="Component"></label>
+        <button id="exportLayerAsset">Export active layer as asset</button>
+        <label>Registry <input id="registrySource" placeholder="https://registry.example/v1"></label>
+        <button id="searchRegistry">Search registry</button>
+        <div id="registryResults" class="asset-results"></div>
+      </section>
+      <section>
         <div class="section-head"><h2>Pages</h2><button id="addPage" class="icon" aria-label="Add page" title="Add page">＋</button></div>
         <div id="pages" class="page-list"></div>
       </section>

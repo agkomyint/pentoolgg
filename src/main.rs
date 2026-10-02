@@ -1,11 +1,15 @@
 use pentool::{
-    agent, benchmark, document, editing, fonts, geometry, import, page, render, server, text,
+    agent, asset, benchmark, document, editing, fonts, geometry, import, instance, library,
+    package, page, render, server, text,
 };
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use document::Document;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Parser)]
 #[command(
@@ -23,6 +27,70 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create, inspect, or preview reusable assets.
+    Asset {
+        #[command(subcommand)]
+        action: AssetAction,
+    },
+    /// Manage registered local asset folders.
+    Library {
+        #[command(subcommand)]
+        action: LibraryAction,
+    },
+    /// Search the local asset index.
+    Explore {
+        query: Option<String>,
+        #[arg(long)]
+        library: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Place an indexed asset as a copy or offline-safe instance.
+    Add {
+        destination: PathBuf,
+        asset: String,
+        #[arg(long, value_enum, default_value = "copy")]
+        mode: AddMode,
+        #[arg(long, num_args=2, default_values_t=[0.0,0.0])]
+        at: Vec<f64>,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f64,
+        #[arg(long, default_value_t = 0.0)]
+        rotate: f64,
+        #[arg(long)]
+        prefix: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Inspect, change, or detach component instances.
+    Instance {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: InstanceAction,
+    },
+    /// Build, verify, publish, or install deterministic packages.
+    Package {
+        #[command(subcommand)]
+        action: PackageAction,
+    },
+    /// Search a filesystem or static HTTP registry.
+    Registry {
+        #[command(subcommand)]
+        action: RegistryAction,
+    },
+    /// Verify project package locks.
+    Lock {
+        #[command(subcommand)]
+        action: LockAction,
+    },
     /// Generate and measure a large in-memory document.
     Benchmark {
         #[arg(long, default_value_t = 100)]
@@ -192,6 +260,207 @@ enum Command {
     },
 }
 
+#[derive(Clone, clap::ValueEnum)]
+enum AddMode {
+    Copy,
+    Instance,
+}
+#[derive(Clone, clap::ValueEnum)]
+enum Scope {
+    Project,
+    User,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Subcommand)]
+enum AssetAction {
+    Create {
+        input: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long, default_value = "0.1.0")]
+        version: String,
+        #[arg(long, default_value = "component")]
+        kind: String,
+        #[arg(long)]
+        author: Option<String>,
+        #[arg(long)]
+        license: Option<String>,
+        #[arg(long)]
+        tag: Vec<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        source_page: Option<String>,
+        #[arg(long)]
+        layer: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        objects: Vec<String>,
+        #[arg(long,num_args=4,value_names=["X","Y","WIDTH","HEIGHT"])]
+        rect: Option<Vec<f64>>,
+        #[arg(long)]
+        overwrite: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Inspect {
+        asset: String,
+    },
+    Preview {
+        asset: String,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f32,
+    },
+}
+#[derive(Subcommand)]
+enum LibraryAction {
+    Add {
+        folder: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+    List {
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+    Refresh {
+        name: Option<String>,
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+    Remove {
+        name: String,
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+    Enable {
+        name: String,
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+    Disable {
+        name: String,
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+    Doctor {
+        #[arg(long, value_enum, default_value = "project")]
+        scope: Scope,
+    },
+}
+#[derive(Subcommand)]
+enum InstanceAction {
+    List,
+    Inspect {
+        id: String,
+    },
+    Updates {
+        id: String,
+        #[arg(long)]
+        source: PathBuf,
+    },
+    Update {
+        id: String,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Rollback {
+        id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Detach {
+        id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Set {
+        id: String,
+        #[arg(long)]
+        property: String,
+        #[arg(long)]
+        value: String,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+#[derive(Subcommand)]
+enum PackageAction {
+    List,
+    Remove {
+        spec: String,
+        #[arg(long)]
+        force: bool,
+    },
+    Keygen {
+        prefix: PathBuf,
+    },
+    Sign {
+        file: PathBuf,
+        #[arg(long)]
+        key: PathBuf,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    Init {
+        dir: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
+    Pack {
+        dir: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    Verify {
+        file: PathBuf,
+        #[arg(long)]
+        signature: Option<PathBuf>,
+        #[arg(long)]
+        public_key: Option<PathBuf>,
+    },
+    Inspect {
+        file: PathBuf,
+    },
+    Publish {
+        file: PathBuf,
+        #[arg(long)]
+        registry: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Install {
+        source: String,
+        #[arg(long)]
+        registry: Option<String>,
+    },
+}
+#[derive(Subcommand)]
+enum RegistryAction {
+    Search { path: String, query: String },
+}
+#[derive(Subcommand)]
+enum LockAction {
+    Verify,
+    Sync {
+        #[arg(long)]
+        offline: bool,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -201,6 +470,429 @@ async fn main() -> Result<()> {
         host: "127.0.0.1".into(),
         port: 4711,
     }) {
+        Command::Asset { action } => {
+            let cwd = std::env::current_dir()?;
+            match action {
+                AssetAction::Create {
+                    input,
+                    output,
+                    id,
+                    name,
+                    description,
+                    version,
+                    kind,
+                    author,
+                    license,
+                    tag,
+                    category,
+                    source_page,
+                    layer,
+                    objects,
+                    rect,
+                    overwrite,
+                    dry_run,
+                } => {
+                    let rect = rect.map(|v| asset::Bounds {
+                        x: v[0],
+                        y: v[1],
+                        width: v[2],
+                        height: v[3],
+                    });
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&asset::create(&asset::CreateOptions {
+                            input,
+                            output,
+                            page: source_page,
+                            layers: layer,
+                            objects,
+                            rect,
+                            id,
+                            name,
+                            description: description.unwrap_or_default(),
+                            version,
+                            kind,
+                            author: author.unwrap_or_default(),
+                            license: license.unwrap_or_default(),
+                            tags: tag,
+                            category: category.unwrap_or_default(),
+                            overwrite,
+                            dry_run
+                        })?)?
+                    );
+                    Ok(())
+                }
+                AssetAction::Inspect { asset: spec } => {
+                    let path = resolve_asset_path(&cwd, &spec)?;
+                    println!("{}", serde_json::to_string_pretty(&asset::inspect(&path)?)?);
+                    Ok(())
+                }
+                AssetAction::Preview {
+                    asset: spec,
+                    output,
+                    scale,
+                } => {
+                    let path = resolve_asset_path(&cwd, &spec)?;
+                    let source_bytes = fs::read(&path)?;
+                    let hash = asset::hash_bytes(&source_bytes);
+                    let extension = output
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .context("preview output must end in .png or .svg")?;
+                    let cache = cwd.join(".pentool").join("previews").join(format!(
+                        "{}-{}x.{}",
+                        hash.trim_start_matches("sha256:"),
+                        scale,
+                        extension
+                    ));
+                    if !cache.exists() {
+                        if let Some(parent) = cache.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        let doc = read_document(&path, None)?;
+                        render::write_export_options(&doc, &cache, scale, false)?;
+                    }
+                    if let Some(parent) = output.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::copy(&cache, &output)?;
+                    println!(
+                        "{}",
+                        json_pretty(
+                            serde_json::json!({"ok":true,"asset":spec,"output":output,"cache":cache,"content_hash":hash})
+                        )?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        Command::Library { action } => {
+            let cwd = std::env::current_dir()?;
+            match action {
+                LibraryAction::Add {
+                    folder,
+                    name,
+                    scope,
+                } => {
+                    let (config, index) = scope_paths(&cwd, &scope)?;
+                    println!(
+                        "{}",
+                        json_pretty(library::add(&cwd, &config, &name, &folder)?)?
+                    );
+                    println!(
+                        "{}",
+                        json_pretty(library::refresh(&cwd, &config, &index, None)?)?
+                    );
+                    Ok(())
+                }
+                LibraryAction::List { scope } => {
+                    let (config, _) = scope_paths(&cwd, &scope)?;
+                    println!("{}", json_pretty(library::list(&cwd, &config)?)?);
+                    Ok(())
+                }
+                LibraryAction::Refresh { name, scope } => {
+                    let (config, index) = scope_paths(&cwd, &scope)?;
+                    println!(
+                        "{}",
+                        json_pretty(library::refresh(&cwd, &config, &index, name.as_deref())?)?
+                    );
+                    Ok(())
+                }
+                LibraryAction::Remove { name, scope } => {
+                    let (config, index) = scope_paths(&cwd, &scope)?;
+                    println!("{}", json_pretty(library::remove(&config, &name)?)?);
+                    println!(
+                        "{}",
+                        json_pretty(library::refresh(&cwd, &config, &index, None)?)?
+                    );
+                    Ok(())
+                }
+                LibraryAction::Enable { name, scope } => {
+                    let (config, index) = scope_paths(&cwd, &scope)?;
+                    println!(
+                        "{}",
+                        json_pretty(library::set_enabled(&config, &name, true)?)?
+                    );
+                    println!(
+                        "{}",
+                        json_pretty(library::refresh(&cwd, &config, &index, None)?)?
+                    );
+                    Ok(())
+                }
+                LibraryAction::Disable { name, scope } => {
+                    let (config, index) = scope_paths(&cwd, &scope)?;
+                    println!(
+                        "{}",
+                        json_pretty(library::set_enabled(&config, &name, false)?)?
+                    );
+                    println!(
+                        "{}",
+                        json_pretty(library::refresh(&cwd, &config, &index, None)?)?
+                    );
+                    Ok(())
+                }
+                LibraryAction::Doctor { scope } => {
+                    let (_, index) = scope_paths(&cwd, &scope)?;
+                    let idx = library::load_index(&index)?;
+                    println!(
+                        "{}",
+                        json_pretty(
+                            serde_json::json!({"ok":idx.warnings.is_empty(),"assets":idx.assets.len(),"warnings":idx.warnings})
+                        )?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        Command::Explore {
+            query,
+            library: lib,
+            tag,
+            category,
+            kind,
+            offset,
+            limit,
+        } => {
+            let cwd = std::env::current_dir()?;
+            let idx = all_indexes(&cwd)?;
+            println!(
+                "{}",
+                json_pretty(library::search(
+                    &idx,
+                    &library::SearchOptions {
+                        query: query.as_deref(),
+                        library: lib.as_deref(),
+                        tag: tag.as_deref(),
+                        category: category.as_deref(),
+                        kind: kind.as_deref(),
+                        offset,
+                        limit
+                    }
+                ))?
+            );
+            Ok(())
+        }
+        Command::Add {
+            destination,
+            asset: spec,
+            mode,
+            at,
+            scale,
+            rotate,
+            prefix,
+            dry_run,
+        } => {
+            let cwd = std::env::current_dir()?;
+            let idx = all_indexes(&cwd)?;
+            let item = library::resolve(&idx, &spec)?;
+            let source_bytes = fs::read(&item.path)?;
+            let source_raw: serde_json::Value = serde_json::from_slice(&source_bytes)?;
+            let manifest =
+                asset::manifest(&source_raw)?.context("indexed asset metadata missing")?;
+            let destination_bytes = fs::read(&destination)?;
+            let revision = agent::revision_bytes(&destination_bytes);
+            let chosen_prefix = prefix.unwrap_or_else(|| {
+                format!(
+                    "{}-{}",
+                    item.id.replace('/', "-"),
+                    &item.content_hash[7..15]
+                )
+            });
+            let mut result = import::compose(
+                serde_json::from_slice(&destination_bytes)?,
+                source_raw,
+                &import::ImportOptions {
+                    destination_page: selected_page.map(str::to_owned),
+                    source_page: manifest.entry_page.clone(),
+                    prefix: Some(chosen_prefix),
+                    x: at[0],
+                    y: at[1],
+                    scale,
+                    rotation: rotate,
+                    expand_canvas: false,
+                },
+            )?;
+            if matches!(mode, AddMode::Instance) {
+                let layer_ids = result.summary["layers"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|m| m.values())
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>();
+                let id = next_instance_id(&result.document);
+                instance::attach(
+                    &mut result.document,
+                    instance::InstanceRecord {
+                        id: id.clone(),
+                        library: item.library.clone(),
+                        asset_id: item.id.clone(),
+                        asset_version: item.version.clone(),
+                        content_hash: item.content_hash.clone(),
+                        layer_ids,
+                        page_id: result.summary["destination_page"]
+                            .as_str()
+                            .unwrap_or("page-1")
+                            .to_owned(),
+                        transform: {
+                            let r = rotate.to_radians();
+                            [
+                                scale * r.cos(),
+                                scale * r.sin(),
+                                -scale * r.sin(),
+                                scale * r.cos(),
+                                at[0],
+                                at[1],
+                            ]
+                        },
+                        visible: true,
+                        overrides: Default::default(),
+                        previous: vec![],
+                    },
+                )?;
+                result.summary["instance_id"] = serde_json::Value::String(id);
+            }
+            let output = serde_json::to_vec_pretty(&result.document)?;
+            if !dry_run {
+                let backup = editing::transactional_write(&destination, &output)?;
+                result.summary["backup"] = serde_json::to_value(backup)?;
+            }
+            println!(
+                "{}",
+                json_pretty(
+                    serde_json::json!({"ok":true,"dry_run":dry_run,"revision_before":revision,"revision_after":agent::revision_bytes(&output),"summary":result.summary})
+                )?
+            );
+            Ok(())
+        }
+        Command::Instance { input, action } => match action {
+            InstanceAction::List => {
+                let raw = serde_json::from_slice(&fs::read(input)?)?;
+                println!("{}", json_pretty(instance::list(&raw)?)?);
+                Ok(())
+            }
+            InstanceAction::Inspect { id } => {
+                let raw = serde_json::from_slice(&fs::read(input)?)?;
+                println!("{}", json_pretty(instance::inspect(&raw, &id)?)?);
+                Ok(())
+            }
+            InstanceAction::Updates { id, source } => {
+                println!(
+                    "{}",
+                    json_pretty(instance::update_plan(&input, &id, &source)?)?
+                );
+                Ok(())
+            }
+            InstanceAction::Update {
+                id,
+                source,
+                dry_run,
+            } => {
+                println!(
+                    "{}",
+                    json_pretty(instance::update(&input, &id, &source, dry_run)?)?
+                );
+                Ok(())
+            }
+            InstanceAction::Rollback { id, dry_run } => {
+                println!(
+                    "{}",
+                    json_pretty(instance::rollback(&input, &id, dry_run)?)?
+                );
+                Ok(())
+            }
+            InstanceAction::Detach { id, dry_run } => {
+                println!("{}", json_pretty(instance::detach(&input, &id, dry_run)?)?);
+                Ok(())
+            }
+            InstanceAction::Set {
+                id,
+                property,
+                value,
+                source,
+                dry_run,
+            } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(source)?)?;
+                let m = asset::manifest(&raw)?.context("source lacks asset metadata")?;
+                println!(
+                    "{}",
+                    json_pretty(instance::set_property(
+                        &input, &id, &m, &property, &value, dry_run
+                    )?)?
+                );
+                Ok(())
+            }
+        },
+        Command::Package { action } => {
+            let cwd = std::env::current_dir()?;
+            let value = match action {
+                PackageAction::List => package::list_installed(&cwd)?,
+                PackageAction::Remove { spec, force } => {
+                    let report = package::remove_installed(&cwd, &spec, force)?;
+                    let library_name = format!("pkg-{}", spec.replace(['/', '@'], "-"));
+                    let config = library::project_config(&cwd);
+                    let _ = library::remove(&config, &library_name);
+                    let _ = library::refresh(&cwd, &config, &library::project_index(&cwd), None);
+                    report
+                }
+                PackageAction::Keygen { prefix } => package::keygen(&prefix)?,
+                PackageAction::Sign { file, key, output } => {
+                    package::sign(&file, &key, output.as_deref())?
+                }
+                PackageAction::Init { dir, name } => package::init(&dir, &name)?,
+                PackageAction::Pack { dir, output } => package::pack(&dir, &output)?,
+                PackageAction::Verify {
+                    file,
+                    signature,
+                    public_key,
+                } => {
+                    let base = package::verify(&file)?;
+                    if let Some(sig) = signature {
+                        serde_json::json!({"package":base,"signature":package::verify_signature(&file,&sig,public_key.as_deref())?})
+                    } else {
+                        base
+                    }
+                }
+                PackageAction::Inspect { file } => package::inspect(&file)?,
+                PackageAction::Publish {
+                    file,
+                    registry,
+                    dry_run,
+                } => package::publish(&file, &registry, dry_run)?,
+                PackageAction::Install { source, registry } => {
+                    let mut report = if let Some(reg) = registry {
+                        package::install_from_registry(&reg, &source, &cwd)?
+                    } else {
+                        package::install(Path::new(&source), &cwd, &source)?
+                    };
+                    activate_installed_package(&cwd, &mut report)?;
+                    report
+                }
+            };
+            println!("{}", json_pretty(value)?);
+            Ok(())
+        }
+        Command::Registry { action } => match action {
+            RegistryAction::Search { path, query } => {
+                println!("{}", json_pretty(package::registry_search(&path, &query)?)?);
+                Ok(())
+            }
+        },
+        Command::Lock { action } => match action {
+            LockAction::Verify => {
+                let cwd = std::env::current_dir()?;
+                let report = package::lock_verify(&cwd)?;
+                println!("{}", json_pretty(report.clone())?);
+                if report["ok"] != true {
+                    anyhow::bail!("lock verification failed")
+                }
+                Ok(())
+            }
+            LockAction::Sync { offline } => {
+                let cwd = std::env::current_dir()?;
+                println!("{}", json_pretty(package::lock_sync(&cwd, offline)?)?);
+                Ok(())
+            }
+        },
         Command::Benchmark {
             layers,
             objects,
@@ -496,5 +1188,71 @@ fn select_page(doc: &mut Document, page: Option<&str>) -> Result<()> {
     if let Some(id) = page {
         doc.select_page(id).map_err(anyhow::Error::msg)?;
     }
+    Ok(())
+}
+
+fn scope_paths(root: &Path, scope: &Scope) -> Result<(PathBuf, PathBuf)> {
+    Ok(match scope {
+        Scope::Project => (library::project_config(root), library::project_index(root)),
+        Scope::User => (library::user_config()?, library::user_index()?),
+    })
+}
+fn all_indexes(root: &Path) -> Result<library::AssetIndex> {
+    library::merged_indexes(
+        Some(&library::project_index(root)),
+        library::user_index().ok().as_deref(),
+    )
+}
+fn resolve_asset_path(root: &Path, spec: &str) -> Result<PathBuf> {
+    let direct = PathBuf::from(spec);
+    if direct.is_file() {
+        return Ok(direct);
+    }
+    let idx = all_indexes(root)?;
+    Ok(library::resolve(&idx, spec)?.path.clone())
+}
+fn json_pretty(value: serde_json::Value) -> Result<String> {
+    Ok(serde_json::to_string_pretty(&value)?)
+}
+fn next_instance_id(raw: &serde_json::Value) -> String {
+    let used: std::collections::HashSet<_> = raw
+        .get("instances")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.get("id").and_then(serde_json::Value::as_str))
+        .collect();
+    (1..)
+        .map(|n| format!("instance-{n}"))
+        .find(|id| !used.contains(id.as_str()))
+        .unwrap()
+}
+fn activate_installed_package(root: &Path, report: &mut serde_json::Value) -> Result<()> {
+    let Some(folder) = report
+        .get("installed")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+    else {
+        return Ok(());
+    };
+    let name = report
+        .get("package")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("package");
+    let version = report
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("0");
+    let library_name = format!("pkg-{}-{version}", name.replace('/', "-"));
+    let config = library::project_config(root);
+    let index = library::project_index(root);
+    match library::add(root, &config, &library_name, &folder) {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("already registered") => {}
+        Err(e) => return Err(e),
+    };
+    let refreshed = library::refresh(root, &config, &index, None)?;
+    report["library"] = serde_json::Value::String(library_name);
+    report["index_refresh"] = refreshed;
     Ok(())
 }

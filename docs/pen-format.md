@@ -136,3 +136,14 @@ Embedded fonts are document-wide. Byte-identical font data is reused; a differen
 font whose resource ID collides receives a deterministic numbered ID. Unknown
 JSON fields on imported layers and objects are preserved. Imports are copies, not
 live links to the source file.
+
+## Reusable asset and instance extensions
+
+Pentool v0.5 adds an optional top-level `asset` object to metadata-bearing reusable
+documents and an optional top-level `instances` array to documents containing
+offline-safe component instances. These are extension fields over format version 3;
+ordinary documents remain valid without them. An instance's imported layers are
+materialized in the document so rendering never depends on a library or network.
+
+The normative identity, packaging, registry, lockfile, and update rules are defined
+in [`PROTOCOL.md`](PROTOCOL.md).
