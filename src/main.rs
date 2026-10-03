@@ -1385,6 +1385,17 @@ async fn run() -> Result<()> {
             offset,
             limit,
         } => {
+            let bytes = fs::read(&input)?;
+            if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+                    let k = kind.map(|k| match k {
+                        agent::ObjectKind::Path => "path",
+                        agent::ObjectKind::Text => "text",
+                    });
+                    println!("{}", serde_json::to_string_pretty(&scene::inspect_paginated_v4(&raw, selected_page, query.as_deref(), k, layer.as_deref(), offset, limit)?)?);
+                    return Ok(());
+                }
+            }
             let doc = read_document(&input, selected_page)?;
             println!(
                 "{}",
@@ -1407,6 +1418,17 @@ async fn run() -> Result<()> {
             offset,
             limit,
         } => {
+            let bytes = fs::read(&input)?;
+            if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+                    let k = kind.map(|k| match k {
+                        agent::ObjectKind::Path => "path",
+                        agent::ObjectKind::Text => "text",
+                    });
+                    println!("{}", serde_json::to_string_pretty(&scene::inspect_paginated_v4(&raw, selected_page, Some(&query), k, layer.as_deref(), offset, limit)?)?);
+                    return Ok(());
+                }
+            }
             let doc = read_document(&input, selected_page)?;
             println!(
                 "{}",
@@ -2291,11 +2313,6 @@ fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
 
 fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Document> {
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
-    if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-        if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
-            anyhow::bail!("tree does not support v4 yet; use `info`");
-        }
-    }
     let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     select_page(&mut doc, page)?;
     Ok(doc)

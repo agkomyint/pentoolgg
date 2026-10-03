@@ -1932,3 +1932,136 @@ mod tests {
         validate(&raw).unwrap();
     }
 }
+
+
+pub fn inspect_paginated_v4(
+    raw: &Value,
+    page_id: Option<&str>,
+    query: Option<&str>,
+    kind_filter: Option<&str>,
+    layer_filter: Option<&str>,
+    offset: usize,
+    limit: usize,
+) -> Result<Value> {
+    if limit == 0 || limit > 10_000 {
+        bail!("search limit must be between 1 and 10,000");
+    }
+    let needle = query.unwrap_or("").to_lowercase();
+    let mut doc = raw.clone();
+    let page = page_mut(&mut doc, page_id)?;
+    
+    let mut matches = 0usize;
+    let mut returned = 0usize;
+    let mut layers = Vec::new();
+
+    let doc_name = raw.get("name").and_then(Value::as_str).unwrap_or("Untitled");
+    let version = raw.get("version").and_then(Value::as_u64).unwrap_or(4);
+    let active_page = page.get("id").and_then(Value::as_str).unwrap_or("page-1");
+
+    let page_layers = page.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+    for (l_idx, l) in page_layers.iter().enumerate() {
+        let lid = l.get("id").and_then(Value::as_str).unwrap_or("");
+        let lname = l.get("name").and_then(Value::as_str).unwrap_or("");
+        
+        if let Some(f) = layer_filter {
+            if lid != f && !lname.to_lowercase().contains(&f.to_lowercase()) {
+                continue;
+            }
+        }
+
+        let mut out_nodes = Vec::new();
+        let nodes = l.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+        
+        for node in nodes {
+            if let Some(aug) = augment_node(page, &node, &needle, kind_filter, &mut matches, &mut returned, offset, limit)? {
+                out_nodes.push(aug);
+            }
+        }
+        
+        let layer_match = needle.is_empty() || lid.to_lowercase().contains(&needle) || lname.to_lowercase().contains(&needle);
+        
+        if layer_match || !out_nodes.is_empty() {
+            let mut out_layer = l.clone();
+            out_layer["nodes"] = json!(out_nodes);
+            layers.push(out_layer);
+        }
+    }
+
+    Ok(json!({
+        "document": doc_name,
+        "version": version,
+        "page": active_page,
+        "matches": matches,
+        "returned": returned,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset.saturating_add(returned) < matches,
+        "stacking": "layers, then nodes; zero is back",
+        "layers": layers
+    }))
+}
+
+fn augment_node(
+    page: &Value,
+    node: &Value,
+    needle: &str,
+    kind_filter: Option<&str>,
+    matches: &mut usize,
+    returned: &mut usize,
+    offset: usize,
+    limit: usize,
+) -> Result<Option<Value>> {
+    let mut out = node.clone();
+    let id = node.get("id").and_then(Value::as_str).unwrap_or("");
+    let name = node.get("name").and_then(Value::as_str).unwrap_or("");
+    let kind = node.get("kind").and_then(Value::as_str).unwrap_or("");
+    
+    let mut is_match = needle.is_empty() || id.to_lowercase().contains(needle) || name.to_lowercase().contains(needle);
+    if kind == "text" {
+        if let Some(content) = node.get("content").and_then(Value::as_str) {
+            if content.to_lowercase().contains(needle) {
+                is_match = true;
+            }
+        }
+    }
+    
+    let kind_matches = kind_filter.map_or(true, |k| k == kind);
+
+    let mut augmented_children = Vec::new();
+    if let Some(children) = node.get("children").and_then(Value::as_array) {
+        for child in children {
+            if let Some(aug) = augment_node(page, child, needle, kind_filter, matches, returned, offset, limit)? {
+                augmented_children.push(aug);
+            }
+        }
+    }
+    
+    if (is_match && kind_matches) || !augmented_children.is_empty() {
+        if is_match && kind_matches {
+            if *matches >= offset && *returned < limit {
+                if let Ok(b) = node_bounds_on_page(page, id) {
+                    if !b.is_null() {
+                        out["bounds"] = b;
+                    }
+                }
+                *returned += 1;
+            }
+            *matches += 1;
+        } else {
+            // Add bounds for parent groups even if they aren't the direct match
+            if let Ok(b) = node_bounds_on_page(page, id) {
+                if !b.is_null() {
+                    out["bounds"] = b;
+                }
+            }
+        }
+        
+        if !augmented_children.is_empty() {
+            out["children"] = json!(augmented_children);
+        }
+        
+        return Ok(Some(out));
+    }
+    
+    Ok(None)
+}
