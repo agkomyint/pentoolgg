@@ -2291,6 +2291,11 @@ fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
 
 fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Document> {
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+            anyhow::bail!("tree does not support v4 yet; use `info`");
+        }
+    }
     let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     select_page(&mut doc, page)?;
     Ok(doc)
