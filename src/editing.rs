@@ -124,6 +124,17 @@ pub fn edit_page(
     page: Option<&str>,
     change: impl FnOnce(&mut Document) -> Result<()>,
 ) -> Result<()> {
+    edit_page_options(file, page, "edit", false, None, change)
+}
+
+pub fn edit_page_options(
+    file: &FilePath,
+    page: Option<&str>,
+    operation: &str,
+    dry_run: bool,
+    expected: Option<&str>,
+    change: impl FnOnce(&mut Document) -> Result<()>,
+) -> Result<()> {
     // Keep extension fields when modifying the known document schema.
     let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(file)?)?;
     let mut doc: Document = serde_json::from_value(raw.clone())?;
@@ -140,9 +151,8 @@ pub fn edit_page(
             object.remove("layers");
         }
     }
-    fs::write(file, serde_json::to_vec_pretty(&raw)?)
-        .with_context(|| format!("could not write {}", file.display()))?;
-    println!("{}", serde_json::json!({"ok":true,"file":file}));
+    let summary = crate::transaction::commit_value(file, operation, dry_run, expected, &raw)?;
+    println!("{}", serde_json::to_string(&summary)?);
     Ok(())
 }
 
@@ -171,6 +181,32 @@ pub fn transactional_write(file: &FilePath, bytes: &[u8]) -> Result<std::path::P
         return Err(e).context("could not replace document; original restored");
     }
     Ok(backup)
+}
+
+/// Atomically replace a document without creating a legacy sibling backup.
+pub fn atomic_write(file: &FilePath, bytes: &[u8]) -> Result<()> {
+    let parent = file.parent().unwrap_or_else(|| FilePath::new("."));
+    let name = file
+        .file_name()
+        .context("document path has no filename")?
+        .to_string_lossy();
+    let temp = parent.join(format!(".{name}.pentool-tmp-{}", std::process::id()));
+    let previous = parent.join(format!(".{name}.pentool-old-{}", std::process::id()));
+    fs::write(&temp, bytes)?;
+    if file.exists() {
+        fs::rename(file, &previous)?;
+    }
+    if let Err(error) = fs::rename(&temp, file) {
+        if previous.exists() {
+            let _ = fs::rename(&previous, file);
+        }
+        let _ = fs::remove_file(&temp);
+        return Err(error.into());
+    }
+    if previous.exists() {
+        fs::remove_file(previous)?;
+    }
+    Ok(())
 }
 
 pub fn merge(old: &mut serde_json::Value, new: serde_json::Value) {

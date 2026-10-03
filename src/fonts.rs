@@ -3,7 +3,11 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use resvg::usvg::fontdb::{Database, Family, Query, Style, Weight};
 use serde_json::{json, Value};
-use std::sync::OnceLock;
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::{Mutex, OnceLock},
+};
 
 pub const DEFAULT_FAMILY: &str = "Atkinson Hyperlegible";
 pub const BUNDLED: [(&str, u16, bool, &[u8]); 4] = [
@@ -37,6 +41,17 @@ pub fn decode(asset: &FontAsset) -> Result<Vec<u8>> {
     if asset.data.len() > 8 * 1024 * 1024 {
         bail!("embedded font is too large");
     }
+    static VALIDATED: OnceLock<Mutex<HashMap<[u8; 32], Vec<u8>>>> = OnceLock::new();
+    let cache = VALIDATED.get_or_init(|| Mutex::new(HashMap::new()));
+    let key: [u8; 32] = Sha256::digest(asset.data.as_bytes()).into();
+    if let Some(data) = cache
+        .lock()
+        .expect("font cache poisoned")
+        .get(&key)
+        .cloned()
+    {
+        return Ok(data);
+    }
     let data = STANDARD
         .decode(&asset.data)
         .context("invalid base64 font data")?;
@@ -45,6 +60,11 @@ pub fn decode(asset: &FontAsset) -> Result<Vec<u8>> {
     if db.faces().next().is_none() {
         bail!("invalid or unsupported font file");
     }
+    let mut cache = cache.lock().expect("font cache poisoned");
+    if cache.len() >= 8 {
+        cache.clear();
+    }
+    cache.insert(key, data.clone());
     Ok(data)
 }
 
@@ -54,8 +74,16 @@ pub fn database(doc: &Document, system: bool) -> Result<Database> {
     for asset in &doc.fonts {
         db.load_font_data(decode(asset)?);
     }
-    for (_, _, _, bytes) in BUNDLED {
-        db.load_font_data(bytes.to_vec());
+    static BUNDLED_DB: OnceLock<Database> = OnceLock::new();
+    let bundled = BUNDLED_DB.get_or_init(|| {
+        let mut db = Database::new();
+        for (_, _, _, bytes) in BUNDLED {
+            db.load_font_data(bytes.to_vec());
+        }
+        db
+    });
+    for face in bundled.faces() {
+        db.push_face_info(face.clone());
     }
     if system {
         static SYSTEM: OnceLock<Database> = OnceLock::new();
@@ -131,7 +159,18 @@ pub fn svg_faces(doc: &Document) -> Result<String> {
     if doc.layers.iter().all(|l| l.texts.is_empty()) {
         return Ok(String::new());
     }
+    let requests = requests(doc);
     for (_, weight, italic, bytes) in BUNDLED {
+        let needed = requests
+            .iter()
+            .any(|(family, requested_weight, requested_italic)| {
+                family == DEFAULT_FAMILY
+                    && *requested_italic == italic
+                    && ((*requested_weight >= 600) == (weight >= 600))
+            });
+        if !needed {
+            continue;
+        }
         css.push_str(&format!("@font-face{{font-family:'{}';font-weight:{};font-style:{};src:url(data:font/ttf;base64,{})}}",DEFAULT_FAMILY,weight,if italic{"italic"}else{"normal"},STANDARD.encode(bytes)));
     }
     for asset in &doc.fonts {
@@ -146,4 +185,13 @@ pub fn svg_faces(doc: &Document) -> Result<String> {
     }
     css.push_str("</style>");
     Ok(css)
+}
+
+pub fn requests(doc: &Document) -> BTreeSet<(String, u16, bool)> {
+    doc.layers
+        .iter()
+        .filter(|layer| layer.visible)
+        .flat_map(|layer| &layer.texts)
+        .map(|text| (text.font_family.clone(), text.font_weight, text.italic))
+        .collect()
 }

@@ -18,13 +18,32 @@ general performance guarantee.
 
 ## Install
 
-Download the binary for your platform from [GitHub Releases](https://github.com/agkomyint/pentoolgg/releases), put it on your `PATH`, then run:
+macOS and Linux:
+
+```sh
+curl -LsSf https://pentool.space/install.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://pentool.space/install.ps1 | iex
+```
+
+The installer downloads the latest release for your platform, verifies its
+SHA-256 checksum, installs `pentool`, and adds its directory to your user
+`PATH`. Restart your terminal if this is the first installation, then run:
 
 ```sh
 pentool serve
 ```
 
 Open `http://127.0.0.1:4711`. No Node.js, database, or external assets are required.
+
+To install a specific release or choose another directory, set
+`PENTOOL_VERSION` (for example, `v0.6.2`) or `PENTOOL_INSTALL_DIR` before
+running the command. You can also download an archive directly from
+[GitHub Releases](https://github.com/agkomyint/pentoolgg/releases).
 
 Build from source:
 
@@ -146,6 +165,7 @@ Large searches are paginated for compact agent context:
 ```sh
 pentool --page mobile search design.pen icon --offset 100 --limit 50
 pentool benchmark --layers 1000 --objects 100000
+pentool benchmark --render --layers 100 --objects 10000 --warmups 2 --repetitions 7 --scale 1 --json
 ```
 
 ## Agent discovery and safe editing (v0.3.0)

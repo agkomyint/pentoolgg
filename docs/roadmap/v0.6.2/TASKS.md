@@ -25,7 +25,7 @@ instance, package, or lock guarantees.
 
 ## Must ship, in order
 
-- [ ] **1. Specify an ordered scene graph and migration contract.** Publish the
+- [x] **1. Specify an ordered scene graph and migration contract.** Publish the
   next `.pen` schema before adding commands. Replace separate layer-level path and
   text collections with an ordered node model capable of containing:
 
@@ -41,14 +41,14 @@ instance, package, or lock guarantees.
   a flatten/export path for older consumers. Do not silently upgrade a file merely
   by reading it.
 
-- [ ] **2. Centralize all writes in one transaction engine.** Route `path put`,
+- [x] **2. Centralize all writes in one transaction engine.** Route `path put`,
   `text put`, layer geometry, object editing, batch, page import, styles, groups,
   and every new command through one mutation API. Each operation validates before
   commit, supports `--dry-run` and `--if-revision`, writes atomically, and produces
   a structured change summary. A failed operation leaves the document byte-for-byte
   unchanged.
 
-- [ ] **3. Add semantic shape primitives.** Implement rectangle, rounded rectangle,
+- [x] **3. Add semantic shape primitives.** Implement rectangle, rounded rectangle,
   ellipse/circle, and line nodes with measured bounds and normal styling:
 
   ```sh
@@ -66,7 +66,7 @@ instance, package, or lock guarantees.
   primitive parameters when possible and convert to a path only through an explicit
   command.
 
-- [ ] **4. Add groups and everyday components.** Provide create, add/remove child,
+- [x] **4. Add groups and everyday components.** Provide create, add/remove child,
   ungroup, move, rotate, scale, duplicate, rename, reorder, and bounds inspection:
 
   ```sh
@@ -79,14 +79,14 @@ instance, package, or lock guarantees.
   instance. Reuse v0.5 source identity, fallback snapshots, overrides, detach, and
   update semantics instead of inventing an incompatible component system.
 
-- [ ] **5. Let batch create and compose complete scenes.** Add `put-shape`,
+- [x] **5. Let batch create and compose complete scenes.** Add `put-shape`,
   `put-path`, `put-text`, `create-group`, `set-style`, and reparent operations to
   batch. One JSON request must be able to construct a full slide or screen in one
   validated transaction. Support temporary aliases so later operations in the same
   batch can refer to objects created earlier. Report the failing operation index,
   page, layer, group, and object ID without committing a partial result.
 
-- [ ] **6. Add document styles and design tokens.** Store named color, stroke,
+- [x] **6. Add document styles and design tokens.** Store named color, stroke,
   typography, spacing, radius, and shadow tokens in the document. Nodes reference
   tokens while retaining explicit fallback values for robust rendering. Provide
   list, create, set, rename, delete, usage, detach, and replace commands:
@@ -101,7 +101,7 @@ instance, package, or lock guarantees.
   and cycles, define missing-token behavior, preserve package/instance fallbacks,
   and include style dependencies in asset/package manifests.
 
-- [ ] **7. Add scoped bulk replacement.** Support direct values as well as named
+- [x] **7. Add scoped bulk replacement.** Support direct values as well as named
   styles, with page, layer, group, object-type, visibility, and selection scopes:
 
   ```sh
@@ -114,21 +114,21 @@ instance, package, or lock guarantees.
   for document-wide changes and never alter embedded assets or detached fallback
   snapshots unless separately requested.
 
-- [ ] **8. Add alignment, distribution, and bounds snapping.** Implement left,
+- [x] **8. Add alignment, distribution, and bounds snapping.** Implement left,
   horizontal-center, right, top, vertical-center, bottom, equal horizontal/vertical
   distribution, fixed-gap distribution, and snapping to another object's bounds.
   Operate on objects or groups, support key-object and selection-bounds modes, and
   define behavior for transformed, rotated, locked, hidden, and zero-size nodes.
   Return computed bounds and applied deltas in dry-run output.
 
-- [ ] **9. Add real text boxes.** Support point text and bounded text with width,
+- [x] **9. Add real text boxes.** Support point text and bounded text with width,
   optional height, wrapping, overflow policy, horizontal alignment, vertical
   alignment, line height, and explicit anchor modes (`baseline`, `top`, `center`,
   `bottom`). Document in `--help` that existing `y` is a baseline. Bounds, layout,
   SVG, PNG, PDF, browser display, and hit testing must share the same shaping and
   line-breaking result.
 
-- [ ] **10. Unify history, backups, and undo.** Store project-local history under a
+- [x] **10. Unify history, backups, and undo.** Store project-local history under a
   hidden directory such as `.pentool/history/`, not beside the `.pen` file. Add:
 
   ```sh
@@ -143,7 +143,7 @@ instance, package, or lock guarantees.
   locking. Every mutating command follows the same policy. Migrating legacy
   `.bak.N` files is explicit; never delete them automatically.
 
-- [ ] **11. Make CLI failures agent-safe.** Add a global `--json` mode with stable
+- [x] **11. Make CLI failures agent-safe.** Add a global `--json` mode with stable
   error codes, command context, page/layer/group/object identity, nearest-ID
   suggestions, and actionable hints. Expected user errors must not print Rust
   backtraces. Treat a closed stdout pipe as normal termination, including
@@ -153,7 +153,7 @@ instance, package, or lock guarantees.
   Audit every command's help text for coordinate meaning, defaults, scope, output,
   backup/history behavior, and runnable examples.
 
-- [ ] **12. Add multi-page export and document comparison.** Implement:
+- [x] **12. Add multi-page export and document comparison.** Implement:
 
   ```sh
   pentool export deck.pen ./exports --all-pages --format png
@@ -167,17 +167,36 @@ instance, package, or lock guarantees.
   reports pages, groups, nodes, styles, geometry, text, and instance changes;
   optional visual diff produces bounded artifacts.
 
-- [ ] **13. Add optional compact serialization.** Keep human-readable JSON as the
+- [x] **13. Add optional compact serialization.** Keep human-readable JSON as the
   default. Add `pentool format --compact` and `--pretty`, producing semantically
   equivalent deterministic files. Never make compact output a hidden side effect of
   editing. Measure size and parse-time changes on the 257-object feedback fixture
   and large benchmark fixtures.
 
-- [ ] **14. Complete browser parity and authoring documentation.** Expose groups,
+- [x] **14. Complete browser parity and authoring documentation.** Expose groups,
   primitives, styles, layout, text boxes, history, and diff through shared Rust
   services and the browser UI. Publish task-oriented guides for building a card,
   creating a reusable component, recoloring through tokens, laying out a grid,
   undoing a transaction, and generating a multi-page PDF.
+
+## Release verification
+
+Verified on Windows x86_64 on 2026-10-04:
+
+- `cargo test --all-targets`: 62 tests passed;
+- `cargo clippy --all-targets -- -D warnings`: passed;
+- `cargo build --release --locked`: passed and reports `pentool 0.6.2`;
+- the 257-object scene is constructed by one batch in the v0.6.2 integration
+  suite, and compact JSON is at least 25% smaller there;
+- release-binary smoke tests passed for v3→v4 migration, batch construction,
+  component promotion/placement, layout dry run, history undo/redo, v4 PNG,
+  three-page PDF, compact formatting, JSON errors, negative values, and closed
+  stdout pipes;
+- WSL `file` identifies the generated document as PDF 1.7 with three pages.
+
+Native macOS qualification was intentionally deferred because no Mac is
+available for this release pass. The existing release workflow retains its
+macOS jobs for tag-triggered CI coverage.
 
 ## Acceptance targets
 

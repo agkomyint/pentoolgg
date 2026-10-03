@@ -1,0 +1,20 @@
+{
+  "format": "pentool",
+  "version": 4,
+  "name": "V4 scene fixture",
+  "pages": [{
+    "id": "page-1", "name": "Page 1",
+    "canvas": { "width": 320, "height": 240, "background": "#ffffff" },
+    "layers": [{
+      "id": "content", "name": "Content", "visible": true, "locked": false,
+      "nodes": [{
+        "kind": "group", "id": "card", "transform": [1,0,0,1,20,20],
+        "children": [
+          {"kind":"rect","id":"card-bg","x":0,"y":0,"width":280,"height":200,"radius_x":16,"radius_y":16,"style":{"fill":{"fallback":"#111827"}}},
+          {"kind":"text","id":"title","content":"Semantic scene","x":24,"y":56,"font_family":"Atkinson Hyperlegible","font_size":24,"font_weight":700,"style":{"fill":{"fallback":"#ffffff"}}}
+        ]
+      }]
+    }]
+  }],
+  "styles": {}, "components": [], "fonts": []
+}

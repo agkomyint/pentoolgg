@@ -17,7 +17,7 @@ Baseline: [`docs/render-benchmark-v0.6.0.md`](../../render-benchmark-v0.6.0.md).
 
 ## Must ship, in order
 
-- [ ] **1. Add a renderer benchmark harness.** Extend `pentool benchmark` or add
+- [x] **1. Add a renderer benchmark harness.** Extend `pentool benchmark` or add
   `pentool benchmark render` with JSON output for:
 
   - document read and JSON parse;
@@ -35,25 +35,25 @@ Baseline: [`docs/render-benchmark-v0.6.0.md`](../../render-benchmark-v0.6.0.md).
   `total`. Commit deterministic 100, 1,000, 10,000, and 100,000 object fixtures or
   generators, plus 1x, 2x, 4x, and 8x pixel-scale cases.
 
-- [ ] **2. Remove duplicated validation.** Introduce an internal validated export
+- [x] **2. Remove duplicated validation.** Introduce an internal validated export
   entry point so CLI/API boundaries validate exactly once. Public APIs must remain
   safe by default. Add tests proving invalid documents are still rejected through
   every public export path.
 
-- [ ] **3. Make font work proportional to fonts actually used.** Collect unique
+- [x] **3. Make font work proportional to fonts actually used.** Collect unique
   visible `(family, weight, style)` requests once per render. Query each unique face
   once, include only required bundled faces in SVG, and avoid decoding or loading
   the same embedded font multiple times. Cache immutable bundled font metadata and
   the system font database safely across exports. Missing-font errors must remain
   deterministic.
 
-- [ ] **4. Remove the PNG SVG-string round trip where practical.** Build one
+- [x] **4. Remove the PNG SVG-string round trip where practical.** Build one
   reusable render representation for SVG and PNG, or provide `usvg` with generated
   XML without redundant font data and allocations. Preserve ordinary SVG output,
   outlined-text output, IDs, stroke behavior, text layout, and embedded-font
   portability. Record the chosen architecture and rejected alternatives.
 
-- [ ] **5. Reduce SVG assembly allocations.** Pre-size the output buffer from
+- [x] **5. Reduce SVG assembly allocations.** Pre-size the output buffer from
   document complexity, write numeric and escaped attributes into the buffer, avoid
   temporary `String`/`Vec` creation in hot loops, and share escaped/static values
   where safe. Optimize only after stage benchmarks identify material wins.
@@ -65,23 +65,26 @@ Baseline: [`docs/render-benchmark-v0.6.0.md`](../../render-benchmark-v0.6.0.md).
   deterministic. Any new `--png-compression` or `--fast` option needs documented
   quality, size, CPU, and compatibility tradeoffs.
 
-- [ ] **7. Add safe render limits and memory accounting.** Check scaled width,
+  Linux captures are committed for object-heavy and pixel-heavy runs under
+  `docs/profiles/`. Windows and macOS sampling captures are still required.
+
+- [x] **7. Add safe render limits and memory accounting.** Check scaled width,
   height, total pixels, row bytes, and estimated pixmap memory with checked
   arithmetic before allocation. Return structured errors for unsafe requests.
   Rendering must not panic or partially overwrite an existing destination.
 
-- [ ] **8. Add visual equivalence and regression tests.** Cover paths, fills,
+- [x] **8. Add visual equivalence and regression tests.** Cover paths, fills,
   caps, joins, miters, transforms, multiline text, all bundled font faces, embedded
   fonts, transparent backgrounds, pages, and scales. Compare SVG structure where
   contractual and PNG pixels with an explicit tolerance. Store small golden files
   and produce diff artifacts on CI failure.
 
-- [ ] **9. Add performance gates.** On controlled CI runners, compare repeated
+- [x] **9. Add performance gates.** On controlled CI runners, compare repeated
   medians against a checked-in baseline and fail only on statistically meaningful
   regressions. Track artifact size and peak memory alongside latency. Keep the
   existing functional cross-platform release matrix.
 
-- [ ] **10. Publish performance documentation.** Document the rendering stack,
+- [x] **10. Publish performance documentation.** Document the rendering stack,
   benchmark method, expected scaling, memory formula, CLI controls, and before/after
   results. Include raw machine-readable results and hardware/software metadata.
 

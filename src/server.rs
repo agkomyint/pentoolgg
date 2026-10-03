@@ -27,8 +27,8 @@ const STYLE: &str = include_str!("../web/style.css");
 
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
     if let Some(path) = &file {
-        let doc: Document = serde_json::from_slice(&std::fs::read(path)?)?;
-        doc.validate().map_err(anyhow::Error::msg)?;
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+        crate::transaction::validate_value(&value)?;
     }
     let address: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -52,6 +52,10 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
         .route("/api/render/png", post(render_png))
         .route("/api/render/svg", post(render_svg))
         .route("/api/document", get(get_document).put(put_document))
+        .route("/api/scene", post(scene_command))
+        .route("/api/history", get(history_list))
+        .route("/api/undo", post(history_undo))
+        .route("/api/redo", post(history_redo))
         .route("/api/geometry", post(geometry_command))
         .route("/api/text", post(text_command))
         .route("/api/edit", post(object_command))
@@ -361,6 +365,70 @@ async fn get_document(State(state): State<Shared>) -> Response {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct SceneRequest {
+    operations: Vec<serde_json::Value>,
+    page: Option<String>,
+    revision: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+}
+async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneRequest>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let _guard = state
+            .gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        let bytes = std::fs::read(&file)?;
+        let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+        if body
+            .revision
+            .as_deref()
+            .is_some_and(|wanted| wanted != revision(&raw))
+        {
+            anyhow::bail!("document revision changed")
+        };
+        let changes = crate::scene::apply_batch(&mut raw, body.page.as_deref(), &body.operations)?;
+        let change =
+            crate::transaction::commit_value(&file, "browser-scene", body.dry_run, None, &raw)?;
+        Ok(serde_json::json!({"change":change,"changes":changes}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+async fn history_list(State(state): State<Shared>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    match crate::history::list(&file) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+async fn history_undo(State(state): State<Shared>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    match crate::history::undo(&file) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+async fn history_redo(State(state): State<Shared>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    match crate::history::redo(&file) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 async fn put_document(
     State(state): State<Shared>,
     Json(body): Json<serde_json::Value>,
@@ -384,9 +452,7 @@ async fn put_document(
             );
         }
         let value = body.get("document").context("missing document")?;
-        let doc: Document = serde_json::from_value(value.clone())?;
-        doc.validate().map_err(anyhow::Error::msg)?;
-        std::fs::write(&file, serde_json::to_vec_pretty(value)?)?;
+        crate::transaction::commit_value(&file, "browser-save", false, None, value)?;
         Ok(revision(value))
     })();
     match result {
@@ -425,14 +491,25 @@ struct PageQuery {
 
 async fn render_png(
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
-    Json(mut doc): Json<Document>,
+    Json(value): Json<serde_json::Value>,
 ) -> Response {
-    if let Some(page) = query.page {
-        if let Err(error) = doc.select_page(&page) {
-            return problem(anyhow::Error::msg(error));
+    let result = (|| -> Result<Vec<u8>> {
+        let value = if value.get("version").and_then(serde_json::Value::as_u64)
+            == Some(crate::scene::VERSION)
+        {
+            crate::scene::flatten_to_v3(&value)?
+        } else {
+            value
+        };
+        let mut doc: Document = serde_json::from_value(value)?;
+        if let Some(page) = query.page {
+            if let Err(error) = doc.select_page(&page) {
+                return Err(anyhow::Error::msg(error));
+            }
         }
-    }
-    match render::to_png(&doc, 1.0) {
+        render::to_png(&doc, 1.0)
+    })();
+    match result {
         Ok(bytes) => binary(bytes, "image/png", "artwork.png"),
         Err(error) => problem(error),
     }
@@ -440,14 +517,25 @@ async fn render_png(
 
 async fn render_svg(
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
-    Json(mut doc): Json<Document>,
+    Json(value): Json<serde_json::Value>,
 ) -> Response {
-    if let Some(page) = query.page {
-        if let Err(error) = doc.select_page(&page) {
-            return problem(anyhow::Error::msg(error));
+    let result = (|| -> Result<String> {
+        let value = if value.get("version").and_then(serde_json::Value::as_u64)
+            == Some(crate::scene::VERSION)
+        {
+            crate::scene::flatten_to_v3(&value)?
+        } else {
+            value
+        };
+        let mut doc: Document = serde_json::from_value(value)?;
+        if let Some(page) = query.page {
+            if let Err(error) = doc.select_page(&page) {
+                return Err(anyhow::Error::msg(error));
+            }
         }
-    }
-    match render::to_svg(&doc) {
+        render::to_svg(&doc)
+    })();
+    match result {
         Ok(svg) => binary(svg.into_bytes(), "image/svg+xml", "artwork.svg"),
         Err(error) => problem(error),
     }

@@ -20,3 +20,9 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all-targets --locked
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-diffs-${{ matrix.os }}
+          path: target/render-diffs
+          if-no-files-found: ignore

@@ -1,5 +1,5 @@
 //! Offline-safe component instance metadata over materialized imported layers.
-use crate::{asset::AssetManifest, editing};
+use crate::asset::AssetManifest;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -75,9 +75,7 @@ pub fn detach(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
     if arr.len() == before {
         bail!("instance not found")
     };
-    if !dry_run {
-        editing::transactional_write(file, &serde_json::to_vec_pretty(&raw)?)?;
-    }
+    crate::transaction::commit_value(file, "instance-detach", dry_run, None, &raw)?;
     Ok(json!({"ok":true,"dry_run":dry_run,"instance":id,"detached":true}))
 }
 
@@ -137,9 +135,7 @@ pub fn set_property(
         })
         .unwrap();
     record["overrides"][name] = Value::String(value.into());
-    if !dry_run {
-        editing::transactional_write(file, &serde_json::to_vec_pretty(&raw)?)?;
-    }
+    crate::transaction::commit_value(file, "instance-set", dry_run, None, &raw)?;
     Ok(json!({"ok":true,"dry_run":dry_run,"instance":id,"property":name,"value":value}))
 }
 fn set_object_property(
@@ -266,7 +262,7 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
         .as_array_mut()
         .context("invalid instance history")?
         .push(history);
-    editing::transactional_write(file, &serde_json::to_vec_pretty(&updated)?)?;
+    crate::transaction::commit_value(file, "instance-update", false, None, &updated)?;
     Ok(
         json!({"ok":true,"instance":id,"from":plan["from_version"],"to":manifest.asset_version,"content_hash":new_hash,"layers":new_ids}),
     )
@@ -313,7 +309,7 @@ pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
     record["layer_ids"] = previous["layer_ids"].clone();
     record["previous"].as_array_mut().unwrap().pop();
     let rolled_back_to = record["asset_version"].clone();
-    editing::transactional_write(file, &serde_json::to_vec_pretty(&raw)?)?;
+    crate::transaction::commit_value(file, "instance-rollback", false, None, &raw)?;
     Ok(json!({"ok":true,"instance":id,"rolled_back_to":rolled_back_to}))
 }
 fn page_mut<'a>(raw: &'a mut Value, page_id: &str) -> Result<&'a mut Value> {

@@ -1,0 +1,20 @@
+name: Controlled renderer performance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: [self-hosted, renderer-benchmark]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - shell: pwsh
+        run: ./scripts/check-render-performance.ps1
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-performance-current
+          path: render-performance-current.json
+          if-no-files-found: ignore

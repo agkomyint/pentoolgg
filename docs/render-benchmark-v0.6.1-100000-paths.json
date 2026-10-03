@@ -1,0 +1,124 @@
+{
+  "benchmark": "render",
+  "fixture": {
+    "json_bytes": 18924406,
+    "kind": "paths",
+    "layers": 1000,
+    "objects": 100000
+  },
+  "note": "total contains each stage exactly once; fixture generation and warmups are excluded",
+  "peak_resident_bytes": 244592640,
+  "render": {
+    "output_bytes": 61908,
+    "pixmap_bytes": 3840000,
+    "scale": 1.0,
+    "source_height": 800,
+    "source_width": 1200
+  },
+  "runs": {
+    "repetitions": 5,
+    "warmups": 2
+  },
+  "schema_version": 1,
+  "timings_us": {
+    "document_read_and_json_parse": {
+      "median": 83392,
+      "p95": 97761,
+      "samples": [
+        74118,
+        77362,
+        83392,
+        94283,
+        97761
+      ]
+    },
+    "font_preparation_and_resolution": {
+      "median": 8,
+      "p95": 12,
+      "samples": [
+        7,
+        7,
+        8,
+        10,
+        12
+      ]
+    },
+    "output_write": {
+      "median": 698,
+      "p95": 1353,
+      "samples": [
+        607,
+        608,
+        698,
+        1118,
+        1353
+      ]
+    },
+    "png_encoding": {
+      "median": 2024,
+      "p95": 2828,
+      "samples": [
+        1758,
+        1945,
+        2024,
+        2183,
+        2828
+      ]
+    },
+    "rasterization": {
+      "median": 85363,
+      "p95": 104797,
+      "samples": [
+        78390,
+        78579,
+        85363,
+        85867,
+        104797
+      ]
+    },
+    "svg_construction": {
+      "median": 19115,
+      "p95": 22826,
+      "samples": [
+        18598,
+        18736,
+        19115,
+        21835,
+        22826
+      ]
+    },
+    "total": {
+      "median": 560933,
+      "p95": 642493,
+      "samples": [
+        515611,
+        554138,
+        560933,
+        582137,
+        642493
+      ]
+    },
+    "usvg_parse": {
+      "median": 292630,
+      "p95": 345177,
+      "samples": [
+        267039,
+        267487,
+        292630,
+        297716,
+        345177
+      ]
+    },
+    "validation": {
+      "median": 57582,
+      "p95": 68373,
+      "samples": [
+        52534,
+        54389,
+        57582,
+        63153,
+        68373
+      ]
+    }
+  }
+}

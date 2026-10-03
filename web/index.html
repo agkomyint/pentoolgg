@@ -107,6 +107,16 @@
         <div id="nodeEditor"></div>
       </section>
       <section class="agent-card">
+        <h2>Scene operations</h2>
+        <p>Apply v4 shape, text, group, style, and reparent operations as one transaction.</p>
+        <textarea id="sceneOperations" rows="8">[
+  {"type":"put-shape","shape":"rect","id":"box","layer":"content","x":40,"y":40,"width":160,"height":96,"fill":"#22D3EE"}
+]</textarea>
+        <button id="applyScene">Apply scene transaction</button>
+        <div class="section-head"><button id="historyUndo">Undo</button><button id="historyRedo">Redo</button><button id="historyRefresh">History</button></div>
+        <pre id="historyResult" class="import-result" hidden></pre>
+      </section>
+      <section class="agent-card">
         <h2>Agent API</h2>
         <p>Generate paths with JSON, then render them through this server.</p>
         <code>POST /api/render/png</code>

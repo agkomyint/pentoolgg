@@ -1,45 +1,237 @@
-//! Repeatable large-document smoke benchmark for release qualification.
+//! Deterministic document and renderer benchmarks for release qualification.
 use crate::{
     agent::{self, ObjectAction},
     document::{Document, Layer, Path, StrokeCap, StrokeJoin, Text},
     render,
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
-use std::time::Instant;
+use std::{fs, hint::black_box, time::Instant};
 
+#[derive(Debug, Clone, Copy)]
+pub struct RenderBenchmark {
+    pub layers: usize,
+    pub objects: usize,
+    pub paths_only: bool,
+    pub scale: f32,
+    pub warmups: usize,
+    pub repetitions: usize,
+}
+
+#[derive(Default)]
+struct Sample {
+    read_parse: u128,
+    validation: u128,
+    svg: u128,
+    fonts: u128,
+    usvg: u128,
+    raster: u128,
+    encode: u128,
+    write: u128,
+    total: u128,
+    output_bytes: usize,
+    pixmap_bytes: u64,
+}
+
+/// Retained for compatibility with the v0.6.0 smoke benchmark CLI.
 pub fn run(
     layer_count: usize,
     object_count: usize,
     png: bool,
     max_ms: Option<u128>,
 ) -> Result<Value> {
-    if layer_count == 0 || layer_count > 1000 || object_count > 100_000 {
+    if png {
+        let report = run_render(RenderBenchmark {
+            layers: layer_count,
+            objects: object_count,
+            paths_only: false,
+            scale: 1.0,
+            warmups: 0,
+            repetitions: 1,
+        })?;
+        if let Some(budget) = max_ms {
+            let total = report["timings_us"]["total"]["median"]
+                .as_u64()
+                .unwrap_or(0) as u128
+                / 1000;
+            if total > budget {
+                bail!("benchmark exceeded {budget} ms budget: {total} ms");
+            }
+        }
+        return Ok(report);
+    }
+    run_smoke(layer_count, object_count, max_ms)
+}
+
+pub fn run_render(c: RenderBenchmark) -> Result<Value> {
+    validate_config(c)?;
+    let source = serde_json::to_vec(&generate(c.layers, c.objects, c.paths_only))?;
+    let fixture_path =
+        std::env::temp_dir().join(format!("pentool-render-fixture-{}.pen", std::process::id()));
+    fs::write(&fixture_path, &source)?;
+    for _ in 0..c.warmups {
+        black_box(render_sample(&fixture_path, c.scale, false)?);
+    }
+    let mut samples = Vec::with_capacity(c.repetitions);
+    for _ in 0..c.repetitions {
+        samples.push(render_sample(&fixture_path, c.scale, true)?);
+    }
+    let _ = fs::remove_file(&fixture_path);
+    let last = samples.last().context("benchmark produced no samples")?;
+    Ok(json!({
+        "schema_version":1,"benchmark":"render",
+        "fixture":{"layers":c.layers,"objects":c.objects,"kind":if c.paths_only{"paths"}else{"mixed-text"},"json_bytes":source.len()},
+        "render":{"scale":c.scale,"source_width":1200,"source_height":800,"output_bytes":last.output_bytes,"pixmap_bytes":last.pixmap_bytes},
+        "runs":{"warmups":c.warmups,"repetitions":c.repetitions},
+        "timings_us":{
+            "document_read_and_json_parse":stats(&samples,|s|s.read_parse),"validation":stats(&samples,|s|s.validation),
+            "svg_construction":stats(&samples,|s|s.svg),"font_preparation_and_resolution":stats(&samples,|s|s.fonts),
+            "usvg_parse":stats(&samples,|s|s.usvg),"rasterization":stats(&samples,|s|s.raster),
+            "png_encoding":stats(&samples,|s|s.encode),"output_write":stats(&samples,|s|s.write),"total":stats(&samples,|s|s.total)},
+        "peak_resident_bytes":peak_resident_bytes(),
+        "note":"total contains each stage exactly once; fixture generation and warmups are excluded"
+    }))
+}
+
+fn validate_config(c: RenderBenchmark) -> Result<()> {
+    if c.layers == 0 || c.layers > 1000 || c.objects > 100_000 {
         bail!("benchmark supports 1–1,000 layers and at most 100,000 objects");
     }
-    let generated_at = Instant::now();
-    let doc = generate(layer_count, object_count);
-    let generate_ms = generated_at.elapsed().as_millis();
+    if c.repetitions == 0 || c.repetitions > 100 || c.warmups > 100 {
+        bail!("warmups must be 0–100 and repetitions 1–100");
+    }
+    if !(0.1..=8.0).contains(&c.scale) {
+        bail!("scale must be between 0.1 and 8");
+    }
+    Ok(())
+}
 
-    let serialize_at = Instant::now();
+fn render_sample(source: &std::path::Path, scale: f32, measure_write: bool) -> Result<Sample> {
+    let total_at = Instant::now();
+    let at = Instant::now();
+    let input = fs::read(source)?;
+    let doc: Document = serde_json::from_slice(&input)?;
+    let read_parse = at.elapsed().as_micros();
+    let at = Instant::now();
+    doc.validate().map_err(anyhow::Error::msg)?;
+    let validation = at.elapsed().as_micros();
+    let rendered = render::to_png_profiled_validated(&doc, scale)?;
+    let write = if measure_write {
+        let path = std::env::temp_dir().join(format!(
+            "pentool-render-benchmark-{}.png",
+            std::process::id()
+        ));
+        let at = Instant::now();
+        fs::write(&path, &rendered.bytes)?;
+        let elapsed = at.elapsed().as_micros();
+        let _ = fs::remove_file(path);
+        elapsed
+    } else {
+        0
+    };
+    Ok(Sample {
+        read_parse,
+        validation,
+        svg: rendered.timings.svg_construction_us,
+        fonts: rendered.timings.font_preparation_us,
+        usvg: rendered.timings.usvg_parse_us,
+        raster: rendered.timings.rasterization_us,
+        encode: rendered.timings.png_encoding_us,
+        write,
+        total: total_at.elapsed().as_micros(),
+        output_bytes: rendered.bytes.len(),
+        pixmap_bytes: rendered.pixmap_bytes,
+    })
+}
+
+fn stats(samples: &[Sample], get: impl Fn(&Sample) -> u128) -> Value {
+    let mut v: Vec<u128> = samples.iter().map(get).collect();
+    v.sort_unstable();
+    let median = if v.len() % 2 == 0 {
+        (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2
+    } else {
+        v[v.len() / 2]
+    };
+    let p95 = v[((v.len() * 95).div_ceil(100)).saturating_sub(1)];
+    json!({"median":median,"p95":p95,"samples":v})
+}
+
+#[cfg(target_os = "linux")]
+fn peak_resident_bytes() -> Option<u64> {
+    fs::read_to_string("/proc/self/status")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("VmHWM:")
+                .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+        })
+        .map(|kb| kb * 1024)
+}
+#[cfg(target_os = "windows")]
+fn peak_resident_bytes() -> Option<u64> {
+    #[repr(C)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+        private_usage: usize,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn K32GetProcessMemoryInfo(
+            process: *mut std::ffi::c_void,
+            counters: *mut Counters,
+            size: u32,
+        ) -> i32;
+    }
+    let mut counters = Counters {
+        cb: std::mem::size_of::<Counters>() as u32,
+        page_fault_count: 0,
+        peak_working_set_size: 0,
+        working_set_size: 0,
+        quota_peak_paged_pool_usage: 0,
+        quota_paged_pool_usage: 0,
+        quota_peak_non_paged_pool_usage: 0,
+        quota_non_paged_pool_usage: 0,
+        pagefile_usage: 0,
+        peak_pagefile_usage: 0,
+        private_usage: 0,
+    };
+    // SAFETY: Windows fills the correctly sized process-memory structure for the current process.
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
+    (ok != 0).then_some(counters.peak_working_set_size as u64)
+}
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+fn peak_resident_bytes() -> Option<u64> {
+    None
+}
+
+fn run_smoke(layers: usize, objects: usize, max_ms: Option<u128>) -> Result<Value> {
+    validate_config(RenderBenchmark {
+        layers,
+        objects,
+        paths_only: false,
+        scale: 1.0,
+        warmups: 0,
+        repetitions: 1,
+    })?;
+    let started = Instant::now();
+    let mut doc = generate(layers, objects, false);
     let bytes = serde_json::to_vec(&doc)?;
-    let serialize_ms = serialize_at.elapsed().as_millis();
-    let parse_at = Instant::now();
-    let mut parsed: Document = serde_json::from_slice(&bytes)?;
-    let parse_ms = parse_at.elapsed().as_millis();
-    let validate_at = Instant::now();
-    parsed.validate().map_err(anyhow::Error::msg)?;
-    let validate_ms = validate_at.elapsed().as_millis();
-    let index_at = Instant::now();
+    let parsed: Document = serde_json::from_slice(&bytes)?;
     agent::DocumentIndex::build(&parsed)?;
-    let index_ms = index_at.elapsed().as_millis();
-    let search_at = Instant::now();
     agent::inspect_paginated(&parsed, Some("object"), None, None, 0, 100)?;
-    let search_ms = search_at.elapsed().as_millis();
-    let edit_at = Instant::now();
-    if object_count > 0 {
+    if objects > 0 {
         agent::apply(
-            &mut parsed,
+            &mut doc,
             &ObjectAction::Set {
                 id: "object-0".into(),
                 layer: "layer-0".into(),
@@ -63,38 +255,18 @@ pub fn run(
             },
         )?;
     }
-    let edit_ms = edit_at.elapsed().as_millis();
-    let svg_at = Instant::now();
-    let svg = render::to_svg(&parsed)?;
-    let svg_ms = svg_at.elapsed().as_millis();
-    let (png_ms, png_bytes) = if png {
-        let at = Instant::now();
-        let output = render::to_png(&parsed, 1.0)?;
-        (Some(at.elapsed().as_millis()), Some(output.len()))
-    } else {
-        (None, None)
-    };
-    let total_ms = generate_ms
-        + serialize_ms
-        + parse_ms
-        + validate_ms
-        + index_ms
-        + search_ms
-        + edit_ms
-        + svg_ms
-        + png_ms.unwrap_or(0);
-    if let Some(budget) = max_ms {
-        if total_ms > budget {
-            bail!("benchmark exceeded {budget} ms budget: {total_ms} ms");
+    let elapsed = started.elapsed().as_millis();
+    if let Some(limit) = max_ms {
+        if elapsed > limit {
+            bail!("benchmark exceeded {limit} ms budget: {elapsed} ms");
         }
     }
-    Ok(json!({
-        "layers":layer_count,"objects":object_count,"json_bytes":bytes.len(),"svg_bytes":svg.len(),"png_bytes":png_bytes,
-        "milliseconds":{"generate":generate_ms,"serialize":serialize_ms,"parse":parse_ms,"validate":validate_ms,"index":index_ms,"search_100":search_ms,"edit_one":edit_ms,"svg":svg_ms,"png":png_ms,"total":total_ms}
-    }))
+    Ok(
+        json!({"benchmark":"document-smoke","layers":layers,"objects":objects,"json_bytes":bytes.len(),"milliseconds":{"total":elapsed}}),
+    )
 }
 
-fn generate(layer_count: usize, object_count: usize) -> Document {
+pub fn generate(layer_count: usize, object_count: usize, paths_only: bool) -> Document {
     let mut doc = Document::new(1200, 800);
     doc.layers.clear();
     for index in 0..layer_count {
@@ -109,7 +281,7 @@ fn generate(layer_count: usize, object_count: usize) -> Document {
     }
     for index in 0..object_count {
         let layer = &mut doc.layers[index % layer_count];
-        if index % 10 == 9 {
+        if !paths_only && index % 10 == 9 {
             layer.texts.push(Text {
                 id: format!("object-{index}"),
                 content: format!("Label {index}"),

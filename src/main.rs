@@ -1,10 +1,10 @@
 use pentool::{
-    agent, asset, benchmark, document, editing, fonts, geometry, import, instance, library,
-    package, page, render, server, text,
+    agent, asset, benchmark, diff, document, editing, fonts, geometry, history, import, instance,
+    layout, library, package, page, pdf, render, replace, scene, server, style, text, transaction,
 };
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use document::Document;
 use std::{
     fs,
@@ -15,14 +15,221 @@ use std::{
 #[command(
     name = "pentool",
     version,
-    about = "Draw vector paths, automate them, and serve a canvas"
+    about = "Draw vector paths, automate them, and serve a canvas",
+    allow_negative_numbers = true
 )]
 struct Cli {
     /// Select a page for page-aware commands (v3 documents).
     #[arg(long, global = true)]
     page: Option<String>,
+    /// Emit stable machine-readable errors.
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[derive(Args)]
+struct GroupArgs {
+    input: PathBuf,
+    #[arg(value_enum)]
+    operation: scene::GroupOperation,
+    id: String,
+    #[arg(long)]
+    layer: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    children: Vec<String>,
+    #[arg(long = "id", visible_alias = "id-new")]
+    id_new: Option<String>,
+    #[arg(long, default_value_t = 0.0)]
+    dx: f64,
+    #[arg(long, default_value_t = 0.0)]
+    dy: f64,
+    #[arg(long, default_value_t = 0.0)]
+    degrees: f64,
+    #[arg(long, default_value_t = 1.0)]
+    scale_x: f64,
+    #[arg(long, default_value_t = 1.0)]
+    scale_y: f64,
+    #[arg(long)]
+    index: Option<usize>,
+    #[arg(long)]
+    child: Option<String>,
+    #[arg(long)]
+    component: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct StyleArgs {
+    input: PathBuf,
+    #[arg(value_enum)]
+    operation: style::Operation,
+    name: Option<String>,
+    #[arg(long = "type")]
+    token_type: Option<String>,
+    #[arg(long)]
+    value: Option<String>,
+    #[arg(long)]
+    to: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct ReplaceArgs {
+    input: PathBuf,
+    #[arg(long)]
+    fill: Option<String>,
+    #[arg(long)]
+    stroke: Option<String>,
+    #[arg(long)]
+    to: String,
+    #[arg(long)]
+    page: Option<String>,
+    #[arg(long)]
+    all_pages: bool,
+    #[arg(long)]
+    layer: Option<String>,
+    #[arg(long)]
+    group: Option<String>,
+    #[arg(long)]
+    object_type: Option<String>,
+    #[arg(long)]
+    visible: Option<bool>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct FormatArgs {
+    input: PathBuf,
+    #[arg(long, required_unless_present = "pretty", conflicts_with = "pretty")]
+    compact: bool,
+    #[arg(long, required_unless_present = "compact", conflicts_with = "compact")]
+    pretty: bool,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct DiffArgs {
+    old: PathBuf,
+    new: PathBuf,
+    #[arg(long)]
+    visual: bool,
+}
+
+#[derive(Args)]
+struct LayoutArgs {
+    input: PathBuf,
+    #[arg(value_enum)]
+    operation: layout::Operation,
+    #[arg(long, value_delimiter = ',')]
+    ids: Vec<String>,
+    #[arg(long)]
+    gap: Option<f64>,
+    #[arg(long)]
+    columns: Option<usize>,
+    #[arg(long)]
+    key: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct TextBoxArgs {
+    input: PathBuf,
+    id: String,
+    #[arg(long)]
+    layer: String,
+    #[arg(long)]
+    content: String,
+    #[arg(long, default_value_t = 100.0)]
+    x: f64,
+    #[arg(long, default_value_t = 100.0)]
+    y: f64,
+    #[arg(long)]
+    width: Option<f64>,
+    #[arg(long)]
+    height: Option<f64>,
+    #[arg(long, default_value = "Atkinson Hyperlegible")]
+    font: String,
+    #[arg(long, default_value_t = 48.0)]
+    size: f64,
+    #[arg(long, default_value_t = 400)]
+    weight: u16,
+    #[arg(long, default_value = "#111827")]
+    fill: String,
+    #[arg(long, default_value = "left")]
+    align: String,
+    #[arg(long, default_value = "top")]
+    vertical_align: String,
+    #[arg(long, default_value_t = 1.2)]
+    line_height: f64,
+    #[arg(long, value_enum, default_value = "baseline")]
+    anchor: scene::TextAnchor,
+    #[arg(long, value_enum, default_value = "visible")]
+    overflow: scene::TextOverflow,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct ShapeEditArgs {
+    input: PathBuf,
+    id: String,
+    #[arg(long)]
+    x: Option<f64>,
+    #[arg(long)]
+    y: Option<f64>,
+    #[arg(long, visible_alias = "w")]
+    width: Option<f64>,
+    #[arg(long, visible_alias = "h")]
+    height: Option<f64>,
+    #[arg(long, visible_alias = "r")]
+    radius: Option<f64>,
+    #[arg(long)]
+    cx: Option<f64>,
+    #[arg(long)]
+    cy: Option<f64>,
+    #[arg(long)]
+    radius_x: Option<f64>,
+    #[arg(long)]
+    radius_y: Option<f64>,
+    #[arg(long)]
+    x1: Option<f64>,
+    #[arg(long)]
+    y1: Option<f64>,
+    #[arg(long)]
+    x2: Option<f64>,
+    #[arg(long)]
+    y2: Option<f64>,
+    #[arg(long)]
+    fill: Option<String>,
+    #[arg(long)]
+    stroke: Option<String>,
+    #[arg(long)]
+    stroke_width: Option<f64>,
+    #[arg(long)]
+    to_path: bool,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -69,6 +276,8 @@ enum Command {
         prefix: Option<String>,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
     },
     /// Inspect, change, or detach component instances.
     Instance {
@@ -101,10 +310,28 @@ enum Command {
         png: bool,
         #[arg(long)]
         max_ms: Option<u128>,
+        /// Run the stage-level renderer benchmark (implied by any render option).
+        #[arg(long)]
+        render: bool,
+        #[arg(long, default_value_t = 1)]
+        warmups: usize,
+        #[arg(long, default_value_t = 5)]
+        repetitions: usize,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f32,
+        #[arg(long)]
+        paths_only: bool,
+        /// Emit machine-readable JSON (benchmark output is JSON by default).
+        #[arg(long)]
+        json: bool,
     },
     /// List, add, rename, duplicate, move, or remove pages.
     Page {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[command(subcommand)]
         action: page::PageAction,
     },
@@ -128,7 +355,7 @@ enum Command {
         expand_canvas: bool,
         #[arg(long)]
         dry_run: bool,
-        #[arg(long)]
+        #[arg(long = "if-revision", visible_alias = "revision")]
         revision: Option<String>,
     },
     /// List or search layers and objects as compact JSON.
@@ -161,6 +388,10 @@ enum Command {
     /// Partially edit, rename, duplicate, move, reorder, or remove one object.
     Object {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[command(subcommand)]
         action: agent::ObjectAction,
     },
@@ -170,18 +401,26 @@ enum Command {
         operations: PathBuf,
         #[arg(long)]
         dry_run: bool,
-        #[arg(long)]
+        #[arg(long = "if-revision", visible_alias = "revision")]
         revision: Option<String>,
     },
     /// Create, update, or remove editable text.
     Text {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[command(subcommand)]
         action: text::TextAction,
     },
     /// Embed a custom TTF/OTF font or remove an unused font.
     Font {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[command(subcommand)]
         action: text::FontAction,
     },
@@ -191,6 +430,10 @@ enum Command {
     LayerGeometry {
         input: PathBuf,
         #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[arg(long)]
         layer: String,
         #[command(subcommand)]
         operation: geometry::Operation,
@@ -198,6 +441,10 @@ enum Command {
     /// Shared Rust geometry operations. Coordinates are in document units.
     Geometry {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[arg(long)]
         layer: String,
         #[arg(long)]
@@ -224,9 +471,108 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
+    /// Explicitly migrate a legacy document to the ordered v4 scene graph.
+    Migrate {
+        input: PathBuf,
+        #[arg(long, default_value_t = 4)]
+        target: u32,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Create a semantic v4 rectangle, ellipse, circle, or line.
+    #[command(allow_negative_numbers = true)]
+    Shape {
+        input: PathBuf,
+        #[arg(value_enum)]
+        kind: scene::ShapeKind,
+        id: String,
+        #[arg(long)]
+        layer: String,
+        #[arg(long)]
+        x: Option<f64>,
+        #[arg(long)]
+        y: Option<f64>,
+        #[arg(long, visible_alias = "w")]
+        width: Option<f64>,
+        #[arg(long, visible_alias = "h")]
+        height: Option<f64>,
+        #[arg(long, visible_alias = "r")]
+        radius: Option<f64>,
+        #[arg(long)]
+        cx: Option<f64>,
+        #[arg(long)]
+        cy: Option<f64>,
+        #[arg(long)]
+        radius_x: Option<f64>,
+        #[arg(long)]
+        radius_y: Option<f64>,
+        #[arg(long)]
+        x1: Option<f64>,
+        #[arg(long)]
+        y1: Option<f64>,
+        #[arg(long)]
+        x2: Option<f64>,
+        #[arg(long)]
+        y2: Option<f64>,
+        #[arg(long)]
+        fill: Option<String>,
+        #[arg(long)]
+        stroke: Option<String>,
+        #[arg(long)]
+        stroke_width: Option<f64>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Create, transform, duplicate, or ungroup semantic v4 groups.
+    #[command(allow_negative_numbers = true)]
+    Group(Box<GroupArgs>),
+    /// List, create, edit, and rebind named document design tokens.
+    Style(Box<StyleArgs>),
+    /// Replace fills or strokes within an explicit scene scope.
+    Replace(Box<ReplaceArgs>),
+    /// Serialize deterministically as compact or human-readable JSON.
+    Format(Box<FormatArgs>),
+    /// Compare document structure and optionally render bounded visual artifacts.
+    Diff(Box<DiffArgs>),
+    /// Align, distribute, or arrange scene nodes from measured bounds.
+    #[command(allow_negative_numbers = true)]
+    Layout(Box<LayoutArgs>),
+    /// Create wrapped point or bounded text; y is a baseline unless --anchor changes it.
+    #[command(allow_negative_numbers = true)]
+    TextBox(Box<TextBoxArgs>),
+    /// Edit primitive parameters, or explicitly convert a primitive to a path.
+    #[command(allow_negative_numbers = true)]
+    ShapeEdit(Box<ShapeEditArgs>),
+    /// Show history, or prune it with `history prune FILE`.
+    History {
+        target: String,
+        input: Option<PathBuf>,
+        #[arg(long, default_value_t = 50)]
+        keep: usize,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Restore the preceding document revision.
+    Undo { input: PathBuf },
+    /// Reapply the next undone document revision.
+    Redo { input: PathBuf },
+    /// Restore an exact content-addressed document revision.
+    Restore {
+        input: PathBuf,
+        #[arg(long)]
+        revision: String,
+    },
     /// Change canvas size, background, or document name.
     Canvas {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[arg(long)]
         width: Option<u32>,
         #[arg(long)]
@@ -239,12 +585,20 @@ enum Command {
     /// Add, update, remove, or reorder a layer.
     Layer {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[command(subcommand)]
         action: editing::LayerAction,
     },
     /// Add, update, or remove an SVG-compatible vector path.
     Path {
         input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
         #[command(subcommand)]
         action: editing::PathAction,
     },
@@ -257,6 +611,12 @@ enum Command {
         /// Convert text to glyph outlines for a font-independent SVG.
         #[arg(long)]
         outline_text: bool,
+        /// Export every page; directories are used for SVG/PNG and one file for PDF.
+        #[arg(long)]
+        all_pages: bool,
+        /// Output format when --all-pages targets a directory: png or svg.
+        #[arg(long)]
+        format: Option<String>,
     },
 }
 
@@ -461,9 +821,105 @@ enum LockAction {
     },
 }
 
+fn main() -> Result<()> {
+    let wants_json = std::env::args_os().any(|arg| arg == "--json");
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !panic_message(info.payload())
+            .to_ascii_lowercase()
+            .contains("broken pipe")
+        {
+            default_hook(info);
+        }
+    }));
+    let joined = std::thread::Builder::new()
+        .name("pentool-cli".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(run)?
+        .join();
+    let result = match joined {
+        Ok(result) => result,
+        Err(payload)
+            if panic_message(payload.as_ref())
+                .to_ascii_lowercase()
+                .contains("broken pipe") =>
+        {
+            return Ok(())
+        }
+        Err(_) => return Err(anyhow::anyhow!("pentool CLI thread panicked")),
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if is_broken_pipe(&error) => Ok(()),
+        Err(error) if wants_json => {
+            eprintln!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "ok":false,
+                    "error":{"code":error_code(&error),"message":error.to_string(),"context":format!("{error:#}"),"suggestions":error_suggestions(&error),"hint":"Run the command with --help and verify page, layer, group, and object IDs."}
+                }))?
+            );
+            std::process::exit(2)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|value| (*value).into()))
+        .unwrap_or_default()
+}
+
+fn is_broken_pipe(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
+}
+fn error_code(error: &anyhow::Error) -> &'static str {
+    let message = error.to_string();
+    if message.contains("not found") {
+        "not_found"
+    } else if message.contains("revision mismatch") {
+        "revision_conflict"
+    } else if message.contains("invalid")
+        || message.contains("must")
+        || message.contains("required")
+    {
+        "invalid_input"
+    } else {
+        "operation_failed"
+    }
+}
+fn error_suggestions(error: &anyhow::Error) -> Vec<String> {
+    error
+        .to_string()
+        .split("nearest ID: ")
+        .nth(1)
+        .map(|value| vec![value.trim().to_owned()])
+        .unwrap_or_default()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
+async fn run() -> Result<()> {
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            print!("{error}");
+            return Ok(());
+        }
+        Err(error) => return Err(anyhow::anyhow!(error.to_string())),
+    };
+    let _json_output = cli.json;
     let selected_page = cli.page.as_deref();
     match cli.command.unwrap_or(Command::Serve {
         input: None,
@@ -681,6 +1137,7 @@ async fn main() -> Result<()> {
             rotate,
             prefix,
             dry_run,
+            if_revision,
         } => {
             let cwd = std::env::current_dir()?;
             let idx = all_indexes(&cwd)?;
@@ -690,7 +1147,6 @@ async fn main() -> Result<()> {
             let manifest =
                 asset::manifest(&source_raw)?.context("indexed asset metadata missing")?;
             let destination_bytes = fs::read(&destination)?;
-            let revision = agent::revision_bytes(&destination_bytes);
             let chosen_prefix = prefix.unwrap_or_else(|| {
                 format!(
                     "{}-{}",
@@ -751,16 +1207,17 @@ async fn main() -> Result<()> {
                 )?;
                 result.summary["instance_id"] = serde_json::Value::String(id);
             }
-            let output = serde_json::to_vec_pretty(&result.document)?;
-            if !dry_run {
-                let backup = editing::transactional_write(&destination, &output)?;
-                result.summary["backup"] = serde_json::to_value(backup)?;
-            }
+            let value = serde_json::to_value(&result.document)?;
+            let change = transaction::commit_value(
+                &destination,
+                "add",
+                dry_run,
+                if_revision.as_deref(),
+                &value,
+            )?;
             println!(
                 "{}",
-                json_pretty(
-                    serde_json::json!({"ok":true,"dry_run":dry_run,"revision_before":revision,"revision_after":agent::revision_bytes(&output),"summary":result.summary})
-                )?
+                json_pretty(serde_json::json!({"change":change,"summary":result.summary}))?
             );
             Ok(())
         }
@@ -898,11 +1355,26 @@ async fn main() -> Result<()> {
             objects,
             png,
             max_ms,
+            render: render_benchmark,
+            warmups,
+            repetitions,
+            scale,
+            paths_only,
+            json: _,
         } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&benchmark::run(layers, objects, png, max_ms)?)?
-            );
+            let value = if render_benchmark || paths_only || scale != 1.0 {
+                benchmark::run_render(benchmark::RenderBenchmark {
+                    layers,
+                    objects,
+                    paths_only,
+                    scale,
+                    warmups,
+                    repetitions,
+                })?
+            } else {
+                benchmark::run(layers, objects, png, max_ms)?
+            };
+            println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
         }
         Command::Tree {
@@ -949,19 +1421,21 @@ async fn main() -> Result<()> {
             );
             Ok(())
         }
-        Command::Object { input, action } => {
+        Command::Object {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => {
             let bytes = fs::read(&input)?;
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let mut doc: Document = serde_json::from_value(raw.clone())?;
             select_page(&mut doc, selected_page)?;
             let result = agent::apply(&mut doc, &action)?;
             agent::merge_document(&mut raw, &doc, std::slice::from_ref(&action))?;
-            let output = serde_json::to_vec_pretty(&raw)?;
-            let backup = editing::transactional_write(&input, &output)?;
-            println!(
-                "{}",
-                serde_json::json!({"ok":true,"file":input,"backup":backup,"result":result})
-            );
+            let change =
+                transaction::commit_value(&input, "object", dry_run, if_revision.as_deref(), &raw)?;
+            println!("{}", serde_json::json!({"change":change,"result":result}));
             Ok(())
         }
         Command::Batch {
@@ -972,47 +1446,50 @@ async fn main() -> Result<()> {
         } => {
             let bytes =
                 fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
-            let current_revision = agent::revision_bytes(&bytes);
-            if let Some(expected) = revision {
-                if expected != current_revision {
-                    anyhow::bail!("revision mismatch: document changed on disk");
-                }
-            }
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let mut doc: Document = serde_json::from_value(raw.clone())?;
-            select_page(&mut doc, selected_page)?;
-            let actions: Vec<agent::ObjectAction> = serde_json::from_slice(
-                &fs::read(&operations)
-                    .with_context(|| format!("could not read {}", operations.display()))?,
-            )?;
-            let changes = agent::apply_batch(&mut doc, &actions)?;
-            agent::merge_document(&mut raw, &doc, &actions)?;
-            let output = serde_json::to_vec_pretty(&raw)?;
-            if dry_run {
-                println!(
-                    "{}",
-                    serde_json::json!({"ok":true,"dry_run":true,"revision":current_revision,"changes":changes})
-                );
+            let operation_bytes = fs::read(&operations)
+                .with_context(|| format!("could not read {}", operations.display()))?;
+            let changes = if raw.get("version").and_then(serde_json::Value::as_u64)
+                == Some(scene::VERSION)
+            {
+                let actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
+                scene::apply_batch(&mut raw, selected_page, &actions)?
             } else {
-                let backup = editing::transactional_write(&input, &output)?;
-                println!(
-                    "{}",
-                    serde_json::json!({"ok":true,"revision_before":current_revision,"revision_after":agent::revision_bytes(&output),"backup":backup,"changes":changes})
-                );
-            }
+                let mut doc: Document = serde_json::from_value(raw.clone())?;
+                select_page(&mut doc, selected_page)?;
+                let actions: Vec<agent::ObjectAction> = serde_json::from_slice(&operation_bytes)?;
+                let changes = agent::apply_batch(&mut doc, &actions)?;
+                agent::merge_document(&mut raw, &doc, &actions)?;
+                changes
+            };
+            let change =
+                transaction::commit_value(&input, "batch", dry_run, revision.as_deref(), &raw)?;
+            println!("{}", serde_json::json!({"change":change,"changes":changes}));
             Ok(())
         }
         Command::Serve { host, port, input } => server::serve(&host, port, input).await,
-        Command::Page { input, action } => {
+        Command::Page {
+            input,
+            action,
+            dry_run,
+            if_revision,
+        } => {
             if matches!(action, page::PageAction::List) {
                 let doc = read_document(&input, None)?;
                 println!("{}", serde_json::to_string_pretty(&page::list(&doc))?);
                 Ok(())
             } else {
-                editing::edit_page(&input, None, |doc| {
-                    println!("{}", page::apply(doc, action)?);
-                    Ok(())
-                })
+                editing::edit_page_options(
+                    &input,
+                    None,
+                    "page",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| {
+                        println!("{}", page::apply(doc, action)?);
+                        Ok(())
+                    },
+                )
             }
         }
         Command::Import {
@@ -1035,10 +1512,6 @@ async fn main() -> Result<()> {
                 }
             }
             let destination_bytes = fs::read(&destination)?;
-            let current_revision = agent::revision_bytes(&destination_bytes);
-            if revision.as_deref().is_some_and(|r| r != current_revision) {
-                anyhow::bail!("revision mismatch: destination changed on disk");
-            }
             let prefix = if no_prefix {
                 None
             } else {
@@ -1064,27 +1537,46 @@ async fn main() -> Result<()> {
                     expand_canvas,
                 },
             )?;
-            let output = serde_json::to_vec_pretty(&result.document)?;
-            if dry_run {
-                println!(
-                    "{}",
-                    serde_json::json!({"ok":true,"dry_run":true,"revision":current_revision,"summary":result.summary})
-                );
-            } else {
-                let backup = editing::transactional_write(&destination, &output)?;
-                println!(
-                    "{}",
-                    serde_json::json!({"ok":true,"revision_before":current_revision,"revision_after":agent::revision_bytes(&output),"backup":backup,"summary":result.summary})
-                );
-            }
+            let value = serde_json::to_value(&result.document)?;
+            let change = transaction::commit_value(
+                &destination,
+                "import",
+                dry_run,
+                revision.as_deref(),
+                &value,
+            )?;
+            println!(
+                "{}",
+                serde_json::json!({"change":change,"summary":result.summary})
+            );
             Ok(())
         }
-        Command::Text { input, action } => {
-            editing::edit_page(&input, selected_page, |doc| text::apply(doc, action))
-        }
-        Command::Font { input, action } => {
-            editing::edit_page(&input, selected_page, |doc| text::font(doc, action))
-        }
+        Command::Text {
+            input,
+            action,
+            dry_run,
+            if_revision,
+        } => editing::edit_page_options(
+            &input,
+            selected_page,
+            "text",
+            dry_run,
+            if_revision.as_deref(),
+            |doc| text::apply(doc, action),
+        ),
+        Command::Font {
+            input,
+            action,
+            dry_run,
+            if_revision,
+        } => editing::edit_page_options(
+            &input,
+            selected_page,
+            "font",
+            dry_run,
+            if_revision.as_deref(),
+            |doc| text::font(doc, action),
+        ),
         Command::Fonts { input } => {
             let doc = match input {
                 Some(path) => read_document(&path, selected_page)?,
@@ -1095,14 +1587,25 @@ async fn main() -> Result<()> {
         }
         Command::LayerGeometry {
             input,
+            dry_run,
+            if_revision,
             layer,
             operation,
-        } => editing::edit_page(&input, selected_page, |doc| {
-            geometry::execute_layer(doc, &layer, &operation)?;
-            Ok(())
-        }),
+        } => editing::edit_page_options(
+            &input,
+            selected_page,
+            "layer-geometry",
+            dry_run,
+            if_revision.as_deref(),
+            |doc| {
+                geometry::execute_layer(doc, &layer, &operation)?;
+                Ok(())
+            },
+        ),
         Command::Geometry {
             input,
+            dry_run,
+            if_revision,
             layer,
             id,
             operation,
@@ -1112,39 +1615,75 @@ async fn main() -> Result<()> {
                 println!("{}", geometry::execute(&mut doc, &layer, &id, &operation)?);
                 Ok(())
             } else {
-                editing::edit_page(&input, selected_page, |doc| {
-                    geometry::execute(doc, &layer, &id, &operation)?;
-                    Ok(())
-                })
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "geometry",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| {
+                        geometry::execute(doc, &layer, &id, &operation)?;
+                        Ok(())
+                    },
+                )
             }
         }
         Command::Canvas {
             input,
+            dry_run,
+            if_revision,
             width,
             height,
             background,
             name,
-        } => editing::edit_page(&input, selected_page, |doc| {
-            if let Some(v) = width {
-                doc.canvas.width = v;
-            }
-            if let Some(v) = height {
-                doc.canvas.height = v;
-            }
-            if let Some(v) = background {
-                doc.canvas.background = v;
-            }
-            if let Some(v) = name {
-                doc.name = v;
-            }
-            Ok(())
-        }),
-        Command::Layer { input, action } => {
-            editing::edit_page(&input, selected_page, |doc| editing::layer(doc, action))
-        }
-        Command::Path { input, action } => {
-            editing::edit_page(&input, selected_page, |doc| editing::path(doc, action))
-        }
+        } => editing::edit_page_options(
+            &input,
+            selected_page,
+            "canvas",
+            dry_run,
+            if_revision.as_deref(),
+            |doc| {
+                if let Some(v) = width {
+                    doc.canvas.width = v;
+                }
+                if let Some(v) = height {
+                    doc.canvas.height = v;
+                }
+                if let Some(v) = background {
+                    doc.canvas.background = v;
+                }
+                if let Some(v) = name {
+                    doc.name = v;
+                }
+                Ok(())
+            },
+        ),
+        Command::Layer {
+            input,
+            action,
+            dry_run,
+            if_revision,
+        } => editing::edit_page_options(
+            &input,
+            selected_page,
+            "layer",
+            dry_run,
+            if_revision.as_deref(),
+            |doc| editing::layer(doc, action),
+        ),
+        Command::Path {
+            input,
+            action,
+            dry_run,
+            if_revision,
+        } => editing::edit_page_options(
+            &input,
+            selected_page,
+            "path",
+            dry_run,
+            if_revision.as_deref(),
+            |doc| editing::path(doc, action),
+        ),
         Command::New {
             output,
             width,
@@ -1158,8 +1697,506 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Info { input } => {
-            let doc = read_document(&input, selected_page)?;
-            println!("{}", serde_json::to_string_pretty(&doc)?);
+            let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            transaction::validate_value(&raw)?;
+            println!("{}", serde_json::to_string_pretty(&raw)?);
+            Ok(())
+        }
+        Command::Migrate {
+            input,
+            target,
+            dry_run,
+            if_revision,
+        } => {
+            if !matches!(target, 3 | 4) {
+                anyhow::bail!("migration target must be 3 or 4")
+            }
+            let before =
+                fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
+            let raw: serde_json::Value =
+                serde_json::from_slice(&before).context("invalid .pen document")?;
+            let from = raw.get("version").and_then(serde_json::Value::as_u64);
+            let migrated = if target == 4 {
+                scene::migrate_to_v4(raw)?
+            } else {
+                scene::flatten_to_v3(&raw)?
+            };
+            let summary = transaction::commit_value(
+                &input,
+                "migrate",
+                dry_run,
+                if_revision.as_deref(),
+                &migrated,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":summary,"from_version":from,"to_version":target})
+                )?
+            );
+            Ok(())
+        }
+        Command::Shape {
+            input,
+            kind,
+            id,
+            layer,
+            x,
+            y,
+            width,
+            height,
+            radius,
+            cx,
+            cy,
+            radius_x,
+            radius_y,
+            x1,
+            y1,
+            x2,
+            y2,
+            fill,
+            stroke,
+            stroke_width,
+            dry_run,
+            if_revision,
+        } => {
+            let bytes =
+                fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
+            let mut raw: serde_json::Value =
+                serde_json::from_slice(&bytes).context("invalid .pen document")?;
+            scene::put_shape(
+                &mut raw,
+                selected_page,
+                &layer,
+                kind,
+                &id,
+                scene::ShapeInput {
+                    x,
+                    y,
+                    width,
+                    height,
+                    radius,
+                    cx,
+                    cy,
+                    radius_x,
+                    radius_y,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    fill,
+                    stroke,
+                    stroke_width,
+                },
+            )?;
+            let summary =
+                transaction::commit_value(&input, "shape", dry_run, if_revision.as_deref(), &raw)?;
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+            Ok(())
+        }
+        Command::ShapeEdit(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let result = if args.to_path {
+                scene::shape_to_path(&mut raw, selected_page, &args.id)?
+            } else {
+                scene::edit_shape(
+                    &mut raw,
+                    selected_page,
+                    &args.id,
+                    &scene::ShapeInput {
+                        x: args.x,
+                        y: args.y,
+                        width: args.width,
+                        height: args.height,
+                        radius: args.radius,
+                        cx: args.cx,
+                        cy: args.cy,
+                        radius_x: args.radius_x,
+                        radius_y: args.radius_y,
+                        x1: args.x1,
+                        y1: args.y1,
+                        x2: args.x2,
+                        y2: args.y2,
+                        fill: args.fill,
+                        stroke: args.stroke,
+                        stroke_width: args.stroke_width,
+                    },
+                )?
+            };
+            let change = transaction::commit_value(
+                &args.input,
+                "shape-edit",
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Group(args) => {
+            let GroupArgs {
+                input,
+                operation,
+                id,
+                layer,
+                children,
+                id_new,
+                dx,
+                dy,
+                degrees,
+                scale_x,
+                scale_y,
+                index,
+                child,
+                component,
+                dry_run,
+                if_revision,
+            } = *args;
+            let bytes =
+                fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
+            let mut raw: serde_json::Value =
+                serde_json::from_slice(&bytes).context("invalid .pen document")?;
+            if matches!(
+                operation,
+                scene::GroupOperation::Promote | scene::GroupOperation::Instantiate
+            ) {
+                let result = match operation {
+                    scene::GroupOperation::Promote => scene::promote_component(
+                        &mut raw,
+                        selected_page,
+                        &id,
+                        &component.context("--component is required for group promote")?,
+                    )?,
+                    scene::GroupOperation::Instantiate => scene::instantiate_component(
+                        &mut raw,
+                        selected_page,
+                        &layer.context("--layer is required for group instantiate")?,
+                        &component.context("--component is required for group instantiate")?,
+                        &id,
+                        dx,
+                        dy,
+                    )?,
+                    _ => unreachable!(),
+                };
+                let change = transaction::commit_value(
+                    &input,
+                    "group",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                return Ok(());
+            }
+            let query = matches!(operation, scene::GroupOperation::Bounds);
+            let action = match operation {
+                scene::GroupOperation::Create => scene::GroupAction::Create {
+                    id,
+                    layer: layer.context("--layer is required for group create")?,
+                    children,
+                },
+                scene::GroupOperation::Move => scene::GroupAction::Move { id, dx, dy },
+                scene::GroupOperation::Rotate => scene::GroupAction::Rotate { id, degrees },
+                scene::GroupOperation::Scale => scene::GroupAction::Scale {
+                    id,
+                    scale_x,
+                    scale_y,
+                },
+                scene::GroupOperation::Duplicate => scene::GroupAction::Duplicate {
+                    source: id,
+                    id: id_new.context("--id-new is required for group duplicate")?,
+                    dx,
+                    dy,
+                },
+                scene::GroupOperation::Ungroup => scene::GroupAction::Ungroup { id },
+                scene::GroupOperation::Rename => scene::GroupAction::Rename {
+                    id,
+                    new_id: id_new.context("--id-new is required for group rename")?,
+                },
+                scene::GroupOperation::Reorder => scene::GroupAction::Reorder {
+                    id,
+                    index: index.context("--index is required for group reorder")?,
+                },
+                scene::GroupOperation::Bounds => scene::GroupAction::Bounds { id },
+                scene::GroupOperation::AddChild => scene::GroupAction::AddChild {
+                    group: id,
+                    child: child.context("--child is required for group add-child")?,
+                },
+                scene::GroupOperation::RemoveChild => scene::GroupAction::RemoveChild {
+                    group: id,
+                    child: child.context("--child is required for group remove-child")?,
+                    layer: layer.context("--layer is required for group remove-child")?,
+                },
+                scene::GroupOperation::Promote | scene::GroupOperation::Instantiate => {
+                    unreachable!()
+                }
+            };
+            let result = scene::apply_group(&mut raw, selected_page, action)?;
+            if query {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                return Ok(());
+            }
+            let change =
+                transaction::commit_value(&input, "group", dry_run, if_revision.as_deref(), &raw)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Style(args) => {
+            let bytes = fs::read(&args.input)
+                .with_context(|| format!("could not read {}", args.input.display()))?;
+            let mut raw: serde_json::Value =
+                serde_json::from_slice(&bytes).context("invalid .pen document")?;
+            let result = style::apply(
+                &mut raw,
+                args.operation,
+                args.name.as_deref(),
+                args.token_type.as_deref(),
+                args.value.as_deref(),
+                args.to.as_deref(),
+            )?;
+            if matches!(
+                args.operation,
+                style::Operation::List | style::Operation::Usage
+            ) {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                let change = transaction::commit_value(
+                    &args.input,
+                    "style",
+                    args.dry_run,
+                    args.if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+            }
+            Ok(())
+        }
+        Command::Replace(args) => {
+            let (property, from) = match (&args.fill, &args.stroke) {
+                (Some(value), None) => ("fill", value.as_str()),
+                (None, Some(value)) => ("stroke", value.as_str()),
+                _ => anyhow::bail!("specify exactly one of --fill or --stroke"),
+            };
+            let bytes = fs::read(&args.input)
+                .with_context(|| format!("could not read {}", args.input.display()))?;
+            let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let result = replace::apply(
+                &mut raw,
+                &replace::Options {
+                    page: args.page.as_deref().or(selected_page),
+                    all_pages: args.all_pages,
+                    layer: args.layer.as_deref(),
+                    group: args.group.as_deref(),
+                    object_type: args.object_type.as_deref(),
+                    visible: args.visible,
+                    property,
+                    from,
+                    to: &args.to,
+                },
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                "replace",
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Format(args) => {
+            let before = fs::read(&args.input)
+                .with_context(|| format!("could not read {}", args.input.display()))?;
+            let parse_started = std::time::Instant::now();
+            let value: serde_json::Value = serde_json::from_slice(&before)?;
+            let parse_us = parse_started.elapsed().as_micros();
+            transaction::validate_value(&value)?;
+            let serialize_started = std::time::Instant::now();
+            let after = if args.compact {
+                serde_json::to_vec(&value)?
+            } else {
+                serde_json::to_vec_pretty(&value)?
+            };
+            let serialize_us = serialize_started.elapsed().as_micros();
+            let change = transaction::commit_bytes(
+                &args.input,
+                "format",
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &after,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "change":change,
+                    "mode":if args.compact {"compact"} else {"pretty"},
+                    "saved_bytes":before.len().saturating_sub(after.len()),
+                    "parse_us":parse_us,
+                    "serialize_us":serialize_us
+                }))?
+            );
+            Ok(())
+        }
+        Command::Diff(args) => {
+            let before: serde_json::Value = serde_json::from_slice(&fs::read(&args.old)?)?;
+            let after: serde_json::Value = serde_json::from_slice(&fs::read(&args.new)?)?;
+            transaction::validate_value(&before)?;
+            transaction::validate_value(&after)?;
+            let changes = diff::structural(&before, &after);
+            let mut artifacts = Vec::new();
+            if args.visual {
+                let base = args
+                    .new
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("document");
+                let directory = args.new.parent().unwrap_or_else(|| Path::new("."));
+                let old_png = directory.join(format!("{base}.diff-before.png"));
+                let new_png = directory.join(format!("{base}.diff-after.png"));
+                render::write_export_options(
+                    &read_render_document(&args.old, selected_page)?,
+                    &old_png,
+                    1.0,
+                    false,
+                )?;
+                render::write_export_options(
+                    &read_render_document(&args.new, selected_page)?,
+                    &new_png,
+                    1.0,
+                    false,
+                )?;
+                artifacts.push(old_png);
+                artifacts.push(new_png);
+            }
+            let result = serde_json::json!({"equal":changes.is_empty(),"change_count":changes.len(),"changes":changes,"visual_artifacts":artifacts});
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Layout(args) => {
+            let bytes = fs::read(&args.input)?;
+            let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let result = layout::apply(
+                &mut raw,
+                selected_page,
+                args.operation,
+                &args.ids,
+                args.gap,
+                args.columns,
+                args.key.as_deref(),
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                "layout",
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::TextBox(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let result = scene::put_text_box(
+                &mut raw,
+                selected_page,
+                &args.layer,
+                &args.id,
+                scene::TextBoxInput {
+                    content: args.content,
+                    x: args.x,
+                    y: args.y,
+                    width: args.width,
+                    height: args.height,
+                    font: args.font,
+                    size: args.size,
+                    weight: args.weight,
+                    fill: args.fill,
+                    align: args.align,
+                    vertical_align: args.vertical_align,
+                    line_height: args.line_height,
+                    anchor: args.anchor,
+                    overflow: args.overflow,
+                },
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                "text-box",
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::History {
+            target,
+            input,
+            keep,
+            dry_run,
+        } => {
+            let result = if target == "prune" {
+                history::prune(
+                    &input.context("history prune requires a document path")?,
+                    keep,
+                    dry_run,
+                )?
+            } else {
+                if input.is_some() {
+                    anyhow::bail!("unexpected document path after {target}")
+                }
+                history::list(Path::new(&target))?
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Undo { input } => {
+            println!("{}", serde_json::to_string_pretty(&history::undo(&input)?)?);
+            Ok(())
+        }
+        Command::Redo { input } => {
+            println!("{}", serde_json::to_string_pretty(&history::redo(&input)?)?);
+            Ok(())
+        }
+        Command::Restore { input, revision } => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&history::restore(&input, &revision)?)?
+            );
             Ok(())
         }
         Command::Export {
@@ -1167,9 +2204,79 @@ async fn main() -> Result<()> {
             output,
             scale,
             outline_text,
+            all_pages,
+            format,
         } => {
-            let doc = read_document(&input, selected_page)?;
-            render::write_export_options(&doc, &output, scale, outline_text)?;
+            let wants_pdf = output.extension().and_then(|value| value.to_str()) == Some("pdf");
+            if all_pages || wants_pdf {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let page_ids: Vec<String> = raw
+                    .get("pages")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|pages| {
+                        pages
+                            .iter()
+                            .filter_map(|page| {
+                                page.get("id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(Into::into)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_else(|| vec!["page-1".into()]);
+                let docs = page_ids
+                    .iter()
+                    .map(|id| read_render_document(&input, Some(id)))
+                    .collect::<Result<Vec<_>>>()?;
+                if wants_pdf {
+                    pdf::write(&docs, &output)?;
+                } else {
+                    let extension = format.as_deref().unwrap_or("png");
+                    if !matches!(extension, "png" | "svg") {
+                        anyhow::bail!("--format must be png or svg")
+                    }
+                    let parent = output.parent().unwrap_or_else(|| Path::new("."));
+                    let name = output
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("export");
+                    let staging =
+                        parent.join(format!(".{name}.pentool-stage-{}", std::process::id()));
+                    fs::create_dir_all(&staging)?;
+                    for (index, (id, doc)) in page_ids.iter().zip(&docs).enumerate() {
+                        let safe: String = id
+                            .chars()
+                            .map(|c| {
+                                if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                                    c
+                                } else {
+                                    '-'
+                                }
+                            })
+                            .collect();
+                        let destination =
+                            staging.join(format!("{:03}-{safe}.{extension}", index + 1));
+                        render::write_export_options(doc, &destination, scale, outline_text)?;
+                    }
+                    let previous =
+                        parent.join(format!(".{name}.pentool-old-{}", std::process::id()));
+                    if output.exists() {
+                        fs::rename(&output, &previous)?;
+                    }
+                    if let Err(error) = fs::rename(&staging, &output) {
+                        if previous.exists() {
+                            let _ = fs::rename(&previous, &output);
+                        }
+                        return Err(error.into());
+                    }
+                    if previous.exists() {
+                        fs::remove_dir_all(previous)?;
+                    }
+                }
+            } else {
+                let doc = read_render_document(&input, selected_page)?;
+                render::write_export_options(&doc, &output, scale, outline_text)?;
+            }
             println!("Exported {}", output.display());
             Ok(())
         }
@@ -1177,10 +2284,28 @@ async fn main() -> Result<()> {
 }
 
 fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    let doc = read_document_unvalidated(path, page)?;
+    doc.validate().map_err(anyhow::Error::msg)?;
+    Ok(doc)
+}
+
+fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Document> {
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     select_page(&mut doc, page)?;
-    doc.validate().map_err(anyhow::Error::msg)?;
+    Ok(doc)
+}
+
+fn read_render_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
+    let flattened = if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+        scene::flatten_to_v3(&raw)?
+    } else {
+        raw
+    };
+    let mut doc: Document = serde_json::from_value(flattened).context("invalid .pen document")?;
+    select_page(&mut doc, page)?;
     Ok(doc)
 }
 
