@@ -106,6 +106,7 @@ pub struct CreateOptions {
     pub rect: Option<Bounds>,
     pub canvas_bounds: bool,
     pub include_hidden: bool,
+    pub properties: Vec<String>,
     pub id: String,
     pub name: String,
     pub description: String,
@@ -259,6 +260,17 @@ pub fn create(options: &CreateOptions) -> Result<Value> {
     } else {
         tight_visible_bounds(&raw, options.include_hidden)?
     };
+    let mut properties = serde_json::Map::new();
+    for shorthand in &options.properties {
+        let (name, definition) = property_shorthand(shorthand)?;
+        if properties
+            .insert(name.clone(), definition.clone())
+            .is_some()
+        {
+            bail!("duplicate exposed property: {name}")
+        }
+        validate_property_definition(&raw, &name, &definition)?;
+    }
     raw["name"] = Value::String(options.name.clone());
     raw["asset"] = serde_json::to_value(AssetManifest {
         schema: 1,
@@ -273,7 +285,7 @@ pub fn create(options: &CreateOptions) -> Result<Value> {
         category: options.category.clone(),
         entry_page: Some("asset".into()),
         bounds: Some(inferred_bounds),
-        properties: Default::default(),
+        properties,
     })?;
     let output = serde_json::to_vec_pretty(&raw)?;
     let verified: Document = serde_json::from_slice(&output)?;
@@ -368,6 +380,356 @@ pub fn inspect(path: &Path) -> Result<Value> {
     Ok(
         json!({"file":path,"content_hash":hash_bytes(&bytes),"asset":manifest(&raw)?,"document":doc.name,"page":doc.active_page_id(),"canvas":doc.canvas,"layers":doc.layers.len()}),
     )
+}
+
+pub fn property_list(path: &Path, asset_id: &str) -> Result<Value> {
+    let raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let manifest = checked_manifest(&raw, asset_id)?;
+    Ok(json!({"asset_id":asset_id,"properties":manifest.properties}))
+}
+
+pub fn property_inspect(path: &Path, asset_id: &str, name: &str) -> Result<Value> {
+    let raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let manifest = checked_manifest(&raw, asset_id)?;
+    let definition = manifest
+        .properties
+        .get(name)
+        .with_context(|| format!("exposed property not found: {name}"))?;
+    Ok(json!({"asset_id":asset_id,"name":name,"definition":definition}))
+}
+
+pub fn property_usage(path: &Path, asset_id: &str, name: &str) -> Result<Value> {
+    let inspected = property_inspect(path, asset_id, name)?;
+    Ok(json!({"asset_id":asset_id,"property":name,"targets":inspected["definition"]["targets"]}))
+}
+
+pub fn property_validate(path: &Path, asset_id: &str) -> Result<Value> {
+    let raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let manifest = checked_manifest(&raw, asset_id)?;
+    for (name, definition) in &manifest.properties {
+        validate_property_definition(&raw, name, definition)?;
+    }
+    Ok(json!({"ok":true,"asset_id":asset_id,"properties":manifest.properties.len()}))
+}
+
+pub fn validate_properties(raw: &Value) -> Result<()> {
+    let manifest = manifest(raw)?.context("file has no asset metadata")?;
+    for (name, definition) in &manifest.properties {
+        validate_property_definition(raw, name, definition)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn property_write(
+    path: &Path,
+    asset_id: &str,
+    name: &str,
+    definition: Value,
+    replace: bool,
+    dry_run: bool,
+    expected: Option<&str>,
+) -> Result<Value> {
+    validate_id(name).context("property name must be a portable identifier")?;
+    let mut raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    checked_manifest(&raw, asset_id)?;
+    validate_property_definition(&raw, name, &definition)?;
+    let properties = raw["asset"]["properties"]
+        .as_object_mut()
+        .context("asset properties must be an object")?;
+    if properties.contains_key(name) != replace {
+        if replace {
+            bail!("exposed property not found: {name}")
+        } else {
+            bail!("exposed property already exists: {name}")
+        }
+    }
+    properties.insert(name.to_owned(), definition.clone());
+    let change = crate::transaction::commit_value(
+        path,
+        if replace {
+            "asset-property-set"
+        } else {
+            "asset-property-add"
+        },
+        dry_run,
+        expected,
+        &raw,
+    )?;
+    Ok(
+        json!({"ok":true,"dry_run":dry_run,"asset_id":asset_id,"property":name,"definition":definition,"change":change}),
+    )
+}
+
+pub fn property_rename(
+    path: &Path,
+    asset_id: &str,
+    name: &str,
+    to: &str,
+    dry_run: bool,
+    expected: Option<&str>,
+) -> Result<Value> {
+    validate_id(to).context("new property name must be a portable identifier")?;
+    let mut raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    checked_manifest(&raw, asset_id)?;
+    let properties = raw["asset"]["properties"]
+        .as_object_mut()
+        .context("asset properties must be an object")?;
+    if properties.contains_key(to) {
+        bail!("exposed property already exists: {to}")
+    }
+    let definition = properties
+        .remove(name)
+        .with_context(|| format!("exposed property not found: {name}"))?;
+    properties.insert(to.to_owned(), definition);
+    let change =
+        crate::transaction::commit_value(path, "asset-property-rename", dry_run, expected, &raw)?;
+    Ok(json!({"ok":true,"dry_run":dry_run,"asset_id":asset_id,"from":name,"to":to,"change":change}))
+}
+
+pub fn property_remove(
+    path: &Path,
+    asset_id: &str,
+    name: &str,
+    dry_run: bool,
+    expected: Option<&str>,
+) -> Result<Value> {
+    let mut raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    checked_manifest(&raw, asset_id)?;
+    raw["asset"]["properties"]
+        .as_object_mut()
+        .context("asset properties must be an object")?
+        .remove(name)
+        .with_context(|| format!("exposed property not found: {name}"))?;
+    let change =
+        crate::transaction::commit_value(path, "asset-property-remove", dry_run, expected, &raw)?;
+    Ok(json!({"ok":true,"dry_run":dry_run,"asset_id":asset_id,"removed":name,"change":change}))
+}
+
+pub fn property_definition(
+    raw_schema: Option<&Path>,
+    target: Option<&str>,
+    field: Option<&str>,
+    default: Option<&str>,
+    label: Option<&str>,
+) -> Result<Value> {
+    if let Some(path) = raw_schema {
+        return serde_json::from_slice(&fs::read(path)?)
+            .context("property schema must be valid JSON");
+    }
+    let target = target.context("--target is required without --schema")?;
+    let field = field.context("--field is required without --schema")?;
+    let property_type = property_type(field)?;
+    let mut definition =
+        json!({"type":property_type,"targets":[{"object":target,"property":field}]});
+    if let Some(label) = label {
+        definition["label"] = Value::String(label.to_owned());
+    }
+    if let Some(default) = default {
+        definition["default"] = parse_property_value(field, default)?;
+    }
+    Ok(definition)
+}
+
+pub fn property_shorthand(value: &str) -> Result<(String, Value)> {
+    let (name, remainder) = value
+        .split_once('=')
+        .context("property must use NAME=TYPE:OBJECT.FIELD")?;
+    validate_id(name).context("property name must be a portable identifier")?;
+    let (declared_type, target) = remainder
+        .split_once(':')
+        .context("property must use NAME=TYPE:OBJECT.FIELD")?;
+    let (object, field) = target
+        .rsplit_once('.')
+        .context("property target must use OBJECT.FIELD")?;
+    let actual_type = property_type(field)?;
+    if declared_type != actual_type {
+        bail!("property {name} declares {declared_type} but {field} requires {actual_type}")
+    }
+    Ok((
+        name.to_owned(),
+        json!({"type":declared_type,"targets":[{"object":object,"property":field}]}),
+    ))
+}
+
+fn checked_manifest(raw: &Value, asset_id: &str) -> Result<AssetManifest> {
+    let manifest = manifest(raw)?.context("file has no asset metadata")?;
+    if manifest.id != asset_id {
+        bail!(
+            "asset ID mismatch: file contains {}, requested {asset_id}",
+            manifest.id
+        )
+    }
+    Ok(manifest)
+}
+
+fn property_type(field: &str) -> Result<&'static str> {
+    match field {
+        "content" => Ok("text"),
+        "fill" | "stroke" => Ok("color"),
+        "visible" => Ok("visibility"),
+        "stroke_width" | "opacity" | "width" | "height" => Ok("number"),
+        "style_ref" => Ok("style"),
+        _ => bail!("unsupported exposed property field: {field}"),
+    }
+}
+
+fn parse_property_value(field: &str, value: &str) -> Result<Value> {
+    match property_type(field)? {
+        "visibility" => Ok(Value::Bool(
+            value.parse().context("expected true or false")?,
+        )),
+        "number" => serde_json::Number::from_f64(value.parse().context("expected a number")?)
+            .map(Value::Number)
+            .context("number must be finite"),
+        _ => Ok(Value::String(value.to_owned())),
+    }
+}
+
+fn validate_property_definition(raw: &Value, name: &str, definition: &Value) -> Result<()> {
+    let targets = definition
+        .get("targets")
+        .and_then(Value::as_array)
+        .with_context(|| format!("property {name} must contain a targets array"))?;
+    if targets.is_empty() {
+        bail!("property {name} must contain at least one target")
+    }
+    let declared = definition.get("type").and_then(Value::as_str);
+    let mut target_field = None;
+    for target in targets {
+        let object = target
+            .get("object")
+            .and_then(Value::as_str)
+            .with_context(|| format!("property {name} target lacks object"))?;
+        let field = target
+            .get("property")
+            .and_then(Value::as_str)
+            .with_context(|| format!("property {name} target lacks property"))?;
+        let actual = property_type(field)?;
+        if declared.is_some_and(|declared| actual != declared) {
+            bail!(
+                "property {name} declares {} but {field} requires {actual}",
+                declared.unwrap_or_default()
+            )
+        }
+        if target_field
+            .replace(field)
+            .is_some_and(|old| property_type(old).ok() != Some(actual))
+        {
+            bail!("property {name} mixes incompatible target types")
+        }
+        if !contains_object_id(raw, object) {
+            let suggestion = object_ids(raw)
+                .into_iter()
+                .min_by_key(|candidate| edit_distance(candidate, object));
+            if let Some(suggestion) = suggestion {
+                bail!(
+                    "property {name} target object not found: {object}; did you mean {suggestion}?"
+                )
+            }
+            bail!("property {name} target object not found: {object}")
+        }
+    }
+    if let (Some(default), Some(field)) = (definition.get("default"), target_field) {
+        validate_property_value(name, field, default, definition.get("constraints"))?;
+    }
+    Ok(())
+}
+
+fn validate_property_value(
+    name: &str,
+    field: &str,
+    value: &Value,
+    constraints: Option<&Value>,
+) -> Result<()> {
+    match property_type(field)? {
+        "visibility" if !value.is_boolean() => bail!("property {name} expects a boolean"),
+        "number" if !value.is_number() => bail!("property {name} expects a number"),
+        "text" | "color" | "style" if !value.is_string() => {
+            bail!("property {name} expects a string")
+        }
+        _ => {}
+    }
+    if let Some(constraints) = constraints {
+        let constraints = constraints
+            .as_object()
+            .with_context(|| format!("property {name} constraints must be an object"))?;
+        if let Some(max_length) = constraints.get("max_length").and_then(Value::as_u64) {
+            if value
+                .as_str()
+                .is_some_and(|text| text.chars().count() > max_length as usize)
+            {
+                bail!("property {name} exceeds max_length {max_length}")
+            }
+        }
+        if let Some(number) = value.as_f64() {
+            if constraints
+                .get("min")
+                .and_then(Value::as_f64)
+                .is_some_and(|min| number < min)
+            {
+                bail!("property {name} is below its minimum")
+            }
+            if constraints
+                .get("max")
+                .and_then(Value::as_f64)
+                .is_some_and(|max| number > max)
+            {
+                bail!("property {name} is above its maximum")
+            }
+        }
+        if let Some(allowed) = constraints.get("enum").and_then(Value::as_array) {
+            if !allowed.contains(value) {
+                bail!("property {name} is not one of its allowed values")
+            }
+        }
+    }
+    Ok(())
+}
+
+fn contains_object_id(value: &Value, id: &str) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.get("id").and_then(Value::as_str) == Some(id)
+                || map.values().any(|child| contains_object_id(child, id))
+        }
+        Value::Array(values) => values.iter().any(|child| contains_object_id(child, id)),
+        _ => false,
+    }
+}
+
+fn object_ids(value: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    fn visit(value: &Value, ids: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(id) = map.get("id").and_then(Value::as_str) {
+                    ids.push(id.to_owned());
+                }
+                map.values().for_each(|value| visit(value, ids));
+            }
+            Value::Array(values) => values.iter().for_each(|value| visit(value, ids)),
+            _ => {}
+        }
+    }
+    visit(value, &mut ids);
+    ids
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let mut previous = (0..=right.chars().count()).collect::<Vec<_>>();
+    for (i, a) in left.chars().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, b) in right.chars().enumerate() {
+            current.push(
+                (current[j] + 1)
+                    .min(previous[j + 1] + 1)
+                    .min(previous[j] + usize::from(a != b)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.chars().count()]
 }
 
 #[cfg(test)]

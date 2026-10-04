@@ -261,6 +261,7 @@ fn index_file(library: &str, root: &Path, path: &Path) -> Result<IndexedAsset> {
     let bytes = fs::read(path)?;
     let raw: Value = serde_json::from_slice(&bytes)?;
     let m = asset::manifest(&raw)?.context("missing asset metadata")?;
+    asset::validate_properties(&raw)?;
     let doc: Document = serde_json::from_value(raw)?;
     doc.validate().map_err(anyhow::Error::msg)?;
     let objects = doc

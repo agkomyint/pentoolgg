@@ -669,6 +669,9 @@ enum AssetAction {
         /// Include hidden layers when inferring content bounds.
         #[arg(long)]
         include_hidden: bool,
+        /// Expose NAME=TYPE:OBJECT.FIELD; repeat for multiple properties.
+        #[arg(long = "property")]
+        property: Vec<String>,
         #[arg(long)]
         overwrite: bool,
         #[arg(long)]
@@ -683,6 +686,95 @@ enum AssetAction {
         output: PathBuf,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+    },
+    /// Author and validate exposed instance properties.
+    Property {
+        #[command(subcommand)]
+        action: AssetPropertyAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AssetPropertyAction {
+    #[command(
+        after_help = "Example:\n  pentool asset property add chrome.pen ai/chrome counter --target counter-label --field content --default \"1 / 6\""
+    )]
+    Add {
+        input: PathBuf,
+        asset_id: String,
+        name: String,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        field: Option<String>,
+        #[arg(long)]
+        default: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+        /// Complete property definition JSON; conflicts with target/field/default/label.
+        #[arg(long, conflicts_with_all = ["target", "field", "default", "label"])]
+        schema: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    Set {
+        input: PathBuf,
+        asset_id: String,
+        name: String,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        field: Option<String>,
+        #[arg(long)]
+        default: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long, conflicts_with_all = ["target", "field", "default", "label"])]
+        schema: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    Rename {
+        input: PathBuf,
+        asset_id: String,
+        name: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    Remove {
+        input: PathBuf,
+        asset_id: String,
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    List {
+        input: PathBuf,
+        asset_id: String,
+    },
+    Inspect {
+        input: PathBuf,
+        asset_id: String,
+        name: String,
+    },
+    Usage {
+        input: PathBuf,
+        asset_id: String,
+        name: String,
+    },
+    Validate {
+        input: PathBuf,
+        asset_id: String,
     },
 }
 #[derive(Subcommand)]
@@ -960,6 +1052,7 @@ async fn run() -> Result<()> {
                     rect,
                     canvas_bounds,
                     include_hidden,
+                    property,
                     overwrite,
                     dry_run,
                 } => {
@@ -980,6 +1073,7 @@ async fn run() -> Result<()> {
                             rect,
                             canvas_bounds,
                             include_hidden,
+                            properties: property,
                             id,
                             name,
                             description: description.unwrap_or_default(),
@@ -1035,6 +1129,114 @@ async fn run() -> Result<()> {
                             serde_json::json!({"ok":true,"asset":spec,"output":output,"cache":cache,"content_hash":hash})
                         )?
                     );
+                    Ok(())
+                }
+                AssetAction::Property { action } => {
+                    let result = match action {
+                        AssetPropertyAction::Add {
+                            input,
+                            asset_id,
+                            name,
+                            target,
+                            field,
+                            default,
+                            label,
+                            schema,
+                            dry_run,
+                            if_revision,
+                        } => {
+                            let definition = asset::property_definition(
+                                schema.as_deref(),
+                                target.as_deref(),
+                                field.as_deref(),
+                                default.as_deref(),
+                                label.as_deref(),
+                            )?;
+                            asset::property_write(
+                                &input,
+                                &asset_id,
+                                &name,
+                                definition,
+                                false,
+                                dry_run,
+                                if_revision.as_deref(),
+                            )?
+                        }
+                        AssetPropertyAction::Set {
+                            input,
+                            asset_id,
+                            name,
+                            target,
+                            field,
+                            default,
+                            label,
+                            schema,
+                            dry_run,
+                            if_revision,
+                        } => {
+                            let definition = asset::property_definition(
+                                schema.as_deref(),
+                                target.as_deref(),
+                                field.as_deref(),
+                                default.as_deref(),
+                                label.as_deref(),
+                            )?;
+                            asset::property_write(
+                                &input,
+                                &asset_id,
+                                &name,
+                                definition,
+                                true,
+                                dry_run,
+                                if_revision.as_deref(),
+                            )?
+                        }
+                        AssetPropertyAction::Rename {
+                            input,
+                            asset_id,
+                            name,
+                            to,
+                            dry_run,
+                            if_revision,
+                        } => asset::property_rename(
+                            &input,
+                            &asset_id,
+                            &name,
+                            &to,
+                            dry_run,
+                            if_revision.as_deref(),
+                        )?,
+                        AssetPropertyAction::Remove {
+                            input,
+                            asset_id,
+                            name,
+                            dry_run,
+                            if_revision,
+                        } => asset::property_remove(
+                            &input,
+                            &asset_id,
+                            &name,
+                            dry_run,
+                            if_revision.as_deref(),
+                        )?,
+                        AssetPropertyAction::List { input, asset_id } => {
+                            asset::property_list(&input, &asset_id)?
+                        }
+                        AssetPropertyAction::Inspect {
+                            input,
+                            asset_id,
+                            name,
+                        } => asset::property_inspect(&input, &asset_id, &name)?,
+                        AssetPropertyAction::Usage {
+                            input,
+                            asset_id,
+                            name,
+                        } => asset::property_usage(&input, &asset_id, &name)?,
+                        AssetPropertyAction::Validate { input, asset_id } => {
+                            asset::property_validate(&input, &asset_id)?
+                        }
+                    };
+                    println!("{}", json_pretty(result)?);
                     Ok(())
                 }
             }
@@ -1206,6 +1408,10 @@ async fn run() -> Result<()> {
                     instance::materialized_hash(&result.document, &page_id, &layer_ids)?;
                 let base_layers =
                     instance::selected_layers(&result.document, &page_id, &layer_ids)?;
+                let child_ids = result.summary["objects"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
                 instance::attach(
                     &mut result.document,
                     instance::InstanceRecord {
@@ -1230,6 +1436,7 @@ async fn run() -> Result<()> {
                         visible: true,
                         overrides: Default::default(),
                         property_definitions: manifest.properties.clone(),
+                        child_ids,
                         materialized_hash: Some(materialized_hash),
                         base_layers,
                         previous: vec![],
@@ -1416,39 +1623,37 @@ async fn run() -> Result<()> {
             limit,
         } => {
             let bytes = fs::read(&input)?;
-            if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
-                    let k = kind.map(|k| match k {
-                        agent::ObjectKind::Path => "path",
-                        agent::ObjectKind::Text => "text",
-                    });
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&scene::inspect_paginated_v4(
-                            &raw,
-                            selected_page,
-                            query.as_deref(),
-                            k,
-                            layer.as_deref(),
-                            offset,
-                            limit
-                        )?)?
-                    );
-                    return Ok(());
-                }
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+                let k = kind.map(|k| match k {
+                    agent::ObjectKind::Path => "path",
+                    agent::ObjectKind::Text => "text",
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&scene::inspect_paginated_v4(
+                        &raw,
+                        selected_page,
+                        query.as_deref(),
+                        k,
+                        layer.as_deref(),
+                        offset,
+                        limit
+                    )?)?
+                );
+                return Ok(());
             }
             let doc = read_document(&input, selected_page)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&agent::inspect_paginated(
-                    &doc,
-                    query.as_deref(),
-                    kind,
-                    layer.as_deref(),
-                    offset,
-                    limit
-                )?)?
-            );
+            let mut output = agent::inspect_paginated(
+                &doc,
+                query.as_deref(),
+                kind,
+                layer.as_deref(),
+                offset,
+                limit,
+            )?;
+            instance::annotate_inspection(&raw, &mut output);
+            println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }
         Command::Search {
@@ -1460,39 +1665,37 @@ async fn run() -> Result<()> {
             limit,
         } => {
             let bytes = fs::read(&input)?;
-            if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
-                    let k = kind.map(|k| match k {
-                        agent::ObjectKind::Path => "path",
-                        agent::ObjectKind::Text => "text",
-                    });
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&scene::inspect_paginated_v4(
-                            &raw,
-                            selected_page,
-                            Some(&query),
-                            k,
-                            layer.as_deref(),
-                            offset,
-                            limit
-                        )?)?
-                    );
-                    return Ok(());
-                }
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+                let k = kind.map(|k| match k {
+                    agent::ObjectKind::Path => "path",
+                    agent::ObjectKind::Text => "text",
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&scene::inspect_paginated_v4(
+                        &raw,
+                        selected_page,
+                        Some(&query),
+                        k,
+                        layer.as_deref(),
+                        offset,
+                        limit
+                    )?)?
+                );
+                return Ok(());
             }
             let doc = read_document(&input, selected_page)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&agent::inspect_paginated(
-                    &doc,
-                    Some(&query),
-                    kind,
-                    layer.as_deref(),
-                    offset,
-                    limit
-                )?)?
-            );
+            let mut output = agent::inspect_paginated(
+                &doc,
+                Some(&query),
+                kind,
+                layer.as_deref(),
+                offset,
+                limit,
+            )?;
+            instance::annotate_inspection(&raw, &mut output);
+            println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }
         Command::Object {

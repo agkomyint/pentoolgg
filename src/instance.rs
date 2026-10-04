@@ -24,6 +24,9 @@ pub struct InstanceRecord {
     /// These make semantic target changes detectable even when a key is reused.
     #[serde(default)]
     pub property_definitions: serde_json::Map<String, Value>,
+    /// Stable source-to-materialized child ID mappings for discovery APIs.
+    #[serde(default)]
+    pub child_ids: Vec<Value>,
     /// Hash of the last materialized state accepted by Pentool. Generic edits
     /// that change this hash are treated as undeclared local changes.
     #[serde(default)]
@@ -129,6 +132,9 @@ pub fn set_property(
         .unwrap_or("page-1")
         .to_owned();
     let override_value = parse_override_value(definition, value)?;
+    if !override_compatible(definition, &override_value) {
+        bail!("override value violates the exposed property's type or constraints")
+    }
     for target in targets {
         let object = target
             .get("object")
@@ -363,6 +369,44 @@ fn override_compatible(definition: &Value, value: &Value) -> bool {
                 _ => false,
             },
         )
+        && constraints_accept(definition.get("constraints"), value)
+}
+
+fn constraints_accept(constraints: Option<&Value>, value: &Value) -> bool {
+    let Some(constraints) = constraints else {
+        return true;
+    };
+    let Some(constraints) = constraints.as_object() else {
+        return false;
+    };
+    if constraints
+        .get("max_length")
+        .and_then(Value::as_u64)
+        .is_some_and(|max| {
+            value
+                .as_str()
+                .is_none_or(|text| text.chars().count() > max as usize)
+        })
+    {
+        return false;
+    }
+    if let Some(number) = value.as_f64() {
+        if constraints
+            .get("min")
+            .and_then(Value::as_f64)
+            .is_some_and(|min| number < min)
+            || constraints
+                .get("max")
+                .and_then(Value::as_f64)
+                .is_some_and(|max| number > max)
+        {
+            return false;
+        }
+    }
+    constraints
+        .get("enum")
+        .and_then(Value::as_array)
+        .is_none_or(|allowed| allowed.contains(value))
 }
 
 pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Value> {
@@ -431,13 +475,14 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
                 .find(|v| v.get("id").and_then(Value::as_str) == Some(id))
         })
         .context("instance record lost during update")?;
-    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions,"materialized_hash":old.materialized_hash,"base_layers":old.base_layers,"property_definitions":old.property_definitions});
+    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions,"materialized_hash":old.materialized_hash,"base_layers":old.base_layers,"property_definitions":old.property_definitions,"child_ids":old.child_ids});
     record["asset_version"] = Value::String(manifest.asset_version.clone());
     record["content_hash"] = Value::String(new_hash.clone());
     record["layer_ids"] = serde_json::to_value(&new_ids)?;
     record["materialized_hash"] = Value::String(next_materialized_hash);
     record["base_layers"] = Value::Array(next_base_layers);
     record["property_definitions"] = serde_json::to_value(&manifest.properties)?;
+    record["child_ids"] = result.summary["objects"].clone();
     record["previous"]
         .as_array_mut()
         .context("invalid instance history")?
@@ -510,6 +555,10 @@ pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
         .get("property_definitions")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    record["child_ids"] = previous
+        .get("child_ids")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
     record["previous"].as_array_mut().unwrap().pop();
     let rolled_back_to = record["asset_version"].clone();
     crate::transaction::commit_value(file, "instance-rollback", false, None, &raw)?;
@@ -615,6 +664,48 @@ pub fn materialized_hash(raw: &Value, page_id: &str, ids: &[String]) -> Result<S
     )?))
 }
 
+pub fn annotate_inspection(document: &Value, output: &mut Value) {
+    let mappings = document
+        .get("instances")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|instance| {
+            let instance_id = instance.get("id").and_then(Value::as_str).unwrap_or("");
+            instance
+                .get("child_ids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(move |mapping| {
+                    Some((
+                        mapping.get("new_id")?.as_str()?.to_owned(),
+                        instance_id.to_owned(),
+                        mapping.get("id")?.as_str()?.to_owned(),
+                    ))
+                })
+        })
+        .collect::<Vec<_>>();
+    fn visit(value: &mut Value, mappings: &[(String, String, String)]) {
+        match value {
+            Value::Object(map) => {
+                if let Some(id) = map.get("id").and_then(Value::as_str) {
+                    if let Some((_, instance, source)) =
+                        mappings.iter().find(|(new, _, _)| new == id)
+                    {
+                        map.insert("instance_id".into(), Value::String(instance.clone()));
+                        map.insert("source_id".into(), Value::String(source.clone()));
+                    }
+                }
+                map.values_mut().for_each(|value| visit(value, mappings));
+            }
+            Value::Array(values) => values.iter_mut().for_each(|value| visit(value, mappings)),
+            _ => {}
+        }
+    }
+    visit(output, &mappings);
+}
+
 fn apply_override(
     raw: &mut Value,
     layers: &[String],
@@ -681,6 +772,15 @@ mod tests {
     }
 
     #[test]
+    fn inspection_exposes_source_and_stable_materialized_ids() {
+        let document = json!({"instances":[{"id":"card-2","child_ids":[{"id":"label","new_id":"card-2-label"}]}]});
+        let mut output = json!({"layers":[{"objects":[{"id":"card-2-label","kind":"text"}]}]});
+        annotate_inspection(&document, &mut output);
+        assert_eq!(output["layers"][0]["objects"][0]["source_id"], "label");
+        assert_eq!(output["layers"][0]["objects"][0]["instance_id"], "card-2");
+    }
+
+    #[test]
     fn update_plan_reports_untracked_local_edits_and_accepts_compatible_overrides() {
         let document_path = temp_file("document.pen");
         let source_path = temp_file("source.pen");
@@ -713,6 +813,7 @@ mod tests {
                     "label".into(),
                     json!({"targets":[{"object":"label","property":"content"}]}),
                 )]),
+                child_ids: vec![],
                 materialized_hash: Some(accepted),
                 base_layers: vec![],
                 previous: vec![],
@@ -721,7 +822,7 @@ mod tests {
         .unwrap();
         let source = json!({
             "format":"pentool","version":3,"name":"Card","fonts":[],
-            "asset":{"id":"ui/card","name":"Card","asset_version":"1.1.0","entry_page":"page-1","properties":{"label":{"targets":[{"object":"label","property":"content"}]}}},
+            "asset":{"id":"ui/card","name":"Card","asset_version":"1.1.0","entry_page":"page-1","properties":{"label":{"type":"text","targets":[{"object":"label","property":"content"}]}}},
             "pages":[{"id":"page-1","name":"Page 1","canvas":{"width":100,"height":100,"background":"#fff"},"layers":[
                 {"id":"content","name":"Card","visible":true,"locked":false,"paths":[],"texts":[{"id":"label","content":"Source","x":10,"y":20,"fill":"#000"}]}
             ]}]
@@ -794,6 +895,7 @@ mod tests {
                     "label".into(),
                     json!({"targets":[{"object":"label","property":"content"}]}),
                 )]),
+                child_ids: vec![],
                 materialized_hash: Some(accepted),
                 base_layers: base,
                 previous: vec![],

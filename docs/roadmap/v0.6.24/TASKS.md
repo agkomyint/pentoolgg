@@ -48,7 +48,7 @@ a temporary second instance model.
   rollback. Render before/after overlap fixtures proving unrelated foreground
   objects remain visible.
 
-- [ ] **3. Define and document the override schema.** Publish supported property
+- [x] **3. Define and document the override schema.** Publish supported property
   types, targets, defaults, labels, constraints, stable keys, serialization,
   compatibility rules, and package behavior. Initial required properties:
 
@@ -62,7 +62,7 @@ a temporary second instance model.
   asset revision must not silently retarget an existing property key to a different
   semantic object or incompatible type.
 
-- [ ] **4. Add complete CLI authoring for exposed properties.** Nobody should need
+- [x] **4. Add complete CLI authoring for exposed properties.** Nobody should need
   to hand-edit asset JSON. Support repeated flags for simple cases and a JSON file
   for complete schemas:
 
@@ -141,7 +141,7 @@ a temporary second instance model.
   undocumented fallback. Empty or unmeasurable content is a clear error requesting
   an explicit rectangle.
 
-- [ ] **11. Generate readable, stable instance child IDs.** Prefer deterministic
+- [x] **11. Generate readable, stable instance child IDs.** Prefer deterministic
   IDs derived from instance ID and source child ID, such as `card-2/label`. Escape
   unsafe characters canonically and add a short hash suffix only for a real
   collision. IDs must remain stable across placement, update, package reinstall,

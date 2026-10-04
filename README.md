@@ -123,6 +123,20 @@ pentool instance design.pen update instance-1 --source card-v2.pen
 pentool instance design.pen rollback instance-1
 ```
 
+Expose stable asset properties without editing JSON by hand:
+
+```sh
+pentool asset create design.pen assets/chrome.pen --id ai/chrome --name Chrome --layer content \
+  --property 'counter=text:counter-label.content'
+pentool asset property add assets/chrome.pen ai/chrome active \
+  --target active-segment --field visible --default true
+pentool asset property list assets/chrome.pen ai/chrome --json
+pentool asset property validate assets/chrome.pen ai/chrome
+```
+
+Property definitions may also be supplied with `--schema property.json`. Mutating
+property commands support `--dry-run` and `--if-revision`.
+
 ## Multiple pages (v0.4.0)
 
 Version 3 `.pen` documents contain ordered pages, each with its own canvas and

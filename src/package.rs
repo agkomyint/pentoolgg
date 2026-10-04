@@ -141,6 +141,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         let bytes = fs::read(e.path())?;
         let raw: Value = serde_json::from_slice(&bytes)?;
         let am = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
+        asset::validate_properties(&raw)?;
         let doc: Document = serde_json::from_value(raw)?;
         doc.validate().map_err(anyhow::Error::msg)?;
         if !seen.insert(am.id.clone()) {
@@ -242,6 +243,7 @@ pub fn verify(path: &Path) -> Result<Value> {
         }
         let raw: Value = serde_json::from_slice(&data)?;
         let am = asset::manifest(&raw)?.context("asset metadata missing")?;
+        asset::validate_properties(&raw)?;
         if am.id != *id {
             bail!("asset ID mismatch: {id}")
         }
