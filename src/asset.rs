@@ -104,6 +104,8 @@ pub struct CreateOptions {
     pub layers: Vec<String>,
     pub objects: Vec<String>,
     pub rect: Option<Bounds>,
+    pub canvas_bounds: bool,
+    pub include_hidden: bool,
     pub id: String,
     pub name: String,
     pub description: String,
@@ -245,6 +247,18 @@ pub fn create(options: &CreateOptions) -> Result<Value> {
         layer_count = layers.len();
     }
 
+    let inferred_bounds = if let Some(rect) = options.rect {
+        rect
+    } else if options.canvas_bounds {
+        Bounds {
+            x: 0.0,
+            y: 0.0,
+            width: doc.canvas.width as f64,
+            height: doc.canvas.height as f64,
+        }
+    } else {
+        tight_visible_bounds(&raw, options.include_hidden)?
+    };
     raw["name"] = Value::String(options.name.clone());
     raw["asset"] = serde_json::to_value(AssetManifest {
         schema: 1,
@@ -258,13 +272,13 @@ pub fn create(options: &CreateOptions) -> Result<Value> {
         tags: options.tags.clone(),
         category: options.category.clone(),
         entry_page: Some("asset".into()),
-        bounds: None,
+        bounds: Some(inferred_bounds),
         properties: Default::default(),
     })?;
     let output = serde_json::to_vec_pretty(&raw)?;
     let verified: Document = serde_json::from_slice(&output)?;
     verified.validate().map_err(anyhow::Error::msg)?;
-    let summary = json!({"ok":true,"dry_run":options.dry_run,"output":options.output,"asset_id":options.id,"asset_version":options.version,"content_hash":hash_bytes(&output),"layers":layer_count});
+    let summary = json!({"ok":true,"dry_run":options.dry_run,"output":options.output,"asset_id":options.id,"asset_version":options.version,"content_hash":hash_bytes(&output),"layers":layer_count,"bounds":inferred_bounds});
     if !options.dry_run {
         if let Some(parent) = options.output.parent() {
             fs::create_dir_all(parent)?;
@@ -276,6 +290,53 @@ pub fn create(options: &CreateOptions) -> Result<Value> {
         }
     }
     Ok(summary)
+}
+
+fn tight_visible_bounds(raw: &Value, include_hidden: bool) -> Result<Bounds> {
+    let mut doc: Document = serde_json::from_value(raw.clone())?;
+    let objects = doc
+        .layers
+        .iter()
+        .filter(|layer| include_hidden || layer.visible)
+        .flat_map(|layer| {
+            layer
+                .paths
+                .iter()
+                .map(|item| (layer.id.clone(), item.id.clone()))
+                .chain(
+                    layer
+                        .texts
+                        .iter()
+                        .map(|item| (layer.id.clone(), item.id.clone())),
+                )
+        })
+        .collect::<Vec<_>>();
+    let mut union: Option<Bounds> = None;
+    for (layer, object) in objects {
+        let value = geometry::execute(&mut doc, &layer, &object, &geometry::Operation::Bounds)?;
+        let bounds = Bounds {
+            x: value["x"].as_f64().context("bounds x missing")?,
+            y: value["y"].as_f64().context("bounds y missing")?,
+            width: value["width"].as_f64().context("bounds width missing")?,
+            height: value["height"].as_f64().context("bounds height missing")?,
+        };
+        union = Some(match union {
+            None => bounds,
+            Some(old) => {
+                let x = old.x.min(bounds.x);
+                let y = old.y.min(bounds.y);
+                Bounds {
+                    x,
+                    y,
+                    width: (old.x + old.width).max(bounds.x + bounds.width) - x,
+                    height: (old.y + old.height).max(bounds.y + bounds.height) - y,
+                }
+            }
+        });
+    }
+    union.context(
+        "asset has no measurable visible content; select content, pass --include-hidden, or use --canvas-bounds",
+    )
 }
 
 pub fn atomic_new(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -317,5 +378,23 @@ mod tests {
         assert!(validate_id("open/icons/arrow-right").is_ok());
         assert!(validate_id("../escape").is_err());
         assert!(validate_id("bad name").is_err());
+    }
+
+    #[test]
+    fn inferred_bounds_are_tight_and_ignore_hidden_layers() {
+        let raw = json!({
+            "format":"pentool","version":3,"name":"Bounds","fonts":[],
+            "pages":[{"id":"asset","name":"Asset","canvas":{"width":920,"height":400,"background":"none"},"layers":[
+                {"id":"visible","name":"Visible","visible":true,"locked":false,"paths":[{"id":"body","d":"M10 10 L90 10 L90 90 L10 90 Z","fill":"#000","stroke":"none","stroke_width":0,"closed":true}],"texts":[]},
+                {"id":"hidden","name":"Hidden","visible":false,"locked":false,"paths":[{"id":"far","d":"M500 20 L600 20 L600 80 Z","fill":"#000","stroke":"none","stroke_width":0,"closed":true}],"texts":[]}
+            ]}]
+        });
+        let visible = tight_visible_bounds(&raw, false).unwrap();
+        assert_eq!(
+            (visible.x, visible.y, visible.width, visible.height),
+            (10.0, 10.0, 80.0, 80.0)
+        );
+        let all = tight_visible_bounds(&raw, true).unwrap();
+        assert!(all.width > 500.0);
     }
 }

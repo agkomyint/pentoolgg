@@ -81,9 +81,10 @@ and commits use the same plan and neither path mutates the document on conflict.
 
 ## Mutation protection
 
-Generic editing commands must not mutate attached instance internals invisibly.
-The complete v0.6.24 CLI will reject those edits by default with guidance to use an
-exposed property or detach the instance. An explicit tracked-edit mode may record a
-property-level patch against the base snapshot. Until a command implements that
-protection, the update-time materialization hash is the mandatory final guard: an
-undeclared difference blocks replacement instead of being overwritten.
+Generic editing commands cannot mutate attached instance internals. The shared
+transaction boundary compares every materialized instance layer before committing
+an ordinary edit and rejects differences with guidance to use an exposed property
+or detach the instance. This covers object, text, path, shape, group, layer, batch,
+and future commands that use the transaction engine. Existing documents with
+earlier untracked changes retain a second update-time materialization-hash guard:
+an undeclared difference blocks replacement instead of being overwritten.

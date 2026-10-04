@@ -80,7 +80,7 @@ a temporary second instance model.
   structured errors, nearest-ID suggestions, and package validation. `--help` and
   the format documentation must include runnable examples.
 
-- [ ] **5. Prevent invisible local mutations.** Instance internals are protected by
+- [x] **5. Prevent invisible local mutations.** Instance internals are protected by
   default. Generic `object`, `text`, `path`, shape, group, and batch commands must:
 
   1. reject edits inside an attached instance with guidance to use a declared

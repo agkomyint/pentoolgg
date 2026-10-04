@@ -394,7 +394,10 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
         &crate::import::ImportOptions {
             destination_page: Some(old.page_id.clone()),
             source_page: manifest.entry_page.clone(),
-            prefix: Some(format!("{}-{}", id, &new_hash[7..15])),
+            // Instance-derived IDs stay readable and stable across revisions.
+            // The old materialization has already been removed in memory, so the
+            // stable prefix cannot collide with itself during replacement.
+            prefix: Some(id.to_owned()),
             x: old.transform[4],
             y: old.transform[5],
             scale: sx,
@@ -811,8 +814,18 @@ mod tests {
         let layers = updated["pages"][0]["layers"].as_array().unwrap();
         assert_eq!(layers[0]["id"], "back");
         assert_eq!(layers[2]["id"], "check");
+        assert_eq!(layers[1]["id"], "card-content");
+        assert_eq!(layers[1]["texts"][0]["id"], "card-label");
         assert_eq!(layers[1]["texts"][0]["content"], "Local label");
         assert_eq!(updated["instances"][0]["asset_version"], "1.1.0");
+        rollback(&document_path, "card", false).unwrap();
+        let rolled_back: Value =
+            serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
+        let rolled_back_layers = rolled_back["pages"][0]["layers"].as_array().unwrap();
+        assert_eq!(rolled_back_layers[0]["id"], "back");
+        assert_eq!(rolled_back_layers[1]["id"], "card-old-content");
+        assert_eq!(rolled_back_layers[2]["id"], "check");
+        assert_eq!(rolled_back["instances"][0]["asset_version"], "1.0.0");
         let _ = fs::remove_file(document_path);
         let _ = fs::remove_file(source_path);
     }

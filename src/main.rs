@@ -663,6 +663,12 @@ enum AssetAction {
         objects: Vec<String>,
         #[arg(long,num_args=4,value_names=["X","Y","WIDTH","HEIGHT"])]
         rect: Option<Vec<f64>>,
+        /// Use the complete source canvas instead of inferred visible-content bounds.
+        #[arg(long, conflicts_with = "rect")]
+        canvas_bounds: bool,
+        /// Include hidden layers when inferring content bounds.
+        #[arg(long)]
+        include_hidden: bool,
         #[arg(long)]
         overwrite: bool,
         #[arg(long)]
@@ -952,6 +958,8 @@ async fn run() -> Result<()> {
                     layer,
                     objects,
                     rect,
+                    canvas_bounds,
+                    include_hidden,
                     overwrite,
                     dry_run,
                 } => {
@@ -970,6 +978,8 @@ async fn run() -> Result<()> {
                             layers: layer,
                             objects,
                             rect,
+                            canvas_bounds,
+                            include_hidden,
                             id,
                             name,
                             description: description.unwrap_or_default(),
@@ -1154,15 +1164,20 @@ async fn run() -> Result<()> {
             let manifest =
                 asset::manifest(&source_raw)?.context("indexed asset metadata missing")?;
             let destination_bytes = fs::read(&destination)?;
+            let destination_raw: serde_json::Value = serde_json::from_slice(&destination_bytes)?;
+            let planned_instance_id =
+                matches!(mode, AddMode::Instance).then(|| next_instance_id(&destination_raw));
             let chosen_prefix = prefix.unwrap_or_else(|| {
-                format!(
-                    "{}-{}",
-                    item.id.replace('/', "-"),
-                    &item.content_hash[7..15]
-                )
+                planned_instance_id.clone().unwrap_or_else(|| {
+                    format!(
+                        "{}-{}",
+                        item.id.replace('/', "-"),
+                        &item.content_hash[7..15]
+                    )
+                })
             });
             let mut result = import::compose(
-                serde_json::from_slice(&destination_bytes)?,
+                destination_raw,
                 source_raw,
                 &import::ImportOptions {
                     destination_page: selected_page.map(str::to_owned),
@@ -1182,7 +1197,7 @@ async fn run() -> Result<()> {
                     .flat_map(|m| m.values())
                     .filter_map(|v| v.as_str().map(str::to_owned))
                     .collect::<Vec<_>>();
-                let id = next_instance_id(&result.document);
+                let id = planned_instance_id.expect("instance ID planned for instance mode");
                 let page_id = result.summary["destination_page"]
                     .as_str()
                     .unwrap_or("page-1")

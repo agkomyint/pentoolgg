@@ -32,6 +32,8 @@ fn local_asset_index_and_package_round_trip() {
         layers: vec![],
         objects: vec![],
         rect: None,
+        canvas_bounds: true,
+        include_hidden: false,
         id: "ui/card".into(),
         name: "Card".into(),
         description: "Reusable card".into(),
