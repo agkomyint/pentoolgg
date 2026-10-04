@@ -147,7 +147,7 @@ fn render_sample(source: &std::path::Path, scale: f32, measure_write: bool) -> R
 fn stats(samples: &[Sample], get: impl Fn(&Sample) -> u128) -> Value {
     let mut v: Vec<u128> = samples.iter().map(get).collect();
     v.sort_unstable();
-    let median = if v.len() % 2 == 0 {
+    let median = if v.len() & 1 == 0 {
         (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2
     } else {
         v[v.len() / 2]
