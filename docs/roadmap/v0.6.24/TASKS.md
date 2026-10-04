@@ -166,6 +166,56 @@ a temporary second instance model.
   on Windows, Linux, Intel macOS, and Apple Silicon. Golden renders must prove stack
   preservation and compatible override survival.
 
+## v0.7 readiness gate
+
+These tasks prepare the shared architecture for the
+[`v0.7.0`](../v0.7.0/TASKS.md) image milestone without adding image nodes, codecs,
+or editing features to this patch release. They are release requirements for
+v0.6.24 because v0.7 must extend one scene graph, transaction system, package
+protocol, cache, and renderer rather than introduce parallel infrastructure.
+
+- [ ] **15. Freeze format-evolution and capability rules.** Document how new v4+
+  node kinds, resource records, operation schemas, and renderer capabilities are
+  versioned and validated. Unknown required kinds must fail loudly with a stable
+  structured error; unknown optional extension data must survive round trips.
+  Add forward-version, unknown-kind, extension-preservation, migration, and
+  downgrade-diagnostic fixtures.
+
+- [ ] **16. Stabilize one resource and content-addressing interface.** Extract and
+  test the shared contracts for embedded bytes, document-relative external files,
+  SHA-256 identity, deduplication, verified cache lookup, missing resources, and
+  hash mismatches. v0.6.24 does not add image resources, but packages and future
+  resource types must be able to reuse these contracts without a second cache or
+  resolver. All paths must remain traversal-safe and offline by default.
+
+- [ ] **17. Make transaction boundaries resource-safe.** Define a staged-write API
+  that can atomically commit a document plus related cache/resource changes, with
+  dry run, revision guards, one hidden-history entry, rollback, and cleanup after
+  failure. Add fault-injection tests proving validation, interrupted writes, and
+  conflicts leave no partial document, orphan resource, or misleading history
+  entry.
+
+- [ ] **18. Centralize bounded-work and structured-error policy.** Publish and test
+  shared limits for input bytes, decoded/expanded dimensions, object counts, batch
+  operations, recursion, memory estimates, and output size. Define stable error
+  codes for unsupported capability, limit exceeded, malformed resource, hash
+  mismatch, missing resource, and unsafe path. Limits must be checked before large
+  allocation or mutation and be suitable for reuse by v0.7 decoders.
+
+- [ ] **19. Freeze renderer and scene-extension seams.** Ensure bounds, tree,
+  search, groups, components, layout, diff, history, batch, export, and package
+  validation dispatch through documented node/resource interfaces. Add a harmless
+  test-only extension fixture proving an added node kind can participate or fail
+  explicitly without bypassing validation. Do not add raster rendering in this
+  release.
+
+- [ ] **20. Publish the v0.7 baseline and handoff report.** Record per-platform
+  release binary size, representative render time, peak-memory method, package
+  determinism hash, supported format versions, and the complete v0.6.24 conformance
+  result. Link every v0.7 required foundation to its implementation and tests, and
+  list any accepted debt explicitly. v0.7 development starts only after this gate
+  and tasks 1–14 pass.
+
 ## Acceptance targets
 
 - Updating a card below a check circle leaves the card at the same stack index and
@@ -186,6 +236,12 @@ a temporary second instance model.
   reinstall.
 - Dry-run and commit plans agree, rollback restores the exact pre-update bytes, and
   failed/conflicted updates leave no partial state or orphan backup.
+- Unknown required scene capabilities fail explicitly, while optional extension
+  data survives a validated save/load round trip.
+- A simulated document-plus-resource failure leaves original bytes, cache contents,
+  and hidden history unchanged.
+- v0.6.24 publishes cross-platform binary-size, render, package-determinism, and
+  compatibility baselines that v0.7 can measure against.
 
 ## Out of scope
 
@@ -194,6 +250,8 @@ a temporary second instance model.
 - Updating every project on disk or contacting registries during document open.
 - Replacing asset/package identity or the content-addressed cache.
 - Real-time collaborative merge of simultaneous editors.
+- Raster image nodes, codecs, image assets, masks, adjustments, or image editor UI;
+  those remain in v0.7.0.
 
 ## Acceptance demo
 
