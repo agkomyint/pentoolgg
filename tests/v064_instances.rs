@@ -1,4 +1,4 @@
-use pentool::{asset, history, instance};
+use pentool::{asset, history, instance, render};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -19,6 +19,17 @@ fn temp(name: &str) -> PathBuf {
 
 fn source(version: &str, fill: &str, label: &str) -> Value {
     json!({"format":"pentool","version":3,"name":"Card","fonts":[],"pages":[{"id":"asset","name":"Asset","canvas":{"width":920,"height":400,"background":"none"},"layers":[{"id":"content","name":"Content","visible":true,"locked":false,"paths":[{"id":"body","d":"M10 10 L90 10 L90 90 L10 90 Z","stroke":"none","stroke_width":0,"fill":fill,"closed":true}],"texts":[{"id":"label","content":label,"x":20,"y":55,"font_family":"Atkinson Hyperlegible","font_size":16,"font_weight":400,"italic":false,"fill":"#ffffff","align":"left","letter_spacing":0,"line_height":1.2,"transform":[1,0,0,1,0,0]}]}]}],"asset":{"id":"ui/card","name":"Card","asset_version":version,"entry_page":"asset","bounds":{"x":10,"y":10,"width":80,"height":80},"properties":{"label":{"type":"text","targets":[{"object":"label","property":"content"}]}}}})
+}
+
+fn red_foreground_pixels(raw: &Value) -> usize {
+    let document: pentool::document::Document = serde_json::from_value(raw.clone()).unwrap();
+    let png = render::to_png(&document, 1.0).unwrap();
+    tiny_skia::Pixmap::decode_png(&png)
+        .unwrap()
+        .pixels()
+        .iter()
+        .filter(|pixel| pixel.red() > 180 && pixel.green() < 120 && pixel.blue() < 120)
+        .count()
 }
 
 #[test]
@@ -70,11 +81,10 @@ fn six_pages_update_atomically_preserving_overrides_and_stack() {
         )
         .unwrap();
     }
-    fs::write(
-        &document_path,
-        serde_json::to_vec_pretty(&document).unwrap(),
-    )
-    .unwrap();
+    let original_bytes = serde_json::to_vec_pretty(&document).unwrap();
+    let original_red_pixels = red_foreground_pixels(&document);
+    assert!(original_red_pixels > 0);
+    fs::write(&document_path, &original_bytes).unwrap();
     let incoming = source("1.1.0", "#0f766e", "Incoming");
     fs::write(&source_path, serde_json::to_vec_pretty(&incoming).unwrap()).unwrap();
     let preview = instance::update_bulk(
@@ -111,6 +121,10 @@ fn six_pages_update_atomically_preserving_overrides_and_stack() {
     assert_eq!(result["counts"]["skipped"], 0, "{result:#}");
     assert_eq!(result["counts"]["updated"], 6);
     let updated: Value = serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
+    assert!(
+        red_foreground_pixels(&updated) * 100 >= original_red_pixels * 95,
+        "the foreground check must remain visibly above the updated card"
+    );
     for (index, page) in updated["pages"].as_array().unwrap().iter().enumerate() {
         assert_eq!(
             page["layers"][1]["id"],
@@ -127,6 +141,8 @@ fn six_pages_update_atomically_preserving_overrides_and_stack() {
     }
     let entries = history::list(&document_path).unwrap();
     assert_eq!(entries["entries"].as_array().unwrap().len(), 1);
+    history::undo(&document_path).unwrap();
+    assert_eq!(fs::read(&document_path).unwrap(), original_bytes);
     let _ = fs::remove_file(document_path);
     let _ = fs::remove_file(source_path);
 }

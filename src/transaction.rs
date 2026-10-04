@@ -22,6 +22,63 @@ pub struct ChangeSummary {
     pub history: Option<PathBuf>,
 }
 
+/// Commit related offline resources before the document and restore them if the
+/// guarded document commit fails. Validation and revision checks happen before
+/// any write, and the document commit remains the single visible history entry.
+pub fn commit_bundle(
+    path: &Path,
+    operation: &str,
+    dry_run: bool,
+    expected: Option<&str>,
+    value: &Value,
+    resources: &[(PathBuf, Vec<u8>)],
+) -> Result<ChangeSummary> {
+    validate_value(value)?;
+    let before = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    let current = revision(&before);
+    if expected.is_some_and(|wanted| wanted != current) {
+        bail!("revision mismatch: expected {expected:?}, current {current}")
+    }
+    for (resource_path, bytes) in resources {
+        crate::resource::safe_relative_path(resource_path)?;
+        if bytes.len() > crate::resource::MAX_RESOURCE_BYTES {
+            bail!("[limit-exceeded] staged resource exceeds the encoded-byte limit")
+        }
+    }
+    let after = serde_json::to_vec_pretty(value)?;
+    if dry_run {
+        return commit_bytes(path, operation, true, expected, &after);
+    }
+    let root = path.parent().unwrap_or_else(|| Path::new("."));
+    let snapshots = resources
+        .iter()
+        .map(|(relative, _)| {
+            let target = root.join(relative);
+            let old = fs::read(&target).ok();
+            (target, old)
+        })
+        .collect::<Vec<_>>();
+    let write_result = (|| -> Result<ChangeSummary> {
+        for ((_, bytes), (target, _)) in resources.iter().zip(&snapshots) {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            crate::editing::atomic_write(target, bytes)?;
+        }
+        commit_bytes(path, operation, false, expected, &after)
+    })();
+    if write_result.is_err() {
+        for (target, old) in snapshots.iter().rev() {
+            if let Some(bytes) = old {
+                let _ = crate::editing::atomic_write(target, bytes);
+            } else if target.exists() {
+                let _ = fs::remove_file(target);
+            }
+        }
+    }
+    write_result
+}
+
 pub fn revision(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -132,12 +189,18 @@ fn find_layer<'a>(document: &'a Value, page_id: &str, layer_id: &str) -> Option<
 }
 
 pub fn validate_value(value: &Value) -> Result<()> {
-    if value.get("version").and_then(Value::as_u64) == Some(crate::scene::VERSION) {
-        crate::scene::validate(value)
-    } else {
-        let doc: crate::document::Document =
-            serde_json::from_value(value.clone()).context("invalid legacy document")?;
-        doc.validate().map_err(anyhow::Error::msg)
+    match value.get("version").and_then(Value::as_u64) {
+        Some(crate::scene::VERSION) => crate::scene::validate(value),
+        Some(1..=3) => {
+            let doc: crate::document::Document =
+                serde_json::from_value(value.clone()).context("invalid legacy document")?;
+            doc.validate().map_err(anyhow::Error::msg)
+        }
+        Some(version) => bail!(
+            "[unsupported-capability] document format version {version} is newer than supported version {}",
+            crate::scene::VERSION
+        ),
+        None => bail!("[malformed-resource] document version is missing or invalid"),
     }
 }
 
@@ -188,5 +251,55 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), bytes);
         commit_value(&path, "instance-set", true, None, &edited).unwrap();
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn future_versions_and_unknown_required_nodes_fail_explicitly() {
+        let mut future = crate::scene::new_document(10, 10);
+        future["version"] = serde_json::json!(99);
+        assert!(validate_value(&future)
+            .unwrap_err()
+            .to_string()
+            .contains("[unsupported-capability]"));
+        let mut unknown = crate::scene::new_document(10, 10);
+        unknown["pages"][0]["layers"][0]["nodes"] =
+            serde_json::json!([{"id":"future","kind":"future-node","transform":[1,0,0,1,0,0]}]);
+        assert!(validate_value(&unknown)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported node kind"));
+    }
+
+    #[test]
+    fn staged_bundle_failure_leaves_document_resource_and_history_unchanged() {
+        let root = std::env::temp_dir().join(format!(
+            "pentool-bundle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let document = root.join("design.pen");
+        let raw = crate::scene::new_document(10, 10);
+        let bytes = serde_json::to_vec_pretty(&raw).unwrap();
+        fs::write(&document, &bytes).unwrap();
+        let resource = root.join("assets/data.bin");
+        fs::create_dir_all(resource.parent().unwrap()).unwrap();
+        fs::write(&resource, b"before").unwrap();
+        let result = commit_bundle(
+            &document,
+            "bundle-test",
+            false,
+            Some("wrong-revision"),
+            &raw,
+            &[(PathBuf::from("assets/data.bin"), b"after".to_vec())],
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read(&document).unwrap(), bytes);
+        assert_eq!(fs::read(&resource).unwrap(), b"before");
+        assert!(!root.join(".pentool/history").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -17,6 +17,7 @@ pub mod page;
 pub mod pdf;
 pub mod render;
 pub mod replace;
+pub mod resource;
 pub mod scene;
 pub mod server;
 pub mod style;
