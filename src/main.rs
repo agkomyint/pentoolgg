@@ -836,9 +836,22 @@ enum InstanceAction {
         #[arg(long)]
         asset: Option<String>,
         #[arg(long)]
+        group: Option<String>,
+        #[arg(long)]
+        current_version: Option<String>,
+        #[arg(long)]
+        current_hash: Option<String>,
+        #[arg(long)]
+        package: Option<String>,
+        #[arg(long)]
+        stale_only: bool,
+        #[arg(long)]
         to: Option<String>,
         #[arg(long)]
         continue_on_conflict: bool,
+        /// JSON file containing explicit per-conflict resolutions.
+        #[arg(long)]
+        resolutions: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
     },
@@ -1421,6 +1434,9 @@ async fn run() -> Result<()> {
                     .as_array()
                     .cloned()
                     .unwrap_or_default();
+                let layer_indices =
+                    instance::layer_positions_public(&result.document, &page_id, &layer_ids)?;
+                let layer_states = instance::layer_states(&result.document, &page_id, &layer_ids)?;
                 instance::attach(
                     &mut result.document,
                     instance::InstanceRecord {
@@ -1431,6 +1447,9 @@ async fn run() -> Result<()> {
                         content_hash: item.content_hash.clone(),
                         layer_ids,
                         page_id,
+                        parent_id: None,
+                        layer_indices,
+                        layer_states,
                         transform: {
                             let r = rotate.to_radians();
                             [
@@ -1446,6 +1465,7 @@ async fn run() -> Result<()> {
                         overrides: Default::default(),
                         property_definitions: manifest.properties.clone(),
                         child_ids,
+                        local_patches: vec![],
                         materialized_hash: Some(materialized_hash),
                         base_layers,
                         previous: vec![],
@@ -1490,8 +1510,14 @@ async fn run() -> Result<()> {
                 source,
                 all,
                 asset: asset_filter,
+                group,
+                current_version,
+                current_hash,
+                package,
+                stale_only,
                 to,
                 continue_on_conflict,
+                resolutions,
                 dry_run,
             } => {
                 if let Some(expected) = to {
@@ -1509,16 +1535,22 @@ async fn run() -> Result<()> {
                         &source,
                         asset_filter.as_deref(),
                         selected_page,
+                        group.as_deref(),
+                        current_version.as_deref(),
+                        current_hash.as_deref(),
+                        package.as_deref(),
+                        stale_only,
                         continue_on_conflict,
+                        resolutions.as_deref(),
                         dry_run,
                     )?
                 } else {
-                    instance::update(
-                        &input,
-                        id.as_deref().context("instance ID is required")?,
-                        &source,
-                        dry_run,
-                    )?
+                    let id = id.as_deref().context("instance ID is required")?;
+                    if let Some(resolutions) = resolutions {
+                        instance::update_resolved(&input, id, &source, &resolutions, dry_run)?
+                    } else {
+                        instance::update(&input, id, &source, dry_run)?
+                    }
                 };
                 println!("{}", json_pretty(result)?);
                 Ok(())

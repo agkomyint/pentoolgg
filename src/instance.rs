@@ -15,6 +15,12 @@ pub struct InstanceRecord {
     pub layer_ids: Vec<String>,
     #[serde(default = "default_page")]
     pub page_id: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub layer_indices: Vec<usize>,
+    #[serde(default)]
+    pub layer_states: Vec<Value>,
     pub transform: [f64; 6],
     #[serde(default = "yes")]
     pub visible: bool,
@@ -27,6 +33,9 @@ pub struct InstanceRecord {
     /// Stable source-to-materialized child ID mappings for discovery APIs.
     #[serde(default)]
     pub child_ids: Vec<Value>,
+    /// Explicitly accepted property-level local edits reapplied after updates.
+    #[serde(default)]
+    pub local_patches: Vec<Value>,
     /// Hash of the last materialized state accepted by Pentool. Generic edits
     /// that change this hash are treated as undeclared local changes.
     #[serde(default)]
@@ -265,13 +274,13 @@ pub fn update_plan(file: &Path, id: &str, source: &Path) -> Result<Value> {
 
 fn update_plan_value(document: &Value, id: &str, raw: &Value, bytes: &[u8]) -> Result<Value> {
     let record: InstanceRecord = serde_json::from_value(inspect(document, id)?)?;
-    let manifest = crate::asset::manifest(&raw)?.context("source lacks asset metadata")?;
+    let manifest = crate::asset::manifest(raw)?.context("source lacks asset metadata")?;
     if manifest.id != record.asset_id {
         bail!("source asset ID does not match instance")
     }
-    let next_hash = crate::asset::hash_bytes(&bytes);
+    let next_hash = crate::asset::hash_bytes(bytes);
     let current_materialized_hash =
-        materialized_hash(&document, &record.page_id, &record.layer_ids)?;
+        materialized_hash(document, &record.page_id, &record.layer_ids)?;
     let local_changed = record
         .materialized_hash
         .as_deref()
@@ -299,7 +308,7 @@ fn update_plan_value(document: &Value, id: &str, raw: &Value, bytes: &[u8]) -> R
                         .property_definitions
                         .get(name)
                         .is_some_and(|accepted| property_identity(accepted) == property_identity(definition))
-                    && override_targets_exist(&raw, definition) => {}
+                    && override_targets_exist(raw, definition) => {}
             Some(definition)
                 if record.property_definitions.contains_key(name)
                     && property_identity(&record.property_definitions[name])
@@ -448,7 +457,7 @@ fn classify_changes(record: &InstanceRecord, document: &Value, incoming: &Value)
 fn collect_content_objects<'a>(value: &'a Value, output: &mut Vec<&'a Value>) {
     match value {
         Value::Object(map) => {
-            if map.get("content").is_some() || map.get("d").is_some() || map.get("kind").is_some() {
+            if map.get("content").is_some() || map.get("d").is_some() {
                 output.push(value);
             }
             map.values()
@@ -627,6 +636,183 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
     Ok(result)
 }
 
+pub fn update_resolved(
+    file: &Path,
+    id: &str,
+    source: &Path,
+    resolutions_file: &Path,
+    dry_run: bool,
+) -> Result<Value> {
+    let destination_bytes = fs::read(file)?;
+    let mut destination: Value = serde_json::from_slice(&destination_bytes)?;
+    let source_bytes = fs::read(source)?;
+    let mut source_raw: Value = serde_json::from_slice(&source_bytes)?;
+    let resolutions: Value = serde_json::from_slice(&fs::read(resolutions_file)?)
+        .context("resolution file must be valid JSON")?;
+    let detached = apply_resolutions(&mut destination, id, &mut source_raw, &resolutions)?;
+    if detached {
+        if !dry_run {
+            crate::transaction::commit_value(
+                file,
+                "instance-resolution-detach",
+                false,
+                None,
+                &destination,
+            )?;
+        }
+        return Ok(json!({"ok":true,"dry_run":dry_run,"instance":id,"resolution":"detach"}));
+    }
+    let plan = update_plan_value(&destination, id, &source_raw, &source_bytes)?;
+    if plan["conflicts"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
+        bail!("resolution file does not resolve every conflict")
+    }
+    if dry_run {
+        return Ok(json!({"ok":true,"dry_run":true,"plan":plan}));
+    }
+    let (updated, mut summary) = apply_update(destination, id, source_raw, &source_bytes)?;
+    let change =
+        crate::transaction::commit_value(file, "instance-update-resolved", false, None, &updated)?;
+    summary["change"] = serde_json::to_value(change)?;
+    summary["resolutions"] = resolutions;
+    Ok(summary)
+}
+
+fn apply_resolutions(
+    document: &mut Value,
+    id: &str,
+    source: &mut Value,
+    resolutions: &Value,
+) -> Result<bool> {
+    let actions = resolutions
+        .get("resolutions")
+        .unwrap_or(resolutions)
+        .as_array()
+        .context("resolution file must be an array or contain a resolutions array")?;
+    for resolution in actions.iter().filter(|resolution| {
+        resolution
+            .get("instance")
+            .and_then(Value::as_str)
+            .is_none_or(|instance| instance == id)
+    }) {
+        let action = resolution
+            .get("action")
+            .and_then(Value::as_str)
+            .context("resolution lacks action")?;
+        let property = resolution.get("property").and_then(Value::as_str);
+        match action {
+            "detach" => {
+                document
+                    .get_mut("instances")
+                    .and_then(Value::as_array_mut)
+                    .context("document has no instances")?
+                    .retain(|instance| instance.get("id").and_then(Value::as_str) != Some(id));
+                return Ok(true);
+            }
+            "take-source" => {
+                let current: InstanceRecord = serde_json::from_value(inspect(document, id)?)?;
+                let current_hash =
+                    materialized_hash(document, &current.page_id, &current.layer_ids)?;
+                let record = record_mut(document, id)?;
+                record["materialized_hash"] = Value::String(current_hash);
+                if let Some(property) = property {
+                    record["overrides"]
+                        .as_object_mut()
+                        .context("invalid overrides")?
+                        .remove(property);
+                } else {
+                    record["overrides"] = json!({});
+                    record["local_patches"] = json!([]);
+                }
+            }
+            "keep-local" => {
+                let current: InstanceRecord = serde_json::from_value(inspect(document, id)?)?;
+                let patches = local_patches(document, &current)?;
+                let current_hash =
+                    materialized_hash(document, &current.page_id, &current.layer_ids)?;
+                let record = record_mut(document, id)?;
+                record["local_patches"] = Value::Array(patches);
+                record["materialized_hash"] = Value::String(current_hash);
+                if let Some(property) = property {
+                    record["overrides"]
+                        .as_object_mut()
+                        .context("invalid overrides")?
+                        .remove(property);
+                }
+            }
+            "map-target" => {
+                let property = property.context("map-target requires property")?;
+                let target = resolution
+                    .get("target")
+                    .and_then(Value::as_str)
+                    .context("map-target requires target")?;
+                let field = resolution
+                    .get("field")
+                    .and_then(Value::as_str)
+                    .context("map-target requires field")?;
+                if !contains_object_id(source, target) {
+                    bail!("mapped target object not found: {target}")
+                }
+                let definition = source
+                    .get_mut("asset")
+                    .and_then(|asset| asset.get_mut("properties"))
+                    .and_then(|properties| properties.get_mut(property))
+                    .with_context(|| format!("incoming property not found: {property}"))?;
+                definition["targets"] = json!([{"object":target,"property":field}]);
+                let record = record_mut(document, id)?;
+                record["property_definitions"][property] = definition.clone();
+            }
+            other => bail!("unsupported conflict resolution: {other}"),
+        }
+    }
+    Ok(false)
+}
+
+fn record_mut<'a>(document: &'a mut Value, id: &str) -> Result<&'a mut Value> {
+    document
+        .get_mut("instances")
+        .and_then(Value::as_array_mut)
+        .and_then(|instances| {
+            instances
+                .iter_mut()
+                .find(|instance| instance.get("id").and_then(Value::as_str) == Some(id))
+        })
+        .context("instance not found")
+}
+
+fn local_patches(document: &Value, record: &InstanceRecord) -> Result<Vec<Value>> {
+    let local = selected_layers(document, &record.page_id, &record.layer_ids)?;
+    let mut patches = Vec::new();
+    for mapping in &record.child_ids {
+        let Some(source_id) = mapping.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(materialized_id) = mapping.get("new_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let (Some(base), Some(current)) = (
+            find_id_in_values(&record.base_layers, materialized_id),
+            find_id_in_values(&local, materialized_id),
+        ) else {
+            continue;
+        };
+        let Some(base) = base.as_object() else {
+            continue;
+        };
+        let Some(current) = current.as_object() else {
+            continue;
+        };
+        for (property, value) in current {
+            if property != "id" && base.get(property) != Some(value) {
+                patches.push(json!({"object":source_id,"property":property,"value":value}));
+            }
+        }
+    }
+    Ok(patches)
+}
+
 fn apply_update(
     mut destination: Value,
     id: &str,
@@ -636,6 +822,11 @@ fn apply_update(
     let old_value = inspect(&destination, id)?;
     let old: InstanceRecord = serde_json::from_value(old_value)?;
     let old_positions = layer_positions(&destination, &old.page_id, &old.layer_ids)?;
+    let preserved_states = if old.layer_states.is_empty() {
+        layer_states(&destination, &old.page_id, &old.layer_ids)?
+    } else {
+        old.layer_states.clone()
+    };
     let old_layers = take_layers(&mut destination, &old.page_id, &old.layer_ids)?;
     let manifest = crate::asset::manifest(&source_raw)?.context("source lacks asset metadata")?;
     let new_hash = crate::asset::hash_bytes(source_bytes);
@@ -667,6 +858,7 @@ fn apply_update(
         .collect::<Vec<_>>();
     let imported_layers = take_layers(&mut updated, &old.page_id, &new_ids)?;
     insert_layers_at(&mut updated, &old.page_id, imported_layers, &old_positions)?;
+    restore_layer_states(&mut updated, &old.page_id, &new_ids, &preserved_states)?;
     let next_base_layers = selected_layers(&updated, &old.page_id, &new_ids)?;
     for (name, value) in &old.overrides {
         let definition = manifest
@@ -675,7 +867,20 @@ fn apply_update(
             .with_context(|| format!("override target removed during update: {name}"))?;
         apply_override(&mut updated, &new_ids, definition, value)?;
     }
+    for patch in &old.local_patches {
+        let object = patch
+            .get("object")
+            .and_then(Value::as_str)
+            .context("local patch lacks object")?;
+        let property = patch
+            .get("property")
+            .and_then(Value::as_str)
+            .context("local patch lacks property")?;
+        let value = patch.get("value").context("local patch lacks value")?;
+        set_object_property(&mut updated, &new_ids, object, property, value)?;
+    }
     let next_materialized_hash = materialized_hash(&updated, &old.page_id, &new_ids)?;
+    let next_layer_states = layer_states(&updated, &old.page_id, &new_ids)?;
     let record = updated
         .get_mut("instances")
         .and_then(Value::as_array_mut)
@@ -684,14 +889,17 @@ fn apply_update(
                 .find(|v| v.get("id").and_then(Value::as_str) == Some(id))
         })
         .context("instance record lost during update")?;
-    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions,"materialized_hash":old.materialized_hash,"base_layers":old.base_layers,"property_definitions":old.property_definitions,"child_ids":old.child_ids});
+    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions,"materialized_hash":old.materialized_hash,"base_layers":old.base_layers,"property_definitions":old.property_definitions,"child_ids":old.child_ids,"local_patches":old.local_patches,"parent_id":old.parent_id,"layer_indices":old.layer_indices,"layer_states":old.layer_states});
     record["asset_version"] = Value::String(manifest.asset_version.clone());
     record["content_hash"] = Value::String(new_hash.clone());
     record["layer_ids"] = serde_json::to_value(&new_ids)?;
+    record["layer_indices"] = serde_json::to_value(&old_positions)?;
+    record["layer_states"] = serde_json::to_value(next_layer_states)?;
     record["materialized_hash"] = Value::String(next_materialized_hash);
     record["base_layers"] = Value::Array(next_base_layers);
     record["property_definitions"] = serde_json::to_value(&manifest.properties)?;
     record["child_ids"] = result.summary["objects"].clone();
+    record["local_patches"] = serde_json::to_value(&old.local_patches)?;
     record["previous"]
         .as_array_mut()
         .context("invalid instance history")?
@@ -700,12 +908,19 @@ fn apply_update(
     Ok((updated, summary))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_bulk(
     file: &Path,
     source: &Path,
     asset_filter: Option<&str>,
     page_filter: Option<&str>,
+    group_filter: Option<&str>,
+    version_filter: Option<&str>,
+    hash_filter: Option<&str>,
+    package_filter: Option<&str>,
+    stale_only: bool,
     continue_on_conflict: bool,
+    resolutions_file: Option<&Path>,
     dry_run: bool,
 ) -> Result<Value> {
     let before = fs::read(file)?;
@@ -714,35 +929,66 @@ pub fn update_bulk(
     let source_raw: Value = serde_json::from_slice(&source_bytes)?;
     let source_manifest =
         crate::asset::manifest(&source_raw)?.context("source lacks asset metadata")?;
-    let ids = document
-        .get("instances")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|instance| {
-            asset_filter
-                .is_none_or(|asset| instance.get("asset_id").and_then(Value::as_str) == Some(asset))
-                && page_filter.is_none_or(|page| {
+    let source_hash = crate::asset::hash_bytes(&source_bytes);
+    let ids =
+        document
+            .get("instances")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|instance| {
+                asset_filter.is_none_or(|asset| {
+                    instance.get("asset_id").and_then(Value::as_str) == Some(asset)
+                }) && page_filter.is_none_or(|page| {
                     instance.get("page_id").and_then(Value::as_str) == Some(page)
-                })
-                && instance.get("asset_id").and_then(Value::as_str)
-                    == Some(source_manifest.id.as_str())
-        })
-        .filter_map(|instance| {
-            instance
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .collect::<Vec<_>>();
+                }) && group_filter.is_none_or(|group| {
+                    instance.get("parent_id").and_then(Value::as_str) == Some(group)
+                }) && version_filter.is_none_or(|version| {
+                    instance.get("asset_version").and_then(Value::as_str) == Some(version)
+                }) && hash_filter.is_none_or(|hash| {
+                    instance.get("content_hash").and_then(Value::as_str) == Some(hash)
+                }) && package_filter.is_none_or(|package| {
+                    instance.get("library").and_then(Value::as_str) == Some(package)
+                }) && (!stale_only
+                    || instance.get("content_hash").and_then(Value::as_str)
+                        != Some(source_hash.as_str()))
+                    && instance.get("asset_id").and_then(Value::as_str)
+                        == Some(source_manifest.id.as_str())
+            })
+            .filter_map(|instance| {
+                instance
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
     if ids.is_empty() {
         bail!("no instances match the requested update scope")
     }
     let mut plans = Vec::with_capacity(ids.len());
     let mut updated_ids = Vec::new();
     let mut skipped = Vec::new();
+    let resolutions = resolutions_file
+        .map(|path| {
+            serde_json::from_slice::<Value>(&fs::read(path)?)
+                .context("resolution file must be valid JSON")
+        })
+        .transpose()?;
     for id in ids {
-        let plan = update_plan_value(&document, &id, &source_raw, &source_bytes)?;
+        let mut instance_source = source_raw.clone();
+        if let Some(resolutions) = &resolutions {
+            let mut candidate = document.clone();
+            if apply_resolutions(&mut candidate, &id, &mut instance_source, resolutions)? {
+                if !dry_run {
+                    document = candidate;
+                }
+                updated_ids.push(id.clone());
+                plans.push(json!({"instance":id,"resolution":"detach","conflicts":[]}));
+                continue;
+            }
+            document = candidate;
+        }
+        let plan = update_plan_value(&document, &id, &instance_source, &source_bytes)?;
         let conflicts = plan["conflicts"]
             .as_array()
             .is_some_and(|items| !items.is_empty());
@@ -750,7 +996,7 @@ pub fn update_bulk(
             skipped.push(id.clone());
         } else if plan["changed"].as_bool() == Some(true) {
             if !dry_run {
-                let (next, _) = apply_update(document, &id, source_raw.clone(), &source_bytes)?;
+                let (next, _) = apply_update(document, &id, instance_source, &source_bytes)?;
                 document = next;
             }
             updated_ids.push(id.clone());
@@ -850,6 +1096,19 @@ pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
         .get("child_ids")
         .cloned()
         .unwrap_or_else(|| json!([]));
+    record["local_patches"] = previous
+        .get("local_patches")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    record["parent_id"] = previous.get("parent_id").cloned().unwrap_or(Value::Null);
+    record["layer_indices"] = previous
+        .get("layer_indices")
+        .cloned()
+        .unwrap_or_else(|| previous["positions"].clone());
+    record["layer_states"] = previous
+        .get("layer_states")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
     record["previous"].as_array_mut().unwrap().pop();
     let rolled_back_to = record["asset_version"].clone();
     crate::transaction::commit_value(file, "instance-rollback", false, None, &raw)?;
@@ -908,6 +1167,41 @@ fn layer_positions(raw: &Value, page_id: &str, ids: &[String]) -> Result<Vec<usi
                 .with_context(|| format!("instance layer missing: {id}"))
         })
         .collect()
+}
+
+pub fn layer_positions_public(raw: &Value, page_id: &str, ids: &[String]) -> Result<Vec<usize>> {
+    layer_positions(raw, page_id, ids)
+}
+
+pub fn layer_states(raw: &Value, page_id: &str, ids: &[String]) -> Result<Vec<Value>> {
+    Ok(selected_layers(raw, page_id, ids)?
+        .into_iter()
+        .map(|layer| json!({"visible":layer.get("visible").cloned().unwrap_or(json!(true)),"locked":layer.get("locked").cloned().unwrap_or(json!(false))}))
+        .collect())
+}
+
+fn restore_layer_states(
+    raw: &mut Value,
+    page_id: &str,
+    ids: &[String],
+    states: &[Value],
+) -> Result<()> {
+    if states.is_empty() {
+        return Ok(());
+    }
+    let layers = page_mut(raw, page_id)?
+        .get_mut("layers")
+        .and_then(Value::as_array_mut)
+        .context("page layers missing")?;
+    for (id, state) in ids.iter().zip(states) {
+        let layer = layers
+            .iter_mut()
+            .find(|layer| layer.get("id").and_then(Value::as_str) == Some(id))
+            .with_context(|| format!("instance layer missing: {id}"))?;
+        layer["visible"] = state.get("visible").cloned().unwrap_or(json!(true));
+        layer["locked"] = state.get("locked").cloned().unwrap_or(json!(false));
+    }
+    Ok(())
 }
 
 fn insert_layers_at(
@@ -1094,6 +1388,9 @@ mod tests {
                 content_hash: "sha256:old".into(),
                 layer_ids: ids,
                 page_id: "page-1".into(),
+                parent_id: None,
+                layer_indices: vec![0],
+                layer_states: vec![],
                 transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
                 visible: true,
                 overrides: serde_json::Map::from_iter([(
@@ -1105,6 +1402,7 @@ mod tests {
                     json!({"targets":[{"object":"label","property":"content"}]}),
                 )]),
                 child_ids: vec![],
+                local_patches: vec![],
                 materialized_hash: Some(accepted),
                 base_layers: vec![],
                 previous: vec![],
@@ -1176,6 +1474,9 @@ mod tests {
                 content_hash: "sha256:old".into(),
                 layer_ids: ids,
                 page_id: "page-1".into(),
+                parent_id: None,
+                layer_indices: vec![1],
+                layer_states: vec![],
                 transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
                 visible: true,
                 overrides: serde_json::Map::from_iter([(
@@ -1187,6 +1488,7 @@ mod tests {
                     json!({"targets":[{"object":"label","property":"content"}]}),
                 )]),
                 child_ids: vec![],
+                local_patches: vec![],
                 materialized_hash: Some(accepted),
                 base_layers: base,
                 previous: vec![],
@@ -1219,7 +1521,30 @@ mod tests {
         assert_eq!(rolled_back_layers[1]["id"], "card-old-content");
         assert_eq!(rolled_back_layers[2]["id"], "check");
         assert_eq!(rolled_back["instances"][0]["asset_version"], "1.0.0");
+        let mut locally_edited = rolled_back;
+        locally_edited["pages"][0]["layers"][1]["texts"][0]["content"] = json!("Undeclared");
+        fs::write(&document_path, serde_json::to_vec(&locally_edited).unwrap()).unwrap();
+        let resolutions_path = temp_file("resolutions.json");
+        fs::write(
+            &resolutions_path,
+            br#"{"resolutions":[{"instance":"card","action":"take-source"}]}"#,
+        )
+        .unwrap();
+        update_resolved(
+            &document_path,
+            "card",
+            &source_path,
+            &resolutions_path,
+            false,
+        )
+        .unwrap();
+        let resolved: Value = serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
+        assert_eq!(
+            resolved["pages"][0]["layers"][1]["texts"][0]["content"],
+            "Source 1.1"
+        );
         let _ = fs::remove_file(document_path);
         let _ = fs::remove_file(source_path);
+        let _ = fs::remove_file(resolutions_path);
     }
 }
