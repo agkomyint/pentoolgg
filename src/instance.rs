@@ -258,9 +258,13 @@ fn parse_override_value(definition: &Value, value: &str) -> Result<Value> {
 
 pub fn update_plan(file: &Path, id: &str, source: &Path) -> Result<Value> {
     let document: Value = serde_json::from_slice(&fs::read(file)?)?;
-    let record: InstanceRecord = serde_json::from_value(inspect(&document, id)?)?;
     let bytes = fs::read(source)?;
     let raw: Value = serde_json::from_slice(&bytes)?;
+    update_plan_value(&document, id, &raw, &bytes)
+}
+
+fn update_plan_value(document: &Value, id: &str, raw: &Value, bytes: &[u8]) -> Result<Value> {
+    let record: InstanceRecord = serde_json::from_value(inspect(document, id)?)?;
     let manifest = crate::asset::manifest(&raw)?.context("source lacks asset metadata")?;
     if manifest.id != record.asset_id {
         bail!("source asset ID does not match instance")
@@ -410,7 +414,11 @@ fn constraints_accept(constraints: Option<&Value>, value: &Value) -> bool {
 }
 
 pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Value> {
-    let plan = update_plan(file, id, source)?;
+    let destination_bytes = fs::read(file)?;
+    let destination: Value = serde_json::from_slice(&destination_bytes)?;
+    let source_bytes = fs::read(source)?;
+    let source_raw: Value = serde_json::from_slice(&source_bytes)?;
+    let plan = update_plan_value(&destination, id, &source_raw, &source_bytes)?;
     if !plan["changed"].as_bool().unwrap_or(false) {
         return Ok(json!({"ok":true,"changed":false,"instance":id}));
     }
@@ -420,16 +428,23 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
     if dry_run {
         return Ok(json!({"ok":true,"dry_run":true,"plan":plan}));
     }
-    let destination_bytes = fs::read(file)?;
-    let mut destination: Value = serde_json::from_slice(&destination_bytes)?;
+    let (updated, result) = apply_update(destination, id, source_raw, &source_bytes)?;
+    crate::transaction::commit_value(file, "instance-update", false, None, &updated)?;
+    Ok(result)
+}
+
+fn apply_update(
+    mut destination: Value,
+    id: &str,
+    source_raw: Value,
+    source_bytes: &[u8],
+) -> Result<(Value, Value)> {
     let old_value = inspect(&destination, id)?;
     let old: InstanceRecord = serde_json::from_value(old_value)?;
     let old_positions = layer_positions(&destination, &old.page_id, &old.layer_ids)?;
     let old_layers = take_layers(&mut destination, &old.page_id, &old.layer_ids)?;
-    let source_bytes = fs::read(source)?;
-    let source_raw: Value = serde_json::from_slice(&source_bytes)?;
     let manifest = crate::asset::manifest(&source_raw)?.context("source lacks asset metadata")?;
-    let new_hash = crate::asset::hash_bytes(&source_bytes);
+    let new_hash = crate::asset::hash_bytes(source_bytes);
     let sx = (old.transform[0] * old.transform[0] + old.transform[1] * old.transform[1]).sqrt();
     let rotation = old.transform[1].atan2(old.transform[0]).to_degrees();
     let result = crate::import::compose(
@@ -487,10 +502,92 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
         .as_array_mut()
         .context("invalid instance history")?
         .push(history);
-    crate::transaction::commit_value(file, "instance-update", false, None, &updated)?;
-    Ok(
-        json!({"ok":true,"instance":id,"from":plan["from_version"],"to":manifest.asset_version,"content_hash":new_hash,"layers":new_ids}),
-    )
+    let summary = json!({"ok":true,"instance":id,"from":old.asset_version,"to":manifest.asset_version,"content_hash":new_hash,"layers":new_ids,"page":old.page_id,"positions":old_positions});
+    Ok((updated, summary))
+}
+
+pub fn update_bulk(
+    file: &Path,
+    source: &Path,
+    asset_filter: Option<&str>,
+    page_filter: Option<&str>,
+    continue_on_conflict: bool,
+    dry_run: bool,
+) -> Result<Value> {
+    let before = fs::read(file)?;
+    let mut document: Value = serde_json::from_slice(&before)?;
+    let source_bytes = fs::read(source)?;
+    let source_raw: Value = serde_json::from_slice(&source_bytes)?;
+    let source_manifest =
+        crate::asset::manifest(&source_raw)?.context("source lacks asset metadata")?;
+    let ids = document
+        .get("instances")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|instance| {
+            asset_filter
+                .is_none_or(|asset| instance.get("asset_id").and_then(Value::as_str) == Some(asset))
+                && page_filter.is_none_or(|page| {
+                    instance.get("page_id").and_then(Value::as_str) == Some(page)
+                })
+                && instance.get("asset_id").and_then(Value::as_str)
+                    == Some(source_manifest.id.as_str())
+        })
+        .filter_map(|instance| {
+            instance
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    if ids.is_empty() {
+        bail!("no instances match the requested update scope")
+    }
+    let mut plans = Vec::with_capacity(ids.len());
+    let mut updated_ids = Vec::new();
+    let mut skipped = Vec::new();
+    for id in ids {
+        let plan = update_plan_value(&document, &id, &source_raw, &source_bytes)?;
+        let conflicts = plan["conflicts"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty());
+        if conflicts {
+            skipped.push(id.clone());
+        } else if plan["changed"].as_bool() == Some(true) {
+            if !dry_run {
+                let (next, _) = apply_update(document, &id, source_raw.clone(), &source_bytes)?;
+                document = next;
+            }
+            updated_ids.push(id.clone());
+        }
+        plans.push(plan);
+    }
+    if !skipped.is_empty() && !continue_on_conflict && !dry_run {
+        bail!("bulk instance update has conflicts; no changes were committed")
+    }
+    let change = if dry_run || updated_ids.is_empty() {
+        Value::Null
+    } else {
+        serde_json::to_value(crate::transaction::commit_value(
+            file,
+            "instance-update-bulk",
+            false,
+            None,
+            &document,
+        )?)?
+    };
+    Ok(json!({
+        "ok": skipped.is_empty() || continue_on_conflict,
+        "dry_run":dry_run,
+        "asset_id":source_manifest.id,
+        "plans":plans,
+        "counts":{"matched":plans.len(),"updated":updated_ids.len(),"skipped":skipped.len()},
+        "updated":updated_ids,
+        "skipped":skipped,
+        "all_or_nothing":!continue_on_conflict,
+        "change":change
+    }))
 }
 
 pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {

@@ -827,9 +827,18 @@ enum InstanceAction {
         source: PathBuf,
     },
     Update {
-        id: String,
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        id: Option<String>,
         #[arg(long)]
         source: PathBuf,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        asset: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        continue_on_conflict: bool,
         #[arg(long)]
         dry_run: bool,
     },
@@ -1479,12 +1488,39 @@ async fn run() -> Result<()> {
             InstanceAction::Update {
                 id,
                 source,
+                all,
+                asset: asset_filter,
+                to,
+                continue_on_conflict,
                 dry_run,
             } => {
-                println!(
-                    "{}",
-                    json_pretty(instance::update(&input, &id, &source, dry_run)?)?
-                );
+                if let Some(expected) = to {
+                    let raw: serde_json::Value = serde_json::from_slice(&fs::read(&source)?)?;
+                    let actual = asset::manifest(&raw)?
+                        .context("source lacks asset metadata")?
+                        .asset_version;
+                    if actual != expected {
+                        anyhow::bail!("source version is {actual}, not requested {expected}")
+                    }
+                }
+                let result = if all {
+                    instance::update_bulk(
+                        &input,
+                        &source,
+                        asset_filter.as_deref(),
+                        selected_page,
+                        continue_on_conflict,
+                        dry_run,
+                    )?
+                } else {
+                    instance::update(
+                        &input,
+                        id.as_deref().context("instance ID is required")?,
+                        &source,
+                        dry_run,
+                    )?
+                };
+                println!("{}", json_pretty(result)?);
                 Ok(())
             }
             InstanceAction::Rollback { id, dry_run } => {
