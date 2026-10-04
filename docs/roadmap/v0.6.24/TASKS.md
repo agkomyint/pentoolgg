@@ -1,4 +1,4 @@
-# v0.6.3 — Trustworthy component updates and overrides
+# v0.6.24 — Trustworthy component updates and overrides
 
 Make asset instances safe to use across real multi-page designs. Updating an
 instance must preserve placement and stacking, retain compatible overrides, detect
@@ -14,7 +14,7 @@ content differs from its recorded source.
 - v0.6 package provenance, immutable versions, hashes, locks, and rollback metadata.
 - v0.6.2 ordered scene graph and unified history/transaction engine where available.
 
-If v0.6.3 ships before every v0.6.2 authoring feature, it must still use stable
+If v0.6.24 ships before every v0.6.2 authoring feature, it must still use stable
 container/index metadata and one shared transactional write path. It must not create
 a temporary second instance model.
 

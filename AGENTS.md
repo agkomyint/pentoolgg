@@ -45,7 +45,7 @@ implemented. Confirm behavior in code and tests.
 
 The current planned sequence is:
 
-1. `docs/roadmap/v0.6.3/TASKS.md`: trustworthy component updates and overrides;
+1. `docs/roadmap/v0.6.24/TASKS.md`: trustworthy component updates and overrides;
 2. `docs/roadmap/v0.7.0/TASKS.md`: raster images and non-destructive image editing;
 3. `docs/roadmap/v0.7.1/TASKS.md`: the follow-up milestone described there.
 

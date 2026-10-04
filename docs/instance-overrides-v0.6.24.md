@@ -1,6 +1,6 @@
-# Instance overrides and trustworthy updates (v0.6.3)
+# Instance overrides and trustworthy updates (v0.6.24)
 
-This document defines the v0.6.3 instance-update contract. It is normative for
+This document defines the v0.6.24 instance-update contract. It is normative for
 newly created instance records; older records without a stored materialization
 hash are treated as unverifiable and must not be updated silently.
 
@@ -82,7 +82,7 @@ and commits use the same plan and neither path mutates the document on conflict.
 ## Mutation protection
 
 Generic editing commands must not mutate attached instance internals invisibly.
-The complete v0.6.3 CLI will reject those edits by default with guidance to use an
+The complete v0.6.24 CLI will reject those edits by default with guidance to use an
 exposed property or detach the instance. An explicit tracked-edit mode may record a
 property-level patch against the base snapshot. Until a command implements that
 protection, the update-time materialization hash is the mandatory final guard: an
