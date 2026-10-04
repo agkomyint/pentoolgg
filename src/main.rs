@@ -1183,6 +1183,14 @@ async fn run() -> Result<()> {
                     .filter_map(|v| v.as_str().map(str::to_owned))
                     .collect::<Vec<_>>();
                 let id = next_instance_id(&result.document);
+                let page_id = result.summary["destination_page"]
+                    .as_str()
+                    .unwrap_or("page-1")
+                    .to_owned();
+                let materialized_hash =
+                    instance::materialized_hash(&result.document, &page_id, &layer_ids)?;
+                let base_layers =
+                    instance::selected_layers(&result.document, &page_id, &layer_ids)?;
                 instance::attach(
                     &mut result.document,
                     instance::InstanceRecord {
@@ -1192,10 +1200,7 @@ async fn run() -> Result<()> {
                         asset_version: item.version.clone(),
                         content_hash: item.content_hash.clone(),
                         layer_ids,
-                        page_id: result.summary["destination_page"]
-                            .as_str()
-                            .unwrap_or("page-1")
-                            .to_owned(),
+                        page_id,
                         transform: {
                             let r = rotate.to_radians();
                             [
@@ -1209,6 +1214,8 @@ async fn run() -> Result<()> {
                         },
                         visible: true,
                         overrides: Default::default(),
+                        materialized_hash: Some(materialized_hash),
+                        base_layers,
                         previous: vec![],
                     },
                 )?;

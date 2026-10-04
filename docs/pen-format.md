@@ -146,4 +146,6 @@ ordinary documents remain valid without them. An instance's imported layers are
 materialized in the document so rendering never depends on a library or network.
 
 The normative identity, packaging, registry, lockfile, and update rules are defined
-in [`PROTOCOL.md`](PROTOCOL.md).
+in [`PROTOCOL.md`](PROTOCOL.md). The v0.6.3 exposed-property schema, typed override
+serialization, and conflict rules are defined in
+[`instance-overrides-v0.6.3.md`](instance-overrides-v0.6.3.md).
