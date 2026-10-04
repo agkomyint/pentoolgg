@@ -277,6 +277,8 @@ fn update_plan_value(document: &Value, id: &str, raw: &Value, bytes: &[u8]) -> R
         .as_deref()
         .is_none_or(|accepted| accepted != current_materialized_hash);
     let mut conflicts = Vec::new();
+    let changes = classify_changes(&record, document, raw);
+    let classification_counts = classification_counts(&changes);
     if local_changed {
         conflicts.push(json!({
             "kind":"untracked-local-edit",
@@ -285,6 +287,7 @@ fn update_plan_value(document: &Value, id: &str, raw: &Value, bytes: &[u8]) -> R
             "base":record.materialized_hash,
             "local":current_materialized_hash,
             "incoming":next_hash,
+            "changes":changes.iter().filter(|change| change["local_changed"] == true).cloned().collect::<Vec<_>>(),
             "resolutions":["keep-local","take-source","detach"]
         }));
     }
@@ -307,8 +310,199 @@ fn update_plan_value(document: &Value, id: &str, raw: &Value, bytes: &[u8]) -> R
         }
     }
     Ok(
-        json!({"instance":id,"asset_id":record.asset_id,"from_version":record.asset_version,"to_version":manifest.asset_version,"from_hash":record.content_hash,"to_hash":next_hash,"changed":record.content_hash!=next_hash,"local_changed":local_changed,"materialized":{"accepted":record.materialized_hash,"current":current_materialized_hash},"overrides":record.overrides,"conflicts":conflicts}),
+        json!({"instance":id,"asset_id":record.asset_id,"page":record.page_id,"parent":null,"from_version":record.asset_version,"to_version":manifest.asset_version,"from_hash":record.content_hash,"to_hash":next_hash,"changed":record.content_hash!=next_hash,"local_changed":local_changed,"materialized":{"accepted":record.materialized_hash,"current":current_materialized_hash},"placement":{"page":record.page_id,"transform":record.transform,"visible":record.visible},"overrides":record.overrides,"changes":changes,"classification_counts":classification_counts,"conflicts":conflicts}),
     )
+}
+
+fn classification_counts(changes: &[Value]) -> Value {
+    let kinds = [
+        "added",
+        "removed",
+        "moved",
+        "renamed",
+        "type-changed",
+        "geometry-changed",
+        "style-changed",
+        "text-changed",
+        "locally-changed",
+        "overridden",
+        "unchanged",
+    ];
+    let mut counts = serde_json::Map::new();
+    for kind in kinds {
+        let count = if kind == "overridden" {
+            changes
+                .iter()
+                .filter(|change| {
+                    change["overrides"]
+                        .as_array()
+                        .is_some_and(|items| !items.is_empty())
+                })
+                .count()
+        } else {
+            changes
+                .iter()
+                .filter(|change| change["kind"].as_str() == Some(kind))
+                .count()
+        };
+        counts.insert(kind.into(), json!(count));
+    }
+    Value::Object(counts)
+}
+
+fn classify_changes(record: &InstanceRecord, document: &Value, incoming: &Value) -> Vec<Value> {
+    let local_layers =
+        selected_layers(document, &record.page_id, &record.layer_ids).unwrap_or_default();
+    let overridden = record
+        .property_definitions
+        .iter()
+        .filter(|(name, _)| record.overrides.contains_key(*name))
+        .flat_map(|(name, definition)| {
+            definition
+                .get("targets")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(move |target| {
+                    Some((
+                        target.get("object")?.as_str()?.to_owned(),
+                        target.get("property")?.as_str()?.to_owned(),
+                        name.clone(),
+                    ))
+                })
+        })
+        .collect::<Vec<_>>();
+    let mut changes = Vec::new();
+    for mapping in &record.child_ids {
+        let Some(source_id) = mapping.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(materialized_id) = mapping.get("new_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let base = find_id_in_values(&record.base_layers, materialized_id);
+        let local = find_id_in_values(&local_layers, materialized_id);
+        let next = find_id(incoming, source_id);
+        let kind = match (base, local, next) {
+            (_, _, None) => "removed",
+            (None, _, Some(_)) => "added",
+            (Some(base), Some(_local), Some(next)) if object_kind(base) != object_kind(next) => {
+                "type-changed"
+            }
+            (Some(base), Some(local), Some(next)) => {
+                if base.get("content") != next.get("content") {
+                    "text-changed"
+                } else if ["d", "x", "y", "width", "height", "transform"]
+                    .iter()
+                    .any(|key| base.get(*key) != next.get(*key))
+                {
+                    "geometry-changed"
+                } else if ["fill", "stroke", "stroke_width", "opacity", "style_ref"]
+                    .iter()
+                    .any(|key| base.get(*key) != next.get(*key))
+                {
+                    "style-changed"
+                } else if base != local {
+                    "locally-changed"
+                } else {
+                    "unchanged"
+                }
+            }
+            _ => "locally-changed",
+        };
+        let local_changed = base != local;
+        let override_paths = overridden
+            .iter()
+            .filter(|(object, _, _)| object == source_id)
+            .map(|(_, property, name)| json!({"property":name,"path":property}))
+            .collect::<Vec<_>>();
+        changes.push(json!({
+            "source_object_id":source_id,
+            "materialized_id":materialized_id,
+            "kind":kind,
+            "local_changed":local_changed,
+            "overrides":override_paths,
+            "base":object_summary(base),
+            "local":object_summary(local),
+            "incoming":object_summary(next)
+        }));
+    }
+    let mapped = record
+        .child_ids
+        .iter()
+        .filter_map(|mapping| mapping.get("id").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    let mut incoming_objects = Vec::new();
+    collect_content_objects(incoming, &mut incoming_objects);
+    for object in incoming_objects {
+        let Some(source_id) = object.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if !mapped.contains(source_id) {
+            changes.push(json!({"source_object_id":source_id,"materialized_id":null,"kind":"added","local_changed":false,"overrides":[],"base":null,"local":null,"incoming":object_summary(Some(object))}));
+        }
+    }
+    changes
+}
+
+fn collect_content_objects<'a>(value: &'a Value, output: &mut Vec<&'a Value>) {
+    match value {
+        Value::Object(map) => {
+            if map.get("content").is_some() || map.get("d").is_some() || map.get("kind").is_some() {
+                output.push(value);
+            }
+            map.values()
+                .for_each(|child| collect_content_objects(child, output));
+        }
+        Value::Array(values) => values
+            .iter()
+            .for_each(|child| collect_content_objects(child, output)),
+        _ => {}
+    }
+}
+
+fn find_id_in_values<'a>(values: &'a [Value], id: &str) -> Option<&'a Value> {
+    values.iter().find_map(|value| find_id(value, id))
+}
+
+fn find_id<'a>(value: &'a Value, id: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(map) => {
+            if map.get("id").and_then(Value::as_str) == Some(id) {
+                Some(value)
+            } else {
+                map.values().find_map(|child| find_id(child, id))
+            }
+        }
+        Value::Array(values) => values.iter().find_map(|child| find_id(child, id)),
+        _ => None,
+    }
+}
+
+fn object_kind(value: &Value) -> &'static str {
+    if value.get("content").is_some() {
+        "text"
+    } else if value.get("d").is_some() {
+        "path"
+    } else {
+        "object"
+    }
+}
+
+fn object_summary(value: Option<&Value>) -> Value {
+    let Some(value) = value else {
+        return Value::Null;
+    };
+    json!({
+        "kind":object_kind(value),
+        "content":value.get("content"),
+        "d":value.get("d"),
+        "fill":value.get("fill"),
+        "stroke":value.get("stroke"),
+        "stroke_width":value.get("stroke_width"),
+        "x":value.get("x"),"y":value.get("y"),
+        "width":value.get("width"),"height":value.get("height")
+    })
 }
 
 fn property_identity(definition: &Value) -> Value {
