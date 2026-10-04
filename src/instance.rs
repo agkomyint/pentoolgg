@@ -382,7 +382,13 @@ fn classify_changes(record: &InstanceRecord, document: &Value, incoming: &Value)
         })
         .collect::<Vec<_>>();
     let mut changes = Vec::new();
-    for mapping in &record.child_ids {
+    let mut incoming_objects = Vec::new();
+    collect_content_objects(incoming, &mut incoming_objects);
+    let incoming_order = incoming_objects
+        .iter()
+        .filter_map(|object| object.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    for (base_index, mapping) in record.child_ids.iter().enumerate() {
         let Some(source_id) = mapping.get("id").and_then(Value::as_str) else {
             continue;
         };
@@ -411,6 +417,9 @@ fn classify_changes(record: &InstanceRecord, document: &Value, incoming: &Value)
                     .any(|key| base.get(*key) != next.get(*key))
                 {
                     "style-changed"
+                } else if incoming_order.iter().position(|id| *id == source_id) != Some(base_index)
+                {
+                    "moved"
                 } else if base != local {
                     "locally-changed"
                 } else {
@@ -441,8 +450,6 @@ fn classify_changes(record: &InstanceRecord, document: &Value, incoming: &Value)
         .iter()
         .filter_map(|mapping| mapping.get("id").and_then(Value::as_str))
         .collect::<std::collections::HashSet<_>>();
-    let mut incoming_objects = Vec::new();
-    collect_content_objects(incoming, &mut incoming_objects);
     for object in incoming_objects {
         let Some(source_id) = object.get("id").and_then(Value::as_str) else {
             continue;
@@ -450,6 +457,33 @@ fn classify_changes(record: &InstanceRecord, document: &Value, incoming: &Value)
         if !mapped.contains(source_id) {
             changes.push(json!({"source_object_id":source_id,"materialized_id":null,"kind":"added","local_changed":false,"overrides":[],"base":null,"local":null,"incoming":object_summary(Some(object))}));
         }
+    }
+    let removed = changes
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change["kind"] == "removed")
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let added = changes
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change["kind"] == "added")
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let mut consumed = std::collections::HashSet::new();
+    for removed_index in removed {
+        if let Some(added_index) = added.iter().copied().find(|added_index| {
+            !consumed.contains(added_index)
+                && changes[removed_index]["base"] == changes[*added_index]["incoming"]
+        }) {
+            let new_id = changes[added_index]["source_object_id"].clone();
+            changes[removed_index]["kind"] = json!("renamed");
+            changes[removed_index]["incoming_source_object_id"] = new_id;
+            consumed.insert(added_index);
+        }
+    }
+    for index in consumed.into_iter().collect::<Vec<_>>().into_iter().rev() {
+        changes.remove(index);
     }
     changes
 }
@@ -966,7 +1000,7 @@ pub fn update_bulk(
         bail!("no instances match the requested update scope")
     }
     let mut plans = Vec::with_capacity(ids.len());
-    let mut updated_ids = Vec::new();
+    let mut pending = Vec::with_capacity(ids.len());
     let mut skipped = Vec::new();
     let resolutions = resolutions_file
         .map(|path| {
@@ -976,35 +1010,61 @@ pub fn update_bulk(
         .transpose()?;
     for id in ids {
         let mut instance_source = source_raw.clone();
+        let mut candidate = document.clone();
+        let mut detached = false;
         if let Some(resolutions) = &resolutions {
-            let mut candidate = document.clone();
             if apply_resolutions(&mut candidate, &id, &mut instance_source, resolutions)? {
-                if !dry_run {
-                    document = candidate;
-                }
-                updated_ids.push(id.clone());
                 plans.push(json!({"instance":id,"resolution":"detach","conflicts":[]}));
-                continue;
+                detached = true;
             }
-            document = candidate;
         }
-        let plan = update_plan_value(&document, &id, &instance_source, &source_bytes)?;
+        if detached {
+            pending.push((id, instance_source, true, false));
+            continue;
+        }
+        let plan = update_plan_value(&candidate, &id, &instance_source, &source_bytes)?;
         let conflicts = plan["conflicts"]
             .as_array()
             .is_some_and(|items| !items.is_empty());
         if conflicts {
             skipped.push(id.clone());
-        } else if plan["changed"].as_bool() == Some(true) {
-            if !dry_run {
-                let (next, _) = apply_update(document, &id, instance_source, &source_bytes)?;
-                document = next;
-            }
-            updated_ids.push(id.clone());
         }
+        let changed = plan["changed"].as_bool() == Some(true);
+        pending.push((id, instance_source, false, conflicts || !changed));
         plans.push(plan);
     }
     if !skipped.is_empty() && !continue_on_conflict && !dry_run {
         bail!("bulk instance update has conflicts; no changes were committed")
+    }
+    let mut updated_ids = Vec::new();
+    if !dry_run {
+        for (id, instance_source, detached, skip) in &mut pending {
+            if *skip {
+                continue;
+            }
+            if let Some(resolutions) = &resolutions {
+                let resolved_detach =
+                    apply_resolutions(&mut document, id, instance_source, resolutions)?;
+                if resolved_detach {
+                    updated_ids.push(id.clone());
+                    continue;
+                }
+            }
+            if *detached {
+                updated_ids.push(id.clone());
+                continue;
+            }
+            let (next, _) = apply_update(document, id, instance_source.clone(), &source_bytes)?;
+            document = next;
+            updated_ids.push(id.clone());
+        }
+    } else {
+        updated_ids.extend(
+            pending
+                .iter()
+                .filter(|(_, _, _, skip)| !skip)
+                .map(|(id, _, _, _)| id.clone()),
+        );
     }
     let change = if dry_run || updated_ids.is_empty() {
         Value::Null
@@ -1244,9 +1304,30 @@ pub fn selected_layers(raw: &Value, page_id: &str, ids: &[String]) -> Result<Vec
 }
 
 pub fn materialized_hash(raw: &Value, page_id: &str, ids: &[String]) -> Result<String> {
-    Ok(crate::asset::hash_bytes(&serde_json::to_vec(
-        &selected_layers(raw, page_id, ids)?,
-    )?))
+    let mut layers = Value::Array(selected_layers(raw, page_id, ids)?);
+    canonicalize_numbers(&mut layers);
+    Ok(crate::asset::hash_bytes(&serde_json::to_vec(&layers)?))
+}
+
+fn canonicalize_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) => {
+            if let Some(value) = number.as_f64() {
+                if value.is_finite()
+                    && value.fract() == 0.0
+                    && value >= i64::MIN as f64
+                    && value <= i64::MAX as f64
+                {
+                    *number = serde_json::Number::from(value as i64);
+                } else if let Some(value) = serde_json::Number::from_f64(value) {
+                    *number = value;
+                }
+            }
+        }
+        Value::Array(values) => values.iter_mut().for_each(canonicalize_numbers),
+        Value::Object(map) => map.values_mut().for_each(canonicalize_numbers),
+        _ => {}
+    }
 }
 
 pub fn annotate_inspection(document: &Value, output: &mut Value) {
