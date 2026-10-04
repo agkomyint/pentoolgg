@@ -1,0 +1,989 @@
+{
+  "components": [],
+  "fonts": [],
+  "format": "pentool",
+  "name": "Pentool 0.6.23 Showcase",
+  "pages": [
+    {
+      "canvas": {
+        "background": "#FFFFFF",
+        "height": 800,
+        "width": 1200
+      },
+      "id": "page-1",
+      "layers": [
+        {
+          "id": "layer-1",
+          "locked": false,
+          "name": "Layer 1",
+          "nodes": [
+            {
+              "height": 736.0,
+              "id": "app-shell",
+              "kind": "rect",
+              "radius_x": 28.0,
+              "radius_y": 28.0,
+              "style": {
+                "fill": {
+                  "fallback": "#111528"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 1136.0,
+              "x": 32.0,
+              "y": 32.0
+            },
+            {
+              "height": 696.0,
+              "id": "sidebar",
+              "kind": "rect",
+              "radius_x": 20.0,
+              "radius_y": 20.0,
+              "style": {
+                "fill": {
+                  "fallback": "#191F38"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 218.0,
+              "x": 52.0,
+              "y": 52.0
+            },
+            {
+              "height": 42.0,
+              "id": "brand-mark",
+              "kind": "rect",
+              "radius_x": 12.0,
+              "radius_y": 12.0,
+              "style": {
+                "fill": {
+                  "fallback": "#8B5CF6"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 42.0,
+              "x": 76.0,
+              "y": 78.0
+            },
+            {
+              "content": "P",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 25,
+              "font_weight": 700,
+              "id": "brand-letter",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#FFFFFF"
+                }
+              },
+              "x": 89,
+              "y": 109
+            },
+            {
+              "content": "PENTOOL",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 19,
+              "font_weight": 700,
+              "id": "brand-name",
+              "kind": "text",
+              "letter_spacing": 1.8,
+              "style": {
+                "fill": {
+                  "fallback": "#F7F8FF"
+                }
+              },
+              "x": 132,
+              "y": 108
+            },
+            {
+              "height": 48.0,
+              "id": "nav-active",
+              "kind": "rect",
+              "radius_x": 12.0,
+              "radius_y": 12.0,
+              "style": {
+                "fill": {
+                  "fallback": "#29264A"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 182.0,
+              "x": 70.0,
+              "y": 164.0
+            },
+            {
+              "cx": 94.0,
+              "cy": 188.0,
+              "id": "nav-dot",
+              "kind": "ellipse",
+              "radius_x": 6.0,
+              "radius_y": 6.0,
+              "style": {
+                "fill": {
+                  "fallback": "#A78BFA"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              }
+            },
+            {
+              "content": "Overview",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16,
+              "font_weight": 700,
+              "id": "nav-overview",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#FFFFFF"
+                }
+              },
+              "x": 114,
+              "y": 195
+            },
+            {
+              "content": "Components",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15,
+              "id": "nav-components",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#8891AE"
+                }
+              },
+              "x": 88,
+              "y": 253
+            },
+            {
+              "content": "Asset library",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15,
+              "id": "nav-assets",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#8891AE"
+                }
+              },
+              "x": 88,
+              "y": 301
+            },
+            {
+              "content": "History",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15,
+              "id": "nav-history",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#8891AE"
+                }
+              },
+              "x": 88,
+              "y": 349
+            },
+            {
+              "height": 108.0,
+              "id": "upgrade-card",
+              "kind": "rect",
+              "radius_x": 16.0,
+              "radius_y": 16.0,
+              "style": {
+                "fill": {
+                  "fallback": "#222943"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 182.0,
+              "x": 70.0,
+              "y": 618.0
+            },
+            {
+              "content": "v0.6.23",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16,
+              "font_weight": 700,
+              "id": "upgrade-title",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#C4B5FD"
+                }
+              },
+              "x": 88,
+              "y": 650
+            },
+            {
+              "content": "Reliable authoring\nand updates",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "id": "upgrade-copy",
+              "kind": "text",
+              "line_height": 1.35,
+              "style": {
+                "fill": {
+                  "fallback": "#AAB2CA"
+                }
+              },
+              "x": 88,
+              "y": 676
+            },
+            {
+              "content": "DESIGN OPERATIONS",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12,
+              "font_weight": 700,
+              "id": "eyebrow",
+              "kind": "text",
+              "letter_spacing": 2.4,
+              "style": {
+                "fill": {
+                  "fallback": "#9B8AFB"
+                }
+              },
+              "x": 310,
+              "y": 92
+            },
+            {
+              "content": "Workspace overview",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 34,
+              "font_weight": 700,
+              "id": "page-title",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#F8FAFF"
+                }
+              },
+              "x": 310,
+              "y": 132
+            },
+            {
+              "content": "A living system, rendered from one portable .pen file.",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15,
+              "id": "page-subtitle",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#929CB8"
+                }
+              },
+              "x": 310,
+              "y": 164
+            },
+            {
+              "height": 36.0,
+              "id": "status-pill",
+              "kind": "rect",
+              "radius_x": 18.0,
+              "radius_y": 18.0,
+              "style": {
+                "fill": {
+                  "fallback": "#173B36"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 124.0,
+              "x": 1008.0,
+              "y": 88.0
+            },
+            {
+              "cx": 1030.0,
+              "cy": 106.0,
+              "id": "status-dot",
+              "kind": "ellipse",
+              "radius_x": 5.0,
+              "radius_y": 5.0,
+              "style": {
+                "fill": {
+                  "fallback": "#34D399"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              }
+            },
+            {
+              "content": "All systems",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "font_weight": 700,
+              "id": "status-text",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#9AF1D0"
+                }
+              },
+              "x": 1043,
+              "y": 112
+            },
+            {
+              "height": 252.0,
+              "id": "hero",
+              "kind": "rect",
+              "radius_x": 22.0,
+              "radius_y": 22.0,
+              "style": {
+                "fill": {
+                  "fallback": "#222943"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 532.0,
+              "x": 310.0,
+              "y": 202.0
+            },
+            {
+              "content": "RENDER HEALTH",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12,
+              "font_weight": 700,
+              "id": "hero-label",
+              "kind": "text",
+              "letter_spacing": 1.8,
+              "style": {
+                "fill": {
+                  "fallback": "#8F99B5"
+                }
+              },
+              "x": 338,
+              "y": 238
+            },
+            {
+              "content": "99.98%",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 46,
+              "font_weight": 700,
+              "id": "hero-value",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#FFFFFF"
+                }
+              },
+              "x": 338,
+              "y": 295
+            },
+            {
+              "content": "+2.4% this release",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14,
+              "id": "hero-delta",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#6EE7B7"
+                }
+              },
+              "x": 340,
+              "y": 326
+            },
+            {
+              "height": 42.0,
+              "id": "bar-1",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#4C426F"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 342.0,
+              "y": 382.0
+            },
+            {
+              "height": 64.0,
+              "id": "bar-2",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#5D4C8D"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 402.0,
+              "y": 360.0
+            },
+            {
+              "height": 84.0,
+              "id": "bar-3",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#7054B8"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 462.0,
+              "y": 340.0
+            },
+            {
+              "height": 56.0,
+              "id": "bar-4",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#604AA1"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 522.0,
+              "y": 368.0
+            },
+            {
+              "height": 106.0,
+              "id": "bar-5",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#8061D1"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 582.0,
+              "y": 318.0
+            },
+            {
+              "height": 132.0,
+              "id": "bar-6",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#8B5CF6"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 642.0,
+              "y": 292.0
+            },
+            {
+              "height": 154.0,
+              "id": "bar-7",
+              "kind": "rect",
+              "radius_x": 8.0,
+              "radius_y": 8.0,
+              "style": {
+                "fill": {
+                  "fallback": "#A78BFA"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 46.0,
+              "x": 702.0,
+              "y": 270.0
+            },
+            {
+              "height": 252.0,
+              "id": "release-card",
+              "kind": "rect",
+              "radius_x": 22.0,
+              "radius_y": 22.0,
+              "style": {
+                "fill": {
+                  "fallback": "#6D4BD8"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 266.0,
+              "x": 866.0,
+              "y": 202.0
+            },
+            {
+              "content": "LATEST RELEASE",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12,
+              "font_weight": 700,
+              "id": "release-kicker",
+              "kind": "text",
+              "letter_spacing": 1.7,
+              "style": {
+                "fill": {
+                  "fallback": "#DDD6FE"
+                }
+              },
+              "x": 894,
+              "y": 240
+            },
+            {
+              "content": "0.6.23",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 40,
+              "font_weight": 700,
+              "id": "release-version",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#FFFFFF"
+                }
+              },
+              "x": 894,
+              "y": 297
+            },
+            {
+              "content": "V4-native editing\nPredictable tokens\nSafer instances",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16,
+              "id": "release-copy",
+              "kind": "text",
+              "line_height": 1.55,
+              "style": {
+                "fill": {
+                  "fallback": "#EEEAFE"
+                }
+              },
+              "x": 894,
+              "y": 340
+            },
+            {
+              "height": 218.0,
+              "id": "metric-a",
+              "kind": "rect",
+              "radius_x": 20.0,
+              "radius_y": 20.0,
+              "style": {
+                "fill": {
+                  "fallback": "#191F38"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 252.0,
+              "x": 310.0,
+              "y": 478.0
+            },
+            {
+              "content": "SCENE NODES",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12,
+              "font_weight": 700,
+              "id": "metric-a-label",
+              "kind": "text",
+              "letter_spacing": 1.5,
+              "style": {
+                "fill": {
+                  "fallback": "#8891AE"
+                }
+              },
+              "x": 336,
+              "y": 516
+            },
+            {
+              "content": "1,284",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 38,
+              "font_weight": 700,
+              "id": "metric-a-value",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#F8FAFF"
+                }
+              },
+              "x": 336,
+              "y": 573
+            },
+            {
+              "height": 10.0,
+              "id": "metric-a-track",
+              "kind": "rect",
+              "radius_x": 5.0,
+              "radius_y": 5.0,
+              "style": {
+                "fill": {
+                  "fallback": "#2E3654"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 198.0,
+              "x": 336.0,
+              "y": 625.0
+            },
+            {
+              "height": 10.0,
+              "id": "metric-a-fill",
+              "kind": "rect",
+              "radius_x": 5.0,
+              "radius_y": 5.0,
+              "style": {
+                "fill": {
+                  "fallback": "#8B5CF6"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 146.0,
+              "x": 336.0,
+              "y": 625.0
+            },
+            {
+              "content": "74% structured",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "id": "metric-a-note",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#AAB2CA"
+                }
+              },
+              "x": 336,
+              "y": 665
+            },
+            {
+              "height": 218.0,
+              "id": "metric-b",
+              "kind": "rect",
+              "radius_x": 20.0,
+              "radius_y": 20.0,
+              "style": {
+                "fill": {
+                  "fallback": "#191F38"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 258.0,
+              "x": 584.0,
+              "y": 478.0
+            },
+            {
+              "content": "TRANSACTIONS",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12,
+              "font_weight": 700,
+              "id": "metric-b-label",
+              "kind": "text",
+              "letter_spacing": 1.5,
+              "style": {
+                "fill": {
+                  "fallback": "#8891AE"
+                }
+              },
+              "x": 610,
+              "y": 516
+            },
+            {
+              "content": "Zero loss",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 34,
+              "font_weight": 700,
+              "id": "metric-b-value",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#F8FAFF"
+                }
+              },
+              "x": 610,
+              "y": 573
+            },
+            {
+              "cx": 622.0,
+              "cy": 632.0,
+              "id": "safe-dot",
+              "kind": "ellipse",
+              "radius_x": 10.0,
+              "radius_y": 10.0,
+              "style": {
+                "fill": {
+                  "fallback": "#34D399"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              }
+            },
+            {
+              "content": "Recovery history active",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "id": "safe-note",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#AAB2CA"
+                }
+              },
+              "x": 644,
+              "y": 638
+            },
+            {
+              "height": 218.0,
+              "id": "activity",
+              "kind": "rect",
+              "radius_x": 20.0,
+              "radius_y": 20.0,
+              "style": {
+                "fill": {
+                  "fallback": "#191F38"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              },
+              "width": 266.0,
+              "x": 866.0,
+              "y": 478.0
+            },
+            {
+              "content": "RECENT ACTIVITY",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12,
+              "font_weight": 700,
+              "id": "activity-label",
+              "kind": "text",
+              "letter_spacing": 1.5,
+              "style": {
+                "fill": {
+                  "fallback": "#8891AE"
+                }
+              },
+              "x": 892,
+              "y": 516
+            },
+            {
+              "cx": 902.0,
+              "cy": 559.0,
+              "id": "activity-dot-1",
+              "kind": "ellipse",
+              "radius_x": 6.0,
+              "radius_y": 6.0,
+              "style": {
+                "fill": {
+                  "fallback": "#A78BFA"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              }
+            },
+            {
+              "content": "Canvas migrated to v4",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "id": "activity-1",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#D9DDF0"
+                }
+              },
+              "x": 920,
+              "y": 565
+            },
+            {
+              "cx": 902.0,
+              "cy": 603.0,
+              "id": "activity-dot-2",
+              "kind": "ellipse",
+              "radius_x": 6.0,
+              "radius_y": 6.0,
+              "style": {
+                "fill": {
+                  "fallback": "#60A5FA"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              }
+            },
+            {
+              "content": "Token refs preserved",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "id": "activity-2",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#D9DDF0"
+                }
+              },
+              "x": 920,
+              "y": 609
+            },
+            {
+              "cx": 902.0,
+              "cy": 647.0,
+              "id": "activity-dot-3",
+              "kind": "ellipse",
+              "radius_x": 6.0,
+              "radius_y": 6.0,
+              "style": {
+                "fill": {
+                  "fallback": "#34D399"
+                },
+                "stroke": {
+                  "fallback": "none"
+                },
+                "stroke_width": {
+                  "fallback": 0.0
+                }
+              }
+            },
+            {
+              "content": "Regression suite passed",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13,
+              "id": "activity-3",
+              "kind": "text",
+              "style": {
+                "fill": {
+                  "fallback": "#D9DDF0"
+                }
+              },
+              "x": 920,
+              "y": 653
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Page 1"
+    }
+  ],
+  "styles": {
+    "color.accent": {
+      "type": "color",
+      "value": "#8B5CF6"
+    },
+    "color.success": {
+      "type": "color",
+      "value": "#34D399"
+    }
+  },
+  "version": 4
+}
