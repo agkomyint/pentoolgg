@@ -46,6 +46,13 @@ jobs:
         run: |
           cargo run --release --locked --target ${{ matrix.target }} -- tree docs/fixtures/v4-scene.pen --limit 1
           cargo run --release --locked --target ${{ matrix.target }} -- search docs/fixtures/v4-scene.pen semantic --kind text
+      - name: Smoke test v4 creation and basic editing
+        shell: bash
+        run: |
+          cargo run --release --locked --target ${{ matrix.target }} -- new v4-smoke.pen --width 320 --height 240
+          cargo run --release --locked --target ${{ matrix.target }} -- canvas v4-smoke.pen --width 640
+          cargo run --release --locked --target ${{ matrix.target }} -- path v4-smoke.pen put outline --layer layer-1 --d 'M0 0 L10 10' --stroke '#112233' --width 2
+          cargo run --release --locked --target ${{ matrix.target }} -- tree v4-smoke.pen
       - name: Smoke test large-document budget
         run: cargo run --release --locked --target ${{ matrix.target }} -- benchmark --layers 50 --objects 5000 --max-ms 60000
       - name: Smoke test pages and import

@@ -8,6 +8,154 @@ use std::collections::HashSet;
 pub const VERSION: u64 = 4;
 pub const MAX_DEPTH: usize = 64;
 
+pub fn new_document(width: u32, height: u32) -> Value {
+    json!({
+        "format": "pentool",
+        "version": VERSION,
+        "name": "Untitled",
+        "pages": [{
+            "id": "page-1",
+            "name": "Page 1",
+            "canvas": {"width": width, "height": height, "background": "#ffffff"},
+            "layers": [{"id": "layer-1", "name": "Layer 1", "visible": true, "locked": false, "nodes": []}]
+        }],
+        "styles": {},
+        "components": [],
+        "fonts": []
+    })
+}
+
+pub fn edit_canvas(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    width: Option<u32>,
+    height: Option<u32>,
+    background: Option<&str>,
+    name: Option<&str>,
+) -> Result<()> {
+    validate(raw)?;
+    if let Some(name) = name {
+        raw["name"] = json!(name);
+    }
+    let canvas = page_mut(raw, page_id)?
+        .get_mut("canvas")
+        .and_then(Value::as_object_mut)
+        .context("page has no canvas")?;
+    if let Some(width) = width {
+        canvas.insert("width".into(), json!(width));
+    }
+    if let Some(height) = height {
+        canvas.insert("height".into(), json!(height));
+    }
+    if let Some(background) = background {
+        canvas.insert("background".into(), json!(background));
+    }
+    validate(raw)
+}
+
+pub fn apply_path(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    action: crate::editing::PathAction,
+) -> Result<()> {
+    use crate::editing::PathAction;
+    validate(raw)?;
+    let page = page_mut(raw, page_id)?;
+    match action {
+        PathAction::Put {
+            id,
+            layer,
+            mut d,
+            stroke,
+            width,
+            fill,
+            closed,
+            cap,
+            join,
+            miter_limit,
+        } => {
+            if !width.is_finite() || width < 0.0 {
+                bail!("width must be finite and nonnegative")
+            }
+            if !miter_limit.is_finite() || !(1.0..=1000.0).contains(&miter_limit) {
+                bail!("miter limit must be finite and between 1 and 1000")
+            }
+            if closed && !d.trim_end().ends_with(['z', 'Z']) {
+                d.push_str(" Z")
+            }
+            if d.trim().is_empty() {
+                bail!("path data cannot be empty")
+            }
+            for segment in svgtypes::PathParser::from(d.as_str()) {
+                segment.context("invalid SVG path data")?;
+            }
+            let replacement = json!({"kind":"path","id":id,"d":d,"closed":closed,"style":{"fill":{"fallback":fill},"stroke":{"fallback":stroke},"stroke_width":{"fallback":width},"stroke_linecap":{"fallback":cap.svg()},"stroke_linejoin":{"fallback":join.svg()},"stroke_miterlimit":{"fallback":miter_limit}}});
+            let nodes = layer_nodes_mut(page, &layer)?;
+            if let Some(existing) = find_node_in_mut(nodes, &id) {
+                *existing = replacement;
+            } else {
+                if pages_node_ids(page).contains(id.as_str()) {
+                    bail!("node ID already exists on page: {id}")
+                }
+                layer_nodes_mut(page, &layer)?.push(replacement);
+            }
+        }
+        PathAction::Style {
+            id,
+            layer,
+            cap,
+            join,
+            miter_limit,
+        } => {
+            if let Some(value) = miter_limit {
+                if !value.is_finite() || !(1.0..=1000.0).contains(&value) {
+                    bail!("miter limit must be finite and between 1 and 1000")
+                }
+            }
+            let node =
+                find_node_in_mut(layer_nodes_mut(page, &layer)?, &id).context("path not found")?;
+            if node.get("kind").and_then(Value::as_str) != Some("path") {
+                bail!("node is not a path")
+            }
+            if let Some(value) = cap {
+                node["style"]["stroke_linecap"]["fallback"] = json!(value.svg());
+            }
+            if let Some(value) = join {
+                node["style"]["stroke_linejoin"]["fallback"] = json!(value.svg());
+            }
+            if let Some(value) = miter_limit {
+                node["style"]["stroke_miterlimit"]["fallback"] = json!(value);
+            }
+        }
+        PathAction::Remove { id, layer } => {
+            let nodes = layer_nodes_mut(page, &layer)?;
+            let index = nodes
+                .iter()
+                .position(|node| node.get("id").and_then(Value::as_str) == Some(&id))
+                .context("path not found")?;
+            if nodes[index].get("kind").and_then(Value::as_str) != Some("path") {
+                bail!("node is not a path")
+            }
+            nodes.remove(index);
+        }
+    }
+    validate(raw)
+}
+
+fn find_node_in_mut<'a>(nodes: &'a mut [Value], id: &str) -> Option<&'a mut Value> {
+    for node in nodes {
+        if node.get("id").and_then(Value::as_str) == Some(id) {
+            return Some(node);
+        }
+        if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+            if let Some(found) = find_node_in_mut(children, id) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum ShapeKind {
     Rect,
@@ -391,15 +539,34 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                         .and_then(Value::as_f64)
                         .unwrap_or(16.0),
                 );
-                let width = node
+                let content = node
                     .get("content")
                     .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .chars()
-                    .count() as f64
-                    * size
-                    * 0.6;
-                Rect::new(x, y - size, x + width, y)
+                    .unwrap_or_default();
+                let width = node
+                    .get("width")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_else(|| {
+                        content
+                            .lines()
+                            .map(|line| line.chars().count())
+                            .max()
+                            .unwrap_or(0) as f64
+                            * size
+                            * 0.6
+                    });
+                let height = node
+                    .get("height")
+                    .and_then(Value::as_f64)
+                    .unwrap_or_else(|| {
+                        content.lines().count().max(1) as f64
+                            * size
+                            * node
+                                .get("line_height")
+                                .and_then(Value::as_f64)
+                                .unwrap_or(1.2)
+                    });
+                Rect::new(x, y - size, x + width, y - size + height)
             }
             "instance" => {
                 return local(
@@ -1194,7 +1361,14 @@ pub fn apply_batch(
                             stroke_width: n("stroke_width"),
                         },
                     )?;
-                    if let Some(reference)=operation.get("fill_ref").and_then(Value::as_str){let page_value=page_mut(&mut candidate,page)?;let node=find_node_mut(page_value,&id).unwrap();node["style"]["fill"]["ref"]=json!(reference);}
+                    if let Some(reference) = operation.get("fill_ref").and_then(Value::as_str) {
+                        let node = find_node_mut(page_mut(&mut candidate, page)?, &id).unwrap();
+                        node["style"]["fill"]["ref"] = json!(reference);
+                    }
+                    if let Some(reference) = operation.get("stroke_ref").and_then(Value::as_str) {
+                        let node = find_node_mut(page_mut(&mut candidate, page)?, &id).unwrap();
+                        node["style"]["stroke"]["ref"] = json!(reference);
+                    }
                     json!({"type":kind,"id":id})
                 }
                 "put-path" | "put-text" => {
@@ -1214,6 +1388,7 @@ pub fn apply_batch(
                         "kind".into(),
                         json!(if kind == "put-path" { "path" } else { "text" }),
                     );
+                    normalize_batch_style(object, kind)?;
                     layer_nodes_mut(page_value, &layer)?.push(node);
                     json!({"type":kind,"id":id})
                 }
@@ -1303,6 +1478,64 @@ pub fn apply_batch(
     validate(&candidate)?;
     *raw = candidate;
     Ok(changes)
+}
+
+fn normalize_batch_style(object: &mut Map<String, Value>, operation: &str) -> Result<()> {
+    let mut style = object
+        .remove("style")
+        .unwrap_or_else(|| json!({}))
+        .as_object()
+        .cloned()
+        .context("style must be an object")?;
+    let keys: &[&str] = if operation == "put-path" {
+        &[
+            "fill",
+            "stroke",
+            "stroke_width",
+            "stroke_linecap",
+            "stroke_linejoin",
+            "stroke_miterlimit",
+        ]
+    } else {
+        &["fill"]
+    };
+    for key in keys {
+        if let Some(value) = object.remove(*key) {
+            style.insert(
+                (*key).into(),
+                if value.is_object() {
+                    value
+                } else {
+                    json!({"fallback": value})
+                },
+            );
+        }
+        let reference_key = format!("{key}_ref");
+        if let Some(reference) = object.remove(&reference_key) {
+            if !reference.is_string() {
+                bail!("{reference_key} must be a string")
+            }
+            let entry = style.entry(*key).or_insert_with(|| json!({"fallback": if *key == "stroke_width" { json!(0) } else { json!("none") }}));
+            entry["ref"] = reference;
+        }
+    }
+    if operation == "put-path" {
+        style
+            .entry("fill")
+            .or_insert_with(|| json!({"fallback":"none"}));
+        style
+            .entry("stroke")
+            .or_insert_with(|| json!({"fallback":"none"}));
+        style
+            .entry("stroke_width")
+            .or_insert_with(|| json!({"fallback":0}));
+    } else {
+        style
+            .entry("fill")
+            .or_insert_with(|| json!({"fallback":"#111827"}));
+    }
+    object.insert("style".into(), Value::Object(style));
+    Ok(())
 }
 
 fn pages_node_ids(page: &Value) -> HashSet<&str> {
@@ -1964,6 +2197,93 @@ mod tests {
         assert_eq!(shapes["matches"], 1);
         assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
     }
+
+    #[test]
+    fn new_canvas_and_path_commands_are_native_v4() {
+        let mut raw = new_document(320, 240);
+        assert_eq!(raw["version"], 4);
+        edit_canvas(&mut raw, None, Some(640), None, Some("#abc"), Some("Demo")).unwrap();
+        assert_eq!(raw["pages"][0]["canvas"]["width"], 640);
+        assert_eq!(raw["name"], "Demo");
+        apply_path(
+            &mut raw,
+            None,
+            crate::editing::PathAction::Put {
+                id: "outline".into(),
+                layer: "layer-1".into(),
+                d: "M0 0 L10 10".into(),
+                stroke: "#123456".into(),
+                width: 2.0,
+                fill: "none".into(),
+                closed: false,
+                cap: crate::document::StrokeCap::Round,
+                join: crate::document::StrokeJoin::Bevel,
+                miter_limit: 4.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(raw["pages"][0]["layers"][0]["nodes"][0]["kind"], "path");
+        assert_eq!(
+            raw["pages"][0]["layers"][0]["nodes"][0]["style"]["stroke"]["fallback"],
+            "#123456"
+        );
+    }
+
+    #[test]
+    fn batch_flat_styles_and_stroke_refs_are_normalized() {
+        let mut raw = new_document(100, 100);
+        raw["styles"]["outline"] = json!({"type":"color","value":"#112233"});
+        let operations = json!([{
+            "type":"put-path", "id":"p", "layer":"layer-1", "d":"M0 0 L20 20",
+            "fill":"none", "stroke":"#000000", "stroke_ref":"outline", "stroke_width":3
+        }]);
+        apply_batch(&mut raw, None, operations.as_array().unwrap()).unwrap();
+        let node = &raw["pages"][0]["layers"][0]["nodes"][0];
+        assert_eq!(node["style"]["stroke"]["ref"], "outline");
+        assert_eq!(node["style"]["stroke_width"]["fallback"], 3);
+        assert!(node.get("stroke").is_none());
+        let usage = crate::style::apply(
+            &mut raw,
+            crate::style::Operation::Usage,
+            Some("outline"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(usage["ids"], json!(["p"]));
+        let tree = inspect_paginated_v4(&raw, None, None, None, None, 0, 10).unwrap();
+        assert_eq!(
+            tree["layers"][0]["objects"][0]["style_refs"]["stroke"],
+            "outline"
+        );
+        let flat = flatten_to_v3(&raw).unwrap();
+        assert_eq!(
+            flat["pages"][0]["layers"][0]["paths"][0]["stroke"],
+            "#112233"
+        );
+    }
+
+    #[test]
+    fn bounded_text_uses_box_bounds_inside_groups() {
+        let mut raw = new_document(800, 600);
+        raw["pages"][0]["layers"][0]["nodes"] = json!([
+            {"kind":"rect","id":"card","x":0,"y":0,"width":260,"height":100,"radius_x":0,"radius_y":0,"style":{}},
+            {"kind":"text","id":"copy","content":"a very long line that would otherwise measure wider","x":0,"y":16,"width":200,"height":40,"font_size":16,"line_height":1.2,"style":{"fill":{"fallback":"#000"}}}
+        ]);
+        apply_group(
+            &mut raw,
+            None,
+            GroupAction::Create {
+                id: "group".into(),
+                layer: "layer-1".into(),
+                children: vec!["card".into(), "copy".into()],
+            },
+        )
+        .unwrap();
+        let bounds = node_bounds(&raw, None, "group").unwrap();
+        assert_eq!(bounds["width"], 260.0);
+    }
 }
 
 pub fn inspect_paginated_v4(
@@ -2099,6 +2419,20 @@ fn collect_v4_matches(
             }
             if let Some(content) = content {
                 object["content"] = json!(content);
+            }
+            if let Some(style) = node.get("style").and_then(Value::as_object) {
+                let refs = style
+                    .iter()
+                    .filter_map(|(property, value)| {
+                        value
+                            .get("ref")
+                            .and_then(Value::as_str)
+                            .map(|reference| (property.clone(), json!(reference)))
+                    })
+                    .collect::<Map<String, Value>>();
+                if !refs.is_empty() {
+                    object["style_refs"] = Value::Object(refs);
+                }
             }
             output.push(object);
         }

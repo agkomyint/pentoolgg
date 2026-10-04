@@ -821,7 +821,14 @@ enum LockAction {
     },
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(error) = cli_main() {
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+}
+
+fn cli_main() -> Result<()> {
     let wants_json = std::env::args_os().any(|arg| arg == "--json");
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -1680,28 +1687,51 @@ async fn run() -> Result<()> {
             height,
             background,
             name,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "canvas",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| {
-                if let Some(v) = width {
-                    doc.canvas.width = v;
-                }
-                if let Some(v) = height {
-                    doc.canvas.height = v;
-                }
-                if let Some(v) = background {
-                    doc.canvas.background = v;
-                }
-                if let Some(v) = name {
-                    doc.name = v;
-                }
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+                scene::edit_canvas(
+                    &mut raw,
+                    selected_page,
+                    width,
+                    height,
+                    background.as_deref(),
+                    name.as_deref(),
+                )?;
+                let summary = transaction::commit_value(
+                    &input,
+                    "canvas",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!("{}", serde_json::to_string(&summary)?);
                 Ok(())
-            },
-        ),
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "canvas",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| {
+                        if let Some(v) = width {
+                            doc.canvas.width = v;
+                        }
+                        if let Some(v) = height {
+                            doc.canvas.height = v;
+                        }
+                        if let Some(v) = background {
+                            doc.canvas.background = v;
+                        }
+                        if let Some(v) = name {
+                            doc.name = v;
+                        }
+                        Ok(())
+                    },
+                )
+            }
+        }
         Command::Layer {
             input,
             action,
@@ -1720,21 +1750,37 @@ async fn run() -> Result<()> {
             action,
             dry_run,
             if_revision,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "path",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| editing::path(doc, action),
-        ),
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+                scene::apply_path(&mut raw, selected_page, action)?;
+                let summary = transaction::commit_value(
+                    &input,
+                    "path",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!("{}", serde_json::to_string(&summary)?);
+                Ok(())
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "path",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| editing::path(doc, action),
+                )
+            }
+        }
         Command::New {
             output,
             width,
             height,
         } => {
-            let doc = Document::new(width, height);
-            doc.validate().map_err(anyhow::Error::msg)?;
+            let doc = scene::new_document(width, height);
+            scene::validate(&doc)?;
             fs::write(&output, serde_json::to_vec_pretty(&doc)?)
                 .with_context(|| format!("could not write {}", output.display()))?;
             println!("Created {}", output.display());

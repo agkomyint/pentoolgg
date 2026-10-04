@@ -27,6 +27,28 @@ shows shapes, text, styles, groups, and temporary aliases in one transaction:
 pentool batch card.pen docs/fixtures/v4-batch.json
 ```
 
+Batch operations may use flat style conveniences. Pentool normalizes these to the
+nested v4 `style` representation, so the following path is equivalent to supplying
+`style.fill`, `style.stroke`, and `style.stroke_width` objects directly:
+
+```json
+{
+  "type": "put-path",
+  "id": "outline",
+  "layer": "content",
+  "d": "M 0 0 L 100 0 L 100 100 Z",
+  "fill": "none",
+  "stroke": "#111827",
+  "stroke_ref": "color.outline",
+  "stroke_width": 2
+}
+```
+
+`fill_ref` and `stroke_ref` retain the literal value as a fallback. Text accepts
+flat `fill`/`fill_ref` or the corresponding nested style. Do not mix a flat and a
+nested value for the same property in one operation; the flat value is explicit
+and takes precedence.
+
 ## Reusable local components
 
 ```powershell

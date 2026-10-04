@@ -218,6 +218,7 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
     let mut destination: Value = serde_json::from_slice(&destination_bytes)?;
     let old_value = inspect(&destination, id)?;
     let old: InstanceRecord = serde_json::from_value(old_value)?;
+    let old_positions = layer_positions(&destination, &old.page_id, &old.layer_ids)?;
     let old_layers = take_layers(&mut destination, &old.page_id, &old.layer_ids)?;
     let source_bytes = fs::read(source)?;
     let source_raw: Value = serde_json::from_slice(&source_bytes)?;
@@ -246,6 +247,8 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
         .flat_map(|m| m.values())
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect::<Vec<_>>();
+    let imported_layers = take_layers(&mut updated, &old.page_id, &new_ids)?;
+    insert_layers_at(&mut updated, &old.page_id, imported_layers, &old_positions)?;
     let record = updated
         .get_mut("instances")
         .and_then(Value::as_array_mut)
@@ -254,7 +257,7 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
                 .find(|v| v.get("id").and_then(Value::as_str) == Some(id))
         })
         .context("instance record lost during update")?;
-    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers});
+    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions});
     record["asset_version"] = Value::String(manifest.asset_version.clone());
     record["content_hash"] = Value::String(new_hash.clone());
     record["layer_ids"] = serde_json::to_value(&new_ids)?;
@@ -289,13 +292,24 @@ pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
         .get_mut("layers")
         .and_then(Value::as_array_mut)
         .context("page layers missing")?;
-    layers.extend(
-        previous["layers"]
-            .as_array()
-            .context("rollback layers missing")?
-            .iter()
-            .cloned(),
-    );
+    let restored = previous["layers"]
+        .as_array()
+        .context("rollback layers missing")?
+        .clone();
+    let positions = previous
+        .get("positions")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_u64)
+                .map(|v| v as usize)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| vec![layers.len(); restored.len()]);
+    for (layer, position) in restored.into_iter().zip(positions) {
+        layers.insert(position.min(layers.len()), layer);
+    }
     let record = raw
         .get_mut("instances")
         .and_then(Value::as_array_mut)
@@ -343,4 +357,72 @@ fn take_layers(raw: &mut Value, page_id: &str, ids: &[String]) -> Result<Vec<Val
         bail!("instance materialized layers are missing")
     };
     Ok(removed)
+}
+
+fn layer_positions(raw: &Value, page_id: &str, ids: &[String]) -> Result<Vec<usize>> {
+    let layers = raw
+        .get("pages")
+        .and_then(Value::as_array)
+        .and_then(|pages| {
+            pages
+                .iter()
+                .find(|page| page.get("id").and_then(Value::as_str) == Some(page_id))
+        })
+        .and_then(|page| page.get("layers"))
+        .and_then(Value::as_array)
+        .context("instance page layers missing")?;
+    ids.iter()
+        .map(|id| {
+            layers
+                .iter()
+                .position(|layer| layer.get("id").and_then(Value::as_str) == Some(id))
+                .with_context(|| format!("instance layer missing: {id}"))
+        })
+        .collect()
+}
+
+fn insert_layers_at(
+    raw: &mut Value,
+    page_id: &str,
+    layers_to_insert: Vec<Value>,
+    positions: &[usize],
+) -> Result<()> {
+    let layers = page_mut(raw, page_id)?
+        .get_mut("layers")
+        .and_then(Value::as_array_mut)
+        .context("page layers missing")?;
+    for (layer, position) in layers_to_insert.into_iter().zip(positions.iter().copied()) {
+        layers.insert(position.min(layers.len()), layer);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacing_instance_layers_preserves_their_stack_positions() {
+        let mut raw = json!({"pages":[{"id":"page-1","layers":[
+            {"id":"back"},{"id":"old-a"},{"id":"old-b"},{"id":"front"}
+        ]}]});
+        let old_ids = vec!["old-a".to_owned(), "old-b".to_owned()];
+        let positions = layer_positions(&raw, "page-1", &old_ids).unwrap();
+        assert_eq!(positions, vec![1, 2]);
+        take_layers(&mut raw, "page-1", &old_ids).unwrap();
+        insert_layers_at(
+            &mut raw,
+            "page-1",
+            vec![json!({"id":"new-a"}), json!({"id":"new-b"})],
+            &positions,
+        )
+        .unwrap();
+        let ids = raw["pages"][0]["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|layer| layer["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["back", "new-a", "new-b", "front"]);
+    }
 }
