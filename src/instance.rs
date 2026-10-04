@@ -20,6 +20,10 @@ pub struct InstanceRecord {
     pub visible: bool,
     #[serde(default)]
     pub overrides: serde_json::Map<String, Value>,
+    /// Exposed-property definitions accepted for the current source revision.
+    /// These make semantic target changes detectable even when a key is reused.
+    #[serde(default)]
+    pub property_definitions: serde_json::Map<String, Value>,
     /// Hash of the last materialized state accepted by Pentool. Generic edits
     /// that change this hash are treated as undeclared local changes.
     #[serde(default)]
@@ -160,6 +164,7 @@ pub fn set_property(
         })
         .unwrap();
     record["overrides"][name] = override_value.clone();
+    record["property_definitions"][name] = definition.clone();
     record["materialized_hash"] = Value::String(accepted_hash);
     crate::transaction::commit_value(file, "instance-set", dry_run, None, &raw)?;
     Ok(json!({"ok":true,"dry_run":dry_run,"instance":id,"property":name,"value":value}))
@@ -277,7 +282,15 @@ pub fn update_plan(file: &Path, id: &str, source: &Path) -> Result<Value> {
         match manifest.properties.get(name) {
             Some(definition)
                 if override_compatible(definition, value)
+                    && record
+                        .property_definitions
+                        .get(name)
+                        .is_some_and(|accepted| property_identity(accepted) == property_identity(definition))
                     && override_targets_exist(&raw, definition) => {}
+            Some(definition)
+                if record.property_definitions.contains_key(name)
+                    && property_identity(&record.property_definitions[name])
+                        != property_identity(definition) => conflicts.push(json!({"kind":"retargeted-override","instance":id,"property":name,"base":property_identity(&record.property_definitions[name]),"incoming":property_identity(definition),"resolutions":["take-source","detach","map-target"]})),
             Some(definition) if override_compatible(definition, value) => conflicts.push(json!({"kind":"removed-override-target","instance":id,"property":name,"resolutions":["take-source","detach","map-target"]})),
             Some(_) => conflicts.push(json!({"kind":"incompatible-override","instance":id,"property":name,"resolutions":["keep-local","take-source","detach"]})),
             None => conflicts.push(json!({"kind":"removed-override-target","instance":id,"property":name,"resolutions":["take-source","detach","map-target"]})),
@@ -285,6 +298,23 @@ pub fn update_plan(file: &Path, id: &str, source: &Path) -> Result<Value> {
     }
     Ok(
         json!({"instance":id,"asset_id":record.asset_id,"from_version":record.asset_version,"to_version":manifest.asset_version,"from_hash":record.content_hash,"to_hash":next_hash,"changed":record.content_hash!=next_hash,"local_changed":local_changed,"materialized":{"accepted":record.materialized_hash,"current":current_materialized_hash},"overrides":record.overrides,"conflicts":conflicts}),
+    )
+}
+
+fn property_identity(definition: &Value) -> Value {
+    Value::Array(
+        definition
+            .get("targets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|target| {
+                json!({
+                    "object": target.get("object").cloned().unwrap_or(Value::Null),
+                    "property": target.get("property").cloned().unwrap_or(Value::Null)
+                })
+            })
+            .collect(),
     )
 }
 
@@ -398,12 +428,13 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
                 .find(|v| v.get("id").and_then(Value::as_str) == Some(id))
         })
         .context("instance record lost during update")?;
-    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions,"materialized_hash":old.materialized_hash,"base_layers":old.base_layers});
+    let history = json!({"asset_version":old.asset_version,"content_hash":old.content_hash,"layer_ids":old.layer_ids,"layers":old_layers,"positions":old_positions,"materialized_hash":old.materialized_hash,"base_layers":old.base_layers,"property_definitions":old.property_definitions});
     record["asset_version"] = Value::String(manifest.asset_version.clone());
     record["content_hash"] = Value::String(new_hash.clone());
     record["layer_ids"] = serde_json::to_value(&new_ids)?;
     record["materialized_hash"] = Value::String(next_materialized_hash);
     record["base_layers"] = Value::Array(next_base_layers);
+    record["property_definitions"] = serde_json::to_value(&manifest.properties)?;
     record["previous"]
         .as_array_mut()
         .context("invalid instance history")?
@@ -472,6 +503,10 @@ pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
         .get("base_layers")
         .cloned()
         .unwrap_or_else(|| previous["layers"].clone());
+    record["property_definitions"] = previous
+        .get("property_definitions")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     record["previous"].as_array_mut().unwrap().pop();
     let rolled_back_to = record["asset_version"].clone();
     crate::transaction::commit_value(file, "instance-rollback", false, None, &raw)?;
@@ -671,6 +706,10 @@ mod tests {
                     "label".into(),
                     Value::String("Local".into()),
                 )]),
+                property_definitions: serde_json::Map::from_iter([(
+                    "label".into(),
+                    json!({"targets":[{"object":"label","property":"content"}]}),
+                )]),
                 materialized_hash: Some(accepted),
                 base_layers: vec![],
                 previous: vec![],
@@ -695,6 +734,15 @@ mod tests {
         fs::write(&source_path, serde_json::to_vec(&missing_target).unwrap()).unwrap();
         let missing = update_plan(&document_path, "card", &source_path).unwrap();
         assert_eq!(missing["conflicts"][0]["kind"], "removed-override-target");
+
+        let mut retargeted = source.clone();
+        retargeted["asset"]["properties"]["label"]["targets"][0]["property"] = json!("fill");
+        fs::write(&source_path, serde_json::to_vec(&retargeted).unwrap()).unwrap();
+        let retargeted_plan = update_plan(&document_path, "card", &source_path).unwrap();
+        assert_eq!(
+            retargeted_plan["conflicts"][0]["kind"],
+            "retargeted-override"
+        );
         fs::write(&source_path, serde_json::to_vec(&source).unwrap()).unwrap();
 
         document["pages"][0]["layers"][0]["texts"][0]["content"] = json!("Untracked");
@@ -738,6 +786,10 @@ mod tests {
                 overrides: serde_json::Map::from_iter([(
                     "label".into(),
                     Value::String("Local label".into()),
+                )]),
+                property_definitions: serde_json::Map::from_iter([(
+                    "label".into(),
+                    json!({"targets":[{"object":"label","property":"content"}]}),
                 )]),
                 materialized_hash: Some(accepted),
                 base_layers: base,

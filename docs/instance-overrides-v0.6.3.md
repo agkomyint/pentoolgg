@@ -16,6 +16,8 @@ An attached instance records:
 - `materialized_hash`, the hash of the accepted materialized layers after declared
   overrides;
 - override values keyed by stable exposed-property name;
+- the accepted exposed-property definitions, so reusing a key for a different
+  source object or property path is detected as a semantic retarget;
 - bounded rollback history containing the preceding layers, positions, hashes,
   source identity, and base snapshot.
 
@@ -74,8 +76,8 @@ Supported conflict resolution names are `keep-local`, `take-source`, `detach`, a
 
 Compatible overrides are reapplied after the incoming source is materialized and
 before the transaction commits. A removed property, missing target, incompatible
-type, or undeclared local edit blocks the update. Dry runs and commits use the same
-plan and neither path mutates the document on conflict.
+type, retargeted stable key, or undeclared local edit blocks the update. Dry runs
+and commits use the same plan and neither path mutates the document on conflict.
 
 ## Mutation protection
 

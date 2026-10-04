@@ -1214,6 +1214,7 @@ async fn run() -> Result<()> {
                         },
                         visible: true,
                         overrides: Default::default(),
+                        property_definitions: manifest.properties.clone(),
                         materialized_hash: Some(materialized_hash),
                         base_layers,
                         previous: vec![],
