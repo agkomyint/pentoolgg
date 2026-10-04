@@ -1,5 +1,10 @@
 /target/
 /dist/
+/.pentool/
+/*.exe
+/*.pdb
+/*.zip
+/SHA256SUMS*.txt
 *.png
 *.svg
 !docs/**/*.svg
