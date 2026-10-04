@@ -1392,7 +1392,18 @@ async fn run() -> Result<()> {
                         agent::ObjectKind::Path => "path",
                         agent::ObjectKind::Text => "text",
                     });
-                    println!("{}", serde_json::to_string_pretty(&scene::inspect_paginated_v4(&raw, selected_page, query.as_deref(), k, layer.as_deref(), offset, limit)?)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&scene::inspect_paginated_v4(
+                            &raw,
+                            selected_page,
+                            query.as_deref(),
+                            k,
+                            layer.as_deref(),
+                            offset,
+                            limit
+                        )?)?
+                    );
                     return Ok(());
                 }
             }
@@ -1425,7 +1436,18 @@ async fn run() -> Result<()> {
                         agent::ObjectKind::Path => "path",
                         agent::ObjectKind::Text => "text",
                     });
-                    println!("{}", serde_json::to_string_pretty(&scene::inspect_paginated_v4(&raw, selected_page, Some(&query), k, layer.as_deref(), offset, limit)?)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&scene::inspect_paginated_v4(
+                            &raw,
+                            selected_page,
+                            Some(&query),
+                            k,
+                            layer.as_deref(),
+                            offset,
+                            limit
+                        )?)?
+                    );
                     return Ok(());
                 }
             }

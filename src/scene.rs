@@ -1834,6 +1834,7 @@ fn validate_node(node: &Value, depth: usize, ids: &mut HashSet<String>) -> Resul
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     #[test]
@@ -1931,8 +1932,39 @@ mod tests {
         assert!(find_node(&raw["pages"][0], "card-2").is_none());
         validate(&raw).unwrap();
     }
-}
 
+    #[test]
+    fn v4_inspection_is_compact_and_paginates_nested_nodes() {
+        let raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let first = inspect_paginated_v4(&raw, None, None, None, None, 0, 1).unwrap();
+        assert_eq!(first["matches"], 3);
+        assert_eq!(first["returned"], 1);
+        assert_eq!(first["has_more"], true);
+        assert_eq!(first["layers"][0]["objects"].as_array().unwrap().len(), 1);
+        assert_eq!(first["layers"][0]["objects"][0]["id"], "card");
+        assert!(first["layers"][0]["objects"][0].get("children").is_none());
+
+        let second = inspect_paginated_v4(&raw, None, None, None, None, 1, 1).unwrap();
+        assert_eq!(second["layers"][0]["objects"][0]["id"], "card-bg");
+        assert_eq!(second["layers"][0]["objects"][0]["parent"], "card");
+        assert_eq!(second["layers"][0]["objects"][0]["depth"], 1);
+    }
+
+    #[test]
+    fn v4_search_matches_text_and_maps_path_filter_to_shapes() {
+        let raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let text =
+            inspect_paginated_v4(&raw, None, Some("semantic"), Some("text"), None, 0, 10).unwrap();
+        assert_eq!(text["matches"], 1);
+        assert_eq!(text["layers"][0]["objects"][0]["id"], "title");
+
+        let shapes = inspect_paginated_v4(&raw, None, None, Some("path"), None, 0, 10).unwrap();
+        assert_eq!(shapes["matches"], 1);
+        assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
+    }
+}
 
 pub fn inspect_paginated_v4(
     raw: &Value,
@@ -1949,42 +1981,71 @@ pub fn inspect_paginated_v4(
     let needle = query.unwrap_or("").to_lowercase();
     let mut doc = raw.clone();
     let page = page_mut(&mut doc, page_id)?;
-    
+
     let mut matches = 0usize;
     let mut returned = 0usize;
     let mut layers = Vec::new();
 
-    let doc_name = raw.get("name").and_then(Value::as_str).unwrap_or("Untitled");
+    let doc_name = raw
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Untitled");
     let version = raw.get("version").and_then(Value::as_u64).unwrap_or(4);
     let active_page = page.get("id").and_then(Value::as_str).unwrap_or("page-1");
 
-    let page_layers = page.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
-    for (l_idx, l) in page_layers.iter().enumerate() {
-        let lid = l.get("id").and_then(Value::as_str).unwrap_or("");
-        let lname = l.get("name").and_then(Value::as_str).unwrap_or("");
-        
+    let page_layers = page
+        .get("layers")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for (layer_index, layer) in page_layers.iter().enumerate() {
+        let lid = layer.get("id").and_then(Value::as_str).unwrap_or("");
+        let lname = layer.get("name").and_then(Value::as_str).unwrap_or("");
+
         if let Some(f) = layer_filter {
             if lid != f && !lname.to_lowercase().contains(&f.to_lowercase()) {
                 continue;
             }
         }
 
-        let mut out_nodes = Vec::new();
-        let nodes = l.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
-        
-        for node in nodes {
-            if let Some(aug) = augment_node(page, &node, &needle, kind_filter, &mut matches, &mut returned, offset, limit)? {
-                out_nodes.push(aug);
+        let layer_match = needle.is_empty()
+            || lid.to_lowercase().contains(&needle)
+            || lname.to_lowercase().contains(&needle);
+        let mut candidates = Vec::new();
+        if let Some(nodes) = layer.get("nodes").and_then(Value::as_array) {
+            collect_v4_matches(
+                nodes,
+                None,
+                0,
+                &needle,
+                layer_match,
+                kind_filter,
+                &mut candidates,
+            );
+        }
+
+        let layer_matches = candidates.len();
+        let start = offset.saturating_sub(matches).min(layer_matches);
+        let remaining = limit.saturating_sub(returned);
+        let take = layer_matches.saturating_sub(start).min(remaining);
+        if take > 0 {
+            let mut objects = Vec::with_capacity(take);
+            for mut object in candidates.into_iter().skip(start).take(take) {
+                let id = object["id"].as_str().unwrap_or_default();
+                object["bounds"] = node_bounds_on_page(page, id)?;
+                objects.push(object);
             }
+            returned += objects.len();
+            layers.push(json!({
+                "id": lid,
+                "name": lname,
+                "index": layer_index,
+                "visible": layer.get("visible").and_then(Value::as_bool).unwrap_or(true),
+                "locked": layer.get("locked").and_then(Value::as_bool).unwrap_or(false),
+                "objects": objects
+            }));
         }
-        
-        let layer_match = needle.is_empty() || lid.to_lowercase().contains(&needle) || lname.to_lowercase().contains(&needle);
-        
-        if layer_match || !out_nodes.is_empty() {
-            let mut out_layer = l.clone();
-            out_layer["nodes"] = json!(out_nodes);
-            layers.push(out_layer);
-        }
+        matches += layer_matches;
     }
 
     Ok(json!({
@@ -1996,72 +2057,61 @@ pub fn inspect_paginated_v4(
         "offset": offset,
         "limit": limit,
         "has_more": offset.saturating_add(returned) < matches,
-        "stacking": "layers, then nodes; zero is back",
+        "stacking": "layers, then depth-first nodes; zero is back",
         "layers": layers
     }))
 }
 
-fn augment_node(
-    page: &Value,
-    node: &Value,
+fn collect_v4_matches(
+    nodes: &[Value],
+    parent: Option<&str>,
+    depth: usize,
     needle: &str,
+    ancestor_match: bool,
     kind_filter: Option<&str>,
-    matches: &mut usize,
-    returned: &mut usize,
-    offset: usize,
-    limit: usize,
-) -> Result<Option<Value>> {
-    let mut out = node.clone();
-    let id = node.get("id").and_then(Value::as_str).unwrap_or("");
-    let name = node.get("name").and_then(Value::as_str).unwrap_or("");
-    let kind = node.get("kind").and_then(Value::as_str).unwrap_or("");
-    
-    let mut is_match = needle.is_empty() || id.to_lowercase().contains(needle) || name.to_lowercase().contains(needle);
-    if kind == "text" {
-        if let Some(content) = node.get("content").and_then(Value::as_str) {
-            if content.to_lowercase().contains(needle) {
-                is_match = true;
+    output: &mut Vec<Value>,
+) {
+    for (index, node) in nodes.iter().enumerate() {
+        let id = node.get("id").and_then(Value::as_str).unwrap_or("");
+        let name = node.get("name").and_then(Value::as_str).unwrap_or("");
+        let kind = node.get("kind").and_then(Value::as_str).unwrap_or("");
+        let content = node.get("content").and_then(Value::as_str);
+        let query_matches = ancestor_match
+            || id.to_lowercase().contains(needle)
+            || name.to_lowercase().contains(needle)
+            || content.is_some_and(|value| value.to_lowercase().contains(needle));
+        let kind_matches = match kind_filter {
+            Some("text") => kind == "text",
+            Some("path") => kind != "text" && kind != "group",
+            Some(expected) => kind == expected,
+            None => true,
+        };
+        if query_matches && kind_matches {
+            let mut object = json!({
+                "id": id,
+                "kind": kind,
+                "index": index,
+                "depth": depth,
+                "draw_order": output.len()
+            });
+            if let Some(parent) = parent {
+                object["parent"] = json!(parent);
             }
+            if let Some(content) = content {
+                object["content"] = json!(content);
+            }
+            output.push(object);
+        }
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            collect_v4_matches(
+                children,
+                Some(id),
+                depth + 1,
+                needle,
+                ancestor_match,
+                kind_filter,
+                output,
+            );
         }
     }
-    
-    let kind_matches = kind_filter.map_or(true, |k| k == kind);
-
-    let mut augmented_children = Vec::new();
-    if let Some(children) = node.get("children").and_then(Value::as_array) {
-        for child in children {
-            if let Some(aug) = augment_node(page, child, needle, kind_filter, matches, returned, offset, limit)? {
-                augmented_children.push(aug);
-            }
-        }
-    }
-    
-    if (is_match && kind_matches) || !augmented_children.is_empty() {
-        if is_match && kind_matches {
-            if *matches >= offset && *returned < limit {
-                if let Ok(b) = node_bounds_on_page(page, id) {
-                    if !b.is_null() {
-                        out["bounds"] = b;
-                    }
-                }
-                *returned += 1;
-            }
-            *matches += 1;
-        } else {
-            // Add bounds for parent groups even if they aren't the direct match
-            if let Ok(b) = node_bounds_on_page(page, id) {
-                if !b.is_null() {
-                    out["bounds"] = b;
-                }
-            }
-        }
-        
-        if !augmented_children.is_empty() {
-            out["children"] = json!(augmented_children);
-        }
-        
-        return Ok(Some(out));
-    }
-    
-    Ok(None)
 }

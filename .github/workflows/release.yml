@@ -41,6 +41,11 @@ jobs:
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/stroke-edges.pen stroke-smoke.png
       - name: Smoke test agent discovery
         run: cargo run --release --locked --target ${{ matrix.target }} -- search examples/text-demo.pen subtitle --kind text
+      - name: Smoke test v4 tree and search
+        shell: bash
+        run: |
+          cargo run --release --locked --target ${{ matrix.target }} -- tree docs/fixtures/v4-scene.pen --limit 1
+          cargo run --release --locked --target ${{ matrix.target }} -- search docs/fixtures/v4-scene.pen semantic --kind text
       - name: Smoke test large-document budget
         run: cargo run --release --locked --target ${{ matrix.target }} -- benchmark --layers 50 --objects 5000 --max-ms 60000
       - name: Smoke test pages and import
