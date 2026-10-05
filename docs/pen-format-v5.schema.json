@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/pen-v5.json",
+  "title": "Pentool document v5",
+  "type": "object",
+  "required": ["format", "version", "name", "pages", "image_assets"],
+  "properties": {
+    "format": {"const": "pentool"},
+    "version": {"const": 5},
+    "name": {"type": "string"},
+    "fonts": {"type": "array"},
+    "styles": {"type": "object"},
+    "components": {"type": "array"},
+    "image_assets": {
+      "type": "object",
+      "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"},
+      "additionalProperties": {"$ref": "#/$defs/imageAsset"}
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": {"$ref": "#/$defs/page"}
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "matrix": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number"}, {"type": "number"}, {"type": "number"},
+        {"type": "number"}, {"type": "number"}, {"type": "number"}
+      ],
+      "items": false
+    },
+    "styleValue": {
+      "type": "object",
+      "required": ["fallback"],
+      "properties": {"ref": {"type": "string"}, "fallback": {}},
+      "additionalProperties": true
+    },
+    "style": {"type": "object", "additionalProperties": {"$ref": "#/$defs/styleValue"}},
+    "embeddedStorage": {
+      "type": "object",
+      "required": ["kind", "encoding", "data"],
+      "properties": {
+        "kind": {"const": "embedded"},
+        "encoding": {"const": "base64"},
+        "data": {"type": "string", "contentEncoding": "base64"}
+      },
+      "additionalProperties": true
+    },
+    "externalStorage": {
+      "type": "object",
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": {"const": "external"},
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\:\\u0000])(?!.*//)[^/]+(?:/[^/]+)*$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "imageAsset": {
+      "type": "object",
+      "required": ["media_type", "byte_length", "pixel_width", "pixel_height", "color_space", "orientation", "storage"],
+      "properties": {
+        "media_type": {"enum": ["image/png", "image/jpeg", "image/webp"]},
+        "byte_length": {"type": "integer", "minimum": 1, "maximum": 134217728},
+        "pixel_width": {"type": "integer", "minimum": 1, "maximum": 32768},
+        "pixel_height": {"type": "integer", "minimum": 1, "maximum": 32768},
+        "color_space": {"const": "srgb8"},
+        "orientation": {"type": "integer", "minimum": 1, "maximum": 8},
+        "storage": {"oneOf": [{"$ref": "#/$defs/embeddedStorage"}, {"$ref": "#/$defs/externalStorage"}]}
+      },
+      "additionalProperties": true
+    },
+    "base": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {"type": "string"},
+        "id": {"type": "string", "minLength": 1},
+        "transform": {"$ref": "#/$defs/matrix"},
+        "clip": {"type": "string"},
+        "style": {"$ref": "#/$defs/style"}
+      },
+      "additionalProperties": true
+    },
+    "imageMask": {
+      "type": "object",
+      "required": ["node", "space", "fill_rule"],
+      "properties": {
+        "node": {"type": "string", "minLength": 1},
+        "space": {"const": "parent"},
+        "fill_rule": {"enum": ["nonzero", "evenodd"]}
+      },
+      "additionalProperties": true
+    },
+    "imageNode": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "properties": {
+            "kind": {"const": "image"},
+            "asset": {"$ref": "#/$defs/digest"},
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "width": {"type": "number", "exclusiveMinimum": 0},
+            "height": {"type": "number", "exclusiveMinimum": 0},
+            "fit": {"enum": ["fill", "contain", "cover", "none", "scale-down"]},
+            "position": {
+              "type": "array",
+              "prefixItems": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "number", "minimum": 0, "maximum": 1}],
+              "items": false
+            },
+            "crop": {
+              "type": "array",
+              "prefixItems": [
+                {"type": "number", "minimum": 0, "maximum": 1},
+                {"type": "number", "minimum": 0, "maximum": 1},
+                {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+              ],
+              "items": false
+            },
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            "blend_mode": {"const": "normal"},
+            "operations": {"type": "array", "maxItems": 256},
+            "mask": {"$ref": "#/$defs/imageMask"}
+          },
+          "required": ["asset", "x", "y", "width", "height", "fit", "position", "crop", "opacity", "blend_mode", "operations"]
+        }
+      ]
+    },
+    "node": {
+      "oneOf": [
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "group"}, "children": {"type": "array", "items": {"$ref": "#/$defs/node"}}}, "required": ["children"]}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "rect"}, "x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number", "minimum": 0}, "height": {"type": "number", "minimum": 0}}, "required": ["x", "y", "width", "height"]}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "ellipse"}, "cx": {"type": "number"}, "cy": {"type": "number"}, "radius_x": {"type": "number", "exclusiveMinimum": 0}, "radius_y": {"type": "number", "exclusiveMinimum": 0}}, "required": ["cx", "cy", "radius_x", "radius_y"]}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "line"}, "x1": {"type": "number"}, "y1": {"type": "number"}, "x2": {"type": "number"}, "y2": {"type": "number"}}, "required": ["x1", "y1", "x2", "y2"]}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "path"}, "d": {"type": "string"}}, "required": ["d"]}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "text"}, "content": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["content", "x", "y"]}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"properties": {"kind": {"const": "instance"}, "component": {"type": "string"}, "fallback": {"$ref": "#/$defs/node"}, "overrides": {"type": "object"}}, "required": ["component", "fallback"]}]},
+        {"$ref": "#/$defs/imageNode"}
+      ]
+    },
+    "layer": {
+      "type": "object",
+      "required": ["id", "name", "nodes"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "visible": {"type": "boolean"},
+        "locked": {"type": "boolean"},
+        "nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}}
+      },
+      "additionalProperties": true
+    },
+    "page": {
+      "type": "object",
+      "required": ["id", "name", "canvas", "layers"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "canvas": {
+          "type": "object",
+          "required": ["width", "height", "background"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+            "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+            "background": {"type": "string"}
+          },
+          "additionalProperties": true
+        },
+        "layers": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/layer"}}
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "format": "pentool",
+  "version": 5,
+  "name": "invalid escaping external image",
+  "image_assets": {
+    "sha256:3bb87b10bbd136a2099f1da24272bce36266368fee2d80bef1582fa5200cb99d": {
+      "media_type": "image/png",
+      "byte_length": 70,
+      "pixel_width": 1,
+      "pixel_height": 1,
+      "color_space": "srgb8",
+      "orientation": 1,
+      "storage": {"kind": "external", "path": "../pixel.png"}
+    }
+  },
+  "pages": [{"id":"page-1","name":"Page 1","canvas":{"width":10,"height":10,"background":"none"},"layers":[{"id":"content","name":"Content","nodes":[]}]}]
+}

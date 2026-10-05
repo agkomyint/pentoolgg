@@ -1,0 +1,17 @@
+{
+  "format": "pentool",
+  "version": 5,
+  "name": "invalid mismatched image hash",
+  "image_assets": {
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000": {
+      "media_type": "image/png",
+      "byte_length": 70,
+      "pixel_width": 1,
+      "pixel_height": 1,
+      "color_space": "srgb8",
+      "orientation": 1,
+      "storage": {"kind": "embedded", "encoding": "base64", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+X2NDWQAAAABJRU5ErkJggg=="}
+    }
+  },
+  "pages": [{"id":"page-1","name":"Page 1","canvas":{"width":10,"height":10,"background":"none"},"layers":[{"id":"content","name":"Content","nodes":[]}]}]
+}

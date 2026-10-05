@@ -18,7 +18,7 @@ second object hierarchy, cache, history mechanism, or batch language.
 
 ## Milestone A — Alpha: image model and placement
 
-- [ ] **1. Freeze the image specification and threat model.** Review node schema,
+- [x] **1. Freeze the image specification and threat model.** Review node schema,
   asset storage, processing order, color/alpha math, masks, resource limits,
   metadata policy, package representation, cache keys, errors, and migration.
   Publish JSON Schema and normative valid/invalid fixtures.

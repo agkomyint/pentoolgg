@@ -1,0 +1,30 @@
+{
+  "format": "pentool",
+  "version": 5,
+  "name": "invalid image geometry and missing asset",
+  "image_assets": {},
+  "pages": [{
+    "id": "page-1",
+    "name": "Page 1",
+    "canvas": {"width": 10, "height": 10, "background": "none"},
+    "layers": [{
+      "id": "content",
+      "name": "Content",
+      "nodes": [{
+        "kind": "image",
+        "id": "bad-image",
+        "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 10,
+        "fit": "cover",
+        "position": [0.5, 0.5],
+        "crop": [0.8, 0, 0.5, 1],
+        "opacity": 2,
+        "blend_mode": "multiply",
+        "operations": []
+      }]
+    }]
+  }]
+}

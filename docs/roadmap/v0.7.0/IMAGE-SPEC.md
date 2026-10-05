@@ -1,6 +1,8 @@
 # Pentool raster image specification
 
-Status: proposed for Pentool v0.7.0.
+Status: frozen for Pentool v0.7.0. The document format version is 5. The
+normative machine contract is [`../../pen-format-v5.schema.json`](../../pen-format-v5.schema.json)
+and the security analysis is [`THREAT-MODEL.md`](THREAT-MODEL.md).
 
 This document defines deterministic raster-image placement and non-destructive
 editing for `.pen` documents. It is normative where it uses MUST, MUST NOT, SHOULD,
@@ -28,10 +30,11 @@ groups, layout, history, and migration contract introduced by v0.6.2. An image i
 a normal scene node: it can be grouped, transformed, aligned, distributed, masked,
 duplicated, diffed, placed in a component, and addressed by stable ID.
 
-The exact integer format version will be assigned after the v0.6.2 schema is
-frozen. Adding image nodes requires a format-version bump from the latest shipped
-schema. Readers MUST reject unsupported newer versions and unknown required node
-kinds with a clear error; they MUST NOT silently omit them.
+Version 5 extends the v4 ordered scene graph with image assets and image nodes.
+Versions 1–4 remain readable. Migration to v5 is explicit; ordinary edits MUST NOT
+silently upgrade an older document. Readers MUST reject unsupported newer versions
+and unknown required node kinds with a clear error; they MUST NOT silently omit
+them.
 
 ## 3. Content-addressed image assets
 
@@ -49,7 +52,8 @@ Conceptual representation:
       "byte_length": 42831,
       "pixel_width": 1600,
       "pixel_height": 900,
-      "color_space": "srgb",
+      "color_space": "srgb8",
+      "orientation": 1,
       "storage": {
         "kind": "embedded",
         "encoding": "base64",
@@ -64,12 +68,22 @@ The stored digest MUST cover source bytes, not decoded pixels. Import MUST decod
 and validate the source before commit. Asset metadata MUST match the decoded source.
 Duplicate source bytes MUST reuse the same asset record.
 
+Asset keys and `asset` references use the exact form `sha256:` followed by 64
+lowercase hexadecimal digits. `media_type` is one of `image/png`, `image/jpeg`, or
+`image/webp`. Dimensions describe the display-oriented image after applying EXIF
+orientation; `orientation` records the parsed source value from 1 through 8.
+
 ### 3.1 Embedded storage
 
 Embedded assets store base64 source bytes in the document. Implementations MUST
 enforce per-asset and per-document encoded and decoded byte limits before
 allocation. Default limits belong in one documented security policy and MAY be
 lowered through configuration, never silently raised by document data.
+
+The v5 defaults are 128 MiB source bytes per asset, 512 MiB embedded source bytes
+per document, 32,768 pixels on either axis, 268,435,456 decoded pixels per asset,
+and 1 GiB for any single decoded RGBA8 surface. Base64 length is checked before
+decode. Checked arithmetic is mandatory for every derived byte count.
 
 ### 3.2 External storage
 
@@ -127,8 +141,12 @@ An image node contains at least:
   portable document features.
 - `transform` follows the scene graph's local affine-transform contract.
 - an optional `mask` references a vector node or inline immutable mask snapshot;
-  the schema MUST define coordinate space, fill rule, missing-reference behavior,
-  and cycle rejection.
+  v5 supports a reference object `{ "node": "mask-id", "space": "parent",
+  "fill_rule": "nonzero" }`. The referenced path, primitive, or group is evaluated
+  in the image node's parent coordinate space. `fill_rule` is `nonzero` or
+  `evenodd`. Missing references, references to non-vector nodes, cross-page
+  references, self-reference, and dependency cycles are validation errors. Inline
+  mask snapshots are reserved for a later format version.
 
 Bounds commands MUST distinguish frame bounds, cropped source bounds, transformed
 world bounds, and visible mask-intersected bounds.
@@ -263,6 +281,12 @@ The renderer MUST apply source orientation, normalized crop, operation stack,
 resampling, fit, mask, opacity, transform, and compositing in a specified order.
 That order is part of the file-format contract and requires golden fixtures.
 
+The v5 order is: verify source bytes; decode; apply source orientation; crop in
+oriented source coordinates; evaluate enabled operations in array order; calculate
+`fit` and `position` into the image frame; resample with the pinned engine version;
+apply the parent-space vector mask; multiply premultiplied alpha by node opacity;
+apply the node/world transform; composite with source-over normal blending.
+
 External assets are hash-verified before decode. Render never rewrites source
 assets, updates operation stacks, downloads bytes, or mutates caches required for
 correctness. Cache failure may reduce performance but not change output.
@@ -323,3 +347,10 @@ Linux, Intel macOS, and Apple Silicon macOS.
 Conformance covers both serialized output and decoded pixels. If exact encoded PNG
 bytes cannot remain stable across a justified encoder upgrade, decoded pixel hashes
 remain normative and encoded-byte changes require an explicit compatibility note.
+
+The initial normative documents are
+[`v5-image-embedded.pen`](../../fixtures/v5-image-embedded.pen),
+[`v5-image-invalid-hash.pen`](../../fixtures/v5-image-invalid-hash.pen),
+[`v5-image-invalid-path.pen`](../../fixtures/v5-image-invalid-path.pen), and
+[`v5-image-invalid-node.pen`](../../fixtures/v5-image-invalid-node.pen). A fixture
+whose name contains `invalid` MUST be rejected before mutation or render output.
