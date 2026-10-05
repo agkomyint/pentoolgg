@@ -6,6 +6,38 @@ content-addressed design.
 
 Normative proposal: [`IMAGE-SPEC.md`](IMAGE-SPEC.md).
 
+## Implementation status
+
+Status audited against `main` at `f3b38b4` on 2026-10-06. A checked box means the
+entire item meets the repository definition of done; partially implemented items
+remain unchecked.
+
+| Item | Status | Implemented now | Still required |
+| --- | --- | --- | --- |
+| 1 | Complete | Image specification, threat model, v5 schema, and normative fixtures | — |
+| 2 | Complete | v5 assets/nodes, explicit v4→v5 migration, validation, downgrade diagnostics, extension preservation | — |
+| 3 | Complete | Bounded PNG/JPEG/WebP decoding, signatures, dimensions/pixels/memory limits, SHA-256, deduplication, EXIF orientation, alpha reporting, normalized metadata-free derived PNG | Additional codec golden coverage belongs to item 12 |
+| 4 | Partial | Embedded assets, aggregate byte budget, safe relative external paths, symlink containment, mandatory hashes, offline missing/hash diagnostics | Integrate image blobs with the existing verified cache and locking paths |
+| 5 | Partial | `image add/set/info/remove`, frame/crop/fit/position/opacity/transform/mask fields, transactions, history, dry-run, revision guards, JSON output, tree/search bounds | Prove and cover image behavior through generic batch, groups/components, align/distribute, and diff workflows |
+| 6 | Partial | Authoritative PNG, portable SVG, raster-backed PDF, multi-page export, parent-space vector masks, atomic PNG/SVG output, source/hash/mask diagnostics | Explicit linked-SVG mode, fully atomic PDF output, and cross-platform fit/crop/mask pixel goldens |
+| 7 | Not started | Empty operation stacks are accepted | Implement and specify every required pixel operation; nonempty stacks currently fail explicitly |
+| 8 | Not started | — | Operation CLI and transactional batch support |
+| 9 | Not started | — | Deterministic bake, provenance, predictions, and undo |
+| 10 | Not started | — | Image-aware package/archive/cache integration |
+| 11 | Not started | Import reports basic source metadata | Dominant colors, focal suggestion, versioned analysis, and palette handoff |
+| 12 | Partial | Codec smoke tests, EXIF orientation, migration, masks, deduplication, relocation, and hash rejection run in Linux/Windows/macOS CI | Compact codec/operation pixel goldens, alpha/color edge cases, package/bake/undo/cache-corruption coverage, and explicit Intel/Apple Silicon evidence |
+| 13 | Not started | — | Proxies, mip levels, and processed-result cache |
+| 14 | Partial | v5 documents open and authoritative embedded/external images render in the browser canvas; image nodes appear in the object list | Crop/focal/mask handles, fit and adjustment controls, operation ordering, before/after, reset, bake confirmation, recovery UX, and preview-status UI |
+| 15 | Not started | — | Image-aware cold/warm renderer benchmarks and memory/stage metrics |
+| 16 | Partial | Bounded decoding, traversal/symlink/hash tests, malformed fixtures, checked allocation arithmetic | Fuzz targets, allocation/concurrency/cache/operation hostile suites, and dependency policy automation |
+| 17 | Not started | Pure-Rust codecs preserve the single-binary architecture | Record and gate binary size on every release target |
+| 18 | Partial | Format/spec/threat-model documents and introductory README image workflow | Complete operations, packages, cache, performance, bake, recovery, and error documentation with runnable batch examples |
+
+Current usable slice: users can import, place, inspect, crop, transform, mask,
+preview, remove, and export verified images without manually editing `.pen` JSON.
+The complete v0.7.0 release is not ready until the unchecked work below and its
+exit criteria are satisfied.
+
 ## Required foundation
 
 - v0.6 package hashing, verified cache, immutable artifacts, and offline rendering.
@@ -28,7 +60,7 @@ second object hierarchy, cache, history mechanism, or batch language.
   newer unsupported node kinds fail loudly. Add explicit upgrade, validation,
   downgrade/flatten diagnostics, and round-trip extension preservation.
 
-- [ ] **3. Implement bounded PNG, JPEG, and WebP import.** Use audited pure-Rust
+- [x] **3. Implement bounded PNG, JPEG, and WebP import.** Use audited pure-Rust
   decoders. Verify signatures, dimensions, pixels, memory, orientation, color-space
   handling, alpha, metadata, and SHA-256 before commit. Deduplicate source blobs.
   Strip private metadata from derived output by default.
