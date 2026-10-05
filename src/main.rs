@@ -233,8 +233,238 @@ struct ShapeEditArgs {
     if_revision: Option<String>,
 }
 
+/// Object kinds accepted by `tree --kind` and `search --kind`.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SearchKind {
+    Path,
+    Text,
+    /// v5 raster image nodes.
+    Image,
+}
+
+impl SearchKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Text => "text",
+            Self::Image => "image",
+        }
+    }
+    fn legacy(self) -> Result<agent::ObjectKind> {
+        match self {
+            Self::Path => Ok(agent::ObjectKind::Path),
+            Self::Text => Ok(agent::ObjectKind::Text),
+            Self::Image => anyhow::bail!(
+                "[unsupported-capability] --kind image requires a v5 document; migrate with `pentool migrate`"
+            ),
+        }
+    }
+}
+
+#[derive(clap::Args, Default)]
+struct OpFlags {
+    /// Blur or sharpen radius in pixels (0-256).
+    #[arg(long)]
+    radius: Option<f64>,
+    /// Sharpen amount in percent (0-500).
+    #[arg(long)]
+    amount: Option<f64>,
+    #[arg(long, allow_hyphen_values = true)]
+    brightness: Option<f64>,
+    #[arg(long, allow_hyphen_values = true)]
+    contrast: Option<f64>,
+    #[arg(long)]
+    black: Option<f64>,
+    #[arg(long)]
+    white: Option<f64>,
+    #[arg(long)]
+    gamma: Option<f64>,
+    #[arg(long, allow_hyphen_values = true)]
+    hue: Option<f64>,
+    #[arg(long, allow_hyphen_values = true)]
+    saturation: Option<f64>,
+    /// Rotation in degrees: 0, 90, 180, or 270.
+    #[arg(long)]
+    degrees: Option<f64>,
+    /// Resize width in pixels.
+    #[arg(long)]
+    width: Option<f64>,
+    /// Resize height in pixels.
+    #[arg(long)]
+    height: Option<f64>,
+    /// Normalized crop rectangle: x y width height.
+    #[arg(long, num_args = 4)]
+    rect: Option<Vec<f64>>,
+    /// Curve points as input:output pairs, for example 0:0,128:160,255:255.
+    #[arg(long)]
+    points: Option<String>,
+}
+
+impl OpFlags {
+    fn into_params(self) -> Result<image::OpParams> {
+        let mut map = serde_json::Map::new();
+        for (key, value) in [
+            ("radius", self.radius),
+            ("amount", self.amount),
+            ("brightness", self.brightness),
+            ("contrast", self.contrast),
+            ("black", self.black),
+            ("white", self.white),
+            ("gamma", self.gamma),
+            ("hue", self.hue),
+            ("saturation", self.saturation),
+            ("degrees", self.degrees),
+            ("width", self.width),
+            ("height", self.height),
+        ] {
+            if let Some(value) = value {
+                map.insert(key.into(), serde_json::json!(value));
+            }
+        }
+        if let Some(rect) = self.rect {
+            for (key, value) in ["x", "y", "width", "height"].into_iter().zip(rect) {
+                map.insert(key.into(), serde_json::json!(value));
+            }
+        }
+        if let Some(points) = self.points {
+            let parsed = points
+                .split(',')
+                .map(|pair| {
+                    let (input, output) = pair
+                        .split_once(':')
+                        .context("[invalid-operation] curve points must look like 0:0,255:255")?;
+                    Ok(serde_json::json!([
+                        input.trim().parse::<f64>()?,
+                        output.trim().parse::<f64>()?
+                    ]))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            map.insert("points".into(), serde_json::Value::Array(parsed));
+        }
+        Ok(image::OpParams(map))
+    }
+}
+
+#[derive(Subcommand)]
+enum OpAction {
+    /// Append (or insert with --index) a non-destructive operation.
+    Add {
+        input: PathBuf,
+        id: String,
+        /// crop, resize, rotate, brightness-contrast, levels, curves,
+        /// hue-saturation, blur, sharpen, or grayscale.
+        kind: String,
+        #[arg(long)]
+        op_id: Option<String>,
+        #[arg(long)]
+        index: Option<usize>,
+        #[command(flatten)]
+        flags: OpFlags,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// List the ordered operation stack.
+    List { input: PathBuf, id: String },
+    /// Change parameters of an existing operation.
+    Set {
+        input: PathBuf,
+        id: String,
+        op_id: String,
+        #[command(flatten)]
+        flags: OpFlags,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Move an operation to a new position.
+    Move {
+        input: PathBuf,
+        id: String,
+        op_id: String,
+        #[arg(long)]
+        index: usize,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Enable a disabled operation.
+    Enable {
+        input: PathBuf,
+        id: String,
+        op_id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Disable an operation without deleting it.
+    Disable {
+        input: PathBuf,
+        id: String,
+        op_id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Remove an operation.
+    Remove {
+        input: PathBuf,
+        id: String,
+        op_id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+}
+
 #[derive(Subcommand)]
 enum ImageAction {
+    /// Add, list, edit, reorder, or toggle non-destructive operations.
+    Op {
+        #[command(subcommand)]
+        action: OpAction,
+    },
+    /// Flatten crop and enabled operations into a new verified embedded PNG.
+    Bake {
+        input: PathBuf,
+        id: String,
+        /// Only PNG is supported; it is lossless and metadata-free.
+        #[arg(long, default_value = "png")]
+        format: String,
+        /// Baked output never retains source metadata (EXIF, GPS, text chunks).
+        #[arg(long)]
+        strip_metadata: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Copy verified external image sources into the project cache so the
+    /// document still renders offline if the original files move.
+    Cache { input: PathBuf },
+    /// Read-only dimensions, alpha, dominant colours, and focal suggestion.
+    Analyze { input: PathBuf, id: String },
+    /// Create or update color design tokens from the analyzed dominant colors.
+    Palette {
+        input: PathBuf,
+        id: String,
+        /// Tokens are named <prefix>-1, <prefix>-2, ...
+        #[arg(long)]
+        prefix: String,
+        /// Number of dominant colors to promote (1-5).
+        #[arg(long, default_value_t = 5)]
+        count: usize,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
     /// Import and place a verified PNG, JPEG, or WebP source.
     Add {
         input: PathBuf,
@@ -402,6 +632,15 @@ enum Command {
         scale: f32,
         #[arg(long)]
         paths_only: bool,
+        /// Benchmark N placements of one reused PNG source (cold then warm runs).
+        #[arg(long)]
+        images: Option<usize>,
+        /// Square source size in pixels for --images.
+        #[arg(long, default_value_t = 512)]
+        source_size: u32,
+        /// Operations per image for --images (0-8).
+        #[arg(long, default_value_t = 2)]
+        operations: usize,
         /// Emit machine-readable JSON (benchmark output is JSON by default).
         #[arg(long)]
         json: bool,
@@ -445,7 +684,7 @@ enum Command {
         #[arg(long)]
         query: Option<String>,
         #[arg(long, value_enum)]
-        kind: Option<agent::ObjectKind>,
+        kind: Option<SearchKind>,
         #[arg(long)]
         layer: Option<String>,
         #[arg(long, default_value_t = 0)]
@@ -458,7 +697,7 @@ enum Command {
         input: PathBuf,
         query: String,
         #[arg(long, value_enum)]
-        kind: Option<agent::ObjectKind>,
+        kind: Option<SearchKind>,
         #[arg(long)]
         layer: Option<String>,
         #[arg(long, default_value_t = 0)]
@@ -698,6 +937,10 @@ enum Command {
         /// Output format when --all-pages targets a directory: png or svg.
         #[arg(long)]
         format: Option<String>,
+        /// SVG only: reference verified external image files by relative href
+        /// instead of embedding them. Fails for cropped or processed images.
+        #[arg(long)]
+        link_images: bool,
     },
 }
 
@@ -1135,6 +1378,235 @@ async fn run() -> Result<()> {
         port: 4711,
     }) {
         Command::Image { action } => match action {
+            ImageAction::Op { action } => {
+                let (input, name, dry_run, if_revision) = match &action {
+                    OpAction::List { input, id } => {
+                        let raw: serde_json::Value = serde_json::from_slice(&fs::read(input)?)?;
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&image::op_list(
+                                &raw,
+                                selected_page,
+                                id
+                            )?)?
+                        );
+                        return Ok(());
+                    }
+                    OpAction::Add {
+                        input,
+                        dry_run,
+                        if_revision,
+                        ..
+                    } => (input.clone(), "image-op-add", *dry_run, if_revision.clone()),
+                    OpAction::Set {
+                        input,
+                        dry_run,
+                        if_revision,
+                        ..
+                    } => (input.clone(), "image-op-set", *dry_run, if_revision.clone()),
+                    OpAction::Move {
+                        input,
+                        dry_run,
+                        if_revision,
+                        ..
+                    } => (
+                        input.clone(),
+                        "image-op-move",
+                        *dry_run,
+                        if_revision.clone(),
+                    ),
+                    OpAction::Enable {
+                        input,
+                        dry_run,
+                        if_revision,
+                        ..
+                    } => (
+                        input.clone(),
+                        "image-op-enable",
+                        *dry_run,
+                        if_revision.clone(),
+                    ),
+                    OpAction::Disable {
+                        input,
+                        dry_run,
+                        if_revision,
+                        ..
+                    } => (
+                        input.clone(),
+                        "image-op-disable",
+                        *dry_run,
+                        if_revision.clone(),
+                    ),
+                    OpAction::Remove {
+                        input,
+                        dry_run,
+                        if_revision,
+                        ..
+                    } => (
+                        input.clone(),
+                        "image-op-remove",
+                        *dry_run,
+                        if_revision.clone(),
+                    ),
+                };
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = match action {
+                    OpAction::Add {
+                        id,
+                        kind,
+                        op_id,
+                        index,
+                        flags,
+                        ..
+                    } => image::op_add(
+                        &mut raw,
+                        selected_page,
+                        &id,
+                        &kind,
+                        op_id.as_deref(),
+                        index,
+                        flags.into_params()?,
+                    )?,
+                    OpAction::Set {
+                        id, op_id, flags, ..
+                    } => image::op_set(&mut raw, selected_page, &id, &op_id, flags.into_params()?)?,
+                    OpAction::Move {
+                        id, op_id, index, ..
+                    } => image::op_move(&mut raw, selected_page, &id, &op_id, index)?,
+                    OpAction::Enable { id, op_id, .. } => {
+                        image::op_enable(&mut raw, selected_page, &id, &op_id, true)?
+                    }
+                    OpAction::Disable { id, op_id, .. } => {
+                        image::op_enable(&mut raw, selected_page, &id, &op_id, false)?
+                    }
+                    OpAction::Remove { id, op_id, .. } => {
+                        image::op_remove(&mut raw, selected_page, &id, &op_id)?
+                    }
+                    OpAction::List { .. } => unreachable!(),
+                };
+                let change =
+                    transaction::commit_value(&input, name, dry_run, if_revision.as_deref(), &raw)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+            ImageAction::Bake {
+                input,
+                id,
+                format,
+                strip_metadata: _,
+                dry_run,
+                if_revision,
+            } => {
+                if format != "png" {
+                    anyhow::bail!(
+                        "[unsupported-capability] bake format {format} is unsupported; use png"
+                    )
+                }
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = image::bake(&mut raw, selected_page, &input, &id, !dry_run)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "image-bake",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+            ImageAction::Cache { input } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let root = pentool::resource::document_root(&input);
+                let mut cached = vec![];
+                for (digest, asset) in raw["image_assets"].as_object().into_iter().flatten() {
+                    if asset["storage"]["kind"] == "external" {
+                        let path = asset["storage"]["path"].as_str().unwrap_or_default();
+                        let bytes = pentool::resource::read_external_offline(
+                            &input,
+                            std::path::Path::new(path),
+                            digest,
+                        )?;
+                        pentool::resource::cache_store(root, &bytes)?;
+                        cached.push(serde_json::json!({"asset": digest, "path": path, "bytes": bytes.len()}));
+                    }
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({"cached": cached}))?
+                );
+                Ok(())
+            }
+            ImageAction::Palette {
+                input,
+                id,
+                prefix,
+                count,
+                dry_run,
+                if_revision,
+            } => {
+                if !(1..=5).contains(&count) || prefix.is_empty() {
+                    anyhow::bail!(
+                        "[invalid-operation] palette needs a non-empty --prefix and --count 1-5"
+                    )
+                }
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let analysis = image::analyze(&raw, selected_page, &input, &id)?;
+                let colors = analysis["dominant_colors"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let mut tokens = Vec::new();
+                for (index, color) in colors.iter().take(count).enumerate() {
+                    let hex = color["hex"].as_str().context("analysis color is missing")?;
+                    let name = format!("{prefix}-{}", index + 1);
+                    style::apply(
+                        &mut raw,
+                        style::Operation::Set,
+                        Some(&name),
+                        Some("color"),
+                        Some(hex),
+                        None,
+                    )?;
+                    tokens.push(serde_json::json!({"token":name,"value":hex}));
+                }
+                let change = transaction::commit_value(
+                    &input,
+                    "image-palette",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":{"image":id,"tokens":tokens}})
+                    )?
+                );
+                Ok(())
+            }
+            ImageAction::Analyze { input, id } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&image::analyze(
+                        &raw,
+                        selected_page,
+                        &input,
+                        &id
+                    )?)?
+                );
+                Ok(())
+            }
             ImageAction::Add {
                 input,
                 id,
@@ -1153,10 +1625,7 @@ async fn run() -> Result<()> {
                 let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let (source_path, storage) = if external {
                     let relative = pentool::resource::safe_relative_path(&file)?;
-                    let root = input
-                        .parent()
-                        .unwrap_or_else(|| Path::new("."))
-                        .canonicalize()?;
+                    let root = pentool::resource::document_root(&input).canonicalize()?;
                     let source = root.join(&relative).canonicalize().with_context(|| {
                         format!("[missing-resource] {}", root.join(&relative).display())
                     })?;
@@ -1895,9 +2364,20 @@ async fn run() -> Result<()> {
             repetitions,
             scale,
             paths_only,
+            images,
+            source_size,
+            operations,
             json: _,
         } => {
-            let value = if render_benchmark || paths_only || scale != 1.0 {
+            let value = if let Some(images) = images {
+                benchmark::run_image(benchmark::ImageBenchmark {
+                    images,
+                    source_size,
+                    operations,
+                    scale,
+                    repetitions: repetitions.min(20),
+                })?
+            } else if render_benchmark || paths_only || scale != 1.0 {
                 benchmark::run_render(benchmark::RenderBenchmark {
                     layers,
                     objects,
@@ -1923,10 +2403,7 @@ async fn run() -> Result<()> {
             let bytes = fs::read(&input)?;
             let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             if scene::is_scene_document(&raw) {
-                let k = kind.map(|k| match k {
-                    agent::ObjectKind::Path => "path",
-                    agent::ObjectKind::Text => "text",
-                });
+                let k = kind.map(SearchKind::as_str);
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&scene::inspect_paginated_v4(
@@ -1945,7 +2422,7 @@ async fn run() -> Result<()> {
             let mut output = agent::inspect_paginated(
                 &doc,
                 query.as_deref(),
-                kind,
+                kind.map(SearchKind::legacy).transpose()?,
                 layer.as_deref(),
                 offset,
                 limit,
@@ -1965,10 +2442,7 @@ async fn run() -> Result<()> {
             let bytes = fs::read(&input)?;
             let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             if scene::is_scene_document(&raw) {
-                let k = kind.map(|k| match k {
-                    agent::ObjectKind::Path => "path",
-                    agent::ObjectKind::Text => "text",
-                });
+                let k = kind.map(SearchKind::as_str);
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&scene::inspect_paginated_v4(
@@ -1987,7 +2461,7 @@ async fn run() -> Result<()> {
             let mut output = agent::inspect_paginated(
                 &doc,
                 Some(&query),
-                kind,
+                kind.map(SearchKind::legacy).transpose()?,
                 layer.as_deref(),
                 offset,
                 limit,
@@ -2819,7 +3293,15 @@ async fn run() -> Result<()> {
             outline_text,
             all_pages,
             format,
+            link_images,
         } => {
+            if link_images
+                && (all_pages || output.extension().and_then(|e| e.to_str()) != Some("svg"))
+            {
+                anyhow::bail!(
+                    "[unsupported-capability] --link-images applies to a single-page .svg output"
+                )
+            }
             let wants_pdf = output.extension().and_then(|value| value.to_str()) == Some("pdf");
             if all_pages || wants_pdf {
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
@@ -2899,6 +3381,7 @@ async fn run() -> Result<()> {
                                 &destination,
                                 scale,
                                 outline_text,
+                                false,
                             )?;
                         } else {
                             let doc = read_render_document(&input, Some(id))?;
@@ -2928,7 +3411,15 @@ async fn run() -> Result<()> {
                         .and_then(serde_json::Value::as_object)
                         .is_some_and(|assets| !assets.is_empty())
                 {
-                    write_image_export(&input, &raw, selected_page, &output, scale, outline_text)?;
+                    write_image_export(
+                        &input,
+                        &raw,
+                        selected_page,
+                        &output,
+                        scale,
+                        outline_text,
+                        link_images,
+                    )?;
                 } else {
                     let doc = read_render_document(&input, selected_page)?;
                     render::write_export_options(&doc, &output, scale, outline_text)?;
@@ -2947,11 +3438,18 @@ fn write_image_export(
     output: &Path,
     scale: f32,
     outline_text: bool,
+    link_images: bool,
 ) -> Result<()> {
     if outline_text {
         anyhow::bail!("[unsupported-capability] outlined text with image scenes is not implemented")
     }
-    let scene = image::to_svg(raw, input, page)?;
+    let scene = if link_images {
+        let directory = pentool::resource::document_root(output);
+        fs::create_dir_all(directory)?;
+        image::to_svg_linked(raw, input, page, Some(directory))?
+    } else {
+        image::to_svg(raw, input, page)?
+    };
     let bytes = match output
         .extension()
         .and_then(|extension| extension.to_str())

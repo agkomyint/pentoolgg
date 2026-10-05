@@ -1,5 +1,5 @@
 //! Deterministic, data-only `.penpkg` packages and filesystem registries.
-use crate::{asset, document::Document};
+use crate::asset;
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signer, Verifier};
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,9 @@ pub struct PackageAsset {
     pub hash: String,
     #[serde(default)]
     pub preview: Option<String>,
+    /// Image blobs the asset document carries, with consumers, for audit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,8 +145,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         let raw: Value = serde_json::from_slice(&bytes)?;
         let am = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
         asset::validate_properties(&raw)?;
-        let doc: Document = serde_json::from_value(raw)?;
-        doc.validate().map_err(anyhow::Error::msg)?;
+        let images = check_asset_document(&raw)?;
         if !seen.insert(am.id.clone()) {
             bail!("duplicate asset ID {}", am.id)
         }
@@ -154,6 +156,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
                 path: rel,
                 hash: asset::hash_bytes(&bytes),
                 preview: None,
+                images,
             },
         );
     }
@@ -195,6 +198,53 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
     Ok(
         json!({"ok":true,"package":m.name,"version":m.version,"assets":m.assets.len(),"output":output,"hash":asset::hash_bytes(&bytes)}),
     )
+}
+
+/// Validate a packaged asset document with the shared format validators and
+/// return its deterministic image table. Image blobs must be embedded so the
+/// package is self-contained and verifiable offline; hashes, decode, pixel and
+/// byte limits are enforced by the same validator used at import.
+fn check_asset_document(raw: &Value) -> Result<Vec<Value>> {
+    crate::transaction::validate_value(raw)?;
+    let Some(images) = raw.get("image_assets").and_then(Value::as_object) else {
+        return Ok(vec![]);
+    };
+    let mut consumers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    fn walk(v: &Value, out: &mut BTreeMap<String, Vec<String>>) {
+        match v {
+            Value::Object(m) => {
+                if m.get("kind").and_then(Value::as_str) == Some("image") {
+                    if let (Some(a), Some(id)) = (
+                        m.get("asset").and_then(Value::as_str),
+                        m.get("id").and_then(Value::as_str),
+                    ) {
+                        out.entry(a.to_owned()).or_default().push(id.to_owned());
+                    }
+                }
+                m.values().for_each(|c| walk(c, out));
+            }
+            Value::Array(a) => a.iter().for_each(|c| walk(c, out)),
+            _ => {}
+        }
+    }
+    walk(raw, &mut consumers);
+    let mut table = vec![];
+    let mut digests: Vec<_> = images.keys().collect();
+    digests.sort();
+    for digest in digests {
+        let a = &images[digest];
+        if a["storage"]["kind"] != "embedded" {
+            bail!("[unsupported-capability] packaged image {digest} must be embedded; external image files are not packaged")
+        }
+        let mut users = consumers.remove(digest).unwrap_or_default();
+        users.sort();
+        table.push(json!({
+            "digest": digest, "media_type": a["media_type"],
+            "pixel_width": a["pixel_width"], "pixel_height": a["pixel_height"],
+            "byte_length": a["byte_length"], "consumers": users
+        }));
+    }
+    Ok(table)
 }
 
 fn canonical_json(v: &Value) -> Result<Vec<u8>> {
@@ -247,8 +297,9 @@ pub fn verify(path: &Path) -> Result<Value> {
         if am.id != *id {
             bail!("asset ID mismatch: {id}")
         }
-        let doc: Document = serde_json::from_value(raw)?;
-        doc.validate().map_err(anyhow::Error::msg)?;
+        if check_asset_document(&raw)? != a.images {
+            bail!("asset image table does not match its document: {id}")
+        }
     }
     Ok(
         json!({"ok":true,"package":m,"package_hash":asset::hash_bytes(&fs::read(path)?),"entries":entries.len(),"expanded_bytes":expanded}),

@@ -31,3 +31,23 @@ without modifying the destination because imports write only after validation.
 
 Committed CLI imports use a sibling temporary file, retain the exact prior file as
 `<name>.bak.N`, and restore it if final replacement fails. Dry runs never write.
+
+## Raster image benchmarks and distribution budget (v0.7)
+
+```sh
+pentool benchmark --images 100 --source-size 512 --operations 2 --repetitions 5
+```
+
+One PNG source is reused `--images` times, each with an operation stack of
+`--operations` entries (0–8). The report lists codec, source dimensions, reuse
+count, document size, and one record per run: `cold` (empty processed cache) then
+`warm`, with decode/process/compose, rasterize/encode, and write times in
+microseconds, output bytes, and peak resident memory where the platform reports it.
+Output bytes must be identical across cold and warm runs.
+
+The editor requests approximate previews with `/api/render/svg?max_edge=N`
+(16–4096). Proxies reduce embedded pixel detail only; exports never use them.
+
+Release binaries are gated by `scripts/check-binary-size.sh` at 24,000,000 bytes in
+CI and for every release target. The Windows release build measured 14,630,400
+bytes at the time of writing; record the per-target sizes in the release notes.

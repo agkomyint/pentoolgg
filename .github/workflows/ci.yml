@@ -26,3 +26,33 @@ jobs:
           name: render-diffs-${{ matrix.os }}
           path: target/render-diffs
           if-no-files-found: ignore
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node tests/web/image-panel.test.mjs
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources
+  binary-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - run: sh scripts/check-binary-size.sh target/release/pentool 24000000
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - run: |
+          for target in decode_source validate_document operation_stack image_assets processed_record package_verify; do
+            cargo fuzz run "$target" -- -max_total_time=30 -rss_limit_mb=2048
+          done

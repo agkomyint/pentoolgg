@@ -74,6 +74,9 @@ jobs:
           cargo run --release --locked --target ${{ matrix.target }} -- --page assets search import-smoke.pen eye --limit 2
       - name: Smoke test outlined typography
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.svg --outline-text
+      - name: Record binary size
+        shell: bash
+        run: sh scripts/check-binary-size.sh "$(ls target/${{ matrix.target }}/release/pentool target/${{ matrix.target }}/release/pentool.exe 2>/dev/null | head -1)" 24000000
       - name: Package Unix
         if: matrix.archive == 'tar.gz'
         shell: bash

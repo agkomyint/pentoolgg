@@ -315,3 +315,113 @@ pub fn generate(layer_count: usize, object_count: usize, paths_only: bool) -> Do
     }
     doc
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImageBenchmark {
+    pub images: usize,
+    pub source_size: u32,
+    pub operations: usize,
+    pub scale: f32,
+    pub repetitions: usize,
+}
+
+fn micros(since: Instant) -> u64 {
+    since.elapsed().as_micros() as u64
+}
+
+/// Image-aware benchmark: one reused source placed `images` times with an
+/// operation stack, measured cold (empty processed cache) and warm.
+pub fn run_image(c: ImageBenchmark) -> Result<Value> {
+    if c.images == 0 || c.images > 1000 || !(1..=4096).contains(&c.source_size) {
+        bail!("image benchmark supports 1–1,000 images and sources of 1–4,096 pixels");
+    }
+    if c.operations > 8 || c.repetitions == 0 || c.repetitions > 20 {
+        bail!("operations must be 0–8 and repetitions 1–20");
+    }
+    if !(0.1..=4.0).contains(&c.scale) {
+        bail!("scale must be between 0.1 and 4");
+    }
+    let dir = std::env::temp_dir().join(format!("pentool-image-bench-{}", std::process::id()));
+    fs::create_dir_all(&dir)?;
+    let result = image_bench_in(&dir, c);
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
+fn image_bench_in(dir: &std::path::Path, c: ImageBenchmark) -> Result<Value> {
+    let mut source = ::image::RgbaImage::new(c.source_size, c.source_size);
+    for (x, y, px) in source.enumerate_pixels_mut() {
+        *px = ::image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x ^ y) % 256) as u8, 255]);
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    ::image::DynamicImage::ImageRgba8(source).write_to(&mut png, ::image::ImageFormat::Png)?;
+    let png = png.into_inner();
+    let mut raw = json!({"format":"pentool","version":4,"name":"bench",
+        "pages":[{"id":"page-1","name":"Page 1","canvas":{"width":1200,"height":800,"background":"#ffffff"},
+        "layers":[{"id":"layer-1","name":"Layer 1","visible":true,"locked":false,"nodes":[]}]}]});
+    let kinds = [
+        (
+            "brightness-contrast",
+            json!({"brightness":10,"contrast":10}),
+        ),
+        ("blur", json!({"radius":2})),
+        ("hue-saturation", json!({"hue":15,"saturation":10})),
+        ("sharpen", json!({"radius":1,"amount":50})),
+    ];
+    let columns = (c.images as f64).sqrt().ceil() as usize;
+    let cell = 1200.0 / columns as f64;
+    for i in 0..c.images {
+        crate::image::add(
+            &mut raw,
+            None,
+            "layer-1",
+            &format!("img-{i}"),
+            &png,
+            crate::image::embedded_storage(&png),
+            (i % columns) as f64 * cell,
+            (i / columns) as f64 * cell.min(800.0 / columns as f64),
+            cell,
+            cell.min(800.0 / columns as f64),
+            crate::image::Fit::Cover,
+        )?;
+        for k in 0..c.operations {
+            let (kind, params) = &kinds[k % kinds.len()];
+            let map = params.as_object().cloned().unwrap_or_default();
+            crate::image::op_add(
+                &mut raw,
+                None,
+                &format!("img-{i}"),
+                kind,
+                Some(&format!("op-{i}-{k}")),
+                None,
+                crate::image::OpParams(map),
+            )?;
+        }
+    }
+    let path = dir.join("bench.pen");
+    fs::write(&path, serde_json::to_vec(&raw)?)?;
+    let mut runs = Vec::new();
+    for run in 0..c.repetitions + 1 {
+        let cold = run == 0;
+        if cold {
+            let _ = fs::remove_dir_all(dir.join(".pentool"));
+        }
+        let total = Instant::now();
+        let at = Instant::now();
+        let scene = crate::image::to_svg(&raw, &path, None)?;
+        let compose = micros(at);
+        let at = Instant::now();
+        let png = render::svg_to_png(&scene.svg, scene.width, scene.height, c.scale)?;
+        let raster_encode = micros(at);
+        let at = Instant::now();
+        let out = dir.join("out.png");
+        fs::write(&out, &png)?;
+        runs.push(json!({"cache":if cold {"cold"} else {"warm"},
+            "decode_process_compose_us":compose,"rasterize_encode_us":raster_encode,
+            "write_us":micros(at),"total_us":micros(total),"output_bytes":png.len()}));
+    }
+    Ok(json!({"schema_version":1,"benchmark":"image","codec":"png",
+        "fixture":{"images":c.images,"reuse_count":c.images,"source_width":c.source_size,
+            "source_height":c.source_size,"operations_per_image":c.operations,"document_bytes":fs::metadata(&path)?.len()},
+        "render":{"scale":c.scale},"runs":runs,"peak_resident_bytes":peak_resident_bytes()}))
+}

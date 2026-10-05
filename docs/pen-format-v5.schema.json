@@ -64,6 +64,18 @@
       },
       "additionalProperties": true
     },
+    "imageOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "version", "enabled", "params"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["crop", "resize", "rotate", "brightness-contrast", "levels", "curves", "hue-saturation", "blur", "sharpen", "grayscale"]},
+        "version": {"const": 1},
+        "enabled": {"type": "boolean"},
+        "params": {"type": "object"}
+      }
+    },
     "imageAsset": {
       "type": "object",
       "required": ["media_type", "byte_length", "pixel_width", "pixel_height", "color_space", "orientation", "storage"],
@@ -129,7 +141,7 @@
             },
             "opacity": {"type": "number", "minimum": 0, "maximum": 1},
             "blend_mode": {"const": "normal"},
-            "operations": {"type": "array", "maxItems": 256},
+            "operations": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/imageOperation"}},
             "mask": {"$ref": "#/$defs/imageMask"}
           },
           "required": ["asset", "x", "y", "width", "height", "fit", "position", "crop", "opacity", "blend_mode", "operations"]

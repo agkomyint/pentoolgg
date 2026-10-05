@@ -24,6 +24,7 @@ struct Shared {
 const INDEX: &str = include_str!("../web/index.html");
 const APP_JS: &str = include_str!("../web/app.js");
 const STYLE: &str = include_str!("../web/style.css");
+const IMAGE_PANEL_JS: &str = include_str!("../web/image-panel.js");
 
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
     if let Some(path) = &file {
@@ -39,6 +40,11 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
             "/app.js",
             get(|| async { asset(APP_JS, "text/javascript; charset=utf-8") }),
         )
+        .route(
+            "/image-panel.js",
+            get(|| async { asset(IMAGE_PANEL_JS, "text/javascript; charset=utf-8") }),
+        )
+        .route("/api/image/bake", post(image_bake))
         .route(
             "/style.css",
             get(|| async { asset(STYLE, "text/css; charset=utf-8") }),
@@ -401,6 +407,54 @@ async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneReques
         Err(error) => problem(error),
     }
 }
+#[derive(serde::Deserialize)]
+struct BakeRequest {
+    id: String,
+    page: Option<String>,
+    revision: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Bake through the same shared service and transaction as `image bake`.
+async fn image_bake(State(state): State<Shared>, Json(body): Json<BakeRequest>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let _guard = state
+            .gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&file)?)?;
+        if body
+            .revision
+            .as_deref()
+            .is_some_and(|wanted| wanted != revision(&raw))
+        {
+            anyhow::bail!("document revision changed")
+        }
+        let result = crate::image::bake(
+            &mut raw,
+            body.page.as_deref(),
+            &file,
+            &body.id,
+            !body.dry_run,
+        )?;
+        let change = crate::transaction::commit_value(
+            &file,
+            "browser-image-bake",
+            body.dry_run,
+            None,
+            &raw,
+        )?;
+        Ok(serde_json::json!({"change":change,"result":result}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
 async fn history_list(State(state): State<Shared>) -> Response {
     let Some(file) = state.file else {
         return (StatusCode::NOT_FOUND, "No shared document").into_response();
@@ -487,6 +541,7 @@ fn asset(body: &'static str, kind: &'static str) -> Response {
 #[derive(serde::Deserialize, Default)]
 struct PageQuery {
     page: Option<String>,
+    max_edge: Option<u32>,
 }
 
 async fn render_png(
@@ -527,13 +582,18 @@ async fn render_svg(
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
     Json(value): Json<serde_json::Value>,
 ) -> Response {
+    let max_edge = query.max_edge;
     let result = (|| -> Result<String> {
         if value.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION) {
             let document = state
                 .file
                 .clone()
                 .unwrap_or_else(|| state.project_root.join("browser.pen"));
-            return Ok(image::to_svg(&value, &document, query.page.as_deref())?.svg);
+            return Ok(match query.max_edge {
+                Some(edge) => image::to_svg_proxy(&value, &document, query.page.as_deref(), edge)?,
+                None => image::to_svg(&value, &document, query.page.as_deref())?,
+            }
+            .svg);
         }
         let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?
@@ -549,7 +609,18 @@ async fn render_svg(
         render::to_svg(&doc)
     })();
     match result {
-        Ok(svg) => binary(svg.into_bytes(), "image/svg+xml", "artwork.svg"),
+        Ok(svg) => {
+            let mut response = binary(svg.into_bytes(), "image/svg+xml", "artwork.svg");
+            response.headers_mut().insert(
+                "x-pentool-preview",
+                HeaderValue::from_static(if max_edge.is_some() {
+                    "approximate"
+                } else {
+                    "authoritative"
+                }),
+            );
+            response
+        }
         Err(error) => problem(error),
     }
 }

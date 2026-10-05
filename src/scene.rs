@@ -1463,6 +1463,10 @@ pub fn apply_batch(
                 "promote-component"=>{let id=resolve("id")?;let component=resolve("component")?;promote_component(&mut candidate,page,&id,&component)?}
                 "instantiate-component"=>{let id=resolve("id")?;let component=resolve("component")?;let layer=resolve("layer")?;instantiate_component(&mut candidate,page,&layer,&component,&id,operation.get("dx").and_then(Value::as_f64).unwrap_or(0.0),operation.get("dy").and_then(Value::as_f64).unwrap_or(0.0))?}
                 "add-page"=>{let id=resolve("id")?;let name=operation.get("name").and_then(Value::as_str).unwrap_or(&id);let width=operation.get("width").and_then(Value::as_u64).unwrap_or(1200);let height=operation.get("height").and_then(Value::as_u64).unwrap_or(800);let layer=operation.get("layer").and_then(Value::as_str).unwrap_or("content");let pages=candidate.get_mut("pages").and_then(Value::as_array_mut).unwrap();if pages.iter().any(|page|page.get("id").and_then(Value::as_str)==Some(&id)){bail!("page already exists: {id}")}pages.push(json!({"id":id,"name":name,"canvas":{"width":width,"height":height,"background":operation.get("background").and_then(Value::as_str).unwrap_or("#ffffff")},"layers":[{"id":layer,"name":"Content","visible":true,"locked":false,"nodes":[]}]}));json!({"type":kind,"id":id})}
+                "put-image" | "set-image" | "image-op-add" | "image-op-set" | "image-op-move"
+                | "image-op-enable" | "image-op-disable" | "image-op-remove" => {
+                    crate::image::batch_operation(&mut candidate, page, kind, operation, &resolve)?
+                }
                 other => bail!("unsupported v4 batch operation: {other}"),
             };
             if let Some(alias) = operation.get("alias").and_then(Value::as_str) {
@@ -2072,7 +2076,7 @@ fn validate_node(
     node: &Value,
     depth: usize,
     ids: &mut HashSet<String>,
-    image_assets: Option<&HashSet<String>>,
+    image_assets: Option<&HashMap<String, (u64, u64)>>,
 ) -> Result<()> {
     if depth > MAX_DEPTH {
         bail!("scene graph exceeds maximum nesting depth {MAX_DEPTH}")

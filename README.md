@@ -450,3 +450,36 @@ Dual-licensed under MIT or Apache-2.0, at your option.
 
 Bundled fonts have a separate [SIL Open Font License](assets/fonts/OFL.txt).
 See [font attribution](assets/fonts/README.md).
+
+### Non-destructive image operations
+
+Image nodes carry an ordered operation stack evaluated top to bottom; the source
+bytes never change until an explicit bake.
+
+```sh
+pentool image op add artwork.pen hero grayscale --op-id gray
+pentool image op add artwork.pen hero blur --op-id soft --radius 2
+pentool image op move artwork.pen hero soft --index 0
+pentool image op disable artwork.pen hero gray
+pentool image op list artwork.pen hero
+pentool image analyze artwork.pen hero
+pentool image bake artwork.pen hero --dry-run
+pentool image bake artwork.pen hero --strip-metadata
+pentool undo artwork.pen
+```
+
+Kinds: `crop`, `resize`, `rotate` (0/90/180/270), `brightness-contrast`, `levels`,
+`curves` (`--points 0:0,128:160,255:255`), `hue-saturation`, `blur`, `sharpen`,
+`grayscale`. A stack holds at most 64 operations; invalid parameters or stacks that
+would exceed surface limits fail with `[invalid-operation]` or `[limit-exceeded]`
+and leave the document unchanged. Use negative values as `--contrast=-20`.
+Batch files may create a node with its whole stack atomically:
+
+```json
+[{"type":"put-image","id":"hero","layer":"content","data":"<base64>","width":160,"height":160,
+  "operations":[{"kind":"grayscale","id":"g"},{"kind":"blur","id":"b","params":{"radius":1}}]}]
+```
+
+See [docs/image-workflow.md](docs/image-workflow.md) for the complete raster image
+workflow: storage, operations, bake, batch, packages, cache repair, the browser
+panel, and benchmarks.

@@ -1,6 +1,6 @@
 /target/
 /dist/
-/.pentool/
+.pentool/
 /*.exe
 /*.pdb
 /*.zip
@@ -10,3 +10,8 @@
 !docs/**/*.svg
 !examples/*.png
 !examples/*.svg
+
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/Cargo.lock

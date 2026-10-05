@@ -116,6 +116,34 @@
         <div class="section-head"><button id="historyUndo">Undo</button><button id="historyRedo">Redo</button><button id="historyRefresh">History</button></div>
         <pre id="historyResult" class="import-result" hidden></pre>
       </section>
+      <section class="agent-card" id="imagePanel">
+        <h2>Image operations</h2>
+        <p id="imageStatus">Open a shared v5 document with images to edit them non-destructively.</p>
+        <select id="imageSelect" aria-label="Image node"></select>
+        <div id="imageFrame">
+          <label>Fit <select id="imageFit"><option>fill</option><option>contain</option><option>cover</option><option>none</option><option>scale-down</option></select></label>
+          <label>Focal X <input id="imageFocalX" type="range" min="0" max="1" step="0.01"></label>
+          <label>Focal Y <input id="imageFocalY" type="range" min="0" max="1" step="0.01"></label>
+          <label>Crop X <input id="imageCropX" type="range" min="0" max="1" step="0.01"></label>
+          <label>Crop Y <input id="imageCropY" type="range" min="0" max="1" step="0.01"></label>
+          <label>Crop W <input id="imageCropW" type="range" min="0.01" max="1" step="0.01"></label>
+          <label>Crop H <input id="imageCropH" type="range" min="0.01" max="1" step="0.01"></label>
+          <label>Opacity <input id="imageOpacity" type="range" min="0" max="1" step="0.01"></label>
+          <button id="imageApplyFrame">Apply frame</button>
+        </div>
+        <div id="imageOps"></div>
+        <div class="section-head">
+          <select id="imageOpKind" aria-label="Operation kind"></select>
+          <button id="imageOpAdd">Add</button>
+        </div>
+        <label>Parameters (JSON) <input id="imageOpParams" value="{}"></label>
+        <div class="section-head">
+          <button id="imageBeforeAfter">Before / after</button>
+          <button id="imageReset">Reset</button>
+          <button id="imageBake">Bake…</button>
+        </div>
+        <p id="imagePreviewStatus">Preview: authoritative</p>
+      </section>
       <section class="agent-card">
         <h2>Agent API</h2>
         <p>Generate paths with JSON, then render them through this server.</p>
@@ -126,5 +154,6 @@
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/app.js"></script>
+  <script src="/image-panel.js"></script>
 </body>
 </html>

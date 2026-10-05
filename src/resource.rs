@@ -42,9 +42,73 @@ pub fn verify(bytes: &[u8], expected: &str) -> Result<()> {
     Ok(())
 }
 
+/// Directory containing a document; a bare relative file name resolves to ".".
+pub fn document_root(document: &Path) -> &Path {
+    match document.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    }
+}
+
+/// Project-local content-addressed cache directory (shared with package installs).
+pub fn cache_dir(root: &Path) -> PathBuf {
+    root.join(".pentool").join("cache").join("sha256")
+}
+
+fn cache_entry(root: &Path, digest: &str) -> Result<PathBuf> {
+    let hex = digest
+        .strip_prefix("sha256:")
+        .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+        .context("[malformed-resource] cache digest must be sha256:<64 hex>")?;
+    Ok(cache_dir(root).join(hex.to_ascii_lowercase()))
+}
+
+/// Store immutable bytes by digest. Idempotent and safe under concurrent writers:
+/// each writer uses a private temporary file and an atomic rename of identical bytes.
+pub fn cache_store(root: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    let digest = sha256(bytes);
+    verify(bytes, &digest)?;
+    let entry = cache_entry(root, &digest)?;
+    if entry.is_file() && cache_read(root, &digest).is_ok() {
+        return Ok(entry);
+    }
+    std::fs::create_dir_all(cache_dir(root))?;
+    let temp = entry.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&temp, bytes)?;
+    if let Err(error) = std::fs::rename(&temp, &entry) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error).context("failed to publish cache entry");
+    }
+    Ok(entry)
+}
+
+/// Read a cache entry. A missing entry is `None`; a corrupt entry is a hard
+/// `[hash-mismatch]` failure and is never treated as a miss.
+pub fn cache_read(root: &Path, digest: &str) -> Result<Option<Vec<u8>>> {
+    let entry = cache_entry(root, digest)?;
+    match std::fs::read(&entry) {
+        Ok(bytes) => {
+            verify(&bytes, digest).with_context(|| {
+                format!(
+                    "cache entry {} is corrupt; delete it and re-add the source",
+                    entry.display()
+                )
+            })?;
+            Ok(Some(bytes))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("[missing-resource] {}", entry.display())),
+    }
+}
+
 pub fn read_external_offline(document: &Path, relative: &Path, expected: &str) -> Result<Vec<u8>> {
     let relative = safe_relative_path(relative)?;
-    let root = document.parent().unwrap_or_else(|| Path::new("."));
+    let root = document_root(document);
+    if !root.join(&relative).exists() {
+        if let Some(bytes) = cache_read(root, expected)? {
+            return Ok(bytes);
+        }
+    }
     let canonical_root = root
         .canonicalize()
         .with_context(|| format!("[missing-resource] {}", root.display()))?;

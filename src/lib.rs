@@ -9,6 +9,7 @@ pub mod fonts;
 pub mod geometry;
 pub mod history;
 pub mod image;
+pub mod imageops;
 pub mod import;
 pub mod instance;
 pub mod layout;
