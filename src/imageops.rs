@@ -539,7 +539,7 @@ fn resize(image: &RgbaImage, width: u32, height: u32) -> RgbaImage {
 fn box_sizes(sigma: f64) -> [usize; 3] {
     let ideal = (12.0 * sigma * sigma / 3.0 + 1.0).sqrt();
     let mut lower = ideal.floor() as usize;
-    if lower % 2 == 0 {
+    if lower & 1 == 0 {
         lower -= 1;
     }
     let lower = lower.max(1);
@@ -610,8 +610,15 @@ fn blur_planes(pixels: &[[f64; 4]], width: u32, height: u32, sigma: f64) -> Vec<
             }
         }
     }
-    data.chunks_exact(4)
-        .map(|c| [c[0], c[1], c[2], c[3]])
+    (0..data.len() / 4)
+        .map(|i| {
+            [
+                data[4 * i],
+                data[4 * i + 1],
+                data[4 * i + 2],
+                data[4 * i + 3],
+            ]
+        })
         .collect()
 }
 
@@ -671,7 +678,7 @@ mod tests {
             op("rotate", json!({"degrees": 0})),
         ] {
             assert_eq!(
-                apply_stack(image.clone(), &[operation.clone()]).unwrap(),
+                apply_stack(image.clone(), std::slice::from_ref(&operation)).unwrap(),
                 image,
                 "{operation}"
             );
