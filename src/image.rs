@@ -2,7 +2,7 @@
 use anyhow::{bail, Context, Result};
 use base64::Engine;
 use serde_json::{Map, Value};
-use std::{collections::HashSet, path::Path};
+use std::{collections::HashSet, io::Cursor, path::Path};
 
 pub const VERSION: u64 = 5;
 pub const MAX_SOURCE_BYTES: u64 = 128 * 1024 * 1024;
@@ -10,6 +10,74 @@ pub const MAX_DOCUMENT_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_DIMENSION: u64 = 32_768;
 pub const MAX_PIXELS: u64 = 268_435_456;
 pub const MAX_SURFACE_BYTES: u64 = 1_073_741_824;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceInfo {
+    pub digest: String,
+    pub media_type: String,
+    pub byte_length: u64,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub color_space: &'static str,
+    pub orientation: u8,
+    pub has_alpha: bool,
+}
+
+pub fn decode_source(bytes: &[u8]) -> Result<SourceInfo> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_SOURCE_BYTES {
+        bail!("[limit-exceeded] image source must contain 1 byte–128 MiB")
+    }
+    let format =
+        image::guess_format(bytes).context("[malformed-resource] unknown image signature")?;
+    let (media_type, animation_marker) = match format {
+        image::ImageFormat::Png => ("image/png", Some(b"acTL".as_slice())),
+        image::ImageFormat::Jpeg => ("image/jpeg", None),
+        image::ImageFormat::WebP => ("image/webp", Some(b"ANIM".as_slice())),
+        other => bail!("[unsupported-capability] image format {other:?} is unsupported"),
+    };
+    if animation_marker.is_some_and(|marker| bytes.windows(marker.len()).any(|part| part == marker))
+    {
+        bail!("[unsupported-capability] animated images require explicit frame selection")
+    }
+    let reader = image::ImageReader::with_format(Cursor::new(bytes), format);
+    let (width, height) = reader
+        .into_dimensions()
+        .context("[malformed-resource] could not read image dimensions")?;
+    validate_surface(width as u64, height as u64)?;
+    let decoded = image::load_from_memory_with_format(bytes, format)
+        .context("[malformed-resource] image decode failed")?;
+    let has_alpha = decoded.color().has_alpha();
+    let rgba = decoded.into_rgba8();
+    if rgba.width() != width || rgba.height() != height {
+        bail!("[malformed-resource] decoded image dimensions changed unexpectedly")
+    }
+    Ok(SourceInfo {
+        digest: crate::resource::sha256(bytes),
+        media_type: media_type.into(),
+        byte_length: bytes.len() as u64,
+        pixel_width: width,
+        pixel_height: height,
+        color_space: "srgb8",
+        orientation: 1,
+        has_alpha,
+    })
+}
+
+fn validate_surface(width: u64, height: u64) -> Result<()> {
+    if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+        bail!("[limit-exceeded] image dimensions are outside 1–32768")
+    }
+    let pixels = width
+        .checked_mul(height)
+        .context("[limit-exceeded] image pixel count overflow")?;
+    let bytes = pixels
+        .checked_mul(4)
+        .context("[limit-exceeded] image surface byte count overflow")?;
+    if pixels > MAX_PIXELS || bytes > MAX_SURFACE_BYTES {
+        bail!("[limit-exceeded] decoded image surface is too large")
+    }
+    Ok(())
+}
 
 pub fn validate_assets(raw: &Value) -> Result<HashSet<String>> {
     let assets = raw

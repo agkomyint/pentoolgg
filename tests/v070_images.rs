@@ -1,4 +1,4 @@
-use pentool::{scene, transaction};
+use pentool::{image, scene, transaction};
 use serde_json::{json, Value};
 
 fn fixture(name: &str) -> Value {
@@ -52,4 +52,26 @@ fn image_content_has_an_actionable_v3_downgrade_error() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("cannot represent image node pixel"));
+}
+
+#[test]
+fn bounded_decoder_accepts_png_jpeg_and_webp_signatures() {
+    for (format, media_type) in [
+        (::image::ImageFormat::Png, "image/png"),
+        (::image::ImageFormat::Jpeg, "image/jpeg"),
+        (::image::ImageFormat::WebP, "image/webp"),
+    ] {
+        let source = ::image::DynamicImage::new_rgb8(2, 3);
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        source.write_to(&mut cursor, format).unwrap();
+        let info = image::decode_source(cursor.get_ref()).unwrap();
+        assert_eq!(info.media_type, media_type);
+        assert_eq!((info.pixel_width, info.pixel_height), (2, 3));
+        assert!(info.digest.starts_with("sha256:"));
+    }
+
+    assert!(image::decode_source(b"not an image")
+        .unwrap_err()
+        .to_string()
+        .contains("[malformed-resource]"));
 }
