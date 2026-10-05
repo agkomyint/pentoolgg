@@ -10,7 +10,14 @@ pub fn sha256(bytes: &[u8]) -> String {
 }
 
 pub fn safe_relative_path(path: &Path) -> Result<PathBuf> {
-    if path.as_os_str().is_empty() || path.is_absolute() {
+    let portable = path.to_string_lossy();
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || portable.starts_with('/')
+        || portable.starts_with('\\')
+        || portable.contains('\\')
+        || portable.contains(':')
+    {
         bail!("[unsafe-path] resource path must be nonempty and document-relative")
     }
     if path.components().any(|part| {
@@ -60,7 +67,10 @@ mod tests {
         assert_ne!(sha256(b"same"), sha256(b"different"));
         assert!(safe_relative_path(Path::new("assets/object.bin")).is_ok());
         assert!(safe_relative_path(Path::new("../secret")).is_err());
+        assert!(safe_relative_path(Path::new("..\\secret")).is_err());
         assert!(safe_relative_path(Path::new("C:\\secret")).is_err());
+        assert!(safe_relative_path(Path::new("\\\\server\\share")).is_err());
+        assert!(safe_relative_path(Path::new("assets/object.bin:stream")).is_err());
         assert!(verify(b"changed", &sha256(b"expected"))
             .unwrap_err()
             .to_string()
