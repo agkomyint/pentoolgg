@@ -190,7 +190,7 @@ fn find_layer<'a>(document: &'a Value, page_id: &str, layer_id: &str) -> Option<
 
 pub fn validate_value(value: &Value) -> Result<()> {
     match value.get("version").and_then(Value::as_u64) {
-        Some(crate::scene::VERSION) => crate::scene::validate(value),
+        Some(crate::scene::VERSION | crate::image::VERSION) => crate::scene::validate(value),
         Some(1..=3) => {
             let doc: crate::document::Document =
                 serde_json::from_value(value.clone()).context("invalid legacy document")?;
@@ -198,7 +198,7 @@ pub fn validate_value(value: &Value) -> Result<()> {
         }
         Some(version) => bail!(
             "[unsupported-capability] document format version {version} is newer than supported version {}",
-            crate::scene::VERSION
+            crate::scene::LATEST_VERSION
         ),
         None => bail!("[malformed-resource] document version is missing or invalid"),
     }

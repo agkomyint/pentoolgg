@@ -6,7 +6,15 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
+pub const LATEST_VERSION: u64 = crate::image::VERSION;
 pub const MAX_DEPTH: usize = 64;
+
+pub fn is_scene_document(raw: &Value) -> bool {
+    matches!(
+        raw.get("version").and_then(Value::as_u64),
+        Some(VERSION) | Some(crate::image::VERSION)
+    )
+}
 
 pub fn new_document(width: u32, height: u32) -> Value {
     json!({
@@ -1571,8 +1579,25 @@ pub fn migrate_to_v4(mut raw: Value) -> Result<Value> {
         validate(&raw)?;
         return Ok(raw);
     }
+    if version == crate::image::VERSION {
+        validate(&raw)?;
+        if raw
+            .get("image_assets")
+            .and_then(Value::as_object)
+            .is_some_and(|assets| !assets.is_empty())
+        {
+            bail!("[unsupported-capability] version 4 cannot represent image assets")
+        }
+        let object = raw
+            .as_object_mut()
+            .context("document must be a JSON object")?;
+        object.insert("version".into(), Value::from(VERSION));
+        object.remove("image_assets");
+        validate(&raw)?;
+        return Ok(raw);
+    }
     if !(1..=3).contains(&version) {
-        bail!("only .pen versions 1–4 are supported");
+        bail!("only .pen versions 1–5 are supported");
     }
     let object = raw
         .as_object_mut()
@@ -1624,6 +1649,28 @@ pub fn migrate_to_v4(mut raw: Value) -> Result<Value> {
     Ok(raw)
 }
 
+pub fn migrate_to_v5(raw: Value) -> Result<Value> {
+    let mut raw = match raw.get("version").and_then(Value::as_u64) {
+        Some(crate::image::VERSION) => {
+            validate(&raw)?;
+            return Ok(raw);
+        }
+        Some(VERSION) => raw,
+        Some(1..=3) => migrate_to_v4(raw)?,
+        Some(version) => {
+            bail!("[unsupported-capability] cannot migrate document version {version} to version 5")
+        }
+        None => bail!("[malformed-resource] document version is missing or invalid"),
+    };
+    let object = raw
+        .as_object_mut()
+        .context("document must be a JSON object")?;
+    object.insert("version".into(), Value::from(crate::image::VERSION));
+    object.entry("image_assets").or_insert_with(|| json!({}));
+    validate(&raw)?;
+    Ok(raw)
+}
+
 fn fallback(value: Value) -> Value {
     json!({"fallback":value})
 }
@@ -1660,11 +1707,20 @@ fn text_node(value: Value) -> Result<Value> {
 }
 
 pub fn validate(raw: &Value) -> Result<()> {
+    let version = raw
+        .get("version")
+        .and_then(Value::as_u64)
+        .context("[malformed-resource] document version is missing or invalid")?;
     if raw.get("format").and_then(Value::as_str) != Some("pentool")
-        || raw.get("version").and_then(Value::as_u64) != Some(VERSION)
+        || !matches!(version, VERSION | crate::image::VERSION)
     {
-        bail!("not a Pentool v4 document")
+        bail!("not a supported Pentool scene document")
     }
+    let image_assets = if version == crate::image::VERSION {
+        Some(crate::image::validate_assets(raw)?)
+    } else {
+        None
+    };
     if let Some(styles) = raw.get("styles") {
         crate::style::validate_aliases(styles)?;
     }
@@ -1710,7 +1766,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 .and_then(Value::as_array)
                 .context("v4 layer has no nodes")?
             {
-                validate_node(node, 0, &mut ids)?;
+                validate_node(node, 0, &mut ids, image_assets.as_ref())?;
             }
         }
         fn check_instances(node: &Value, components: &HashSet<&str>) -> Result<()> {
@@ -1865,6 +1921,13 @@ fn flatten_node(node: &Value, parent: Affine, out: &mut Vec<Flat>) -> Result<()>
             value.insert("transform".into(), json!(world.as_coeffs()));
             out.push(Flat::Text(Value::Object(value)));
         }
+        "image" => bail!(
+            "[unsupported-capability] v3 flattening cannot represent image node {}",
+            object
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ),
         kind => {
             let d = match kind {
                 "path" => string(object, "d")?.to_owned(),
@@ -1994,7 +2057,12 @@ fn ellipse_path(o: &Map<String, Value>) -> Result<String> {
         cx - rx
     ))
 }
-fn validate_node(node: &Value, depth: usize, ids: &mut HashSet<String>) -> Result<()> {
+fn validate_node(
+    node: &Value,
+    depth: usize,
+    ids: &mut HashSet<String>,
+    image_assets: Option<&HashSet<String>>,
+) -> Result<()> {
     if depth > MAX_DEPTH {
         bail!("scene graph exceeds maximum nesting depth {MAX_DEPTH}")
     };
@@ -2017,7 +2085,7 @@ fn validate_node(node: &Value, depth: usize, ids: &mut HashSet<String>) -> Resul
             .and_then(Value::as_array)
             .context("group children are missing")?
         {
-            validate_node(child, depth + 1, ids)?
+            validate_node(child, depth + 1, ids, image_assets)?
         }
     } else {
         match kind {
@@ -2058,8 +2126,14 @@ fn validate_node(node: &Value, depth: usize, ids: &mut HashSet<String>) -> Resul
                 string(o, "component")?;
                 let fallback = o.get("fallback").context("instance fallback is missing")?;
                 let mut fallback_ids = HashSet::new();
-                validate_node(fallback, depth + 1, &mut fallback_ids)?;
+                validate_node(fallback, depth + 1, &mut fallback_ids, image_assets)?;
             }
+            "image" => crate::image::validate_node(
+                o,
+                image_assets.context(
+                    "[unsupported-capability] image nodes require document format version 5",
+                )?,
+            )?,
             _ => bail!("unsupported node kind: {kind}"),
         }
     };

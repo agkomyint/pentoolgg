@@ -23,7 +23,7 @@ second object hierarchy, cache, history mechanism, or batch language.
   metadata policy, package representation, cache keys, errors, and migration.
   Publish JSON Schema and normative valid/invalid fixtures.
 
-- [ ] **2. Bump and migrate the `.pen` format.** Add image-asset records and image
+- [x] **2. Bump and migrate the `.pen` format.** Add image-asset records and image
   scene nodes through the v0.6.2 migration framework. Older documents remain valid;
   newer unsupported node kinds fail loudly. Add explicit upgrade, validation,
   downgrade/flatten diagnostics, and round-trip extension preservation.

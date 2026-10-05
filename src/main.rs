@@ -471,7 +471,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate a legacy document to the ordered v4 scene graph.
+    /// Explicitly migrate between compatible v3, v4, and v5 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -1692,7 +1692,7 @@ async fn run() -> Result<()> {
         } => {
             let bytes = fs::read(&input)?;
             let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+            if scene::is_scene_document(&raw) {
                 let k = kind.map(|k| match k {
                     agent::ObjectKind::Path => "path",
                     agent::ObjectKind::Text => "text",
@@ -1734,7 +1734,7 @@ async fn run() -> Result<()> {
         } => {
             let bytes = fs::read(&input)?;
             let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+            if scene::is_scene_document(&raw) {
                 let k = kind.map(|k| match k {
                     agent::ObjectKind::Path => "path",
                     agent::ObjectKind::Text => "text",
@@ -1794,9 +1794,7 @@ async fn run() -> Result<()> {
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let operation_bytes = fs::read(&operations)
                 .with_context(|| format!("could not read {}", operations.display()))?;
-            let changes = if raw.get("version").and_then(serde_json::Value::as_u64)
-                == Some(scene::VERSION)
-            {
+            let changes = if scene::is_scene_document(&raw) {
                 let actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
                 scene::apply_batch(&mut raw, selected_page, &actions)?
             } else {
@@ -1983,7 +1981,7 @@ async fn run() -> Result<()> {
             name,
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
-            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+            if scene::is_scene_document(&raw) {
                 scene::edit_canvas(
                     &mut raw,
                     selected_page,
@@ -2046,7 +2044,7 @@ async fn run() -> Result<()> {
             if_revision,
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
-            if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+            if scene::is_scene_document(&raw) {
                 scene::apply_path(&mut raw, selected_page, action)?;
                 let summary = transaction::commit_value(
                     &input,
@@ -2092,18 +2090,19 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
         } => {
-            if !matches!(target, 3 | 4) {
-                anyhow::bail!("migration target must be 3 or 4")
+            if !matches!(target, 3..=5) {
+                anyhow::bail!("migration target must be 3, 4, or 5")
             }
             let before =
                 fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
             let raw: serde_json::Value =
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
-            let migrated = if target == 4 {
-                scene::migrate_to_v4(raw)?
-            } else {
-                scene::flatten_to_v3(&raw)?
+            let migrated = match target {
+                5 => scene::migrate_to_v5(raw)?,
+                4 => scene::migrate_to_v4(raw)?,
+                3 => scene::flatten_to_v3(&raw)?,
+                _ => unreachable!(),
             };
             let summary = transaction::commit_value(
                 &input,
@@ -2683,7 +2682,7 @@ fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Docum
 fn read_render_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let raw: serde_json::Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
-    let flattened = if raw.get("version").and_then(serde_json::Value::as_u64) == Some(4) {
+    let flattened = if scene::is_scene_document(&raw) {
         scene::flatten_to_v3(&raw)?
     } else {
         raw

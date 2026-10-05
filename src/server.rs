@@ -494,9 +494,7 @@ async fn render_png(
     Json(value): Json<serde_json::Value>,
 ) -> Response {
     let result = (|| -> Result<Vec<u8>> {
-        let value = if value.get("version").and_then(serde_json::Value::as_u64)
-            == Some(crate::scene::VERSION)
-        {
+        let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?
         } else {
             value
@@ -520,9 +518,7 @@ async fn render_svg(
     Json(value): Json<serde_json::Value>,
 ) -> Response {
     let result = (|| -> Result<String> {
-        let value = if value.get("version").and_then(serde_json::Value::as_u64)
-            == Some(crate::scene::VERSION)
-        {
+        let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?
         } else {
             value

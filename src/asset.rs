@@ -128,7 +128,7 @@ pub fn create(options: &CreateOptions) -> Result<Value> {
     }
     let bytes = fs::read(&options.input)?;
     let mut raw: Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::scene::VERSION) {
+    if crate::scene::is_scene_document(&raw) {
         raw = crate::scene::flatten_to_v3(&raw)
             .context("could not flatten v4 scene for reusable asset extraction")?;
     }
