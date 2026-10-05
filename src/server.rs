@@ -1,4 +1,4 @@
-use crate::{document::Document, render};
+use crate::{document::Document, image, render};
 use anyhow::{Context, Result};
 use axum::{
     body::Body,
@@ -490,10 +490,19 @@ struct PageQuery {
 }
 
 async fn render_png(
+    State(state): State<Shared>,
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
     Json(value): Json<serde_json::Value>,
 ) -> Response {
     let result = (|| -> Result<Vec<u8>> {
+        if value.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION) {
+            let document = state
+                .file
+                .clone()
+                .unwrap_or_else(|| state.project_root.join("browser.pen"));
+            let scene = image::to_svg(&value, &document, query.page.as_deref())?;
+            return render::svg_to_png(&scene.svg, scene.width, scene.height, 1.0);
+        }
         let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?
         } else {
@@ -514,10 +523,18 @@ async fn render_png(
 }
 
 async fn render_svg(
+    State(state): State<Shared>,
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
     Json(value): Json<serde_json::Value>,
 ) -> Response {
     let result = (|| -> Result<String> {
+        if value.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION) {
+            let document = state
+                .file
+                .clone()
+                .unwrap_or_else(|| state.project_root.join("browser.pen"));
+            return Ok(image::to_svg(&value, &document, query.page.as_deref())?.svg);
+        }
         let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?
         } else {

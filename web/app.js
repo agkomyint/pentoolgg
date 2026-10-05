@@ -7,7 +7,7 @@
   let geometryBusy=false,jobController=null;
   $('cancelJob').onclick=()=>jobController?.abort();
   let editGeometry=null, geometryDrag=null;
-  const allObjects=l=>[...(l.paths||[]),...(l.texts||[])];
+  const allObjects=l=>{const objects=[...(l.paths||[]),...(l.texts||[])];const visit=n=>{objects.push(n);for(const child of n.children||[])visit(child)};for(const node of l.nodes||[])visit(node);return objects};
   const activePage=()=>doc.version>=3?(doc.pages.find(p=>p.id===pageId)||doc.pages[0]):{id:'page-1',name:'Page 1',canvas:doc.canvas,layers:doc.layers};
   const pageLayers=()=>activePage().layers;
   const pageCanvas=()=>activePage().canvas;
@@ -48,8 +48,9 @@
       for(const h of node.handles)row(`Handle ${node.element}.${h.handle}`,h.x,h.y,{type:'set-handle',element:node.element,handle:h.handle});
     }
   };
-  async function renderV4Preview(){if(doc.version!==4)return;const response=await fetch(`/api/render/svg?page=${encodeURIComponent(pageId)}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(doc)});if(!response.ok)return;const parsed=new DOMParser().parseFromString(await response.text(),'image/svg+xml').documentElement;svg.setAttribute('viewBox',parsed.getAttribute('viewBox'));svg.innerHTML=parsed.innerHTML;}
-  async function loadShared(){try{const r=await fetch('/api/document');if(!r.ok)return;const data=await r.json();sharedBase=data.document;sharedRevision=data.revision;doc=structuredClone(sharedBase);pageId=doc.version>=3?doc.pages[0]?.id:'page-1';layerId=pageLayers()[0]?.id;draft=[];selected=null;editGeometry=null;undo.length=0;redo.length=0;render();if(doc.version===4)await renderV4Preview();await loadEmbeddedFonts();$('saveBtn').textContent='Save shared';$('reloadBtn').hidden=false;notify('Shared document loaded');}catch(e){notify(`Load failed: ${e.message}`,true)}}
+  let previewGeneration=0;
+  async function renderScenePreview(){if(doc.version<4)return;const generation=++previewGeneration,currentPage=pageId,response=await fetch(`/api/render/svg?page=${encodeURIComponent(currentPage)}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(doc)});if(!response.ok||generation!==previewGeneration||currentPage!==pageId)return;const parsed=new DOMParser().parseFromString(await response.text(),'image/svg+xml').documentElement;svg.setAttribute('viewBox',parsed.getAttribute('viewBox'));svg.innerHTML=parsed.innerHTML;}
+  async function loadShared(){try{const r=await fetch('/api/document');if(!r.ok)return;const data=await r.json();sharedBase=data.document;sharedRevision=data.revision;doc=structuredClone(sharedBase);pageId=doc.version>=3?doc.pages[0]?.id:'page-1';layerId=pageLayers()[0]?.id;draft=[];selected=null;editGeometry=null;undo.length=0;redo.length=0;render();if(doc.version>=4)await renderScenePreview();await loadEmbeddedFonts();$('saveBtn').textContent='Save shared';$('reloadBtn').hidden=false;notify('Shared document loaded');}catch(e){notify(`Load failed: ${e.message}`,true)}}
   $('applyScene').onclick=async()=>{try{if(doc.version!==4||!sharedBase)throw new Error('Open a shared v4 document first');const operations=JSON.parse($('sceneOperations').value);const response=await fetch('/api/scene',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({operations,page:pageId,revision:sharedRevision})});const result=await response.json();if(!response.ok)throw new Error(result.error);await loadShared();notify(`${result.changes.length} scene operation(s) applied`)}catch(error){notify(error.message,true)}};
   async function historyAction(action){try{const response=await fetch(`/api/${action}`,{method:action==='history'?'GET':'POST'}),result=await response.json();if(!response.ok)throw new Error(result.error);const output=$('historyResult');output.hidden=false;output.textContent=JSON.stringify(result,null,2);if(action!=='history')await loadShared()}catch(error){notify(error.message,true)}}
   $('historyUndo').onclick=()=>historyAction('undo');$('historyRedo').onclick=()=>historyAction('redo');$('historyRefresh').onclick=()=>historyAction('history');
@@ -95,7 +96,7 @@
         marker('rect',{x:node.x-size,y:node.y-size,width:size*2,height:size*2,fill:'white',stroke:'#2563eb','stroke-width':1/scale},{geometry:'anchor',index:node.index});
       }
     }
-    renderPages();renderLayers();
+    renderPages();renderLayers();if(doc.version>=4)queueMicrotask(renderScenePreview);
   }
   const n = value => value.toFixed(2);
   const pathData = points => points.map((p,i)=>{
@@ -111,7 +112,7 @@
     const root=$('pages');root.replaceChildren();
     const pages=doc.version>=3?doc.pages:[{id:'page-1',name:'Page 1'}];
     pages.forEach((page,index)=>{const row=document.createElement('div');row.className=`page-row${page.id===pageId?' active':''}`;
-      const name=document.createElement('button');name.className='page-name';name.textContent=page.name;name.onclick=()=>{pageId=page.id;layerId=activePage().layers[0]?.id;selected=null;draft=[];editGeometry=null;render();if(doc.version===4)renderV4Preview()};
+      const name=document.createElement('button');name.className='page-name';name.textContent=page.name;name.onclick=()=>{pageId=page.id;layerId=activePage().layers[0]?.id;selected=null;draft=[];editGeometry=null;render();if(doc.version>=4)renderScenePreview()};
       const rename=document.createElement('button');rename.textContent='✎';rename.title='Rename page';rename.onclick=()=>{const value=prompt('Page name',page.name);if(value){remember();page.name=value;render()}};
       const duplicate=document.createElement('button');duplicate.textContent='⧉';duplicate.title='Duplicate page';duplicate.onclick=()=>{remember();if(doc.version!==3)return;const copy=structuredClone(page);copy.id=uid('page');copy.name=`${page.name} copy`;doc.pages.splice(index+1,0,copy);pageId=copy.id;layerId=copy.layers[0]?.id;selected=null;render()};
       const up=document.createElement('button');up.textContent='↑';up.title='Move page up';up.disabled=index===0;up.onclick=()=>{remember();doc.pages.splice(index-1,0,doc.pages.splice(index,1)[0]);render()};
@@ -136,7 +137,7 @@
       row.append(eye,name,lock);
       const list=document.createElement('div');list.className='layer-objects';
       objects.forEach(o=>{
-        const kind=(layer.paths||[]).includes(o)?'path':'text',stack=kind==='path'?layer.paths:layer.texts,index=stack.indexOf(o);
+        const kind=o.kind||((layer.paths||[]).includes(o)?'path':'text'),stack=kind==='path'?layer.paths:kind==='text'?layer.texts:[],index=stack.indexOf(o);
         const item=document.createElement('div');item.className=`object-row${selected===o.id&&layerId===layer.id?' active':''}`;
         const choose=document.createElement('button');choose.className='object-name';choose.innerHTML=`<span class="object-kind">${kind}</span>${escapeXml(o.id)}`;choose.title=o.content||o.id;choose.onclick=()=>{layerId=layer.id;selected=o.id;editGeometry=null;syncInspector();render()};
         const rename=document.createElement('button');rename.textContent='✎';rename.title='Rename';rename.onclick=()=>{const next=prompt('New object ID',o.id);if(next&&next!==o.id)editObjects([{type:'rename',id:o.id,layer:layer.id,new_id:next}],next)};
@@ -144,7 +145,7 @@
         const up=document.createElement('button');up.textContent='↑';up.title='Move forward';up.disabled=index>=stack.length-1;up.onclick=()=>editObjects([{type:'reorder',id:o.id,layer:layer.id,index:index+1}],o.id);
         const down=document.createElement('button');down.textContent='↓';down.title='Move backward';down.disabled=index===0;down.onclick=()=>editObjects([{type:'reorder',id:o.id,layer:layer.id,index:index-1}],o.id);
         const remove=document.createElement('button');remove.textContent='×';remove.title='Delete';remove.onclick=()=>editObjects([{type:'remove',id:o.id,layer:layer.id}],null);
-        for(const b of [rename,duplicate,up,down,remove])b.disabled=b.disabled||layer.locked;
+        for(const b of [rename,duplicate,up,down,remove])b.disabled=b.disabled||layer.locked||!!o.kind;
         item.append(choose,rename,duplicate,up,down,remove);list.append(item);
       });
       row.append(list);root.append(row);
@@ -203,7 +204,7 @@
     for(const el of svg.querySelectorAll('[data-id]'))if(el.dataset.layer===layerId&&(layer||el.dataset.id===geometryDrag.id))el.setAttribute('transform',`translate(${dx} ${dy})`);
   });
   $('saveBtn').onclick=save;$('exportBtn').onclick=exportPng;
-  $('openFile').onchange=async e=>{try{const parsed=JSON.parse(await e.target.files[0].text()),legacy=[1,2].includes(parsed.version)&&Array.isArray(parsed.layers)&&parsed.layers.length,multi=[3,4].includes(parsed.version)&&Array.isArray(parsed.pages)&&parsed.pages.length;if(parsed.format!=='pentool'||(!legacy&&!multi))throw new Error('Unsupported file');detachShared();doc=parsed;pageId=multi?doc.pages[0].id:'page-1';layerId=pageLayers()[0]?.id;draft=[];selected=null;editGeometry=null;render();if(doc.version===4)await renderV4Preview();await loadEmbeddedFonts();notify('.pen file opened')}catch(err){notify(`Could not open file: ${err.message}`,true)}finally{e.target.value=''}};
+  $('openFile').onchange=async e=>{try{const parsed=JSON.parse(await e.target.files[0].text()),legacy=[1,2].includes(parsed.version)&&Array.isArray(parsed.layers)&&parsed.layers.length,multi=[3,4,5].includes(parsed.version)&&Array.isArray(parsed.pages)&&parsed.pages.length;if(parsed.format!=='pentool'||(!legacy&&!multi))throw new Error('Unsupported file');detachShared();doc=parsed;pageId=multi?doc.pages[0].id:'page-1';layerId=pageLayers()[0]?.id;draft=[];selected=null;editGeometry=null;render();if(doc.version>=4)await renderScenePreview();await loadEmbeddedFonts();notify('.pen file opened')}catch(err){notify(`Could not open file: ${err.message}`,true)}finally{e.target.value=''}};
   async function loadAssets(){const root=$('assetResults'),query=$('assetSearch').value.trim();root.innerHTML='<p class="text-help">Searching…</p>';try{const response=await fetch(`/api/assets?query=${encodeURIComponent(query)}&limit=60`),result=await response.json();if(!response.ok)throw new Error(result.error);root.replaceChildren();for(const asset of result.assets){const card=document.createElement('div');card.className='asset-card';const title=document.createElement('strong');title.textContent=asset.name;title.title=asset.id;const meta=document.createElement('small');meta.textContent=`${asset.library} · ${asset.id} · ${asset.version}`;const add=document.createElement('button');add.textContent='Add copy';add.onclick=()=>insertAsset(`${asset.library}/${asset.id}`);card.append(title,meta,add);root.append(card)}if(!result.assets.length)root.innerHTML='<p class="text-help">No matching assets.</p>';}catch(error){root.innerHTML=`<p class="text-help">${escapeXml(error.message)}</p>`;}}
   async function insertAsset(spec){try{const sourceResponse=await fetch(`/api/asset?spec=${encodeURIComponent(spec)}`),source=await sourceResponse.json();if(!sourceResponse.ok)throw new Error(source.error);remember();const prefix=`asset-${Date.now().toString(36)}`,response=await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({document:doc,source:source.document,options:{destination_page:pageId,source_page:source.document.asset?.entry_page||null,prefix,x:0,y:0,scale:1,rotation:0,expand_canvas:false}})}),result=await response.json();if(!response.ok)throw new Error(result.error);doc=result.document;const ids=Object.values(result.summary.layers);if($('assetMode').value==='instance'){doc.instances??=[];doc.instances.push({id:uid('instance'),library:source.asset.library,asset_id:source.asset.id,asset_version:source.asset.version,content_hash:source.asset.content_hash,layer_ids:ids,page_id:pageId,transform:[1,0,0,1,0,0],visible:true,overrides:{},previous:[]})}layerId=ids.at(-1)||layerId;selected=null;render();notify(`${source.asset.name} added as ${$('assetMode').value}`);}catch(error){notify(`Could not add asset: ${error.message}`,true)}}
   $('exportLayerAsset').onclick=()=>{const id=$('assetExportId').value.trim(),name=$('assetExportName').value.trim();if(!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(id)||!name){notify('Enter a portable asset ID and name',true);return}const layer=structuredClone(activeLayer()),canvas=structuredClone(pageCanvas()),assetDoc={format:'pentool',version:3,name,pages:[{id:'asset',name,canvas,layers:[layer]}],fonts:structuredClone(doc.fonts||[]),asset:{schema:1,id,name,description:'',asset_version:'0.1.0',kind:'component',author:'',license:'',tags:[],category:'',entry_page:'asset',properties:{}}};download(JSON.stringify(assetDoc,null,2),`${id.split('/').at(-1)}.pen`,'application/json');notify('Active layer exported as a reusable asset')};
