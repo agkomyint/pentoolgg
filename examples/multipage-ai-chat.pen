@@ -1,0 +1,1299 @@
+{
+  "fonts": [],
+  "format": "pentool",
+  "name": "Orbit AI Chat",
+  "pages": [
+    {
+      "canvas": {
+        "background": "#070B14",
+        "height": 960,
+        "width": 1440
+      },
+      "id": "page-1",
+      "layers": [
+        {
+          "id": "layer-1",
+          "locked": false,
+          "name": "Background",
+          "paths": [],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "chrome",
+          "locked": false,
+          "name": "Chrome",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 0 0 L 292 0 L 292 960 L 0 960 Z",
+              "fill": "#0D1322",
+              "id": "sidebar",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 292 0 L 293 0 L 293 960 L 292 960 Z",
+              "fill": "#25304A",
+              "id": "sidebar-divider",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 28 28 L 68 28 L 68 68 L 28 68 Z",
+              "fill": "#A7F23D",
+              "id": "logo-tile",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "content",
+          "locked": false,
+          "name": "Conversation",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 420 166 C 420 151 432 139 447 139 C 462 139 474 151 474 166 C 474 181 462 193 447 193 C 432 193 420 181 420 166 Z",
+              "fill": "#5B6CFF",
+              "id": "user-avatar",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 492 128 L 1190 128 L 1190 220 L 492 220 Z",
+              "fill": "#141D30",
+              "id": "user-message",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 420 292 L 447 266 L 474 292 L 447 318 Z",
+              "fill": "#A7F23D",
+              "id": "ai-mark",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 492 258 L 1190 258 L 1190 570 L 492 570 Z",
+              "fill": "#0D1322",
+              "id": "ai-answer",
+              "stroke": "#273451",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            },
+            {
+              "closed": true,
+              "d": "M 530 402 L 1148 402 L 1148 530 L 530 530 Z",
+              "fill": "#070B14",
+              "id": "code-card",
+              "stroke": "#283550",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "controls",
+          "locked": false,
+          "name": "Controls",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 24 108 L 268 108 L 268 158 L 24 158 Z",
+              "fill": "#172136",
+              "id": "new-chat",
+              "stroke": "#344463",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            },
+            {
+              "closed": true,
+              "d": "M 24 214 L 268 214 L 268 270 L 24 270 Z",
+              "fill": "#172136",
+              "id": "active-chat",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 1304 42 C 1304 34 1310 28 1318 28 C 1326 28 1332 34 1332 42 C 1332 50 1326 56 1318 56 C 1310 56 1304 50 1304 42 Z",
+              "fill": "#A7F23D",
+              "id": "status-dot",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 398 796 L 1238 796 L 1238 906 L 398 906 Z",
+              "fill": "#050812",
+              "id": "composer-shadow",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 406 784 L 1230 784 L 1230 894 L 406 894 Z",
+              "fill": "#131D30",
+              "id": "composer",
+              "stroke": "#354669",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 2.0
+            },
+            {
+              "closed": true,
+              "d": "M 1154 812 C 1154 797 1166 785 1181 785 C 1196 785 1208 797 1208 812 C 1208 827 1196 839 1181 839 C 1166 839 1154 827 1154 812 Z",
+              "fill": "#A7F23D",
+              "id": "send",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "type",
+          "locked": false,
+          "name": "Typography",
+          "paths": [],
+          "texts": [
+            {
+              "align": "left",
+              "content": "ORBIT",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 22.0,
+              "font_weight": 700,
+              "id": "brand",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 82.0,
+              "y": 57.0
+            },
+            {
+              "align": "left",
+              "content": "+  New conversation",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16.0,
+              "font_weight": 700,
+              "id": "new-chat-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 48.0,
+              "y": 141.0
+            },
+            {
+              "align": "left",
+              "content": "RECENT",
+              "fill": "#72809D",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 11.0,
+              "font_weight": 700,
+              "id": "history-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 28.0,
+              "y": 198.0
+            },
+            {
+              "align": "left",
+              "content": "Design a calm dashboard",
+              "fill": "#E7EBF5",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15.0,
+              "font_weight": 400,
+              "id": "history-1",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 42.0,
+              "y": 246.0
+            },
+            {
+              "align": "left",
+              "content": "Explain vector embeddings",
+              "fill": "#8D99B3",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15.0,
+              "font_weight": 400,
+              "id": "history-2",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 42.0,
+              "y": 306.0
+            },
+            {
+              "align": "left",
+              "content": "Launch plan for v0.4",
+              "fill": "#8D99B3",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15.0,
+              "font_weight": 400,
+              "id": "history-3",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 42.0,
+              "y": 354.0
+            },
+            {
+              "align": "left",
+              "content": "AI workspace",
+              "fill": "#8D99B3",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14.0,
+              "font_weight": 700,
+              "id": "workspace",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 332.0,
+              "y": 50.0
+            },
+            {
+              "align": "left",
+              "content": "Online",
+              "fill": "#A7F23D",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13.0,
+              "font_weight": 700,
+              "id": "online",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 1340.0,
+              "y": 48.0
+            },
+            {
+              "align": "left",
+              "content": "Create a simple AI chat interface that feels\nquiet, fast, and focused.",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 20.0,
+              "font_weight": 400,
+              "id": "user-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 526.0,
+              "y": 166.0
+            },
+            {
+              "align": "left",
+              "content": "Here is a clean direction.",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 24.0,
+              "font_weight": 700,
+              "id": "ai-title",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 526.0,
+              "y": 304.0
+            },
+            {
+              "align": "left",
+              "content": "Absolutely. I’ve reduced the chrome, kept the conversation\nas the focal point, and used a compact command composer.",
+              "fill": "#B7C0D4",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 17.0,
+              "font_weight": 400,
+              "id": "ai-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 526.0,
+              "y": 350.0
+            },
+            {
+              "align": "left",
+              "content": "const answer = await assistant.ask({\n  intent: 'design',\n  tone: 'focused'\n});",
+              "fill": "#A7F23D",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15.0,
+              "font_weight": 400,
+              "id": "code-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 556.0,
+              "y": 438.0
+            },
+            {
+              "align": "left",
+              "content": "Ask Orbit anything…",
+              "fill": "#74819C",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 18.0,
+              "font_weight": 400,
+              "id": "composer-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 444.0,
+              "y": 842.0
+            },
+            {
+              "align": "left",
+              "content": "↑",
+              "fill": "#0A0E16",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 24.0,
+              "font_weight": 700,
+              "id": "send-arrow",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 1181.0,
+              "y": 820.0
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Desktop Chat"
+    },
+    {
+      "canvas": {
+        "background": "#070B14",
+        "height": 844,
+        "width": 390
+      },
+      "id": "mobile",
+      "layers": [
+        {
+          "id": "layer-1",
+          "locked": false,
+          "name": "Background",
+          "paths": [],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "mobile-ui",
+          "locked": false,
+          "name": "Interface",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 0 0 L 390 0 L 390 72 L 0 72 Z",
+              "fill": "#0D1322",
+              "id": "topbar",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 20 20 L 52 20 L 52 52 L 20 52 Z",
+              "fill": "#A7F23D",
+              "id": "mobile-logo",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 338 26 L 370 26 L 370 30 L 338 30 Z M 338 40 L 370 40 L 370 44 L 338 44 Z",
+              "fill": "#7D8AA5",
+              "id": "mobile-menu",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 16 750 L 374 750 L 374 820 L 16 820 Z",
+              "fill": "#131D30",
+              "id": "mobile-composer",
+              "stroke": "#354669",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 2.0
+            },
+            {
+              "closed": true,
+              "d": "M 322 768 C 322 756 332 746 344 746 C 356 746 366 756 366 768 C 366 780 356 790 344 790 C 332 790 322 780 322 768 Z",
+              "fill": "#A7F23D",
+              "id": "mobile-send",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "mobile-content",
+          "locked": false,
+          "name": "Conversation",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 76 118 L 366 118 L 366 206 L 76 206 Z",
+              "fill": "#141D30",
+              "id": "mobile-user",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 24 262 L 40 246 L 56 262 L 40 278 Z",
+              "fill": "#A7F23D",
+              "id": "mobile-ai-mark",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 68 234 L 366 234 L 366 544 L 68 544 Z",
+              "fill": "#0D1322",
+              "id": "mobile-ai-card",
+              "stroke": "#273451",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            },
+            {
+              "closed": true,
+              "d": "M 88 390 L 346 390 L 346 512 L 88 512 Z",
+              "fill": "#070B14",
+              "id": "mobile-code",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "mobile-type",
+          "locked": false,
+          "name": "Typography",
+          "paths": [],
+          "texts": [
+            {
+              "align": "left",
+              "content": "ORBIT",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 18.0,
+              "font_weight": 700,
+              "id": "mobile-brand",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 64.0,
+              "y": 43.0
+            },
+            {
+              "align": "left",
+              "content": "Design a calm AI chat\nfor focused work.",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 17.0,
+              "font_weight": 400,
+              "id": "mobile-user-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 98.0,
+              "y": 151.0
+            },
+            {
+              "align": "left",
+              "content": "Absolutely.",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 22.0,
+              "font_weight": 700,
+              "id": "mobile-ai-title",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 88.0,
+              "y": 282.0
+            },
+            {
+              "align": "left",
+              "content": "Done — one clear thread,\ncompact controls, and no noise.",
+              "fill": "#B7C0D4",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16.0,
+              "font_weight": 400,
+              "id": "mobile-ai-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 88.0,
+              "y": 326.0
+            },
+            {
+              "align": "left",
+              "content": "await assistant.ask({\n  mode: 'focus'\n});",
+              "fill": "#A7F23D",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14.0,
+              "font_weight": 400,
+              "id": "mobile-code-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 108.0,
+              "y": 426.0
+            },
+            {
+              "align": "left",
+              "content": "Message Orbit…",
+              "fill": "#74819C",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16.0,
+              "font_weight": 400,
+              "id": "mobile-composer-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 38.0,
+              "y": 792.0
+            },
+            {
+              "align": "left",
+              "content": "↑",
+              "fill": "#0A0E16",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 21.0,
+              "font_weight": 700,
+              "id": "mobile-send-arrow",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 344.0,
+              "y": 775.0
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Mobile Chat"
+    },
+    {
+      "canvas": {
+        "background": "#0A0F1B",
+        "height": 800,
+        "width": 1200
+      },
+      "id": "components",
+      "layers": [
+        {
+          "id": "layer-1",
+          "locked": false,
+          "name": "Background",
+          "paths": [],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "component-cards",
+          "locked": false,
+          "name": "Cards",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 72 174 L 542 174 L 542 376 L 72 376 Z",
+              "fill": "#10182A",
+              "id": "palette-card",
+              "stroke": "#273451",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            },
+            {
+              "closed": true,
+              "d": "M 578 174 L 1128 174 L 1128 376 L 578 376 Z",
+              "fill": "#10182A",
+              "id": "message-card",
+              "stroke": "#273451",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            },
+            {
+              "closed": true,
+              "d": "M 72 416 L 1128 416 L 1128 690 L 72 690 Z",
+              "fill": "#10182A",
+              "id": "composer-card",
+              "stroke": "#273451",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 1.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "component-elements",
+          "locked": false,
+          "name": "Elements",
+          "paths": [
+            {
+              "closed": true,
+              "d": "M 102 238 L 166 238 L 166 302 L 102 302 Z",
+              "fill": "#070B14",
+              "id": "swatch-ink",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 198 238 L 262 238 L 262 302 L 198 302 Z",
+              "fill": "#141D30",
+              "id": "swatch-panel",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 294 238 L 358 238 L 358 302 L 294 302 Z",
+              "fill": "#A7F23D",
+              "id": "swatch-accent",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 390 238 L 454 238 L 454 302 L 390 302 Z",
+              "fill": "#5B6CFF",
+              "id": "swatch-violet",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 614 226 C 614 210 627 197 643 197 C 659 197 672 210 672 226 C 672 242 659 255 643 255 C 627 255 614 242 614 226 Z",
+              "fill": "#5B6CFF",
+              "id": "sample-avatar",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 696 198 L 1086 198 L 1086 328 L 696 328 Z",
+              "fill": "#141D30",
+              "id": "sample-message",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            },
+            {
+              "closed": true,
+              "d": "M 110 488 L 1090 488 L 1090 608 L 110 608 Z",
+              "fill": "#131D30",
+              "id": "sample-composer",
+              "stroke": "#354669",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 2.0
+            },
+            {
+              "closed": true,
+              "d": "M 1010 518 C 1010 500 1024 486 1042 486 C 1060 486 1074 500 1074 518 C 1074 536 1060 550 1042 550 C 1024 550 1010 536 1010 518 Z",
+              "fill": "#A7F23D",
+              "id": "sample-send",
+              "stroke": "none",
+              "stroke_linecap": "butt",
+              "stroke_linejoin": "miter",
+              "stroke_miterlimit": 4.0,
+              "stroke_width": 0.0
+            }
+          ],
+          "texts": [],
+          "visible": true
+        },
+        {
+          "id": "component-type",
+          "locked": false,
+          "name": "Typography",
+          "paths": [],
+          "texts": [
+            {
+              "align": "left",
+              "content": "Orbit interface kit",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 42.0,
+              "font_weight": 700,
+              "id": "kit-title",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 72.0,
+              "y": 88.0
+            },
+            {
+              "align": "left",
+              "content": "Reusable pieces for agent-designed conversations",
+              "fill": "#8996AF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 16.0,
+              "font_weight": 400,
+              "id": "kit-subtitle",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 74.0,
+              "y": 126.0
+            },
+            {
+              "align": "left",
+              "content": "COLOR TOKENS",
+              "fill": "#8996AF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12.0,
+              "font_weight": 700,
+              "id": "palette-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 102.0,
+              "y": 216.0
+            },
+            {
+              "align": "left",
+              "content": "Ink",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14.0,
+              "font_weight": 700,
+              "id": "ink-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 102.0,
+              "y": 330.0
+            },
+            {
+              "align": "left",
+              "content": "Panel",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14.0,
+              "font_weight": 700,
+              "id": "panel-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 198.0,
+              "y": 330.0
+            },
+            {
+              "align": "left",
+              "content": "Signal",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14.0,
+              "font_weight": 700,
+              "id": "accent-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 294.0,
+              "y": 330.0
+            },
+            {
+              "align": "left",
+              "content": "Agent",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 14.0,
+              "font_weight": 700,
+              "id": "violet-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 390.0,
+              "y": 330.0
+            },
+            {
+              "align": "left",
+              "content": "MESSAGE BLOCK",
+              "fill": "#8996AF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12.0,
+              "font_weight": 700,
+              "id": "message-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 614.0,
+              "y": 352.0
+            },
+            {
+              "align": "left",
+              "content": "Design system ready.",
+              "fill": "#F5F7FF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 20.0,
+              "font_weight": 700,
+              "id": "message-title",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 726.0,
+              "y": 244.0
+            },
+            {
+              "align": "left",
+              "content": "Every element remains editable.",
+              "fill": "#AEB8CD",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 15.0,
+              "font_weight": 400,
+              "id": "message-copy",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 726.0,
+              "y": 280.0
+            },
+            {
+              "align": "left",
+              "content": "PROMPT COMPOSER",
+              "fill": "#8996AF",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 12.0,
+              "font_weight": 700,
+              "id": "composer-label",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 110.0,
+              "y": 464.0
+            },
+            {
+              "align": "left",
+              "content": "Ask, create, refine…",
+              "fill": "#74819C",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 20.0,
+              "font_weight": 400,
+              "id": "composer-hint",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 146.0,
+              "y": 558.0
+            },
+            {
+              "align": "left",
+              "content": "⌘ + Enter to send",
+              "fill": "#68758F",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 13.0,
+              "font_weight": 400,
+              "id": "composer-key",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 110.0,
+              "y": 654.0
+            },
+            {
+              "align": "left",
+              "content": "↑",
+              "fill": "#0A0E16",
+              "font_family": "Atkinson Hyperlegible",
+              "font_size": 24.0,
+              "font_weight": 700,
+              "id": "sample-arrow",
+              "italic": false,
+              "letter_spacing": 0.0,
+              "line_height": 1.2,
+              "transform": [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+              ],
+              "x": 1042.0,
+              "y": 526.0
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Components"
+    }
+  ],
+  "version": 3
+}

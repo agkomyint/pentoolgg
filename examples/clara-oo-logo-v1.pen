@@ -1,0 +1,30 @@
+{
+  "format": "pentool",
+  "version": 2,
+  "name": "Clara Oo — coastal monogram",
+  "canvas": {"width": 1200, "height": 900, "background": "#102529"},
+  "fonts": [],
+  "layers": [
+    {
+      "id": "c-monogram", "name": "C · open horizon", "visible": true, "locked": false,
+      "paths": [
+        {"id": "open-c", "d": "M 704 244 C 677 216 643 202 600 202 C 513 202 443 272 443 359 C 443 446 513 516 600 516 C 643 516 678 500 706 472", "stroke": "#E9BC7C", "stroke_width": 22, "fill": "none", "closed": false}
+      ], "texts": []
+    },
+    {
+      "id": "o-monogram", "name": "O · sea and sun", "visible": true, "locked": false,
+      "paths": [
+        {"id": "o-ring", "d": "M 735 359 C 735 405 698 442 652 442 C 606 442 569 405 569 359 C 569 313 606 276 652 276 C 698 276 735 313 735 359 Z", "stroke": "#F5EBDD", "stroke_width": 16, "fill": "none", "closed": true},
+        {"id": "wave", "d": "M 586 390 C 606 369 627 372 651 381 C 674 390 693 389 716 374 C 696 398 673 399 649 389 C 625 379 607 379 586 390 Z", "stroke": "none", "stroke_width": 0, "fill": "#E9BC7C", "closed": true},
+        {"id": "sun", "d": "M 652 298 C 655 320 658 328 682 332 C 659 336 656 343 652 364 C 648 343 645 336 622 332 C 646 328 649 320 652 298 Z", "stroke": "none", "stroke_width": 0, "fill": "#E9BC7C", "closed": true}
+      ], "texts": []
+    },
+    {
+      "id": "wordmark", "name": "Clara Oo · editable wordmark", "visible": true, "locked": false,
+      "paths": [],
+      "texts": [
+        {"id": "name", "content": "Clara Oo", "x": 600, "y": 656, "font_family": "Atkinson Hyperlegible", "font_size": 68, "font_weight": 400, "italic": false, "fill": "#F5EBDD", "align": "center", "letter_spacing": 6, "line_height": 1.2, "transform": [1,0,0,1,0,0]}
+      ]
+    }
+  ]
+}

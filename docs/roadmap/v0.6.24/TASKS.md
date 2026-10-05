@@ -35,13 +35,13 @@ a temporary second instance model.
 
 ## Must ship, in order
 
-- [ ] **1. Reproduce and lock the reported regressions with tests.** Add fixtures
+- [x] **1. Reproduce and lock the reported regressions with tests.** Add fixtures
   for a card below a check-circle layer, edited instance text, a declared label
   override, a source-only geometry change, six pages using the same asset, content
   smaller than its source canvas, and readable child IDs. Tests must fail against
   v0.6.0 for the reported reasons before implementation changes begin.
 
-- [ ] **2. Preserve stacking and container position during update.** Record and
+- [x] **2. Preserve stacking and container position during update.** Record and
   reuse the exact page, parent, and zero-based child/layer index. Replace instance
   content in place rather than remove-and-append. Add coverage for front, middle,
   and back positions; nested groups; locked/hidden siblings; repeated updates; and
@@ -92,7 +92,7 @@ a temporary second instance model.
   Existing documents containing untracked edits still require update-time detection
   and cannot be grandfathered into silent data loss.
 
-- [ ] **6. Implement a real three-way update planner.** Compare:
+- [x] **6. Implement a real three-way update planner.** Compare:
 
   - base: the exact source hash/snapshot from which the instance was materialized;
   - local: current materialized content plus declared overrides/tracked patches;
@@ -104,7 +104,7 @@ a temporary second instance model.
   base/local/incoming summaries, and available resolutions. `conflicts: []` is valid
   only after every local difference has been classified.
 
-- [ ] **7. Preserve compatible overrides across updates.** An explicit override wins
+- [x] **7. Preserve compatible overrides across updates.** An explicit override wins
   over a changed source default when its target and type remain compatible. Source
   changes to unrelated geometry or styling proceed normally. Report a conflict only
   when the target is removed, identity is ambiguous, type/constraint becomes
@@ -114,13 +114,13 @@ a temporary second instance model.
   property key, validate the final materialization, and commit atomically. Never
   require users to clear all overrides merely because the source changed.
 
-- [ ] **8. Add explicit conflict resolution and policy.** Support `keep-local`,
+- [x] **8. Add explicit conflict resolution and policy.** Support `keep-local`,
   `take-source`, `detach`, `map-target`, and compatible per-property resolutions.
   Resolutions are included in dry-run plans and may be supplied through a JSON file
   for reproducible batch updates. Unresolved conflicts block commit; they never
   choose a destructive default.
 
-- [ ] **9. Add document-wide and scoped bulk updates.** Implement:
+- [x] **9. Add document-wide and scoped bulk updates.** Implement:
 
   ```sh
   pentool instance update deck.pen --all --asset ai/chrome --dry-run
@@ -133,7 +133,7 @@ a temporary second instance model.
   all-or-nothing; an explicit `--continue-on-conflict` may update only conflict-free
   instances but must list skipped instances and still commit through one transaction.
 
-- [ ] **10. Compute useful default asset bounds.** Without `--rect`, derive tight
+- [x] **10. Compute useful default asset bounds.** Without `--rect`, derive tight
   visible content bounds from selected asset nodes, including stroke expansion,
   transforms, text, primitives, images, and nested groups. Ignore hidden nodes by
   default with an explicit inclusion flag. Report the inferred bounds during create
@@ -148,20 +148,20 @@ a temporary second instance model.
   save/load, and operating systems. Expose source ID and materialized ID together in
   tree/search output so agents never need to reverse a hash.
 
-- [ ] **12. Stop backup-file proliferation.** Route placement, overrides, update,
+- [x] **12. Stop backup-file proliferation.** Route placement, overrides, update,
   detach, rollback, and bulk update through the shared hidden project history from
   v0.6.2. One user operation creates one history entry regardless of instance count.
   Until hidden history is available, add an explicit bounded backup policy and
   `--no-backup` only when another recoverable transaction mechanism is active. Never
   leave one adjacent `.bak.N` file per placed instance by default.
 
-- [ ] **13. Improve plans, diagnostics, and documentation.** Human and JSON plans
+- [x] **13. Improve plans, diagnostics, and documentation.** Human and JSON plans
   must show preserved placement, source transition, child changes, override outcome,
   local edits, conflicts, resolutions, fallback replacement, history/backup result,
   and affected pages. Document the asset/instance file format, property authoring,
   edit protection, merge rules, bulk updates, bounds, IDs, rollback, and recovery.
 
-- [ ] **14. Add cross-platform conformance and visual regression coverage.** Run
+- [x] **14. Add cross-platform conformance and visual regression coverage.** Run
   update, override, conflict, bounds, ID, bulk, history, package, and rollback tests
   on Windows, Linux, Intel macOS, and Apple Silicon. Golden renders must prove stack
   preservation and compatible override survival.
@@ -174,42 +174,42 @@ or editing features to this patch release. They are release requirements for
 v0.6.24 because v0.7 must extend one scene graph, transaction system, package
 protocol, cache, and renderer rather than introduce parallel infrastructure.
 
-- [ ] **15. Freeze format-evolution and capability rules.** Document how new v4+
+- [x] **15. Freeze format-evolution and capability rules.** Document how new v4+
   node kinds, resource records, operation schemas, and renderer capabilities are
   versioned and validated. Unknown required kinds must fail loudly with a stable
   structured error; unknown optional extension data must survive round trips.
   Add forward-version, unknown-kind, extension-preservation, migration, and
   downgrade-diagnostic fixtures.
 
-- [ ] **16. Stabilize one resource and content-addressing interface.** Extract and
+- [x] **16. Stabilize one resource and content-addressing interface.** Extract and
   test the shared contracts for embedded bytes, document-relative external files,
   SHA-256 identity, deduplication, verified cache lookup, missing resources, and
   hash mismatches. v0.6.24 does not add image resources, but packages and future
   resource types must be able to reuse these contracts without a second cache or
   resolver. All paths must remain traversal-safe and offline by default.
 
-- [ ] **17. Make transaction boundaries resource-safe.** Define a staged-write API
+- [x] **17. Make transaction boundaries resource-safe.** Define a staged-write API
   that can atomically commit a document plus related cache/resource changes, with
   dry run, revision guards, one hidden-history entry, rollback, and cleanup after
   failure. Add fault-injection tests proving validation, interrupted writes, and
   conflicts leave no partial document, orphan resource, or misleading history
   entry.
 
-- [ ] **18. Centralize bounded-work and structured-error policy.** Publish and test
+- [x] **18. Centralize bounded-work and structured-error policy.** Publish and test
   shared limits for input bytes, decoded/expanded dimensions, object counts, batch
   operations, recursion, memory estimates, and output size. Define stable error
   codes for unsupported capability, limit exceeded, malformed resource, hash
   mismatch, missing resource, and unsafe path. Limits must be checked before large
   allocation or mutation and be suitable for reuse by v0.7 decoders.
 
-- [ ] **19. Freeze renderer and scene-extension seams.** Ensure bounds, tree,
+- [x] **19. Freeze renderer and scene-extension seams.** Ensure bounds, tree,
   search, groups, components, layout, diff, history, batch, export, and package
   validation dispatch through documented node/resource interfaces. Add a harmless
   test-only extension fixture proving an added node kind can participate or fail
   explicitly without bypassing validation. Do not add raster rendering in this
   release.
 
-- [ ] **20. Publish the v0.7 baseline and handoff report.** Record per-platform
+- [x] **20. Publish the v0.7 baseline and handoff report.** Record per-platform
   release binary size, representative render time, peak-memory method, package
   determinism hash, supported format versions, and the complete v0.6.24 conformance
   result. Link every v0.7 required foundation to its implementation and tests, and

@@ -1,0 +1,407 @@
+{
+  "canvas": {
+    "background": "#000000",
+    "height": 1030,
+    "width": 1905
+  },
+  "fonts": [],
+  "format": "pentool",
+  "layers": [
+    {
+      "id": "workspace",
+      "locked": false,
+      "name": "01 · Workspace / tab switcher",
+      "paths": [
+        {
+          "closed": false,
+          "d": "M834.5,15 L1068.5,15 Q1091.5,15 1091.5,36 Q1091.5,57 1068.5,57 L834.5,57 Q812.5,57 812.5,36 Q812.5,15 834.5,15 Z",
+          "fill": "#111111",
+          "id": "tab-track",
+          "stroke": "none",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 3.0
+        },
+        {
+          "closed": false,
+          "d": "M964.5,13 L1068.5,13 Q1091.5,13 1091.5,36 Q1091.5,59 1068.5,59 L964.5,59 Q940.5,59 940.5,36 Q940.5,13 964.5,13 Z",
+          "fill": "#1B1B1B",
+          "id": "active-tab",
+          "stroke": "none",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 3.0
+        }
+      ],
+      "texts": [
+        {
+          "align": "center",
+          "content": "Chat",
+          "fill": "#BEBEBE",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 600,
+          "id": "chat-tab",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1108.0,
+          "y": 43.0
+        },
+        {
+          "align": "center",
+          "content": "Work",
+          "fill": "#F3F3F3",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 600,
+          "id": "work-tab",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1238.0,
+          "y": 43.0
+        },
+        {
+          "align": "center",
+          "content": "What should we work on?",
+          "fill": "#F3F3F3",
+          "font_family": "Segoe UI",
+          "font_size": 28.0,
+          "font_weight": 400,
+          "id": "question",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1174.0,
+          "y": 385.0
+        }
+      ],
+      "visible": true
+    },
+    {
+      "id": "composer",
+      "locked": false,
+      "name": "02 · Prompt composer / controls",
+      "paths": [
+        {
+          "closed": false,
+          "d": "M487.5,570 L1419.5,570 L1419.5,638 Q1419.5,656 1401.5,656 L505.5,656 Q487.5,656 487.5,638 Z",
+          "fill": "#303030",
+          "id": "composer-footer",
+          "stroke": "none",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 3.0
+        },
+        {
+          "closed": false,
+          "d": "M504.5,436 L1398.5,436 Q1431.5,436 1431.5,469 L1431.5,563 Q1431.5,596 1398.5,596 L504.5,596 Q471.5,596 471.5,563 L471.5,469 Q471.5,436 504.5,436 Z",
+          "fill": "#1C1C1C",
+          "id": "composer-box",
+          "stroke": "#292929",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.0
+        },
+        {
+          "closed": false,
+          "d": "M495.5,562 L511.5,562 M503.5,554 L503.5,570",
+          "fill": "none",
+          "id": "plus",
+          "stroke": "#CDCDCD",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 2.299999952316284
+        },
+        {
+          "closed": false,
+          "d": "M1421.5,563 C1421.5,575.4264068711929 1411.4264068711927,585.5 1399,585.5 C1386.5735931288073,585.5 1376.5,575.4264068711929 1376.5,563 C1376.5,550.5735931288071 1386.5735931288073,540.5 1399,540.5 C1411.4264068711927,540.5 1421.5,550.5735931288071 1421.5,563 Z",
+          "fill": "#D8A331",
+          "id": "send",
+          "stroke": "none",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 3.0
+        },
+        {
+          "closed": false,
+          "d": "M1399,573 L1399,553 M1391.5,560.5 L1399,553 L1406.5,560.5",
+          "fill": "none",
+          "id": "send-arrow",
+          "stroke": "#FFFFFF",
+          "stroke_linecap": "butt",
+          "stroke_linejoin": "miter",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.7999999523162842
+        },
+        {
+          "closed": false,
+          "d": "M1340.5,553 Q1339.5,551 1342.5,551 Q1346.5,551 1346.5,555 L1346.5,561 Q1346.5,565 1342.5,565 Q1339.5,565 1339.5,561 L1339.5,555 Q1339.5,553 1340.5,553 M1336.5,560 Q1336.5,570 1342.5,570 Q1349.5,570 1349.5,560 M1342.5,570 L1342.5,575",
+          "fill": "none",
+          "id": "mic",
+          "stroke": "#C5C5C5",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.7000000476837158
+        },
+        {
+          "closed": false,
+          "d": "M1295.5,561 L1300.5,566 L1305.5,561",
+          "fill": "none",
+          "id": "model-chevron",
+          "stroke": "#B9B9B9",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "miter",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.5
+        },
+        {
+          "closed": false,
+          "d": "M507.5,619 L515.5,619 L519.5,622 L522.5,622 Q525.5,622 525.5,625 L525.5,632 Q525.5,635 522.5,635 L510.5,635 Q507.5,635 507.5,632 Z M507.5,624 L524.5,624",
+          "fill": "none",
+          "id": "project-folder",
+          "stroke": "#C5C5C5",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.7000000476837158
+        },
+        {
+          "closed": false,
+          "d": "M688.5,619 L692.5,619 L692.5,634 L688.5,634 Z M695.5,619 L699.5,619 L699.5,634 L695.5,634 Z M702.5,618 L706.5,617 L710.5,632 L706.5,633 Z",
+          "fill": "none",
+          "id": "files-icon",
+          "stroke": "#C5C5C5",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.5
+        },
+        {
+          "closed": false,
+          "d": "M805.5,627 C805.5,631.9705627484772 801.4705627484772,636 796.5,636 C791.5294372515228,636 787.5,631.9705627484772 787.5,627 C787.5,622.0294372515228 791.5294372515228,618 796.5,618 C801.4705627484772,618 805.5,622.0294372515228 805.5,627 M794.5,621 L799.5,625 L797.5,629 L793.5,630 L791.5,626 Z",
+          "fill": "none",
+          "id": "plugin-footer",
+          "stroke": "#C5C5C5",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.5
+        },
+        {
+          "closed": false,
+          "d": "M1232.5,620 L1244.5,620 Q1245.5,620 1245.5,621 L1245.5,629 L1231.5,629 L1231.5,621 Q1231.5,620 1232.5,620 Z M1238.5,629 L1238.5,633 M1235.5,633 L1241.5,633",
+          "fill": "none",
+          "id": "desktop-icon",
+          "stroke": "#C5C5C5",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.2999999523162842
+        },
+        {
+          "closed": false,
+          "d": "M875.5,458 L875.5,484",
+          "fill": "none",
+          "id": "caret",
+          "stroke": "#C5C5C5",
+          "stroke_linecap": "round",
+          "stroke_linejoin": "round",
+          "stroke_miterlimit": 4.0,
+          "stroke_width": 1.0
+        }
+      ],
+      "texts": [
+        {
+          "align": "left",
+          "content": "make a project where people can fold imag",
+          "fill": "#D8D8D8",
+          "font_family": "Segoe UI",
+          "font_size": 20.0,
+          "font_weight": 600,
+          "id": "prompt",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 716.0,
+          "y": 480.0
+        },
+        {
+          "align": "left",
+          "content": "GPT-6.1 Sol",
+          "fill": "#EEEEEE",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 400,
+          "id": "model-name",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1348.0,
+          "y": 569.0
+        },
+        {
+          "align": "left",
+          "content": "Medium",
+          "fill": "#AFAFAF",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 400,
+          "id": "reasoning",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1443.0,
+          "y": 569.0
+        },
+        {
+          "align": "left",
+          "content": "Choose project",
+          "fill": "#C9C9C9",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 400,
+          "id": "choose-project",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 758.0,
+          "y": 634.0
+        },
+        {
+          "align": "left",
+          "content": "Files",
+          "fill": "#C9C9C9",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 400,
+          "id": "files-label",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 938.0,
+          "y": 634.0
+        },
+        {
+          "align": "left",
+          "content": "Plugins",
+          "fill": "#C9C9C9",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 400,
+          "id": "plugins-footer",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1037.0,
+          "y": 634.0
+        },
+        {
+          "align": "left",
+          "content": "Open desktop app",
+          "fill": "#DCDCDC",
+          "font_family": "Segoe UI",
+          "font_size": 18.0,
+          "font_weight": 400,
+          "id": "desktop-label",
+          "italic": false,
+          "letter_spacing": 0.0,
+          "line_height": 1.2,
+          "transform": [
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            -221.5,
+            0.0
+          ],
+          "x": 1474.0,
+          "y": 634.0
+        }
+      ],
+      "visible": true
+    }
+  ],
+  "name": "Pentoolgg showcase — Chat / Work interface",
+  "version": 2
+}

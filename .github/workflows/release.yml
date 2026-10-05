@@ -13,15 +13,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
+            binary: pentool
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: tar.gz
+            binary: pentool
           - os: macos-15
             target: aarch64-apple-darwin
             archive: tar.gz
+            binary: pentool
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
+            binary: pentool.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +59,12 @@ jobs:
           cargo run --release --locked --target ${{ matrix.target }} -- tree v4-smoke.pen
       - name: Smoke test large-document budget
         run: cargo run --release --locked --target ${{ matrix.target }} -- benchmark --layers 50 --objects 5000 --max-ms 60000
+      - name: Record platform baseline
+        shell: bash
+        run: |
+          bytes=$(wc -c < target/${{ matrix.target }}/release/${{ matrix.binary }})
+          hash=$(sha256sum target/${{ matrix.target }}/release/${{ matrix.binary }} | cut -d' ' -f1)
+          printf '{"target":"%s","binary_bytes":%s,"binary_sha256":"%s","formats":[1,2,3,4],"benchmark":"50 layers / 5000 objects under 60000 ms"}\n' '${{ matrix.target }}' "$bytes" "$hash" > pentool-${{ github.ref_name }}-${{ matrix.target }}-baseline.json
       - name: Smoke test pages and import
         shell: bash
         run: |
@@ -84,7 +94,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pentool-${{ matrix.target }}
-          path: pentool-${{ github.ref_name }}-${{ matrix.target }}.*
+          path: |
+            pentool-${{ github.ref_name }}-${{ matrix.target }}.*
   publish:
     needs: build
     runs-on: ubuntu-latest

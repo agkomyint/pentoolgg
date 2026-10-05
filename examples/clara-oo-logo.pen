@@ -1,0 +1,29 @@
+{
+  "format": "pentool",
+  "version": 2,
+  "name": "Clara Oo — interlocking sunrise",
+  "canvas": {"width": 1200, "height": 900, "background": "#102529"},
+  "fonts": [],
+  "layers": [
+    {
+      "id": "o-monogram", "name": "O · integrated rising sun", "visible": true, "locked": false,
+      "paths": [
+        {"id": "sculpted-o", "d": "M 675 208 C 736 208 774 271 774 351 C 774 433 737 498 675 498 C 613 498 576 433 576 351 C 576 271 614 208 675 208 Z M 675 235 C 631 235 606 289 606 351 C 606 410 623 454 648 468 L 648 450 C 648 434 660 422 675 422 C 690 422 702 434 702 450 L 702 468 C 727 454 744 410 744 351 C 744 289 719 235 675 235 Z", "stroke": "none", "stroke_width": 0, "fill": "#E9BC7C", "closed": true},
+        {"id": "sun-rays", "d": "M 672 410 L 675 390 L 678 410 Z M 650 417 L 637 404 L 646 422 Z M 700 417 L 713 404 L 704 422 Z", "stroke": "none", "stroke_width": 0, "fill": "#E9BC7C", "closed": true}
+      ], "texts": []
+    },
+    {
+      "id": "c-monogram", "name": "C · sculpted interlock", "visible": true, "locked": false,
+      "paths": [
+        {"id": "sculpted-c", "d": "M 626 255 C 602 223 570 208 536 208 C 457 208 414 273 414 351 C 414 433 460 498 539 498 C 575 498 607 481 632 451 L 608 425 C 587 454 565 470 539 470 C 484 470 461 416 461 351 C 461 285 485 236 536 236 C 564 236 590 250 610 275 Z", "stroke": "none", "stroke_width": 0, "fill": "#F5EBDD", "closed": true}
+      ], "texts": []
+    },
+    {
+      "id": "wordmark", "name": "Clara Oo · editable editorial wordmark", "visible": true, "locked": false,
+      "paths": [],
+      "texts": [
+        {"id": "name", "content": "Clara Oo", "x": 600, "y": 648, "font_family": "Bodoni MT", "font_size": 88, "font_weight": 400, "italic": false, "fill": "#F5EBDD", "align": "center", "letter_spacing": 1.2, "line_height": 1.2, "transform": [1,0,0,1,0,0]}
+      ]
+    }
+  ]
+}

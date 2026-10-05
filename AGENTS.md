@@ -47,7 +47,11 @@ The current planned sequence is:
 
 1. `docs/roadmap/v0.6.24/TASKS.md`: trustworthy component updates and overrides;
 2. `docs/roadmap/v0.7.0/TASKS.md`: raster images and non-destructive image editing;
-3. `docs/roadmap/v0.7.1/TASKS.md`: the follow-up milestone described there.
+3. `docs/roadmap/v0.7.1/TASKS.md`: professional compositing;
+4. `docs/roadmap/v0.7.2/TASKS.md`: BYOK image models;
+5. `docs/roadmap/v0.7.3/TASKS.md`: pixel editing and retouching;
+6. `docs/roadmap/v0.7.4/TASKS.md`: photography and RAW development;
+7. `docs/roadmap/v0.7.5/TASKS.md`: color management and print production.
 
 Earlier roadmap files are historical requirements and useful regression context.
 When implementing roadmap work:
