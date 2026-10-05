@@ -3,9 +3,9 @@
   "version": 5,
   "name": "v5 embedded image fixture",
   "image_assets": {
-    "sha256:3bb87b10bbd136a2099f1da24272bce36266368fee2d80bef1582fa5200cb99d": {
+    "sha256:fcf6a1b0ab50cf951f5fee0d5fac96822c9973e6b8da238906d1021d2c08397f": {
       "media_type": "image/png",
-      "byte_length": 70,
+      "byte_length": 120,
       "pixel_width": 1,
       "pixel_height": 1,
       "color_space": "srgb8",
@@ -13,7 +13,7 @@
       "storage": {
         "kind": "embedded",
         "encoding": "base64",
-        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+X2NDWQAAAABJRU5ErkJggg=="
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jP0PAfAAYAAn8Ox9V7AAAAAElFTkSuQmCC"
       }
     }
   },
@@ -29,7 +29,7 @@
       "nodes": [{
         "kind": "image",
         "id": "pixel",
-        "asset": "sha256:3bb87b10bbd136a2099f1da24272bce36266368fee2d80bef1582fa5200cb99d",
+        "asset": "sha256:fcf6a1b0ab50cf951f5fee0d5fac96822c9973e6b8da238906d1021d2c08397f",
         "x": 40,
         "y": 30,
         "width": 240,

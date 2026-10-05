@@ -255,6 +255,23 @@ pub fn to_png(doc: &Document, scale: f32) -> Result<Vec<u8>> {
     Ok(to_png_profiled(doc, scale)?.bytes)
 }
 
+pub fn svg_to_png(svg: &str, canvas_width: u32, canvas_height: u32, scale: f32) -> Result<Vec<u8>> {
+    if !(0.1..=8.0).contains(&scale) {
+        bail!("scale must be between 0.1 and 8");
+    }
+    let doc = Document::new(canvas_width, canvas_height);
+    let (width, height, _) = render_dimensions(&doc, scale)?;
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+        .context("could not parse generated SVG")?;
+    let mut pixmap = tiny_skia::Pixmap::new(width, height).context("image is too large")?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    pixmap.encode_png().context("could not encode PNG")
+}
+
 pub fn to_png_profiled(doc: &Document, scale: f32) -> Result<ProfiledPng> {
     if !(0.1..=8.0).contains(&scale) {
         bail!("scale must be between 0.1 and 8");

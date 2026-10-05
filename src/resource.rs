@@ -45,14 +45,23 @@ pub fn verify(bytes: &[u8], expected: &str) -> Result<()> {
 pub fn read_external_offline(document: &Path, relative: &Path, expected: &str) -> Result<Vec<u8>> {
     let relative = safe_relative_path(relative)?;
     let root = document.parent().unwrap_or_else(|| Path::new("."));
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("[missing-resource] {}", root.display()))?;
     let path = root.join(relative);
-    let metadata = std::fs::metadata(&path)
+    let canonical_path = path
+        .canonicalize()
         .with_context(|| format!("[missing-resource] {}", path.display()))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        bail!("[unsafe-path] external resource resolves outside its document root")
+    }
+    let metadata = std::fs::metadata(&canonical_path)
+        .with_context(|| format!("[missing-resource] {}", canonical_path.display()))?;
     if metadata.len() > MAX_RESOURCE_BYTES as u64 {
         bail!("[limit-exceeded] resource exceeds the 512 MiB encoded-byte limit")
     }
-    let bytes =
-        std::fs::read(&path).with_context(|| format!("[missing-resource] {}", path.display()))?;
+    let bytes = std::fs::read(&canonical_path)
+        .with_context(|| format!("[missing-resource] {}", canonical_path.display()))?;
     verify(&bytes, expected)?;
     Ok(bytes)
 }

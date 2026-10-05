@@ -67,6 +67,28 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Raster images (v0.7)
+
+PNG, JPEG, and WebP sources can be embedded for portability or kept as verified,
+document-relative external files. Imports are content-addressed, deduplicated, and
+decoded offline with bounded dimensions and memory. Crop, fit, focal position,
+opacity, transforms, and parent-space vector masks remain non-destructive.
+
+```sh
+pentool image add design.pen hero --file assets/hero.jpg --layer content --width 800 --height 450 --fit cover --external
+pentool image set design.pen hero --crop 0.1 0 0.8 1 --position 0.5 0.4 --opacity 0.9
+pentool image set design.pen hero --mask card-shape --mask-fill-rule evenodd
+pentool image info design.pen hero
+pentool export design.pen design.png --scale 2
+pentool export design.pen design.svg
+pentool export design.pen design.pdf
+```
+
+External sources must stay below the document directory and match their recorded
+SHA-256 digest. Export fails before replacing an existing output when a source is
+missing, changed, unsafe, malformed, or over its resource limit. Portable SVG
+embeds normalized pixels; PNG and PDF use the same verified image pipeline.
+
 ## Open design libraries and packages (v0.5–v0.6)
 
 Reusable assets remain ordinary editable `.pen` documents. Save a document, page,

@@ -576,6 +576,14 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                     });
                 Rect::new(x, y - size, x + width, y - size + height)
             }
+            "image" => Rect::new(
+                node["x"].as_f64().context("image x missing")?,
+                node["y"].as_f64().context("image y missing")?,
+                node["x"].as_f64().unwrap()
+                    + node["width"].as_f64().context("image width missing")?,
+                node["y"].as_f64().unwrap()
+                    + node["height"].as_f64().context("image height missing")?,
+            ),
             "instance" => {
                 return local(
                     node.get("fallback")
@@ -1791,6 +1799,9 @@ pub fn validate(raw: &Value) -> Result<()> {
                 check_instances(node, &component_ids)?;
             }
         }
+        if version == crate::image::VERSION {
+            crate::image::validate_masks(page)?;
+        }
     }
     Ok(())
 }
@@ -2476,7 +2487,7 @@ fn collect_v4_matches(
             || content.is_some_and(|value| value.to_lowercase().contains(needle));
         let kind_matches = match kind_filter {
             Some("text") => kind == "text",
-            Some("path") => kind != "text" && kind != "group",
+            Some("path") => matches!(kind, "path" | "rect" | "ellipse" | "line"),
             Some(expected) => kind == expected,
             None => true,
         };
@@ -2493,6 +2504,9 @@ fn collect_v4_matches(
             }
             if let Some(content) = content {
                 object["content"] = json!(content);
+            }
+            if let Some(asset) = node.get("asset").and_then(Value::as_str) {
+                object["asset"] = json!(asset);
             }
             if let Some(style) = node.get("style").and_then(Value::as_object) {
                 let refs = style

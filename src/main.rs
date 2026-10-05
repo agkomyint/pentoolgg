@@ -1,6 +1,7 @@
 use pentool::{
-    agent, asset, benchmark, diff, document, editing, fonts, geometry, history, import, instance,
-    layout, library, package, page, pdf, render, replace, scene, server, style, text, transaction,
+    agent, asset, benchmark, diff, document, editing, fonts, geometry, history, image, import,
+    instance, layout, library, package, page, pdf, render, replace, scene, server, style, text,
+    transaction,
 };
 
 use anyhow::{Context, Result};
@@ -233,7 +234,87 @@ struct ShapeEditArgs {
 }
 
 #[derive(Subcommand)]
+enum ImageAction {
+    /// Import and place a verified PNG, JPEG, or WebP source.
+    Add {
+        input: PathBuf,
+        id: String,
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        layer: String,
+        #[arg(long, default_value_t = 0.0)]
+        x: f64,
+        #[arg(long, default_value_t = 0.0)]
+        y: f64,
+        #[arg(long)]
+        width: f64,
+        #[arg(long)]
+        height: f64,
+        #[arg(long, value_enum, default_value = "contain")]
+        fit: image::Fit,
+        #[arg(long, conflicts_with = "external")]
+        embed: bool,
+        #[arg(long, conflicts_with = "embed")]
+        external: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Update image frame, crop, focal position, fit, or opacity.
+    Set {
+        input: PathBuf,
+        id: String,
+        #[arg(long)]
+        x: Option<f64>,
+        #[arg(long)]
+        y: Option<f64>,
+        #[arg(long)]
+        width: Option<f64>,
+        #[arg(long)]
+        height: Option<f64>,
+        #[arg(long, value_enum)]
+        fit: Option<image::Fit>,
+        #[arg(long, num_args = 2)]
+        position: Option<Vec<f64>>,
+        #[arg(long, num_args = 4)]
+        crop: Option<Vec<f64>>,
+        #[arg(long)]
+        opacity: Option<f64>,
+        #[arg(long, num_args = 6)]
+        transform: Option<Vec<f64>>,
+        #[arg(long, conflicts_with = "clear_mask")]
+        mask: Option<String>,
+        #[arg(long, default_value = "nonzero", requires = "mask")]
+        mask_fill_rule: String,
+        #[arg(long, conflicts_with = "mask")]
+        clear_mask: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Inspect an image node and its referenced source record.
+    Info { input: PathBuf, id: String },
+    /// Remove an image node and prune its source when no nodes reference it.
+    Remove {
+        input: PathBuf,
+        id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// Import, place, inspect, and edit raster images.
+    Image {
+        #[command(subcommand)]
+        action: ImageAction,
+    },
     /// Create, inspect, or preview reusable assets.
     Asset {
         #[command(subcommand)]
@@ -1053,6 +1134,155 @@ async fn run() -> Result<()> {
         host: "127.0.0.1".into(),
         port: 4711,
     }) {
+        Command::Image { action } => match action {
+            ImageAction::Add {
+                input,
+                id,
+                file,
+                layer,
+                x,
+                y,
+                width,
+                height,
+                fit,
+                embed: _,
+                external,
+                dry_run,
+                if_revision,
+            } => {
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let (source_path, storage) = if external {
+                    let relative = pentool::resource::safe_relative_path(&file)?;
+                    let root = input
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .canonicalize()?;
+                    let source = root.join(&relative).canonicalize().with_context(|| {
+                        format!("[missing-resource] {}", root.join(&relative).display())
+                    })?;
+                    if !source.starts_with(&root) {
+                        anyhow::bail!(
+                            "[unsafe-path] external image resolves outside the document root"
+                        )
+                    }
+                    (source, image::external_storage(&relative)?)
+                } else {
+                    (file.clone(), image::embedded_storage(&fs::read(&file)?))
+                };
+                let bytes = fs::read(&source_path)
+                    .with_context(|| format!("[missing-resource] {}", source_path.display()))?;
+                let result = image::add(
+                    &mut raw,
+                    selected_page,
+                    &layer,
+                    &id,
+                    &bytes,
+                    storage,
+                    x,
+                    y,
+                    width,
+                    height,
+                    fit,
+                )?;
+                let change = transaction::commit_value(
+                    &input,
+                    "image-add",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+            ImageAction::Info { input, id } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&image::info(&raw, selected_page, &id)?)?
+                );
+                Ok(())
+            }
+            ImageAction::Set {
+                input,
+                id,
+                x,
+                y,
+                width,
+                height,
+                fit,
+                position,
+                crop,
+                opacity,
+                transform,
+                mask,
+                mask_fill_rule,
+                clear_mask,
+                dry_run,
+                if_revision,
+            } => {
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let update = image::Update {
+                    x,
+                    y,
+                    width,
+                    height,
+                    fit,
+                    position: position.map(|values| [values[0], values[1]]),
+                    crop: crop.map(|values| [values[0], values[1], values[2], values[3]]),
+                    opacity,
+                    transform: transform.map(|values| {
+                        [
+                            values[0], values[1], values[2], values[3], values[4], values[5],
+                        ]
+                    }),
+                    mask: mask.map(|node| (node, mask_fill_rule)),
+                    clear_mask,
+                };
+                let result = image::set(&mut raw, selected_page, &id, &update)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "image-set",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+            ImageAction::Remove {
+                input,
+                id,
+                dry_run,
+                if_revision,
+            } => {
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = image::remove(&mut raw, selected_page, &id)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "image-remove",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+        },
         Command::Asset { action } => {
             let cwd = std::env::current_dir()?;
             match action {
@@ -2607,12 +2837,34 @@ async fn run() -> Result<()> {
                             .collect()
                     })
                     .unwrap_or_else(|| vec!["page-1".into()]);
-                let docs = page_ids
-                    .iter()
-                    .map(|id| read_render_document(&input, Some(id)))
-                    .collect::<Result<Vec<_>>>()?;
+                let has_images = raw.get("version").and_then(serde_json::Value::as_u64)
+                    == Some(image::VERSION)
+                    && raw
+                        .get("image_assets")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|assets| !assets.is_empty());
                 if wants_pdf {
-                    pdf::write(&docs, &output)?;
+                    if has_images {
+                        if outline_text {
+                            anyhow::bail!(
+                                "[unsupported-capability] outlined text with image scenes is not implemented"
+                            )
+                        }
+                        let pages = page_ids
+                            .iter()
+                            .map(|id| {
+                                let scene = image::to_svg(&raw, &input, Some(id))?;
+                                render::svg_to_png(&scene.svg, scene.width, scene.height, scale)
+                            })
+                            .collect::<Result<Vec<_>>>()?;
+                        pdf::write_png_pages(&pages, &output)?;
+                    } else {
+                        let docs = page_ids
+                            .iter()
+                            .map(|id| read_render_document(&input, Some(id)))
+                            .collect::<Result<Vec<_>>>()?;
+                        pdf::write(&docs, &output)?;
+                    }
                 } else {
                     let extension = format.as_deref().unwrap_or("png");
                     if !matches!(extension, "png" | "svg") {
@@ -2626,7 +2878,7 @@ async fn run() -> Result<()> {
                     let staging =
                         parent.join(format!(".{name}.pentool-stage-{}", std::process::id()));
                     fs::create_dir_all(&staging)?;
-                    for (index, (id, doc)) in page_ids.iter().zip(&docs).enumerate() {
+                    for (index, id) in page_ids.iter().enumerate() {
                         let safe: String = id
                             .chars()
                             .map(|c| {
@@ -2639,7 +2891,19 @@ async fn run() -> Result<()> {
                             .collect();
                         let destination =
                             staging.join(format!("{:03}-{safe}.{extension}", index + 1));
-                        render::write_export_options(doc, &destination, scale, outline_text)?;
+                        if has_images {
+                            write_image_export(
+                                &input,
+                                &raw,
+                                Some(id),
+                                &destination,
+                                scale,
+                                outline_text,
+                            )?;
+                        } else {
+                            let doc = read_render_document(&input, Some(id))?;
+                            render::write_export_options(&doc, &destination, scale, outline_text)?;
+                        }
                     }
                     let previous =
                         parent.join(format!(".{name}.pentool-old-{}", std::process::id()));
@@ -2657,13 +2921,48 @@ async fn run() -> Result<()> {
                     }
                 }
             } else {
-                let doc = read_render_document(&input, selected_page)?;
-                render::write_export_options(&doc, &output, scale, outline_text)?;
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                if raw.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION)
+                    && raw
+                        .get("image_assets")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|assets| !assets.is_empty())
+                {
+                    write_image_export(&input, &raw, selected_page, &output, scale, outline_text)?;
+                } else {
+                    let doc = read_render_document(&input, selected_page)?;
+                    render::write_export_options(&doc, &output, scale, outline_text)?;
+                }
             }
             println!("Exported {}", output.display());
             Ok(())
         }
     }
+}
+
+fn write_image_export(
+    input: &Path,
+    raw: &serde_json::Value,
+    page: Option<&str>,
+    output: &Path,
+    scale: f32,
+    outline_text: bool,
+) -> Result<()> {
+    if outline_text {
+        anyhow::bail!("[unsupported-capability] outlined text with image scenes is not implemented")
+    }
+    let scene = image::to_svg(raw, input, page)?;
+    let bytes = match output
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("svg") => scene.svg.into_bytes(),
+        Some("png") => render::svg_to_png(&scene.svg, scene.width, scene.height, scale)?,
+        _ => anyhow::bail!("output must end in .png or .svg"),
+    };
+    editing::atomic_write(output, &bytes)
 }
 
 fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {

@@ -3,9 +3,9 @@
   "version": 5,
   "name": "invalid escaping external image",
   "image_assets": {
-    "sha256:3bb87b10bbd136a2099f1da24272bce36266368fee2d80bef1582fa5200cb99d": {
+    "sha256:fcf6a1b0ab50cf951f5fee0d5fac96822c9973e6b8da238906d1021d2c08397f": {
       "media_type": "image/png",
-      "byte_length": 70,
+      "byte_length": 120,
       "pixel_width": 1,
       "pixel_height": 1,
       "color_space": "srgb8",

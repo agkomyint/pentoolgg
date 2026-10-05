@@ -3,6 +3,55 @@ use crate::document::Document;
 use anyhow::{Context, Result};
 use kurbo::{BezPath, PathEl, Point};
 
+pub fn write_png_pages(pages: &[Vec<u8>], output: &std::path::Path) -> Result<()> {
+    if pages.is_empty() {
+        anyhow::bail!("PDF export requires at least one page")
+    }
+    let mut decoded = Vec::with_capacity(pages.len());
+    for png in pages {
+        let rgba = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+            .context("could not decode rendered PDF page")?
+            .into_rgba8();
+        let (width, height) = rgba.dimensions();
+        let mut rgb = Vec::with_capacity(width as usize * height as usize * 3);
+        for pixel in rgba.pixels() {
+            let alpha = u16::from(pixel[3]);
+            for channel in &pixel.0[..3] {
+                let value = (u16::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255;
+                rgb.push(value as u8);
+            }
+        }
+        decoded.push((width, height, rgb));
+    }
+    let page_count = decoded.len();
+    let mut objects = Vec::<Vec<u8>>::new();
+    objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+    let kids = (0..page_count)
+        .map(|index| format!("{} 0 R", 3 + index * 3))
+        .collect::<Vec<_>>()
+        .join(" ");
+    objects.push(format!("<< /Type /Pages /Count {page_count} /Kids [{kids}] >>").into_bytes());
+    for (index, (width, height, rgb)) in decoded.into_iter().enumerate() {
+        let page_id = 3 + index * 3;
+        let content_id = page_id + 1;
+        let image_id = page_id + 2;
+        objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << /XObject << /Im0 {image_id} 0 R >> >> /Contents {content_id} 0 R >>").into_bytes());
+        let commands = format!("q {width} 0 0 {height} 0 0 cm /Im0 Do Q");
+        objects.push(
+            format!(
+                "<< /Length {} >>\nstream\n{commands}\nendstream",
+                commands.len()
+            )
+            .into_bytes(),
+        );
+        let mut image = format!("<< /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {} >>\nstream\n", rgb.len()).into_bytes();
+        image.extend_from_slice(&rgb);
+        image.extend_from_slice(b"\nendstream");
+        objects.push(image);
+    }
+    write_objects(objects, output)
+}
+
 pub fn write(documents: &[Document], output: &std::path::Path) -> Result<()> {
     let page_count = documents.len();
     let font_id = 3 + page_count * 2;
@@ -24,6 +73,10 @@ pub fn write(documents: &[Document], output: &std::path::Path) -> Result<()> {
         objects.push(object)
     }
     objects.push(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec());
+    write_objects(objects, output)
+}
+
+fn write_objects(objects: Vec<Vec<u8>>, output: &std::path::Path) -> Result<()> {
     let mut pdf = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
     let mut offsets = Vec::new();
     for (index, object) in objects.iter().enumerate() {
