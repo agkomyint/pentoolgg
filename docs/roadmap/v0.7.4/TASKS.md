@@ -1,88 +1,176 @@
-# v0.7.4 — Professional photography and RAW development
+# v0.7.4 — Rust-native pixel editing and retouching
 
-Build a Lightroom-class, non-destructive photography workflow on v0.7.0–v0.7.3.
-This milestone owns RAW development, high-bit-depth RGB processing, lens correction,
-local adjustments, variants, organization, and batch delivery. Commercial-print
-color management moves to v0.7.5 so photography can ship as a coherent product.
+Complete the missing hands-on raster workflow after v0.7.0 image operations,
+v0.7.2 compositing, and v0.7.3 model-assisted editing. Add paintable raster layers,
+brushes, erasing, clone/heal, patching, and local retouching through one bounded,
+deterministic Rust engine. Human edits and AI-produced assets use the same masks,
+selections, history, compositing, inspection, and export paths.
+
+This milestone targets the daily pixel-editing work for which users still reach
+for Photoshop. It does not copy Photoshop's UI or file format. Pentool keeps edits
+scriptable, recoverable, inspectable, and portable in a readable `.pen` document.
 
 ## Product contract
 
-- RAW and imported photographs remain immutable, content-addressed sources.
-- Development settings, masks, crops, variants, and output recipes remain editable.
-- Decode, demosaic, adjustment, histogram, and export paths are bounded Rust code.
-- Existing sRGB documents retain their appearance unless explicitly converted.
-- Projects render offline; camera databases and AI providers are not runtime needs.
-- Metadata retention, especially GPS and identity data, is explicit.
+- Painting is a first-class scene workflow, not opaque mutation of an imported
+  source. Original assets remain immutable until an explicit destructive bake.
+- The authoritative brush, retouch, tile, and compositing engines are Rust code
+  shared by the CLI, browser editor, server API, batch system, and renderer.
+- A completed document renders offline from materialized local data. Brushes,
+  plugins, models, and external services are never required merely to reopen it.
+- Input events are normalized into deterministic strokes. Replaying a committed
+  stroke with the same engine version and inputs produces its normative tile set.
+- Long sessions remain bounded. History, dirty regions, tile caches, checkpoints,
+  temporary surfaces, and brush samples all have explicit memory and disk limits.
+- Pixel editing respects page, layer, group, selection, mask, lock, blend, opacity,
+  color-space, transaction, and revision semantics already established by v0.7.
 
-v0.7.4 includes the photographic color foundation: declared input profiles,
-scene-linear high-precision processing, wide-gamut RGB spaces, calibrated RGB
-preview where supported, and explicit RGB export conversion. CMYK/Lab, spot inks,
-separations, paper simulation, and PDF/X belong to v0.7.5.
+## Raster layer and tile model
+
+Add a raster-paint node backed by immutable, content-addressed tiles rather than a
+single image rewritten after every stroke. The node declares logical bounds, tile
+size, pixel format, color contract, sparse tile map, and an ordered edit journal.
+Unpainted tiles are transparent. Identical tiles deduplicate across layers,
+checkpoints, history, packages, and documents where the cache contract permits.
+
+The tile size and edge behavior are format contracts, not tuning accidents. Tile
+seams are forbidden for filtered brushes, healing, transforms, and export. Dirty
+regions include every kernel halo and sampling dependency. Cache entries may be
+discarded; committed tile hashes and journal/checkpoint data may not.
+
+Stroke records contain a stable ID, brush-engine version, preset reference,
+canonical input samples, chosen color, blend mode, target, selection/mask hashes,
+seed where applicable, and affected bounds. High-frequency device events are
+resampled through a specified algorithm so document size and output do not depend
+on browser timing. Periodic content-addressed checkpoints bound replay time.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the photography specification.** Define RAW support, decode
-  limits, demosaic order, working RGB spaces, precision, metadata, development
-  stages, variants, caches, schemas, migrations, and conformance fixtures.
-- [ ] **2. Add high-bit-depth RGB paths.** Support 16-bit storage and a documented
-  floating-point working representation without accidental 8-bit/sRGB round trips.
-- [ ] **3. Implement bounded RAW ingestion.** Validate and decode a tested subset
-  of RAW containers, retain source bytes, and report unsupported cameras clearly.
-- [ ] **4. Add camera profiles and white balance.** Support embedded and verified
-  profiles plus as-shot, temperature/tint, sampled-neutral, and suggested balance.
-- [ ] **5. Add lens and geometry correction.** Cover distortion, vignetting,
-  chromatic aberration, perspective, leveling, rotation, and constrained crop.
-- [ ] **6. Build the development stack.** Add exposure, highlights/shadows,
-  whites/blacks, curves, clarity, texture, dehaze, vibrance, HSL, grading,
-  monochrome, grain, vignette, calibration, and stable processing order.
-- [ ] **7. Add detail processing.** Implement luminance/color noise reduction,
-  sharpening, moiré reduction, defective-pixel handling, and defringe.
-- [ ] **8. Add local adjustments.** Reuse gradient, radial, range, depth, and
-  painted masks. AI-derived masks must first become materialized editable masks.
-- [ ] **9. Add HDR and panorama merging.** Provide bounded alignment, deghosting,
-  projection, seam blending, attribution, cancellation, and non-destructive output.
-- [ ] **10. Add wide-gamut and HDR RGB delivery.** Define primaries, transfer
-  functions, inspection, tone mapping, SDR conversion, metadata, and validation.
-- [ ] **11. Add variants, snapshots, and synchronized edits.** Virtual copies do
-  not duplicate sources; synchronization supports selected settings and exceptions.
-- [ ] **12. Add local organization.** Provide ratings, picks, labels, keywords,
-  stacks, contact sheets, compare/survey, and search without a required database.
-- [ ] **13. Add metadata privacy.** Support a deliberate EXIF/IPTC/XMP subset and
-  export policies for copyright, keywords, GPS, identity, serials, and timestamps.
-- [ ] **14. Add output recipes and batch delivery.** Cover web, social, archive,
-  and photo-lab dimensions, RGB profiles, precision, codec, naming, and sharpening.
-- [ ] **15. Build photographer UX.** Add filmstrip/grid, loupe, culling, histogram,
-  clipping warnings, development panels, masks, crop, compare, and copy/sync.
-- [ ] **16. Prove conformance and performance.** Test hostile RAWs, profiles,
-  precision, corrections, masks, merges, privacy, rollback, packaging, and caches.
+- [ ] **1. Freeze the raster-paint specification.** Define pixel formats, tile
+  dimensions, sparse storage, canonical stroke samples, interpolation, rounding,
+  alpha math, checkpointing, journal compaction, corruption recovery, resource
+  limits, and compatibility behavior. Publish JSON Schema plus normative tile,
+  stroke, and invalid-document fixtures.
+
+- [ ] **2. Add raster-paint layers and migration.** Create, resize, crop, clear,
+  duplicate, merge, and explicitly rasterize layers through shared scene and
+  transaction APIs. Integrate tree/search, bounds, groups, masks, clipping,
+  effects, components, packages, diff, undo/redo, and multi-page selection.
+
+- [ ] **3. Implement the deterministic brush engine.** Start with hard round,
+  soft round, pixel, calligraphic, and textured stamp brushes. Support size,
+  hardness, spacing, opacity, flow, angle, roundness, scatter, smoothing, and
+  buildup with pinned algorithms. Every stochastic property uses a stored seed.
+
+- [ ] **4. Normalize pen, mouse, and touch input.** Support position, pressure,
+  tilt, azimuth, twist, and velocity only where the device reports them. Presets
+  map inputs through explicit curves with stable fallbacks. Palm rejection and
+  gesture handling remain UI concerns and cannot alter committed stroke math.
+
+- [ ] **5. Add erasing and local blending.** Provide pixel eraser, background
+  eraser, clear-to-transparency, smudge, blur, sharpen, dodge, burn, sponge, and
+  color-replace tools. Define their sampling radius, accumulation, channel and
+  alpha behavior, edge mode, and interaction with selections and masks.
+
+- [ ] **6. Add clone stamp.** Support aligned and non-aligned sampling, explicit
+  source point, current/below/specified-layer sampling, transforms, and live
+  preview. Stroke records pin the sampled composite or required source revisions
+  so later layer changes cannot silently reinterpret an old clone operation.
+
+- [ ] **7. Add healing and patch tools.** Implement deterministic spot healing,
+  healing brush, and selection-based patching in Rust with bounded algorithms.
+  Separate texture transfer from tone/color matching, expose changed-region
+  previews, and version the algorithm. AI cleanup remains an optional v0.7.3
+  alternative, never the hidden implementation of a core retouch tool.
+
+- [ ] **8. Add flood fill and contiguous selection.** Implement tolerance,
+  connectivity, anti-aliasing, sample scope, gap policy, and transparency handling.
+  Bound traversal before allocation and provide progress/cancellation for large
+  canvases. Results can fill pixels, create masks, or refine selections.
+
+- [ ] **9. Add pixel selections and transforms.** Provide marquee, lasso, magic
+  wand, quick-mask painting, feather, expand, contract, smooth, border, grow,
+  similar, invert, and save/load. Selected pixels can move, transform, copy, cut,
+  paste, float, or become a new raster layer without losing alpha.
+
+- [ ] **10. Add content-preserving layer operations.** Implement trim, canvas
+  resize, rotate/flip, merge visible, merge down, stamp visible, flatten, and
+  explicit rasterization. Every destructive-looking action supports dry run,
+  revision guards, one transaction, and complete undo until bounded history prunes
+  it under documented policy.
+
+- [ ] **11. Add brush presets and assets.** Store presets as readable data with
+  versioned engine requirements and content-addressed texture tips. Importing
+  third-party brushes is opt-in and converts supported properties explicitly;
+  unknown dynamics are reported rather than guessed. Presets contain no scripts.
+
+- [ ] **12. Build editor-grade canvas interaction.** Add cursor outlines, sampled
+  previews, stabilizer feedback, source markers, quick mask, selection edges,
+  rulers, guides, snapping, navigator, zoom/rotate canvas, and tablet-friendly
+  controls. Preview may be approximate while the committed Rust result remains
+  authoritative and replaces it promptly.
+
+- [ ] **13. Add CLI and batch parity.** Allow deterministic strokes and retouch
+  operations from compact JSON sample streams, preset references, selections, and
+  masks. Enforce event, point, tile, surface, and output limits before expensive
+  work. Summaries report changed bounds and tile hashes without dumping pixels.
+
+- [ ] **14. Harden performance and correctness.** Benchmark stroke latency, dirty
+  tile count, checkpoint cadence, replay, zoom, compositing, memory peaks, package
+  size, and undo across large sparse and dense canvases. Fuzz journals, tiles,
+  presets, sample streams, selection edges, and malformed brush assets. Run seam,
+  alpha, pressure, and replay golden tests on every release target.
 
 ## CLI direction
 
 ```sh
-pentool raw add catalog.pen hero --file ./capture.raw --camera-profile auto
-pentool raw develop catalog.pen hero --exposure 0.7 --temperature 5400 --dry-run
-pentool photo variant add catalog.pen hero warm-editorial
-pentool photo settings sync catalog.pen hero --to selected.json --except crop
-pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr
-pentool photo export catalog.pen --selection picks --recipe web-gallery
+pentool raster layer add portrait.pen retouch --width 4000 --height 5000
+pentool brush preset create soft-retouch --kind soft-round --size 36 --flow 0.12
+pentool paint stroke portrait.pen retouch --preset soft-retouch \
+  --samples stroke.json --color '#D2A184' --dry-run
+pentool clone set-source portrait.pen --layer source --x 820 --y 640
+pentool clone stroke portrait.pen retouch --samples clone-stroke.json --aligned
+pentool heal spot portrait.pen retouch --x 912 --y 701 --radius 18
+pentool select wand portrait.pen --source composite --x 10 --y 10 --tolerance 12
+pentool raster merge-down portrait.pen retouch --if-revision <revision>
+pentool raster checkpoint portrait.pen retouch --compact
 ```
+
+Exact command names are provisional. Browser pointer streams use the same canonical
+stroke request accepted by CLI and batch. A malformed or interrupted stroke never
+leaves a partially committed journal or tile set.
 
 ## Acceptance targets
 
-- Develop, locally adjust, compare, and export variants from one immutable RAW.
-- Round-trip a 16-bit wide-gamut fixture without undocumented precision loss.
-- Cull and batch-process a substantial local shoot with bounded resources.
-- Package sources, profiles, masks, variants, and recipes for offline reproduction.
-- Cancel decode, merge, or export without partial mutation or orphan artifacts.
+- Retouch a high-resolution portrait with clone, healing, dodge/burn, selections,
+  and masks while preserving the original imported asset.
+- Paint 10,000 strokes, reopen the document, and reach the current image through a
+  bounded checkpoint plus replay budget rather than replaying the entire history.
+- Produce identical normative pixels and tile hashes from the same canonical
+  strokes on Windows, Linux, Intel macOS, and Apple Silicon.
+- Zoom and paint across tile boundaries without visible seams, double application,
+  missing pixels, or alpha fringes.
+- Cancel a large fill, transform, heal, or stroke without changing document bytes
+  or leaving unreferenced committed tiles.
+- Package the document, clear disposable caches, move it offline, and reproduce
+  the accepted render with every editable raster layer intact.
 
-## Deferred to v0.7.5
+## Explicitly deferred
 
-Complete ICC workflows, CMYK/Lab, device-link profiles, ink limits, spot colors,
-overprint, separations, paper simulation, print preflight, and PDF/X production.
+- Camera RAW development, ICC-managed wide-gamut editing, CMYK/Lab documents,
+  proofing, separations, and print production; these belong to v0.7.5.
+- A Photoshop-compatible `.psd` fidelity guarantee. Import/export may be proposed
+  later only with a documented mapping and loss report.
+- Unbounded procedural brushes, executable brush scripts, and third-party native
+  plugins inside the Pentool process.
+- Full fluid simulation, neural brushes, face reshaping, puppet rigs, and liquify
+  until their deterministic math and bounded interaction model are specified.
 
 ## Acceptance demo
 
-Import a RAW shoot, cull and rate it, correct camera/lens issues, develop at high
-precision, merge brackets and panoramas, apply local masks, create variants, sync
-selected settings, and export web, wide-gamut master, and photo-lab recipes. Move
-the package offline and reproduce outputs without a catalog server or AI provider.
+Open a layered campaign assembled in v0.7.2, accept a cleaned product image from
+v0.7.3, then create raster layers for manual finishing. Remove small defects with
+clone and healing, paint edge corrections through a saved mask, dodge and burn the
+product, add hand-painted texture with pressure input, and patch one selected
+region. Show tile-aware diff, undo/redo, checkpoint compaction, package round trip,
+offline reopening, and matching cross-platform pixels without flattening the work.

@@ -1,266 +1,153 @@
-# v0.7.2 — BYOK image models as first-class editing tools
+# v0.7.2 — Professional compositing and reusable image workflows
 
-Integrate user-chosen image models into Pentool's existing image workflow without
-turning the editor into an autonomous agent or coupling `.pen` documents to one AI
-vendor. Users bring their own provider account, API key, gateway, or local model.
-Pentool exposes generation and editing as explicit, reviewable image operations,
-materializes every accepted result as a verified asset, and keeps the document
-renderable offline afterward.
+Build on v0.7's image nodes and immutable operation stacks with the most valuable
+professional concepts proven by Photoshop: adjustment layers, reusable masks,
+clipping, blending, non-destructive transforms, fill layers, and inspection tools.
+Pentool adopts the workflows, not Photoshop's entire surface area. Features must
+remain deterministic, scriptable, reviewable in JSON, and suitable for one binary.
 
-The design borrows the useful boundary from provider-neutral SDKs: a stable core
-request and result contract, a provider/model registry, capability discovery, and
-an escape hatch for namespaced provider options. Pentool does not embed a
-JavaScript runtime or require an AI SDK, Node.js, hosted gateway, or Pentool cloud
-service. Adapters implement the contract directly or through an external tool
-protocol while preserving the one-binary default distribution.
+## What is worth carrying forward
 
-## Product position
+Photoshop's strongest architectural idea is that edits are independent, reorderable
+objects: adjustment layers alter layers below without rewriting pixels; Smart
+Objects preserve original content through transforms and Smart Filters; masks make
+visibility and filter scope reversible; clipping masks constrain content through
+another layer's alpha; and blend modes define compositing mathematically. These map
+cleanly to Pentool's scene graph, hashes, history, and structured diffs.
 
-AI belongs beside crop, mask, cleanup, fill, and adjustment controls—not behind a
-chat agent that describes and manipulates the whole document. The editor should
-offer focused actions such as Generate, Replace Area, Remove Object, Extend Canvas,
-Remove Background, Restore, Upscale, and Create Variations. Each action receives
-explicit scene inputs and produces candidates that the user can compare, accept,
-or discard.
-
-An accepted result becomes an ordinary content-addressed v0.7 image asset. The
-corresponding recipe and run provenance may remain in the `.pen` document so the
-result can be understood, revised, or explicitly regenerated. Rendering, opening,
-validating, packaging, and exporting a document never invoke a model or require a
-network connection.
-
-## Non-negotiable boundaries
-
-- BYOK means credentials remain in environment variables, OS credential storage,
-  or explicitly configured local provider profiles. API keys, bearer tokens,
-  signed URLs, account IDs, and secret headers MUST NOT be written to `.pen`,
-  history, logs, packages, crash reports, or command output.
-- Model execution is always an explicit user or CLI action. Opening, previewing,
-  rendering, validating, diffing, installing, or exporting never reruns a recipe.
-- Generated pixels are untrusted input and pass through the same signature,
-  decoder, dimension, memory, metadata, and hash checks as imported images.
-- A remote failure, cancellation, moderation refusal, timeout, malformed response,
-  or exhausted budget leaves the document byte-for-byte unchanged.
-- A `.pen` file stores materialized outputs, portable recipe intent, and sanitized
-  provenance—not a promise that a retired or changed model can reproduce pixels.
-- Prompts and reference images can be sensitive. Commands and editor flows MUST
-  show exactly what will leave the machine before submission.
-- No provider may receive the whole document implicitly. Only the selected,
-  flattened inputs, masks, references, and declared metadata are disclosed.
-- Provider terms, licenses, output restrictions, and safety policy remain visible;
-  Pentool does not claim ownership or commercial rights for model output.
-
-## Portable model contract
-
-Pentool defines capability classes rather than a lowest-common-denominator API:
-
-- `generate`: text and optional reference images to a new image;
-- `edit`: instruction plus one or more source/reference images;
-- `inpaint`: edit only a supplied mask region;
-- `outpaint`: extend an image into an explicitly sized canvas;
-- `remove-background`: produce transparency or a reusable mask;
-- `remove-object`: remove masked content and reconstruct the area;
-- `restore`: denoise, deblur, repair, or colorize with declared intent;
-- `upscale`: enlarge with a requested scale or target size;
-- `variation`: create alternatives while retaining source composition.
-
-An adapter reports which capabilities, input counts, mask conventions, media
-types, dimensions, aspect ratios, seeds, candidate counts, and provider-specific
-options a selected model supports. Unsupported portable options fail before any
-billable request. Silent parameter dropping is forbidden; adapter warnings are
-returned and retained with the run.
-
-Portable request fields include operation kind, prompt, negative prompt, input
-asset hashes, reference roles, mask hash and polarity, requested size or aspect
-ratio, candidate count, seed when supported, output media type, timeout, and
-canonical namespaced provider options. Provider/model identifiers are strings,
-not a hard-coded enum, because available models change independently of Pentool.
-
-## `.pen` representation
-
-Add document-level AI recipes and immutable run records rather than making remote
-execution part of the renderer. A conceptual recipe is readable JSON:
-
-```json
-{
-  "id": "cleanup-product-photo",
-  "kind": "remove-background",
-  "inputs": [{ "asset": "sha256:...", "role": "source" }],
-  "prompt": "Preserve the product and its natural translucent edges.",
-  "mask": null,
-  "output": { "alpha": true, "size": "source" },
-  "provider_options": {}
-}
-```
-
-The provider profile and credential selector are local execution configuration,
-not portable document state. A run records the recipe revision/hash, adapter and
-protocol versions, provider and returned model identifiers, input and output
-hashes, sanitized request settings, seed if honored, provider warnings, usage when
-available, timestamps, reproducibility claim, and acceptance status. Raw provider
-responses and headers are not embedded by default.
-
-Prompt storage is explicit: `document` keeps editable prompt text, `private`
-stores only a digest plus a local reference, and `redacted` retains a digest and
-human-authored summary. A private or redacted recipe remains renderable from its
-materialized output but cannot be regenerated elsewhere without the missing input.
-
-AI recipes are not evaluated live in an image operation stack. Instead, accepted
-results create or replace normal image assets through one transaction. The run
-record links source, result, mask, and recipe so structural diff and history can
-explain the change without making ordinary rendering nondeterministic.
+Brush painting, dozens of legacy artistic filters, video, 3D, and bundled generative
+models do not fit v0.7.2. AI and content-aware tools remain external-tool operations
+whose imported results carry provenance.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the AI image protocol and threat model.** Specify portable
-  requests/results, capability negotiation, canonical JSON, input disclosure,
-  credential boundaries, redaction, error taxonomy, cancellation, retries,
-  timeouts, usage reporting, and output validation. Publish normative schemas and
-  valid/invalid fixtures before enabling any network adapter.
+- [ ] **1. Add adjustment nodes.** Introduce scene nodes that apply an adjustment
+  to siblings below, a referenced group, or explicit target IDs without changing
+  source assets. Required adjustments: exposure, brightness/contrast, levels,
+  curves, vibrance, hue/saturation, color balance, black-and-white, channel mixer,
+  gradient map, invert, posterize, and threshold. Each node has opacity, blend mode,
+  enable state, optional mask, stable ID, and a precisely defined color pipeline.
 
-- [ ] **2. Add provider profiles and a model registry.** Support named local
-  profiles containing adapter kind, endpoint policy, credential source, and safe
-  defaults. Discover or configure models with stable string IDs and cached
-  capability snapshots. Listing models may contact a provider only through an
-  explicit refresh; document open and editor startup use local state.
+- [ ] **2. Add reusable raster and vector masks.** Support grayscale image masks,
+  vector masks, invert, density, feather, transform linking/unlinking, and applying
+  one mask to a node or group. Store masks as reusable content-addressed resources.
+  White reveals, black conceals, gray provides partial coverage. `mask apply` is an
+  explicit destructive bake; detach/delete keeps normal history semantics.
 
-- [ ] **3. Implement a versioned adapter boundary.** Add an in-process HTTP
-  adapter interface and a sandboxable external-process JSON protocol for local or
-  community backends. Requests use local byte streams or content-addressed handles,
-  never arbitrary document paths. Bound stdout/stderr, response bytes, redirects,
-  hosts, execution time, and child-process authority.
+- [ ] **3. Add clipping stacks.** Allow consecutive nodes to clip to the alpha of a
+  base node, with explicit stack membership rather than implicit name conventions.
+  Define group isolation, base opacity, mask interaction, reordering behavior, and
+  broken-reference recovery. This enables photographs inside text, shapes, and card
+  frames without duplicating mask geometry.
 
-- [ ] **4. Ship a small reference adapter set.** Choose adapters from maintained
-  providers only after conformance tests exist. Include one OpenAI-compatible
-  remote path, one provider that supports masked editing, and one local/external
-  reference adapter. Keep provider code feature-gated where dependencies or binary
-  size threaten the default artifact. Do not freeze model IDs in the schema.
+- [ ] **4. Add a portable blend-mode core.** Specify and implement `normal`,
+  `multiply`, `screen`, `overlay`, `darken`, `lighten`, `color-dodge`, `color-burn`,
+  `hard-light`, `soft-light`, `difference`, `exclusion`, `hue`, `saturation`,
+  `color`, and `luminosity`. Define sRGB/linear conversion, premultiplied-alpha math,
+  clamping, group isolation, and pass-through groups. Ship a mode only after exact
+  cross-platform conformance fixtures exist.
 
-- [ ] **5. Add generation with candidate review.** Generate one or more bounded
-  candidates at an explicit size/aspect ratio, validate and hash all results, show
-  cost/usage when reported, and commit only selected candidates. Rejected
-  candidates live in bounded temporary storage and never create document history.
+- [ ] **5. Add non-destructive transform stacks.** Preserve source pixels through
+  repeated scale, rotate, skew, perspective, and four-corner transforms. Add a
+  bounded mesh warp only after its interpolation and serialization are specified.
+  Transform nodes are reorderable and maskable like image operations. Rasterization
+  or flattening is always explicit.
 
-- [ ] **6. Add source-aware editing and variations.** Send explicitly selected
-  image/reference nodes with roles, preserve their immutable hashes, and place the
-  accepted result as a sibling, replacement, or new version. Replacement preserves
-  frame geometry, transform, clipping, masks, effects, and stacking unless the
-  user deliberately chooses a new placement.
+- [ ] **6. Add fill nodes.** Implement solid color, linear/radial/conic gradient,
+  and content-addressed pattern fills as normal scene nodes. Values may reference
+  v0.6.2 design tokens. Define gradient interpolation space, spread, transforms,
+  pattern origin, scaling, repetition, and package dependencies.
 
-- [ ] **7. Add mask-aware inpaint and object removal.** Reuse v0.7.1 selections
-  and raster/vector masks, rasterizing a request mask through the authoritative
-  renderer with declared polarity and dimensions. Preview the exact disclosed
-  source and mask. Returned pixels never overwrite areas outside the intended
-  region without a visual diff and explicit full-frame acceptance.
+- [ ] **7. Add non-destructive layer effects.** Start with drop/inner shadow,
+  outer/inner glow, stroke, color overlay, gradient overlay, and blur. Effects form
+  an ordered, toggleable stack with individual opacity/blend mode and may be shared
+  as named effect styles. Separate content opacity from total node opacity.
 
-- [ ] **8. Add outpaint and generative canvas extension.** Require an explicit
-  target rectangle, anchor, and resulting pixel budget. Keep original pixels
-  attributable, show changed/added regions, and preserve placement in scene
-  coordinates. Crop-back remains non-destructive.
+- [ ] **8. Add selections as temporary queries, saved masks as durable data.**
+  Provide rectangle, ellipse, polygon/lasso path, color range, luminosity range,
+  node alpha, mask alpha, and boolean add/subtract/intersect operations. Commands
+  can turn a selection into a mask, crop, analysis scope, or operation scope.
+  Unsaved selections never affect document hashes; saved selections are masks.
 
-- [ ] **9. Add focused cleanup operations.** Normalize remove-background,
-  background replacement, restoration, denoise/deblur, and upscale into the same
-  recipe/run flow. Prefer a returned alpha mask when available so edges remain
-  reusable and editable. Never present a provider's semantic rewrite as lossless
-  cleanup.
+- [ ] **9. Add professional inspection tools.** Implement deterministic histogram,
+  per-channel statistics, sampled colors, clipping warnings, transparency bounds,
+  and before/after comparison. Analysis is read-only, JSON-first, mask/selection
+  aware, and able to create palette tokens only through an explicit follow-up.
 
-- [ ] **10. Add reusable recipes and controlled regeneration.** Save portable
-  recipes as document styles or data-only `.penpreset` entries. Regeneration shows
-  the resolved profile/model, disclosed inputs, parameter compatibility, estimated
-  request count, and reproducibility limits. It creates a new immutable run and
-  output; it never mutates an earlier result in place.
+- [ ] **10. Improve linked-asset workflows.** Add relink, locate-by-hash, embed,
+  externalize, collect-for-output, dependency report, stale-source detection, and
+  project portability checks. Relinking requires a hash match unless the user
+  explicitly imports the bytes as a new asset and reviews affected nodes.
 
-- [ ] **11. Integrate batch, diff, history, and packages.** Batch can declare a
-  recipe and execute it only with an explicit `--allow-model-call` gate. Dry run
-  performs local validation and disclosure planning but makes no billable call.
-  Diff summarizes prompt/setting changes without leaking private prompts. Packages
-  include accepted outputs and sanitized provenance, never credentials or required
-  remote calls.
+- [ ] **11. Add presets and copy/paste of appearances.** Save operation stacks,
+  adjustment settings, effects, masks, fills, and complete appearances as named
+  document styles or deterministic `.penpreset` data-only packages. Presets declare
+  engine/color-contract compatibility and contain no scripts.
 
-- [ ] **12. Build editor-native controls.** Add model/profile selection,
-  capability-aware controls, prompt privacy choice, exact input disclosure,
-  candidate grid, before/after and changed-region views, cancel/retry, usage, and
-  provenance inspection. Controls appear in the relevant image-editing context,
-  not as a general-purpose autonomous chat surface.
+- [ ] **12. Add composite-aware batch and diff.** Batch can create and reorder
+  adjustments, masks, clipping stacks, fills, effects, selections-to-mask, and
+  transforms in one transaction. Structural diff explains scope and stack-order
+  changes; visual diff can isolate the pixels affected by one node.
 
-- [ ] **13. Add policy, privacy, and cost safeguards.** Support endpoint allowlists,
-  per-call pixel/candidate limits, retry ceilings, concurrency limits, optional
-  cost confirmation thresholds, log redaction, proxy/TLS policy, and a strict
-  offline mode. Clearly distinguish provider safety refusal from transport and
-  validation errors.
+- [ ] **13. Build editor parity.** Add panels for adjustments, masks, clipping,
+  blend modes, effects, histograms, linked assets, and before/after views. Expensive
+  previews use cancellable proxies; committed/exported output comes from the shared
+  Rust renderer.
 
-- [ ] **14. Harden conformance and failure recovery.** Test every adapter against
-  recorded local fixtures without network access in normal CI. Cover malformed
-  media, decompression bombs, wrong MIME types, huge outputs, partial streams,
-  timeouts, cancellation, redirects, retries, duplicate results, model drift,
-  unsupported options, secret leakage, rollback, and crash recovery. Live tests
-  are opt-in, credential-gated, non-release checks.
+- [ ] **14. Harden correctness and performance.** Extend golden tests across group
+  isolation, blend modes, masks, adjustment scope, alpha edges, transforms, effects,
+  cache reuse, and color math on every release target. Extend benchmarks with deep
+  stacks, shared masks, many clipped nodes, large blur radii, and cold/warm caches.
+  Enforce memory, temporary-surface, nesting, and operation-count limits.
 
 ## CLI direction
 
 ```sh
-pentool ai provider add studio --adapter openai-compatible \
-  --endpoint https://example.invalid/v1 --credential-env STUDIO_IMAGE_KEY
-pentool ai model refresh --provider studio
-pentool ai model list --capability inpaint --json
-pentool ai generate campaign.pen hero-concept --provider studio \
-  --model image-model-id --prompt-file prompt.txt --aspect 16:9 --candidates 4
-pentool ai edit campaign.pen product-clean --source product \
-  --kind remove-background --prompt-privacy document --dry-run
-pentool ai inpaint campaign.pen product-fix --source product \
-  --mask selection:cleanup --prompt-file cleanup.txt --allow-model-call
-pentool ai outpaint campaign.pen hero-wide --source hero --width 1920 --height 1080 \
-  --anchor center --allow-model-call
-pentool ai run accept campaign.pen <run-id> --candidate 2 --replace product
-pentool ai provenance campaign.pen --node product --json
-pentool ai regenerate campaign.pen cleanup-product-photo --allow-model-call
+pentool adjustment add photo.pen grade --kind curves --scope group:hero
+pentool mask create photo.pen portrait-mask --from node-alpha:portrait
+pentool mask attach photo.pen grade portrait-mask --feather 2
+pentool clip add photo.pen texture --base headline
+pentool object set photo.pen texture --blend overlay --opacity 0.6
+pentool effect add photo.pen card shadow --x 0 --y 12 --blur 30 --opacity 0.24
+pentool transform add photo.pen screen perspective --quad '...'
+pentool inspect histogram photo.pen --scope group:hero --json
+pentool asset collect photo.pen ./portable-project --dry-run
 ```
 
-Exact command names are provisional. Mutations use shared transactions, history,
-revision guards, page selection, structured errors, and one undo entry. `--dry-run`
-never contacts a paid model. Non-interactive execution requires the separate
-`--allow-model-call` acknowledgement so an existing script cannot begin spending
-money merely because a document gained an AI recipe.
+Every mutating command uses v0.6.2 history, dry run, revision guards, structured
+errors, and exactly one transaction.
 
 ## Acceptance targets
 
-- Configure two providers with different capability sets and use the same portable
-  generate recipe where both support it, with unsupported fields rejected before
-  submission.
-- Remove a product background, refine it through a reusable mask, accept one of
-  several candidates, and continue editing it with ordinary v0.7/v0.7.1 tools.
-- Inpaint a selected region while the review UI shows the precise source, mask,
-  prompt privacy, provider, model, settings, and pixels changed.
-- Replace an image asset while preserving its scene placement, crop, transform,
-  clipping, effects, stable node ID, and undo history.
-- Move the completed `.pen` and package to an offline machine and reproduce the
-  accepted render exactly without credentials, adapters, or model availability.
-- Cancel or fail a request at every stage without changing the document, leaving
-  orphan assets, leaking secrets, or recording a misleading successful run.
-- Confirm through automated scans that `.pen`, `.penpkg`, history, JSON output,
-  logs, fixtures, and crash artifacts contain no configured credential values.
+- Reproduce a professional poster composite using linked images, clipped textures,
+  two adjustment nodes, reusable masks, blend modes, gradients, and effects without
+  baking any source asset.
+- Change the grade globally by editing one adjustment node and limit it locally by
+  attaching a reusable mask.
+- Repeated transforms do not degrade the source or accumulate resampling damage.
+- Collect a project into a portable directory, disconnect the original asset paths,
+  and reproduce identical decoded output hashes offline.
+- Undo/redo, package round trips, structural diff, and compact serialization retain
+  every stack and reference deterministically.
+- Golden composite pixels pass on Windows, Linux, Intel macOS, and Apple Silicon;
+  performance and peak memory remain within documented budgets.
 
-## Explicitly deferred
+## Deferred beyond v0.7.2
 
-- Autonomous agents that inspect or redesign an entire document without explicit
-  scoped inputs and user-reviewed mutations.
-- Silent live inference during render, export, package install, document open, or
-  thumbnail generation.
-- A Pentool-hosted model gateway, billing account, credential escrow, or mandatory
-  cloud service.
-- Training, fine-tuning, LoRA management, dataset collection, and model downloads.
-- Claims of pixel reproducibility across provider model updates. Materialized
-  output hashes, not seeds or prompts, are authoritative.
-- Video generation, audio generation, general text/chat models, and arbitrary tool
-  execution; v0.7.2 is intentionally limited to image creation and image editing.
+- Pixel brushes, clone/heal painting, liquify, puppet rigs, and a full raster-layer
+  painting engine.
+- CMYK/Lab editing and print-proofing until a complete color-management contract is
+  designed; v0.7.2 remains explicit sRGB.
+- Camera RAW development and lens-profile databases.
+- Animation, video timelines, 3D, and neural filters.
+- In-core generative fill, background removal, or content-aware synthesis. These
+  remain provenance-recorded external tools.
 
 ## Acceptance demo
 
-Open a product campaign and select one photo. Use a BYOK provider to remove its
-background, refine the returned mask with v0.7.1 tools, outpaint a wider hero, and
-generate four background candidates from a reusable recipe. Accept one candidate,
-apply ordinary curves and effects, then inspect a diff and complete provenance.
-Switch to a second provider and regenerate a variation after reviewing capability
-differences and exact data disclosure. Finally disconnect the network and render,
-package, copy, reopen, undo, and export the accepted campaign identically, with no
-provider credentials stored in the project.
+Create a two-page campaign from three hash-verified linked photographs. Apply a
+shared curves adjustment through a feathered mask, clip a texture into headline
+text, use isolated group blending, add reusable gradient and shadow styles, and
+perspective-place a design into a screen mockup. Show histogram analysis, structural
+and visual diffs, undo/redo, preset reuse, asset collection, offline package
+reproduction, and matching cross-platform golden pixels without baking originals.
