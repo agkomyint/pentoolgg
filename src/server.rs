@@ -556,7 +556,7 @@ async fn render_png(
                 .clone()
                 .unwrap_or_else(|| state.project_root.join("browser.pen"));
             let scene = image::to_svg(&value, &document, query.page.as_deref())?;
-            return render::svg_to_png(&scene.svg, scene.width, scene.height, 1.0);
+            return render::scene_to_png(&scene, 1.0);
         }
         let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?

@@ -411,7 +411,7 @@ fn image_bench_in(dir: &std::path::Path, c: ImageBenchmark) -> Result<Value> {
         let scene = crate::image::to_svg(&raw, &path, None)?;
         let compose = micros(at);
         let at = Instant::now();
-        let png = render::svg_to_png(&scene.svg, scene.width, scene.height, c.scale)?;
+        let png = render::scene_to_png(&scene, c.scale)?;
         let raster_encode = micros(at);
         let at = Instant::now();
         let out = dir.join("out.png");

@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "A single-binary, agent-friendly vector pen tool"
 license = "MIT OR Apache-2.0"

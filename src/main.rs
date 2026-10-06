@@ -723,6 +723,9 @@ enum Command {
         dry_run: bool,
         #[arg(long = "if-revision", visible_alias = "revision")]
         revision: Option<String>,
+        /// Replace existing IDs in put-shape/put-path/put-text instead of failing (v4/v5).
+        #[arg(long)]
+        upsert: bool,
     },
     /// Create, update, or remove editable text.
     Text {
@@ -1636,7 +1639,9 @@ async fn run() -> Result<()> {
                     }
                     (source, image::external_storage(&relative)?)
                 } else {
-                    (file.clone(), image::embedded_storage(&fs::read(&file)?))
+                    let bytes = fs::read(&file)
+                        .with_context(|| format!("[missing-resource] {}", file.display()))?;
+                    (file.clone(), image::embedded_storage(&bytes))
                 };
                 let bytes = fs::read(&source_path)
                     .with_context(|| format!("[missing-resource] {}", source_path.display()))?;
@@ -2478,10 +2483,15 @@ async fn run() -> Result<()> {
         } => {
             let bytes = fs::read(&input)?;
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let mut doc: Document = serde_json::from_value(raw.clone())?;
-            select_page(&mut doc, selected_page)?;
-            let result = agent::apply(&mut doc, &action)?;
-            agent::merge_document(&mut raw, &doc, std::slice::from_ref(&action))?;
+            let result = if scene::is_scene_document(&raw) {
+                scene::apply_object(&mut raw, selected_page, &action)?
+            } else {
+                let mut doc: Document = serde_json::from_value(raw.clone())?;
+                select_page(&mut doc, selected_page)?;
+                let result = agent::apply(&mut doc, &action)?;
+                agent::merge_document(&mut raw, &doc, std::slice::from_ref(&action))?;
+                result
+            };
             let change =
                 transaction::commit_value(&input, "object", dry_run, if_revision.as_deref(), &raw)?;
             println!("{}", serde_json::json!({"change":change,"result":result}));
@@ -2492,6 +2502,7 @@ async fn run() -> Result<()> {
             operations,
             dry_run,
             revision,
+            upsert,
         } => {
             let bytes =
                 fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
@@ -2499,7 +2510,20 @@ async fn run() -> Result<()> {
             let operation_bytes = fs::read(&operations)
                 .with_context(|| format!("could not read {}", operations.display()))?;
             let changes = if scene::is_scene_document(&raw) {
-                let actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
+                let mut actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
+                if upsert {
+                    for action in &mut actions {
+                        let is_put = matches!(
+                            action.get("type").and_then(serde_json::Value::as_str),
+                            Some("put-shape" | "put-path" | "put-text")
+                        );
+                        if let (true, Some(object)) = (is_put, action.as_object_mut()) {
+                            object
+                                .entry("mode")
+                                .or_insert_with(|| serde_json::json!("replace"));
+                        }
+                    }
+                }
                 scene::apply_batch(&mut raw, selected_page, &actions)?
             } else {
                 let mut doc: Document = serde_json::from_value(raw.clone())?;
@@ -2521,7 +2545,18 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
         } => {
-            if matches!(action, page::PageAction::List) {
+            let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                let mut raw = raw;
+                if matches!(action, page::PageAction::List) {
+                    println!("{}", serde_json::to_string_pretty(&scene::page_list(&raw))?);
+                    return Ok(());
+                }
+                let result = scene::apply_page(&mut raw, action)?;
+                transaction::commit_value(&input, "page", dry_run, if_revision.as_deref(), &raw)?;
+                println!("{result}");
+                Ok(())
+            } else if matches!(action, page::PageAction::List) {
                 let doc = read_document(&input, None)?;
                 println!("{}", serde_json::to_string_pretty(&page::list(&doc))?);
                 Ok(())
@@ -2603,14 +2638,30 @@ async fn run() -> Result<()> {
             action,
             dry_run,
             if_revision,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "text",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| text::apply(doc, action),
-        ),
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                scene::apply_text(&mut raw, selected_page, action)?;
+                let summary = transaction::commit_value(
+                    &input,
+                    "text",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!("{}", serde_json::to_string(&summary)?);
+                Ok(())
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "text",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| text::apply(doc, action),
+                )
+            }
+        }
         Command::Font {
             input,
             action,
@@ -2638,17 +2689,33 @@ async fn run() -> Result<()> {
             if_revision,
             layer,
             operation,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "layer-geometry",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| {
-                geometry::execute_layer(doc, &layer, &operation)?;
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                scene::apply_layer_geometry(&mut raw, selected_page, &layer, &operation)?;
+                let summary = transaction::commit_value(
+                    &input,
+                    "layer-geometry",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!("{}", serde_json::to_string(&summary)?);
                 Ok(())
-            },
-        ),
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "layer-geometry",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| {
+                        geometry::execute_layer(doc, &layer, &operation)?;
+                        Ok(())
+                    },
+                )
+            }
+        }
         Command::Geometry {
             input,
             dry_run,
@@ -2657,7 +2724,24 @@ async fn run() -> Result<()> {
             id,
             operation,
         } => {
-            if operation.is_query() {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                let result =
+                    scene::apply_geometry(&mut raw, selected_page, &layer, &id, &operation)?;
+                if operation.is_query() {
+                    println!("{result}");
+                } else {
+                    let summary = transaction::commit_value(
+                        &input,
+                        "geometry",
+                        dry_run,
+                        if_revision.as_deref(),
+                        &raw,
+                    )?;
+                    println!("{}", serde_json::to_string(&summary)?);
+                }
+                Ok(())
+            } else if operation.is_query() {
                 let mut doc = read_document(&input, selected_page)?;
                 println!("{}", geometry::execute(&mut doc, &layer, &id, &operation)?);
                 Ok(())
@@ -2733,14 +2817,30 @@ async fn run() -> Result<()> {
             action,
             dry_run,
             if_revision,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "layer",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| editing::layer(doc, action),
-        ),
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                scene::apply_layer(&mut raw, selected_page, action)?;
+                let summary = transaction::commit_value(
+                    &input,
+                    "layer",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!("{}", serde_json::to_string(&summary)?);
+                Ok(())
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "layer",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| editing::layer(doc, action),
+                )
+            }
+        }
         Command::Path {
             input,
             action,
@@ -3336,7 +3436,7 @@ async fn run() -> Result<()> {
                             .iter()
                             .map(|id| {
                                 let scene = image::to_svg(&raw, &input, Some(id))?;
-                                render::svg_to_png(&scene.svg, scene.width, scene.height, scale)
+                                render::scene_to_png(&scene, scale)
                             })
                             .collect::<Result<Vec<_>>>()?;
                         pdf::write_png_pages(&pages, &output)?;
@@ -3457,7 +3557,7 @@ fn write_image_export(
         .as_deref()
     {
         Some("svg") => scene.svg.into_bytes(),
-        Some("png") => render::svg_to_png(&scene.svg, scene.width, scene.height, scale)?,
+        Some("png") => render::scene_to_png(&scene, scale)?,
         _ => anyhow::bail!("output must end in .png or .svg"),
     };
     editing::atomic_write(output, &bytes)

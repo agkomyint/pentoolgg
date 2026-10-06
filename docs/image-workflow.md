@@ -28,8 +28,9 @@ pentool image info art.pen hero
 `crop` is a normalized `[x, y, w, h]` rectangle of the source. `fit` (`fill`,
 `contain`, `cover`, `none`, `scale-down`) maps the cropped region into the frame;
 `position` (`[0..1, 0..1]`) is the focal alignment inside any slack. A mask is a
-vector shape in the parent space (`--mask SHAPE_ID`, `--mask-fill-rule`). The frame
-always clips the result.
+vector shape in the parent space. Set it after adding the image with
+`image set` (`--mask SHAPE_ID`, `--mask-fill-rule`); `image add` does not accept
+mask flags. The frame always clips the result.
 
 ## Operations
 

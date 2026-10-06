@@ -256,13 +256,35 @@ pub fn to_png(doc: &Document, scale: f32) -> Result<Vec<u8>> {
 }
 
 pub fn svg_to_png(svg: &str, canvas_width: u32, canvas_height: u32, scale: f32) -> Result<Vec<u8>> {
+    svg_to_png_with_fonts(svg, canvas_width, canvas_height, scale, &[])
+}
+
+/// Rasterizes a scene SVG with the bundled, embedded, and installed fonts so
+/// `<text>` nodes render the same as in the SVG export.
+pub fn scene_to_png(scene: &crate::image::SceneSvg, scale: f32) -> Result<Vec<u8>> {
+    svg_to_png_with_fonts(&scene.svg, scene.width, scene.height, scale, &scene.fonts)
+}
+
+fn svg_to_png_with_fonts(
+    svg: &str,
+    canvas_width: u32,
+    canvas_height: u32,
+    scale: f32,
+    fonts: &[crate::document::FontAsset],
+) -> Result<Vec<u8>> {
     if !(0.1..=8.0).contains(&scale) {
         bail!("scale must be between 0.1 and 8");
     }
-    let doc = Document::new(canvas_width, canvas_height);
+    let mut doc = Document::new(canvas_width, canvas_height);
+    doc.fonts = fonts.to_vec();
     let (width, height, _) = render_dimensions(&doc, scale)?;
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .context("could not parse generated SVG")?;
+    let options = resvg::usvg::Options {
+        font_family: fonts::DEFAULT_FAMILY.into(),
+        fontdb: std::sync::Arc::new(fonts::database(&doc, true)?),
+        ..Default::default()
+    };
+    let tree =
+        resvg::usvg::Tree::from_str(svg, &options).context("could not parse generated SVG")?;
     let mut pixmap = tiny_skia::Pixmap::new(width, height).context("image is too large")?;
     resvg::render(
         &tree,

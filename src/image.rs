@@ -375,6 +375,8 @@ pub struct SceneSvg {
     pub svg: String,
     pub width: u32,
     pub height: u32,
+    /// Fonts embedded in the document; rasterizers need them to draw text.
+    pub fonts: Vec<crate::document::FontAsset>,
 }
 
 pub fn to_svg(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<SceneSvg> {
@@ -474,7 +476,19 @@ fn build_svg(
         svg.push_str("</g>");
     }
     svg.push_str("</svg>");
-    Ok(SceneSvg { svg, width, height })
+    let fonts = raw
+        .get("fonts")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .context("[malformed-resource] document fonts are invalid")?
+        .unwrap_or_default();
+    Ok(SceneSvg {
+        svg,
+        width,
+        height,
+        fonts,
+    })
 }
 
 struct SvgContext<'a> {

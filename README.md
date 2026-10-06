@@ -237,6 +237,11 @@ pentool batch artwork.pen operations.json --dry-run
 pentool batch artwork.pen operations.json --revision 0123456789abcdef
 ```
 
+On v4/v5 documents `put-shape`, `put-path`, and `put-text` fail on an existing ID by
+default. Add `"mode":"replace"` to an operation, or pass `--upsert` to `batch`, to
+replace the node in place (stacking position is kept; groups are never replaced).
+Re-running the same batch with `--upsert` is therefore idempotent.
+
 Unknown JSON extension fields follow objects through rename, duplicate, move,
 and reorder. Locked source/target layers reject mutations. Object matching never
 guesses: mutation commands require exact layer and object IDs. Inside a layer,

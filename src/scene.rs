@@ -1299,6 +1299,96 @@ pub fn shape_to_path(raw: &mut Value, page: Option<&str>, id: &str) -> Result<Va
     Ok(json!({"id":id,"converted_from":kind}))
 }
 
+/// Remove an existing leaf node so a `put-*` operation can replace it.
+/// Returns the layer and top-level index it occupied, when it was top-level.
+fn take_for_replace(page: &mut Value, id: &str) -> Result<Option<(String, usize)>> {
+    fn remove(nodes: &mut Vec<Value>, id: &str) -> Result<Option<usize>> {
+        if let Some(index) = nodes
+            .iter()
+            .position(|n| n.get("id").and_then(Value::as_str) == Some(id))
+        {
+            if nodes[index].get("children").is_some() {
+                bail!("cannot replace group {id}; remove it or edit its children")
+            }
+            nodes.remove(index);
+            return Ok(Some(index));
+        }
+        for node in nodes.iter_mut() {
+            if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+                if remove(children, id)?.is_some() {
+                    return Ok(Some(usize::MAX));
+                }
+            }
+        }
+        Ok(None)
+    }
+    let layers = page
+        .get_mut("layers")
+        .and_then(Value::as_array_mut)
+        .context("page layers are missing")?;
+    for layer in layers.iter_mut() {
+        let layer_id = layer
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let locked = layer
+            .get("locked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let Some(nodes) = layer.get_mut("nodes").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        if nodes_contain_id(nodes, id) {
+            if locked {
+                bail!("layer is locked: {layer_id}")
+            }
+            return Ok(match remove(nodes, id)? {
+                Some(usize::MAX) | None => None,
+                Some(index) => Some((layer_id, index)),
+            });
+        }
+    }
+    Ok(None)
+}
+
+fn nodes_contain_id(nodes: &[Value], id: &str) -> bool {
+    nodes.iter().any(|node| {
+        node.get("id").and_then(Value::as_str) == Some(id)
+            || node
+                .get("children")
+                .and_then(Value::as_array)
+                .is_some_and(|children| nodes_contain_id(children, id))
+    })
+}
+
+/// Put a replaced node back at its previous top-level position.
+fn restore_position(page: &mut Value, previous: Option<(String, usize)>, layer: &str, id: &str) {
+    let Some((old_layer, index)) = previous else {
+        return;
+    };
+    if old_layer != layer {
+        return;
+    }
+    if let Ok(nodes) = layer_nodes_mut(page, layer) {
+        if let Some(last) = nodes
+            .iter()
+            .position(|n| n.get("id").and_then(Value::as_str) == Some(id))
+        {
+            let node = nodes.remove(last);
+            nodes.insert(index.min(nodes.len()), node);
+        }
+    }
+}
+
+fn is_replace(operation: &Value) -> Result<bool> {
+    match operation.get("mode").and_then(Value::as_str) {
+        None | Some("create") => Ok(false),
+        Some("replace") => Ok(true),
+        Some(other) => bail!("unsupported mode: {other} (use create or replace)"),
+    }
+}
+
 /// Apply high-level v4 operations atomically to an in-memory scene.
 pub fn apply_batch(
     raw: &mut Value,
@@ -1346,6 +1436,11 @@ pub fn apply_batch(
                         other => bail!("unsupported shape: {other}"),
                     };
                     let n = |key| operation.get(key).and_then(Value::as_f64);
+                    let previous = if is_replace(operation)? {
+                        take_for_replace(page_mut(&mut candidate, page)?, &id)?
+                    } else {
+                        None
+                    };
                     put_shape(
                         &mut candidate,
                         page,
@@ -1377,6 +1472,7 @@ pub fn apply_batch(
                             stroke_width: n("stroke_width"),
                         },
                     )?;
+                    restore_position(page_mut(&mut candidate, page)?, previous, &layer, &id);
                     if let Some(reference) = operation.get("fill_ref").and_then(Value::as_str) {
                         let node = find_node_mut(page_mut(&mut candidate, page)?, &id).unwrap();
                         node["style"]["fill"]["ref"] = json!(reference);
@@ -1391,12 +1487,18 @@ pub fn apply_batch(
                     let id = resolve("id")?;
                     let layer = resolve("layer")?;
                     let page_value = page_mut(&mut candidate, page)?;
+                    let previous = if is_replace(operation)? {
+                        take_for_replace(page_value, &id)?
+                    } else {
+                        None
+                    };
                     if pages_node_ids(page_value).contains(id.as_str()) {
-                        bail!("node ID already exists: {id}")
+                        bail!("node ID already exists: {id} (set mode replace or pass --upsert to replace it)")
                     }
                     let mut node = operation.clone();
                     let object = node.as_object_mut().unwrap();
                     object.remove("type");
+                    object.remove("mode");
                     object.remove("alias");
                     object.remove("layer");
                     object.insert("id".into(), json!(id));
@@ -1406,6 +1508,7 @@ pub fn apply_batch(
                     );
                     normalize_batch_style(object, kind)?;
                     layer_nodes_mut(page_value, &layer)?.push(node);
+                    restore_position(page_value, previous, &layer, &id);
                     json!({"type":kind,"id":id})
                 }
                 "create-group" => {
@@ -1716,6 +1819,559 @@ fn text_node(value: Value) -> Result<Value> {
     }
     o.insert("style".into(), Value::Object(style));
     Ok(Value::Object(o))
+}
+
+fn layer_mut<'a>(page: &'a mut Value, id: &str) -> Result<&'a mut Value> {
+    page.get_mut("layers")
+        .and_then(Value::as_array_mut)
+        .context("page layers are missing")?
+        .iter_mut()
+        .find(|l| l.get("id").and_then(Value::as_str) == Some(id))
+        .with_context(|| format!("layer not found: {id}"))
+}
+
+fn ensure_layer_unlocked(page: &mut Value, id: &str) -> Result<()> {
+    if layer_mut(page, id)?
+        .get("locked")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        bail!("layer is locked: {id}")
+    }
+    Ok(())
+}
+
+/// `layer add|set|remove|move` for scene (v4/v5) documents.
+pub fn apply_layer(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    action: crate::editing::LayerAction,
+) -> Result<()> {
+    use crate::editing::LayerAction;
+    validate(raw)?;
+    let page = page_mut(raw, page_id)?;
+    let layers = page
+        .get_mut("layers")
+        .and_then(Value::as_array_mut)
+        .context("page layers are missing")?;
+    let position = |layers: &[Value], id: &str| {
+        layers
+            .iter()
+            .position(|l| l.get("id").and_then(Value::as_str) == Some(id))
+            .with_context(|| format!("layer not found: {id}"))
+    };
+    match action {
+        LayerAction::Add { id, name } => {
+            if id.trim().is_empty() {
+                bail!("layer ID cannot be empty")
+            }
+            if layers
+                .iter()
+                .any(|l| l.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            {
+                bail!("layer ID already exists: {id}")
+            }
+            layers.push(json!({
+                "id": id,
+                "name": name.unwrap_or_else(|| id.clone()),
+                "visible": true,
+                "locked": false,
+                "nodes": []
+            }));
+        }
+        LayerAction::Set {
+            id,
+            name,
+            visible,
+            locked,
+        } => {
+            let index = position(layers, &id)?;
+            let layer = layers[index].as_object_mut().unwrap();
+            if let Some(name) = name {
+                layer.insert("name".into(), json!(name));
+            }
+            if let Some(visible) = visible {
+                layer.insert("visible".into(), json!(visible));
+            }
+            if let Some(locked) = locked {
+                layer.insert("locked".into(), json!(locked));
+            }
+        }
+        LayerAction::Remove { id } => {
+            let index = position(layers, &id)?;
+            if layers[index]
+                .get("locked")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                bail!("layer is locked: {id}")
+            }
+            if layers.len() == 1 {
+                bail!("cannot remove the last layer")
+            }
+            layers.remove(index);
+        }
+        LayerAction::Move { id, index } => {
+            if index >= layers.len() {
+                bail!("layer index out of range")
+            }
+            let old = position(layers, &id)?;
+            let layer = layers.remove(old);
+            layers.insert(index, layer);
+        }
+    }
+    validate(raw)
+}
+
+/// `text put|set|remove` for scene (v4/v5) documents.
+pub fn apply_text(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    action: crate::text::TextAction,
+) -> Result<()> {
+    use crate::text::TextAction;
+    validate(raw)?;
+    let page = page_mut(raw, page_id)?;
+    let layer_id = match &action {
+        TextAction::Put { layer, .. }
+        | TextAction::Set { layer, .. }
+        | TextAction::Remove { layer, .. } => layer.clone(),
+    };
+    ensure_layer_unlocked(page, &layer_id)?;
+    match action {
+        TextAction::Put {
+            id,
+            content,
+            x,
+            y,
+            font,
+            size,
+            weight,
+            italic,
+            fill,
+            align,
+            letter_spacing,
+            line_height,
+            ..
+        } => {
+            if !size.is_finite() || size <= 0.0 {
+                bail!("font size must be finite and positive")
+            }
+            let align = serde_json::to_value(align)?;
+            let replacement = json!({"kind":"text","id":id,"content":content,"x":x,"y":y,"font_family":font,"font_size":size,"font_weight":weight,"italic":italic,"align":align,"letter_spacing":letter_spacing,"line_height":line_height,"style":{"fill":{"fallback":fill}}});
+            let nodes = layer_nodes_mut(page, &layer_id)?;
+            if let Some(existing) = find_node_in_mut(nodes, &id) {
+                if existing.get("kind").and_then(Value::as_str) != Some("text") {
+                    bail!("object ID belongs to a non-text node: {id}")
+                }
+                *existing = replacement;
+            } else {
+                if pages_node_ids(page).contains(id.as_str()) {
+                    bail!("node ID already exists on page: {id}")
+                }
+                layer_nodes_mut(page, &layer_id)?.push(replacement);
+            }
+        }
+        TextAction::Set {
+            id,
+            content,
+            x,
+            y,
+            font,
+            size,
+            weight,
+            italic,
+            fill,
+            align,
+            letter_spacing,
+            line_height,
+            ..
+        } => {
+            if size.is_some_and(|v| !v.is_finite() || v <= 0.0) {
+                bail!("font size must be finite and positive")
+            }
+            let nodes = layer_nodes_mut(page, &layer_id)?;
+            let node = find_node_in_mut(nodes, &id)
+                .with_context(|| format!("text not found in layer {layer_id}: {id}"))?;
+            if node.get("kind").and_then(Value::as_str) != Some("text") {
+                bail!("object is not text: {id}")
+            }
+            let object = node.as_object_mut().unwrap();
+            let mut set = |key: &str, value: Option<Value>| {
+                if let Some(value) = value {
+                    object.insert(key.into(), value);
+                }
+            };
+            set("content", content.map(Value::from));
+            set("x", x.map(Value::from));
+            set("y", y.map(Value::from));
+            set("font_family", font.map(Value::from));
+            set("font_size", size.map(Value::from));
+            set("font_weight", weight.map(Value::from));
+            set("italic", italic.map(Value::from));
+            set("align", align.map(|a| serde_json::to_value(a).unwrap()));
+            set("letter_spacing", letter_spacing.map(Value::from));
+            set("line_height", line_height.map(Value::from));
+            if let Some(fill) = fill {
+                node["style"]["fill"] = json!({"fallback": fill});
+            }
+        }
+        TextAction::Remove { id, .. } => {
+            let nodes = layer_nodes_mut(page, &layer_id)?;
+            let before = nodes.len();
+            nodes.retain(|n| {
+                !(n.get("id").and_then(Value::as_str) == Some(id.as_str())
+                    && n.get("kind").and_then(Value::as_str) == Some("text"))
+            });
+            if nodes.len() == before {
+                bail!("text not found in layer {layer_id}: {id}")
+            }
+        }
+    }
+    validate(raw)
+}
+
+/// `page add|rename|duplicate|move|remove` for scene (v4/v5) documents.
+pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Value> {
+    use crate::page::PageAction;
+    validate(raw)?;
+    if let PageAction::List = action {
+        return Ok(page_list(raw));
+    }
+    let pages = raw
+        .get_mut("pages")
+        .and_then(Value::as_array_mut)
+        .context("document has no pages")?;
+    let index_of = |pages: &[Value], id: &str| {
+        pages
+            .iter()
+            .position(|p| p.get("id").and_then(Value::as_str) == Some(id))
+            .with_context(|| format!("page not found: {id}"))
+    };
+    let ensure_new = |pages: &[Value], id: &str| -> Result<()> {
+        if id.trim().is_empty() {
+            bail!("page ID cannot be empty")
+        }
+        if pages
+            .iter()
+            .any(|p| p.get("id").and_then(Value::as_str) == Some(id))
+        {
+            bail!("page ID already exists: {id}")
+        }
+        Ok(())
+    };
+    let result = match action {
+        PageAction::List => unreachable!(),
+        PageAction::Add {
+            id,
+            name,
+            width,
+            height,
+            background,
+        } => {
+            ensure_new(pages, &id)?;
+            pages.push(json!({
+                "id": id,
+                "name": name.unwrap_or_else(|| id.clone()),
+                "canvas": {"width": width, "height": height, "background": background},
+                "layers": [{"id": "layer-1", "name": "Layer 1", "visible": true, "locked": false, "nodes": []}]
+            }));
+            json!({"operation":"add","page":id})
+        }
+        PageAction::Rename { id, name } => {
+            let index = index_of(pages, &id)?;
+            pages[index]["name"] = json!(name);
+            json!({"operation":"rename","page":id})
+        }
+        PageAction::Duplicate { id, new_id } => {
+            ensure_new(pages, &new_id)?;
+            let index = index_of(pages, &id)?;
+            let mut copy = pages[index].clone();
+            let name = copy
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(&id)
+                .to_string();
+            copy["id"] = json!(new_id);
+            copy["name"] = json!(format!("{name} copy"));
+            pages.insert(index + 1, copy);
+            json!({"operation":"duplicate","page":id,"new_id":new_id})
+        }
+        PageAction::Move { id, index } => {
+            if index >= pages.len() {
+                bail!("page index out of range")
+            }
+            let old = index_of(pages, &id)?;
+            let page = pages.remove(old);
+            pages.insert(index, page);
+            json!({"operation":"move","page":id,"index":index})
+        }
+        PageAction::Remove { id } => {
+            if pages.len() == 1 {
+                bail!("cannot remove the last page")
+            }
+            let index = index_of(pages, &id)?;
+            pages.remove(index);
+            let active = pages[index.min(pages.len() - 1)]["id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            json!({"operation":"remove","page":id,"active_page":active})
+        }
+    };
+    validate(raw)?;
+    Ok(result)
+}
+
+pub fn page_list(raw: &Value) -> Value {
+    fn count(nodes: &[Value]) -> usize {
+        nodes
+            .iter()
+            .map(|n| {
+                1 + n
+                    .get("children")
+                    .and_then(Value::as_array)
+                    .map_or(0, |c| count(c))
+            })
+            .sum()
+    }
+    let pages = raw
+        .get("pages")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    json!({"pages": pages.iter().enumerate().map(|(index, page)| {
+        let layers = page.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+        json!({
+            "id": page.get("id"),
+            "name": page.get("name"),
+            "index": index,
+            "width": page["canvas"]["width"],
+            "height": page["canvas"]["height"],
+            "layers": layers.len(),
+            "objects": layers.iter().map(|l| count(l.get("nodes").and_then(Value::as_array).map_or(&[][..], |n| n.as_slice()))).sum::<usize>()
+        })
+    }).collect::<Vec<_>>()})
+}
+
+/// `object set|rename|duplicate|move-to-layer|reorder|remove` for scene documents.
+pub fn apply_object(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    action: &crate::agent::ObjectAction,
+) -> Result<Value> {
+    use crate::agent::ObjectAction;
+    validate(raw)?;
+    let page = page_mut(raw, page_id)?;
+    let (id, layer_id) = match action {
+        ObjectAction::Set { id, layer, .. }
+        | ObjectAction::Rename { id, layer, .. }
+        | ObjectAction::Duplicate { id, layer, .. }
+        | ObjectAction::MoveToLayer { id, layer, .. }
+        | ObjectAction::Reorder { id, layer, .. }
+        | ObjectAction::Remove { id, layer } => (id.clone(), layer.clone()),
+    };
+    ensure_layer_unlocked(page, &layer_id)?;
+    let position = |page: &mut Value| -> Result<usize> {
+        layer_nodes_mut(page, &layer_id)?
+            .iter()
+            .position(|n| n.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            .with_context(|| format!("object not found in layer {layer_id}: {id}"))
+    };
+    let result = match action {
+        ObjectAction::Set {
+            d,
+            stroke,
+            width,
+            fill,
+            cap,
+            join,
+            miter_limit,
+            content,
+            x,
+            y,
+            font,
+            size,
+            weight,
+            italic,
+            align,
+            letter_spacing,
+            line_height,
+            ..
+        } => {
+            let index = position(page)?;
+            let node = &mut layer_nodes_mut(page, &layer_id)?[index];
+            let kind = node.get("kind").and_then(Value::as_str).unwrap_or_default();
+            if kind == "path" {
+                if let Some(d) = d {
+                    BezPath::from_svg(d).context("invalid path data")?;
+                    node["d"] = json!(d);
+                }
+                if let Some(v) = stroke {
+                    node["style"]["stroke"] = json!({"fallback": v});
+                }
+                if let Some(v) = width {
+                    node["style"]["stroke_width"] = json!({"fallback": v});
+                }
+                if let Some(v) = fill {
+                    node["style"]["fill"] = json!({"fallback": v});
+                }
+                if let Some(v) = cap {
+                    node["style"]["stroke_linecap"] = json!({"fallback": v.svg()});
+                }
+                if let Some(v) = join {
+                    node["style"]["stroke_linejoin"] = json!({"fallback": v.svg()});
+                }
+                if let Some(v) = miter_limit {
+                    node["style"]["stroke_miterlimit"] = json!({"fallback": v});
+                }
+            } else if kind == "text" {
+                if size.is_some_and(|v| !v.is_finite() || v <= 0.0) {
+                    bail!("font size must be finite and positive")
+                }
+                let object = node.as_object_mut().unwrap();
+                let mut set = |key: &str, value: Option<Value>| {
+                    if let Some(value) = value {
+                        object.insert(key.into(), value);
+                    }
+                };
+                set("content", content.clone().map(Value::from));
+                set("x", x.map(Value::from));
+                set("y", y.map(Value::from));
+                set("font_family", font.clone().map(Value::from));
+                set("font_size", size.map(Value::from));
+                set("font_weight", weight.map(Value::from));
+                set("italic", italic.map(Value::from));
+                set("align", align.and_then(|a| serde_json::to_value(a).ok()));
+                set("letter_spacing", letter_spacing.map(Value::from));
+                set("line_height", line_height.map(Value::from));
+                if let Some(v) = fill {
+                    node["style"]["fill"] = json!({"fallback": v});
+                }
+            } else {
+                bail!("object {id} is a {kind} node; use the matching command to edit it")
+            }
+            json!({"operation":"set","id":id})
+        }
+        ObjectAction::Rename { new_id, .. } | ObjectAction::Duplicate { new_id, .. } => {
+            if new_id.trim().is_empty() {
+                bail!("object ID cannot be empty")
+            }
+            if pages_node_ids(page).contains(new_id.as_str()) {
+                bail!("node ID already exists on page: {new_id}")
+            }
+            let index = position(page)?;
+            let nodes = layer_nodes_mut(page, &layer_id)?;
+            if matches!(action, ObjectAction::Rename { .. }) {
+                nodes[index]["id"] = json!(new_id);
+                json!({"operation":"rename","id":id,"new_id":new_id})
+            } else {
+                if nodes[index].get("children").is_some() {
+                    bail!("duplicating a group would duplicate child IDs; duplicate its children instead")
+                }
+                let mut copy = nodes[index].clone();
+                copy["id"] = json!(new_id);
+                nodes.insert(index + 1, copy);
+                json!({"operation":"duplicate","id":id,"new_id":new_id})
+            }
+        }
+        ObjectAction::MoveToLayer { target_layer, .. } => {
+            ensure_layer_unlocked(page, target_layer)?;
+            let index = position(page)?;
+            let node = layer_nodes_mut(page, &layer_id)?.remove(index);
+            layer_nodes_mut(page, target_layer)?.push(node);
+            json!({"operation":"move-to-layer","id":id,"layer":target_layer})
+        }
+        ObjectAction::Reorder { index, .. } => {
+            let old = position(page)?;
+            let nodes = layer_nodes_mut(page, &layer_id)?;
+            if *index >= nodes.len() {
+                bail!("object index out of range")
+            }
+            let node = nodes.remove(old);
+            nodes.insert(*index, node);
+            json!({"operation":"reorder","id":id,"index":index})
+        }
+        ObjectAction::Remove { .. } => {
+            let index = position(page)?;
+            layer_nodes_mut(page, &layer_id)?.remove(index);
+            json!({"operation":"remove","id":id})
+        }
+    };
+    validate(raw)?;
+    Ok(result)
+}
+
+fn operation_affine(op: &crate::geometry::Operation) -> Result<Affine> {
+    use crate::geometry::Operation;
+    let about = |c: (f64, f64), m: Affine| {
+        Affine::translate((c.0, c.1)) * m * Affine::translate((-c.0, -c.1))
+    };
+    let affine = match *op {
+        Operation::Translate { dx, dy } => Affine::translate((dx, dy)),
+        Operation::Transform { a, b, c, d, e, f } => Affine::new([a, b, c, d, e, f]),
+        Operation::Rotate { degrees, cx, cy } => {
+            about((cx, cy), Affine::rotate(degrees.to_radians()))
+        }
+        Operation::Scale { sx, sy, cx, cy } => about((cx, cy), Affine::scale_non_uniform(sx, sy)),
+        _ => bail!("scene geometry supports bounds, translate, rotate, scale, and transform"),
+    };
+    if !affine.as_coeffs().iter().all(|v| v.is_finite()) {
+        bail!("coordinates must be finite")
+    }
+    Ok(affine)
+}
+
+/// `geometry` for scene documents: bounds query or a transform applied to the node.
+pub fn apply_geometry(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    layer_id: &str,
+    id: &str,
+    op: &crate::geometry::Operation,
+) -> Result<Value> {
+    if matches!(op, crate::geometry::Operation::Bounds) {
+        return node_bounds(raw, page_id, id);
+    }
+    let affine = operation_affine(op)?;
+    validate(raw)?;
+    let page = page_mut(raw, page_id)?;
+    ensure_layer_unlocked(page, layer_id)?;
+    let nodes = layer_nodes_mut(page, layer_id)?;
+    let node = find_node_in_mut(nodes, id)
+        .with_context(|| format!("object not found in layer {layer_id}: {id}"))?;
+    node["transform"] = json!((affine * matrix(node.get("transform"))?).as_coeffs());
+    validate(raw)?;
+    Ok(json!({"ok":true,"id":id}))
+}
+
+/// `layer-geometry` for scene documents: transforms every top-level node of a layer.
+pub fn apply_layer_geometry(
+    raw: &mut Value,
+    page_id: Option<&str>,
+    layer_id: &str,
+    op: &crate::geometry::Operation,
+) -> Result<Value> {
+    if !matches!(
+        op,
+        crate::geometry::Operation::Transform { .. }
+            | crate::geometry::Operation::Translate { .. }
+            | crate::geometry::Operation::Rotate { .. }
+            | crate::geometry::Operation::Scale { .. }
+    ) {
+        bail!("layer operations support translate, rotate, scale, and transform");
+    }
+    let affine = operation_affine(op)?;
+    validate(raw)?;
+    let page = page_mut(raw, page_id)?;
+    ensure_layer_unlocked(page, layer_id)?;
+    let nodes = layer_nodes_mut(page, layer_id)?;
+    for node in nodes.iter_mut() {
+        node["transform"] = json!((affine * matrix(node.get("transform"))?).as_coeffs());
+    }
+    let changed = nodes.len();
+    validate(raw)?;
+    Ok(json!({"ok":true,"nodes_changed":changed}))
 }
 
 pub fn validate(raw: &Value) -> Result<()> {
@@ -2265,7 +2921,12 @@ mod tests {
         assert_eq!(first["has_more"], true);
         assert_eq!(first["layers"][0]["objects"].as_array().unwrap().len(), 1);
         assert_eq!(first["layers"][0]["objects"][0]["id"], "card");
-        assert!(first["layers"][0]["objects"][0].get("children").is_none());
+        // Groups list direct child IDs only, never the child nodes themselves.
+        let children = first["layers"][0]["objects"][0]["children"]
+            .as_array()
+            .unwrap();
+        assert!(children.iter().all(Value::is_string));
+        assert!(children.contains(&json!("card-bg")));
 
         let second = inspect_paginated_v4(&raw, None, None, None, None, 1, 1).unwrap();
         assert_eq!(second["layers"][0]["objects"][0]["id"], "card-bg");
@@ -2505,6 +3166,15 @@ fn collect_v4_matches(
             });
             if let Some(parent) = parent {
                 object["parent"] = json!(parent);
+            }
+            if let Some(children) = node.get("children").and_then(Value::as_array) {
+                object["children"] = Value::Array(
+                    children
+                        .iter()
+                        .filter_map(|child| child.get("id").and_then(Value::as_str))
+                        .map(|id| json!(id))
+                        .collect(),
+                );
             }
             if let Some(content) = content {
                 object["content"] = json!(content);
