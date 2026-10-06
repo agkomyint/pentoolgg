@@ -3436,7 +3436,18 @@ async fn run() -> Result<()> {
                             .iter()
                             .map(|id| {
                                 let scene = image::to_svg(&raw, &input, Some(id))?;
-                                render::scene_to_png(&scene, scale)
+                                let factor = f64::from(scale);
+                                let texts = scene
+                                    .texts
+                                    .iter()
+                                    .map(|line| image::TextLine {
+                                        x: line.x * factor,
+                                        y: line.y * factor,
+                                        size: line.size * factor,
+                                        content: line.content.clone(),
+                                    })
+                                    .collect();
+                                Ok((render::scene_to_png(&scene, scale)?, texts))
                             })
                             .collect::<Result<Vec<_>>>()?;
                         pdf::write_png_pages(&pages, &output)?;

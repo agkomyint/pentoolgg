@@ -44,6 +44,39 @@ impl std::fmt::Display for RenderLimitError {
 }
 impl std::error::Error for RenderLimitError {}
 
+/// Symbol blocks that most text fonts lack (arrows, math, dingbats, emoji).
+fn is_symbol(c: char) -> bool {
+    matches!(c as u32, 0x2190..=0x2BFF | 0x1F000..=0x1FAFF)
+}
+
+/// Push escaped text for a start-aligned line, starting a new text chunk (a `y`-only
+/// `<tspan>`, which continues at the current x) at every boundary between symbols
+/// and other characters. The rasterizer substitutes a fallback font for a whole chunk
+/// when a glyph is missing, so this confines the substitution to the symbols.
+pub fn push_text_runs(output: &mut String, value: &str, y: f64) {
+    let mut start = 0;
+    let mut in_symbols = false;
+    let mut first = true;
+    for (index, c) in value.char_indices().chain([(value.len(), ' ')]) {
+        let at_end = index == value.len();
+        if at_end || is_symbol(c) != in_symbols {
+            let part = &value[start..index];
+            if !part.is_empty() {
+                if first {
+                    push_escaped(output, part);
+                } else {
+                    output.push_str(&format!(r#"<tspan y="{y}">"#));
+                    push_escaped(output, part);
+                    output.push_str("</tspan>");
+                }
+                first = false;
+            }
+            start = index;
+            in_symbols = !in_symbols;
+        }
+    }
+}
+
 fn push_escaped(output: &mut String, value: &str) {
     for part in value.split_inclusive(['&', '<', '>', '"']) {
         let (body, escaped) = match part.as_bytes().last() {
@@ -176,13 +209,13 @@ fn write_text_svg(svg: &mut String, text: &Text) -> Result<()> {
     loop {
         let end = rest.find(['\n', '\r']).unwrap_or(rest.len());
         let line = &rest[..end];
-        write!(
-            svg,
-            r#"<tspan x="{}" y="{}">"#,
-            text.x,
-            text.y + index as f64 * text.font_size * text.line_height
-        )?;
-        push_escaped(svg, line);
+        let line_y = text.y + index as f64 * text.font_size * text.line_height;
+        write!(svg, r#"<tspan x="{}" y="{line_y}">"#, text.x)?;
+        if text.align.anchor() == "start" {
+            push_text_runs(svg, line, line_y);
+        } else {
+            push_escaped(svg, line);
+        }
         svg.push_str("</tspan>");
         if end == rest.len() {
             break;
@@ -210,6 +243,7 @@ pub fn options(doc: &Document) -> Result<resvg::usvg::Options<'static>> {
     Ok(resvg::usvg::Options {
         font_family: fonts::DEFAULT_FAMILY.into(),
         fontdb: std::sync::Arc::new(db),
+        font_resolver: fonts::resolver(),
         ..Default::default()
     })
 }
@@ -281,6 +315,7 @@ fn svg_to_png_with_fonts(
     let options = resvg::usvg::Options {
         font_family: fonts::DEFAULT_FAMILY.into(),
         fontdb: std::sync::Arc::new(fonts::database(&doc, true)?),
+        font_resolver: fonts::resolver(),
         ..Default::default()
     };
     let tree =

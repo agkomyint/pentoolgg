@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 description = "A single-binary, agent-friendly vector pen tool"
 license = "MIT OR Apache-2.0"
@@ -14,6 +14,7 @@ anyhow = "1"
 axum = { version = "0.7", features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 resvg = "0.44"
+ttf-parser = "0.24"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny-skia = "0.11"

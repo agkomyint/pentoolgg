@@ -110,3 +110,8 @@ Other image errors carry codes (`[malformed-resource]`, `[invalid-operation]`, `
 ## Not bugs (my test mistakes, listed to save time)
 - `export` to `.jpg`/`.webp` is unsupported (PNG, SVG, PDF only; same on 0.6.24).
 - `--crop` takes four space-separated values, not a comma list.
+## v0.7.1 retest follow-up (fixed in 0.7.2)
+- Font weight, italic, alignment, letter spacing and line height collapsed to defaults once a document held an image: the image scene writer now emits the same typography attributes as the non-image renderer.
+- PDF export of image scenes dropped text: pages now carry an invisible text layer (render mode 3, Helvetica) so the text is selectable and searchable. Positions ignore group transforms, and characters outside Latin-1 become `?` in the extractable text.
+- A single missing glyph (for example `→`) switched the whole line to a bold serif fallback: start-aligned lines now isolate symbol runs into their own text chunk, and the fallback face is chosen to match the requested weight and style.
+- `batch --upsert` / `"mode":"replace"` and `--mask` (an `image set` flag, not `image add`) behave as documented since 0.7.1.

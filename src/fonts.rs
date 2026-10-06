@@ -195,3 +195,45 @@ pub fn requests(doc: &Document) -> BTreeSet<(String, u16, bool)> {
         .map(|text| (text.font_family.clone(), text.font_weight, text.italic))
         .collect()
 }
+
+/// Font resolver whose fallback choice honors the requested weight and style.
+///
+/// The rasterizer's default fallback takes the first installed face containing the
+/// glyph, which is often a bold serif. This prefers symbol-only faces (so only the
+/// missing glyph is replaced) and then the face closest to the base weight and style.
+pub fn resolver() -> resvg::usvg::FontResolver<'static> {
+    let select_fallback: resvg::usvg::FallbackSelectionFn<'static> = Box::new(|c, exclude, db| {
+        let base = db.face(*exclude.first()?)?;
+        let mut best: Option<(u8, u8, u16, u8, resvg::usvg::fontdb::ID)> = None;
+        for face in db.faces() {
+            if exclude.contains(&face.id) || !has_glyph(db, face.id, c) {
+                continue;
+            }
+            let key = (
+                u8::from(has_glyph(db, face.id, 'a')),
+                u8::from(face.style != base.style),
+                face.weight.0.abs_diff(base.weight.0),
+                u8::from(face.stretch != base.stretch),
+                face.id,
+            );
+            if best.is_none_or(|b| (key.0, key.1, key.2, key.3) < (b.0, b.1, b.2, b.3)) {
+                best = Some(key);
+            }
+        }
+        best.map(|b| b.4)
+    });
+    resvg::usvg::FontResolver {
+        select_font: resvg::usvg::FontResolver::default_font_selector(),
+        select_fallback,
+    }
+}
+
+fn has_glyph(db: &Database, id: resvg::usvg::fontdb::ID, c: char) -> bool {
+    db.with_face_data(id, |data, index| {
+        ttf_parser::Face::parse(data, index)
+            .ok()
+            .and_then(|face| face.glyph_index(c))
+            .is_some()
+    })
+    .unwrap_or(false)
+}

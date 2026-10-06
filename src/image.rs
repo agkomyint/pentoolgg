@@ -377,6 +377,17 @@ pub struct SceneSvg {
     pub height: u32,
     /// Fonts embedded in the document; rasterizers need them to draw text.
     pub fonts: Vec<crate::document::FontAsset>,
+    /// Text lines in canvas coordinates, used for the PDF text layer.
+    pub texts: Vec<TextLine>,
+}
+
+/// One line of text with its baseline origin and font size.
+#[derive(Debug, Clone)]
+pub struct TextLine {
+    pub x: f64,
+    pub y: f64,
+    pub size: f64,
+    pub content: String,
 }
 
 pub fn to_svg(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<SceneSvg> {
@@ -449,6 +460,7 @@ fn build_svg(
         root: crate::resource::document_root(document),
         link_dir,
         proxy_edge,
+        texts: std::cell::RefCell::new(Vec::new()),
     };
     let mut clip_index = 0usize;
     for layer in page["layers"]
@@ -488,6 +500,7 @@ fn build_svg(
         width,
         height,
         fonts,
+        texts: root.texts.take(),
     })
 }
 
@@ -495,6 +508,7 @@ struct SvgContext<'a> {
     root: &'a Path,
     link_dir: Option<&'a Path>,
     proxy_edge: Option<u32>,
+    texts: std::cell::RefCell<Vec<TextLine>>,
 }
 
 fn write_node(
@@ -615,24 +629,7 @@ fn write_node(
             escape(style_string(object, "stroke", "none")),
             style_number(object, "stroke_width", 0.0)
         )?,
-        "text" => write!(
-            svg,
-            r#"<text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}">{}</text>"#,
-            finite(object, "x")?,
-            finite(object, "y")?,
-            escape(
-                object
-                    .get("font_family")
-                    .and_then(Value::as_str)
-                    .unwrap_or("sans-serif")
-            ),
-            object
-                .get("font_size")
-                .and_then(Value::as_f64)
-                .unwrap_or(16.0),
-            escape(style_string(object, "fill", "#111827")),
-            escape(string(object, "content")?)
-        )?,
+        "text" => write_text(svg, object, root)?,
         "image" => write_image(svg, object, raw, root, clip_index)?,
         kind => bail!("[unsupported-capability] cannot render node kind {kind}"),
     }
@@ -792,6 +789,67 @@ fn write_image(
         r#"<defs><clipPath id="image-clip-{clip}"><rect x="{x}" y="{y}" width="{frame_w}" height="{frame_h}"/></clipPath></defs><image x="{image_x}" y="{image_y}" width="{image_w}" height="{image_h}" opacity="{}" clip-path="url(#image-clip-{clip})" preserveAspectRatio="none" {href}/>"#,
         finite(node, "opacity")?,
     )?;
+    Ok(())
+}
+
+/// Emit a text node with the same typography attributes as the non-image renderer.
+fn write_text(svg: &mut String, object: &Map<String, Value>, root: &SvgContext) -> Result<()> {
+    let x = finite(object, "x")?;
+    let y = finite(object, "y")?;
+    let size = object
+        .get("font_size")
+        .and_then(Value::as_f64)
+        .unwrap_or(16.0);
+    let weight = object
+        .get("font_weight")
+        .and_then(Value::as_u64)
+        .unwrap_or(400);
+    let italic = object
+        .get("italic")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let anchor = match object.get("align").and_then(Value::as_str) {
+        Some("center") => "middle",
+        Some("right") => "end",
+        _ => "start",
+    };
+    let spacing = object
+        .get("letter_spacing")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let line_height = object
+        .get("line_height")
+        .and_then(Value::as_f64)
+        .unwrap_or(1.2);
+    write!(
+        svg,
+        r#"<text xml:space="preserve" font-family="{}" font-size="{size}" font-weight="{weight}" font-style="{}" text-anchor="{anchor}" letter-spacing="{spacing}" fill="{}">"#,
+        escape(
+            object
+                .get("font_family")
+                .and_then(Value::as_str)
+                .unwrap_or("sans-serif")
+        ),
+        if italic { "italic" } else { "normal" },
+        escape(style_string(object, "fill", "#111827"))
+    )?;
+    for (index, line) in string(object, "content")?.lines().enumerate() {
+        let line_y = y + index as f64 * size * line_height;
+        root.texts.borrow_mut().push(TextLine {
+            x,
+            y: line_y,
+            size,
+            content: line.to_string(),
+        });
+        write!(svg, r#"<tspan x="{x}" y="{line_y}">"#)?;
+        if anchor == "start" {
+            crate::render::push_text_runs(svg, line, line_y);
+        } else {
+            svg.push_str(&escape(line));
+        }
+        svg.push_str("</tspan>");
+    }
+    svg.push_str("</text>");
     Ok(())
 }
 
