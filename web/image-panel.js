@@ -3,36 +3,112 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const KINDS = ['crop', 'resize', 'rotate', 'brightness-contrast', 'levels', 'curves', 'hue-saturation', 'blur', 'sharpen', 'grayscale'];
-  const state = { doc: null, revision: null, images: [] };
+  const state = { doc: null, revision: null, images: [], shared: false };
   let comparing = false;
 
-  const collect = (nodes, out) => {
+  const collect = (nodes, out, page) => {
     for (const node of nodes || []) {
-      if (node.kind === 'image') out.push(node);
-      collect(node.children, out);
+      if (node.kind === 'image') out.push(page ? {...node, _page: page, _value: JSON.stringify([page,node.id])} : node);
+      collect(node.children, out, page);
     }
     return out;
   };
   const notify = (message) => { $('imageStatus').textContent = message; };
-  const current = () => state.images.find((n) => n.id === $('imageSelect').value);
+  const current = () => state.images.find((n) => n._value === $('imageSelect').value);
 
   async function load() {
     const response = await fetch('/api/document');
-    if (!response.ok) return notify('No shared document is open.');
+    if (!response.ok) return state.doc ? loadDocument({document:state.doc,revision:state.revision,shared:state.shared}) : notify('Start a document to add an image.');
     const data = await response.json();
+    loadDocument({...data,shared:true});
+  }
+  function loadDocument(data) {
     state.doc = data.document;
     state.revision = data.revision;
+    state.shared = data.shared;
+    $('imageBake').disabled = !state.shared;
+    $('imageBake').title = state.shared ? 'Bake through document history' : 'Save .pen and serve that file before baking';
     state.images = [];
-    if (state.doc.version !== 5) return notify('Open a v5 document to edit images.');
-    for (const page of state.doc.pages) for (const layer of page.layers) collect(layer.nodes, state.images);
+    $('imageEditing').hidden = true;
+    loadImportTargets();
+    if (![5,6].includes(state.doc.version)) { $('imageSelect').replaceChildren(); return notify('Add an image above. Allow the v5 upgrade to enable raster images.'); }
+    for (const page of state.doc.pages) for (const layer of page.layers) collect(layer.nodes, state.images, page.id);
+    $('imageEditing').hidden = !state.images.length;
     const select = $('imageSelect');
     const previous = select.value;
-    select.replaceChildren(...state.images.map((n) => new Option(`${n.id} (${n.asset.slice(0, 15)}…)`, n.id)));
-    if (state.images.some((n) => n.id === previous)) select.value = previous;
-    notify(state.images.length ? `${state.images.length} image(s). Source pixels are never modified.` : 'This document has no images.');
+    select.replaceChildren(...state.images.map((n) => new Option(`${n._page} / ${n.id} (${n.asset.slice(0, 15)}…)`, n._value)));
+    if (state.images.some((n) => n._value === previous)) select.value = previous;
+    notify(state.images.length ? `${state.images.length} image(s). Source pixels are never modified.` : 'No images yet. Choose a file above and select Add image.');
     renderOps();
     syncFrame();
   }
+
+  function importPages() {
+    return state.doc?.pages || [{ id:'page-1', layers:state.doc?.layers || [] }];
+  }
+  function loadImportTargets() {
+    const pages = importPages();
+    const previous = $('imageAddPage').value;
+    $('imageAddPage').replaceChildren(...pages.map(p => new Option(p.name || p.id,p.id)));
+    if (pages.some(p => p.id === previous)) $('imageAddPage').value = previous;
+    loadImportLayers();
+    $('imageMigrationLabel').hidden = state.doc.version >= 5;
+    $('imageAddSubmit').disabled = false;
+    $('imageAddStatus').textContent = 'Choose a file to add an undoable image layer.';
+  }
+  function loadImportLayers() {
+    const previous = $('imageAddLayer').value;
+    const layers = importPages().find(p => p.id === $('imageAddPage').value)?.layers || [];
+    $('imageAddLayer').replaceChildren(...layers.map(layer => {
+      const option = new Option(`${layer.name || layer.id}${layer.locked ? ' (locked)' : ''}`,layer.id);
+      option.disabled = layer.locked === true;
+      return option;
+    }));
+    if (layers.some(l => l.id === previous && !l.locked)) $('imageAddLayer').value = previous;
+    else $('imageAddLayer').value = layers.find(l => !l.locked)?.id || '';
+  }
+  $('imageAddPage').onchange = loadImportLayers;
+  $('imageAddForm').onsubmit = async event => {
+    event.preventDefault();
+    const button = $('imageAddSubmit');
+    if (button.disabled) return;
+    const status = $('imageAddStatus');
+    const input = $('imageFile');
+    try {
+      if (!state.doc) throw new Error('Serve a .pen document first, then reload.');
+      const file = input.files[0];
+      if (!file) throw new Error('Choose a PNG, JPEG or WebP file.');
+      if (file.size > 32 * 1024 * 1024) throw new Error('Choose an image smaller than 32 MiB.');
+      if (state.doc.version < 5 && !$('imageAllowMigration').checked) throw new Error('Allow upgrading to v5 below, or migrate this document with the CLI first.');
+      button.disabled = true; button.textContent = 'Adding image…';
+      $('imageAddForm').setAttribute('aria-busy','true');
+      status.textContent = 'Validating and embedding the image locally…';
+      input.removeAttribute('aria-invalid');
+      const data = await new Promise((resolve,reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = () => reject(new Error('Could not read the file. Choose it again.'));
+        reader.readAsDataURL(file);
+      });
+      const id = $('imageAddId').value.trim();
+      const page = $('imageAddPage').value;
+      const response = await fetch('/api/image/add',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,page,layer:$('imageAddLayer').value,data,revision:state.revision || '',migrate:$('imageAllowMigration').checked,...(!state.shared ? {document:state.doc} : {})})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Import failed; reload the shared document and retry.');
+      if (result.local) document.dispatchEvent(new CustomEvent('pentool-local-document',{detail:{document:result.document,page}}));
+      else await load();
+      $('imageSelect').value = JSON.stringify([page,id]); renderOps(); syncFrame();
+      input.value = '';
+      status.textContent = `Added ${id}. Source pixels are unchanged. Undo restores the document.`;
+      if (!result.local) document.dispatchEvent(new Event('pentool-composite-changed'));
+    } catch (error) {
+      status.textContent = `${error.message} Nothing was changed.`;
+      input.setAttribute('aria-invalid','true');
+    } finally {
+      button.disabled = false; button.textContent = 'Add image';
+      $('imageAddForm').removeAttribute('aria-busy');
+    }
+  };
 
   function syncFrame() {
     const node = current();
@@ -88,11 +164,12 @@
     const response = await fetch('/api/scene', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ operations, revision: state.revision }),
+      body: JSON.stringify({ operations, page: current()?._page, revision: state.revision,...(!state.shared ? {document:state.doc} : {}) }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) return notify(result.error || 'The operation was rejected; nothing was changed.');
-    await load();
+    if (result.local) document.dispatchEvent(new CustomEvent('pentool-local-document',{detail:{document:result.document,page:current()?._page}}));
+    else {await load();document.dispatchEvent(new Event('pentool-composite-changed'));}
     document.getElementById('historyRefresh')?.click();
   }
 
@@ -103,12 +180,12 @@
     const doc = structuredClone(state.doc);
     if (stripped) {
       for (const page of doc.pages) for (const layer of page.layers) {
-        collect(layer.nodes, []).forEach(() => {});
+        if (page.id !== node._page) continue;
         const strip = (nodes) => { for (const n of nodes || []) { if (n.id === node.id) n.operations = []; strip(n.children); } };
         strip(layer.nodes);
       }
     }
-    const response = await fetch('/api/render/svg?max_edge=1024', {
+    const response = await fetch(`/api/render/svg?max_edge=1024&page=${encodeURIComponent(node._page)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(doc),
@@ -153,7 +230,7 @@
     const post = (extra) => fetch('/api/image/bake', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: node.id, revision: state.revision, ...extra }),
+      body: JSON.stringify({ id: node.id, page: node._page, revision: state.revision, ...extra }),
     });
     const plan = await post({ dry_run: true });
     const predicted = await plan.json().catch(() => ({}));
@@ -238,5 +315,6 @@
   new MutationObserver(() => { if (!overlayBusy && !$('canvas').querySelector('#imageHandles')) drawHandles(); })
     .observe($('canvas'), { childList: true });
 
-  load().catch(() => notify('Could not load the shared document.'));
+  document.addEventListener('pentool-document-changed',event => loadDocument(event.detail));
+  document.dispatchEvent(new Event('pentool-request-document'));
 })();

@@ -1,0 +1,36 @@
+{
+  "format": "pentool",
+  "version": 6,
+  "name": "Compositing engine 1 conformance",
+  "compositing": {"engine": 1, "color_space": "srgb8"},
+  "image_assets": {},
+  "styles": {},
+  "pages": [
+    {
+      "id": "composite", "name": "Clipping, shadow and grade",
+      "canvas": {"width": 8, "height": 8, "background": "none"},
+      "layers": [{"id": "content", "name": "Content", "visible": true, "locked": false, "nodes": [
+        {"kind": "fill", "id": "background", "x": 0, "y": 0, "width": 8, "height": 8, "fill": {"kind": "solid", "color": "#204060"}},
+        {"kind": "rect", "id": "base", "x": 0, "y": 0, "width": 2, "height": 2, "style": {"fill": {"fallback": "#ff8000"}}},
+        {"kind": "rect", "id": "texture", "x": 0, "y": 0, "width": 4, "height": 2, "opacity": 0.5, "blend_mode": "multiply", "clipping": {"base": "base"}, "style": {"fill": {"fallback": "#0000ff"}}},
+        {"kind": "group", "id": "card", "opacity": 0.5, "children": [
+          {"kind": "rect", "id": "card-content", "x": 2, "y": 2, "width": 2, "height": 2, "style": {"fill": {"fallback": "#ff0000"}}}
+        ], "effects": [{"id": "shadow", "kind": "drop-shadow", "enabled": true, "opacity": 0.5, "blend_mode": "normal", "params": {"x": 2, "y": 0, "blur": 0, "color": "#000000"}}]},
+        {"kind": "adjustment", "id": "global-grade", "adjustment": "invert", "params": {}, "scope": {"kind": "below"}, "enabled": true, "opacity": 0.25, "blend_mode": "normal"}
+      ]}]
+    },
+    {
+      "id": "transforms", "name": "Source-preserving inverse transforms",
+      "canvas": {"width": 8, "height": 8, "background": "none"},
+      "layers": [{"id": "content", "name": "Content", "nodes": [
+        {"kind": "fill", "id": "gradient", "x": 0, "y": 0, "width": 8, "height": 8,
+          "fill": {"kind": "linear", "space": "srgb", "x1": 0, "y1": 0, "x2": 8, "y2": 0, "stops": [{"position": 0, "color": "#000000"}, {"position": 1, "color": "#ffffff"}]},
+          "transforms": [
+            {"id": "scale-up", "kind": "scale", "enabled": true, "opacity": 1, "matrix": [2,0,0,0,2,0,0,0,1]},
+            {"id": "scale-down", "kind": "scale", "enabled": true, "opacity": 1, "matrix": [0.5,0,0,0,0.5,0,0,0,1]}
+          ]}
+      ]}]
+    }
+  ],
+  "x-conformance": {"engine": 1, "purpose": "Tiny analytic pixels; not a photographic demo"}
+}

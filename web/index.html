@@ -117,8 +117,22 @@
         <pre id="historyResult" class="import-result" hidden></pre>
       </section>
       <section class="agent-card" id="imagePanel">
-        <h2>Image operations</h2>
-        <p id="imageStatus">Open a shared v5 document with images to edit them non-destructively.</p>
+        <h2>Images</h2>
+        <form id="imageAddForm">
+          <fieldset><legend>Add image</legend>
+            <label for="imageFile">Image file (required)</label>
+            <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp" required aria-describedby="imageAddHint imageAddStatus">
+            <p id="imageAddHint">PNG, JPEG or WebP, up to 32 MiB. Embedded locally; original pixels stay unchanged.</p>
+            <label>Page <select id="imageAddPage" required></select></label>
+            <label>Layer <select id="imageAddLayer" required></select></label>
+            <label>Image ID (required) <input id="imageAddId" autocomplete="off" required value="image-1" spellcheck="false"></label>
+            <label id="imageMigrationLabel"><input id="imageAllowMigration" type="checkbox">Allow upgrading this document to v5 for images. Undo restores the previous format.</label>
+            <button id="imageAddSubmit" type="submit">Add image</button>
+            <p id="imageAddStatus" role="status" aria-live="polite">Open a shared document to add an image.</p>
+          </fieldset>
+        </form>
+        <p id="imageStatus" role="status" aria-live="polite">Add an image to start editing it non-destructively.</p>
+        <div id="imageEditing" hidden>
         <select id="imageSelect" aria-label="Image node"></select>
         <div id="imageFrame">
           <label>Fit <select id="imageFit"><option>fill</option><option>contain</option><option>cover</option><option>none</option><option>scale-down</option></select></label>
@@ -143,6 +157,69 @@
           <button id="imageBake">Bake…</button>
         </div>
         <p id="imagePreviewStatus">Preview: authoritative</p>
+        </div>
+      </section>
+      <section class="agent-card" id="compositePanel">
+        <h2>Compositing</h2>
+        <p id="compositeStatus" role="status" aria-live="polite">Open a shared v6 document. Migrate explicitly with the CLI.</p>
+        <button id="compositeRefresh">Refresh document</button>
+        <label>Page <select id="compositePage"></select></label>
+        <label>Node <select id="compositeNode"></select></label>
+        <form id="compositeAppearance">
+          <fieldset><legend>Appearance</legend>
+            <label>Blend mode <select id="compositeBlend"></select></label>
+            <label>Blend space <select id="compositeSpace"><option value="srgb">sRGB</option><option value="linear">Linear light</option></select></label>
+            <label>Total opacity <input id="compositeOpacity" type="range" min="0" max="1" step="0.01"></label>
+            <label>Content opacity <input id="compositeContent" type="range" min="0" max="1" step="0.01"></label>
+            <label>Group isolation <select id="compositeIsolation"><option>isolated</option><option>pass-through</option></select></label>
+            <button type="submit">Apply appearance</button>
+          </fieldset>
+        </form>
+        <details><summary>Adjustments, fills and stacks</summary>
+          <form id="compositeOperation">
+            <label>Operation <select id="compositeOperationKind"></select></label>
+            <label>Node / mask ID <input id="compositeId" autocomplete="off" required></label>
+            <label>Stack operation ID <input id="compositeOpId" autocomplete="off" value="operation-1"></label>
+            <label>Settings (JSON) <textarea id="compositeSettings" spellcheck="false" autocomplete="off">{}</textarea></label>
+            <p>Use settings for kind, parameters, scope, fill or layer. Existing stacks appear below.</p>
+            <button type="submit">Apply operation</button>
+          </form>
+          <pre id="compositeStacks" class="import-result"></pre>
+        </details>
+        <details><summary>Masks and clipping</summary>
+          <form id="compositeMaskForm">
+            <label>Mask <select id="compositeMask"></select></label>
+            <label>Density <input id="compositeDensity" type="range" min="0" max="1" step="0.01" value="1"></label>
+            <label>Feather <input id="compositeFeather" inputmode="decimal" autocomplete="off" value="0"></label>
+            <label><input id="compositeInvert" type="checkbox">Invert</label>
+            <label><input id="compositeLinked" type="checkbox" checked>Follow transforms</label>
+            <button type="submit">Attach mask</button>
+          </form>
+          <button id="compositeDetach">Detach mask</button>
+          <form id="compositeClipForm"><label>Base node ID <input id="compositeBase" autocomplete="off" required></label><button type="submit">Clip to base</button></form>
+          <button id="compositeUnclip">Remove clipping</button>
+        </details>
+        <details><summary>Selection and histogram</summary>
+          <form id="compositeAnalyzeForm">
+            <label>Scope <input id="compositeScope" autocomplete="off" value="page"></label>
+            <label>Selection query (optional JSON) <textarea id="compositeQuery" spellcheck="false" autocomplete="off"></textarea></label>
+            <button type="submit">Analyze before / after</button>
+          </form>
+          <svg id="compositeHistogram" viewBox="0 0 256 80" role="img" aria-label="Luminosity histogram"></svg>
+          <pre id="compositeAnalysis" class="import-result">Run analysis to inspect channels and clipping.</pre>
+        </details>
+        <details><summary>Linked assets</summary>
+          <button id="compositeDependencies">Check dependencies</button>
+          <form id="compositeLinkedForm">
+            <label>Asset digest <input id="compositeAssetDigest" autocomplete="off" required></label>
+            <label>Document-relative path <input id="compositeAssetPath" autocomplete="off"></label>
+            <label>Action <select id="compositeAssetAction"><option value="relink">Relink verified bytes</option><option value="embed">Embed source</option></select></label>
+            <button type="submit">Update linked source</button>
+          </form>
+          <pre id="compositeDependencyResult" class="import-result">Check linked files for missing or changed bytes.</pre>
+        </details>
+        <div class="section-head"><button id="compositeBefore">Before</button><button id="compositeAfter">After</button><button id="compositeCancel">Cancel preview</button></div>
+        <p>Previews are approximate, bounded proxies. Export uses the shared Rust renderer.</p>
       </section>
       <section class="agent-card">
         <h2>Agent API</h2>
@@ -155,5 +232,6 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/app.js"></script>
   <script src="/image-panel.js"></script>
+  <script src="/composite-panel.js"></script>
 </body>
 </html>

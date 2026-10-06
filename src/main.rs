@@ -1,7 +1,7 @@
 use pentool::{
-    agent, asset, benchmark, diff, document, editing, fonts, geometry, history, image, import,
-    instance, layout, library, package, page, pdf, render, replace, scene, server, style, text,
-    transaction,
+    agent, asset, benchmark, composite, diff, document, editing, fonts, geometry, history, image,
+    import, instance, layout, library, package, page, pdf, render, replace, scene, server, style,
+    text, transaction,
 };
 
 use anyhow::{Context, Result};
@@ -28,6 +28,224 @@ struct Cli {
     json: bool,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[derive(Args)]
+struct AdjustmentArgs {
+    /// add, set, enable, disable, remove, or list.
+    operation: String,
+    input: PathBuf,
+    id: Option<String>,
+    #[arg(long)]
+    kind: Option<String>,
+    /// JSON object with adjustment parameters; set replaces the parameter object.
+    #[arg(long)]
+    params: Option<String>,
+    /// below, group:ID, or ids:ID,ID (preceding siblings in the same stack).
+    #[arg(long)]
+    scope: Option<String>,
+    #[arg(long)]
+    layer: Option<String>,
+    #[arg(long)]
+    opacity: Option<f64>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct SelectionArgs {
+    /// query, save, or crop.
+    operation: String,
+    input: PathBuf,
+    #[arg(long)]
+    query: String,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct AnalyzeArgs {
+    input: PathBuf,
+    #[arg(long, default_value = "page")]
+    scope: String,
+    #[arg(long)]
+    query: Option<String>,
+    /// JSON array of pixel coordinates, e.g. [[10,20]].
+    #[arg(long, default_value = "[]")]
+    samples: String,
+    #[arg(long)]
+    compare: bool,
+    /// Explicitly create color tokens from the reported palette.
+    #[arg(long)]
+    palette_tokens: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct LinkedArgs {
+    /// report, locate, relink, embed, externalize, or collect.
+    operation: String,
+    input: PathBuf,
+    asset: Option<String>,
+    #[arg(long)]
+    path: Option<PathBuf>,
+    /// JSON array of document-relative candidate paths for locate.
+    #[arg(long)]
+    candidates: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct PresetArgs {
+    /// save, apply, copy, or paste. Copy/paste use named document appearance styles.
+    operation: String,
+    input: PathBuf,
+    id: String,
+    #[arg(long)]
+    file: Option<PathBuf>,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct MaskArgs {
+    /// create, attach, detach, delete, apply, or list.
+    operation: String,
+    input: PathBuf,
+    id: Option<String>,
+    /// Named mask or resource hash for attach.
+    mask: Option<String>,
+    /// vector:ID, node-alpha:ID, or asset:sha256:DIGEST.
+    #[arg(long)]
+    from: Option<String>,
+    #[arg(long)]
+    invert: bool,
+    #[arg(long, default_value_t = 1.0)]
+    density: f64,
+    #[arg(long, default_value_t = 0.0)]
+    feather: f64,
+    #[arg(long)]
+    unlinked: bool,
+    #[arg(long, num_args = 6, allow_hyphen_values = true)]
+    transform: Vec<f64>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct ClipArgs {
+    operation: String,
+    input: PathBuf,
+    id: String,
+    #[arg(long)]
+    base: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct TransformArgs {
+    operation: String,
+    input: PathBuf,
+    id: String,
+    kind: Option<String>,
+    #[arg(long, default_value = "transform-1")]
+    op_id: String,
+    #[arg(long)]
+    params: Option<String>,
+    #[arg(long, conflicts_with = "params")]
+    quad: Option<String>,
+    #[arg(long)]
+    mask: Option<String>,
+    #[arg(long, conflicts_with = "mask")]
+    no_mask: bool,
+    #[arg(long)]
+    opacity: Option<f64>,
+    #[arg(long)]
+    index: Option<usize>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct FillArgs {
+    operation: String,
+    input: PathBuf,
+    id: String,
+    #[arg(long)]
+    kind: Option<String>,
+    /// Hex color, RGBA JSON, or token reference JSON for solid fills.
+    #[arg(long)]
+    color: Option<String>,
+    /// Gradient/pattern settings as a JSON object.
+    #[arg(long)]
+    params: Option<String>,
+    #[arg(long)]
+    layer: Option<String>,
+    #[arg(long)]
+    x: Option<f64>,
+    #[arg(long)]
+    y: Option<f64>,
+    #[arg(long)]
+    width: Option<f64>,
+    #[arg(long)]
+    height: Option<f64>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Args)]
+struct EffectArgs {
+    operation: String,
+    input: PathBuf,
+    id: String,
+    effect_id: String,
+    #[arg(long)]
+    kind: Option<String>,
+    #[arg(long)]
+    params: Option<String>,
+    #[arg(long)]
+    x: Option<f64>,
+    #[arg(long)]
+    y: Option<f64>,
+    #[arg(long)]
+    blur: Option<f64>,
+    #[arg(long)]
+    color: Option<String>,
+    #[arg(long)]
+    opacity: Option<f64>,
+    #[arg(long)]
+    blend: Option<String>,
+    #[arg(long)]
+    index: Option<usize>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
 }
 
 #[derive(Args)]
@@ -128,6 +346,9 @@ struct DiffArgs {
     new: PathBuf,
     #[arg(long)]
     visual: bool,
+    /// Isolate the selected node's appearance in v6 visual artifacts.
+    #[arg(long, requires = "visual")]
+    node: Option<String>,
 }
 
 #[derive(Args)]
@@ -635,6 +856,15 @@ enum Command {
         /// Benchmark N placements of one reused PNG source (cold then warm runs).
         #[arg(long)]
         images: Option<usize>,
+        /// Benchmark compositing stacks, shared masks, clipping and blur.
+        #[arg(long, conflicts_with = "images")]
+        composite: bool,
+        #[arg(long, default_value_t = 16)]
+        clipped: usize,
+        #[arg(long, default_value_t = 8)]
+        stack_depth: usize,
+        #[arg(long, default_value_t = 32.0)]
+        blur_radius: f64,
         /// Square source size in pixels for --images.
         #[arg(long, default_value_t = 512)]
         source_size: u32,
@@ -794,7 +1024,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate between compatible v3, v4, and v5 document formats.
+    /// Explicitly migrate between compatible v3, v4, v5, and v6 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -853,6 +1083,26 @@ enum Command {
     /// Create, transform, duplicate, or ungroup semantic v4 groups.
     #[command(allow_negative_numbers = true)]
     Group(Box<GroupArgs>),
+    /// Edit non-destructive adjustment nodes in an explicitly migrated v6 document.
+    Adjustment(Box<AdjustmentArgs>),
+    /// Create and attach reusable masks; apply explicitly bakes a content node.
+    Mask(Box<MaskArgs>),
+    /// Attach or detach explicit consecutive clipping-stack membership.
+    Clip(Box<ClipArgs>),
+    /// Edit an immutable-source affine/projective transform stack.
+    Transform(Box<TransformArgs>),
+    /// Add or edit a solid, linear/radial/conic gradient, or pattern fill node.
+    Fill(Box<FillArgs>),
+    /// Edit an ordered shadow, glow, stroke, overlay, or blur effect stack.
+    Effect(Box<EffectArgs>),
+    /// Query temporary selections or explicitly save/crop them.
+    Selection(Box<SelectionArgs>),
+    /// Inspect composite histograms, samples, palettes, and before/after pixels.
+    Analyze(Box<AnalyzeArgs>),
+    /// Maintain verified linked sources and collect portable projects offline.
+    Linked(Box<LinkedArgs>),
+    /// Save data-only appearance presets or copy/paste named appearances.
+    Preset(Box<PresetArgs>),
     /// List, create, edit, and rebind named document design tokens.
     Style(Box<StyleArgs>),
     /// Replace fills or strokes within an explicit scene scope.
@@ -2370,11 +2620,26 @@ async fn run() -> Result<()> {
             scale,
             paths_only,
             images,
+            composite: composite_benchmark,
+            clipped,
+            stack_depth,
+            blur_radius,
             source_size,
             operations,
             json: _,
         } => {
-            let value = if let Some(images) = images {
+            let value = if composite_benchmark {
+                if scale != 1.0 || warmups != 1 {
+                    anyhow::bail!("composite benchmark uses scale 1 and one cold run; omit --scale and --warmups")
+                }
+                benchmark::run_composite(benchmark::CompositeBenchmark {
+                    clipped,
+                    depth: stack_depth,
+                    source_size,
+                    blur: blur_radius,
+                    repetitions,
+                })?
+            } else if let Some(images) = images {
                 benchmark::run_image(benchmark::ImageBenchmark {
                     images,
                     source_size,
@@ -2394,6 +2659,23 @@ async fn run() -> Result<()> {
             } else {
                 benchmark::run(layers, objects, png, max_ms)?
             };
+            if composite_benchmark {
+                if let Some(max_ms) = max_ms {
+                    let worst = value["runs"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|run| run["total_us"].as_u64())
+                        .max()
+                        .unwrap_or(0);
+                    if worst as f64 / 1000.0 > max_ms as f64 {
+                        anyhow::bail!(
+                            "composite benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
+                            worst as f64 / 1000.0
+                        )
+                    }
+                }
+            }
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
         }
@@ -2524,7 +2806,7 @@ async fn run() -> Result<()> {
                         }
                     }
                 }
-                scene::apply_batch(&mut raw, selected_page, &actions)?
+                scene::apply_batch_at(&mut raw, selected_page, &actions, &input)?
             } else {
                 let mut doc: Document = serde_json::from_value(raw.clone())?;
                 select_page(&mut doc, selected_page)?;
@@ -2894,8 +3176,8 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
         } => {
-            if !matches!(target, 3..=5) {
-                anyhow::bail!("migration target must be 3, 4, or 5")
+            if !matches!(target, 3..=6) {
+                anyhow::bail!("migration target must be 3, 4, 5, or 6")
             }
             let before =
                 fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
@@ -2903,6 +3185,7 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
+                6 => composite::migrate(raw)?,
                 5 => scene::migrate_to_v5(raw)?,
                 4 => scene::migrate_to_v4(raw)?,
                 3 => scene::flatten_to_v3(&raw)?,
@@ -3013,6 +3296,720 @@ async fn run() -> Result<()> {
             let change = transaction::commit_value(
                 &args.input,
                 "shape-edit",
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Preset(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let result = match args.operation.as_str() {
+                "save" | "copy" => {
+                    let preset =
+                        pentool::preset::capture(&raw, &args.input, selected_page, &args.id)?;
+                    if args.operation == "save" {
+                        if args.name.is_some() || args.if_revision.is_some() {
+                            anyhow::bail!("preset save does not mutate the document")
+                        }
+                        let file = args
+                            .file
+                            .as_deref()
+                            .context("preset save requires --file")?;
+                        if file.exists() {
+                            anyhow::bail!("preset output already exists")
+                        }
+                        if !args.dry_run {
+                            pentool::editing::atomic_write(
+                                file,
+                                &serde_json::to_vec_pretty(&preset)?,
+                            )?;
+                        }
+                        serde_json::json!({"file":file,"dry_run":args.dry_run})
+                    } else {
+                        if args.file.is_some() {
+                            anyhow::bail!("preset copy uses --name, not --file")
+                        }
+                        let name = args
+                            .name
+                            .as_deref()
+                            .context("preset copy requires --name")?;
+                        if name.is_empty() || raw["styles"].get(name).is_some() {
+                            anyhow::bail!("appearance style name must be new and nonempty")
+                        }
+                        if raw.get("styles").is_none() {
+                            raw["styles"] = serde_json::json!({});
+                        }
+                        raw["styles"][name] =
+                            serde_json::json!({"type":"appearance","value":preset});
+                        let change = transaction::commit_value(
+                            &args.input,
+                            "appearance-copy",
+                            args.dry_run,
+                            args.if_revision.as_deref(),
+                            &raw,
+                        )?;
+                        serde_json::json!({"style":name,"change":change})
+                    }
+                }
+                "apply" | "paste" => {
+                    let preset = if args.operation == "apply" {
+                        if args.name.is_some() {
+                            anyhow::bail!("preset apply uses --file, not --name")
+                        }
+                        let file = args
+                            .file
+                            .as_deref()
+                            .context("preset apply requires --file")?;
+                        if fs::metadata(file)?.len() > pentool::resource::MAX_RESOURCE_BYTES as u64
+                        {
+                            anyhow::bail!("preset exceeds 512 MiB")
+                        }
+                        serde_json::from_slice(&fs::read(file)?)?
+                    } else {
+                        if args.file.is_some() {
+                            anyhow::bail!("preset paste uses --name, not --file")
+                        }
+                        let name = args
+                            .name
+                            .as_deref()
+                            .context("preset paste requires --name")?;
+                        let token = raw["styles"]
+                            .get(name)
+                            .context("appearance style missing")?;
+                        if token["type"] != "appearance" {
+                            anyhow::bail!("style is not an appearance")
+                        }
+                        token["value"].clone()
+                    };
+                    let result =
+                        pentool::preset::apply(&mut raw, selected_page, &args.id, &preset)?;
+                    let change = transaction::commit_value(
+                        &args.input,
+                        "appearance-paste",
+                        args.dry_run,
+                        args.if_revision.as_deref(),
+                        &raw,
+                    )?;
+                    serde_json::json!({"result":result,"change":change})
+                }
+                _ => anyhow::bail!("preset operation must be save, apply, copy, or paste"),
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Linked(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let result = match args.operation.as_str() {
+                "report" => {
+                    if args.asset.is_some()
+                        || args.path.is_some()
+                        || args.candidates.is_some()
+                        || args.dry_run
+                        || args.if_revision.is_some()
+                    {
+                        anyhow::bail!("linked report is read-only and accepts no mutation settings")
+                    }
+                    pentool::linked::report(&raw, &args.input)?
+                }
+                "locate" => {
+                    if args.path.is_some() || args.dry_run || args.if_revision.is_some() {
+                        anyhow::bail!("linked locate is read-only")
+                    }
+                    let paths: Vec<String> = serde_json::from_str(
+                        args.candidates
+                            .as_deref()
+                            .context("locate requires --candidates JSON")?,
+                    )?;
+                    pentool::linked::locate(
+                        &raw,
+                        &args.input,
+                        args.asset
+                            .as_deref()
+                            .context("locate requires an asset digest")?,
+                        &paths,
+                    )?
+                }
+                "collect" => {
+                    if args.asset.is_some()
+                        || args.candidates.is_some()
+                        || args.if_revision.is_some()
+                    {
+                        anyhow::bail!("collect does not mutate the source document")
+                    }
+                    pentool::linked::collect(
+                        &raw,
+                        &args.input,
+                        args.path
+                            .as_deref()
+                            .context("collect requires --path output-directory")?,
+                        args.dry_run,
+                    )?
+                }
+                "embed" | "relink" | "externalize" => {
+                    if args.candidates.is_some()
+                        || (args.operation == "embed" && args.path.is_some())
+                    {
+                        anyhow::bail!("inapplicable linked asset flag")
+                    }
+                    // Check revision before publishing an external source file.
+                    transaction::commit_value(
+                        &args.input,
+                        "linked-preflight",
+                        true,
+                        args.if_revision.as_deref(),
+                        &raw,
+                    )?;
+                    let resources = if args.operation == "externalize" {
+                        let id = args
+                            .asset
+                            .as_deref()
+                            .context("externalize requires an asset")?;
+                        raw["image_assets"].get(id).context("asset missing")?;
+                        vec![(
+                            args.path.clone().context("externalize requires --path")?,
+                            image::load_asset_bytes_for_document(&raw, &args.input, id)?,
+                        )]
+                    } else {
+                        Vec::new()
+                    };
+                    let result = pentool::linked::edit(
+                        &mut raw,
+                        &args.input,
+                        &args.operation,
+                        args.asset
+                            .as_deref()
+                            .context("linked edit requires an asset digest")?,
+                        args.path.as_deref(),
+                        true,
+                    )?;
+                    let change = transaction::commit_bundle(
+                        &args.input,
+                        &format!("linked-{}", args.operation),
+                        args.dry_run,
+                        args.if_revision.as_deref(),
+                        &raw,
+                        &resources,
+                    )?;
+                    serde_json::json!({"result":result,"change":change})
+                }
+                _ => anyhow::bail!("unknown linked operation"),
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Selection(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let query = serde_json::from_str(&args.query)?;
+            let result = match args.operation.as_str() {
+                "query" => {
+                    if args.name.is_some() || args.dry_run || args.if_revision.is_some() {
+                        anyhow::bail!(
+                            "selection query is read-only; mutation flags are not applicable"
+                        )
+                    }
+                    let pixels = composite::render(&raw, &args.input, selected_page, 1.0)?;
+                    let coverage = pentool::selection::coverage(
+                        &raw,
+                        &args.input,
+                        selected_page,
+                        &query,
+                        &pixels,
+                    )?;
+                    serde_json::json!({"bounds":pentool::selection::bounds(&coverage,pixels.width(),pixels.height()),"selected_pixels":coverage.iter().filter(|v| **v != 0).count()})
+                }
+                "save" => pentool::selection::save(
+                    &mut raw,
+                    &args.input,
+                    selected_page,
+                    args.name
+                        .as_deref()
+                        .context("selection save requires --name")?,
+                    &query,
+                )?,
+                "crop" => {
+                    if args.name.is_some() {
+                        anyhow::bail!("selection crop does not accept --name")
+                    }
+                    pentool::selection::crop(&mut raw, &args.input, selected_page, &query)?
+                }
+                _ => anyhow::bail!("selection operation must be query, save, or crop"),
+            };
+            let change = if args.operation == "query" {
+                None
+            } else {
+                Some(transaction::commit_value(
+                    &args.input,
+                    &format!("selection-{}", args.operation),
+                    args.dry_run,
+                    args.if_revision.as_deref(),
+                    &raw,
+                )?)
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"result":result,"change":change})
+                )?
+            );
+            Ok(())
+        }
+        Command::Analyze(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let query: Option<serde_json::Value> = args
+                .query
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?;
+            let samples: Vec<[u32; 2]> = serde_json::from_str(&args.samples)?;
+            let analysis = pentool::inspect::analyze(
+                &raw,
+                &args.input,
+                selected_page,
+                &args.scope,
+                query.as_ref(),
+                &samples,
+            )?;
+            let comparison = if args.compare {
+                Some(pentool::inspect::compare(
+                    &raw,
+                    &args.input,
+                    selected_page,
+                    &args.scope,
+                    query.as_ref(),
+                )?)
+            } else {
+                None
+            };
+            let change = if let Some(prefix) = args.palette_tokens {
+                pentool::inspect::palette_tokens(&mut raw, &analysis, &prefix)?;
+                Some(transaction::commit_value(
+                    &args.input,
+                    "analysis-palette-tokens",
+                    args.dry_run,
+                    args.if_revision.as_deref(),
+                    &raw,
+                )?)
+            } else {
+                if args.dry_run || args.if_revision.is_some() {
+                    anyhow::bail!("analysis is read-only unless --palette-tokens is supplied")
+                }
+                None
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"analysis":analysis,"comparison":comparison,"change":change})
+                )?
+            );
+            Ok(())
+        }
+        Command::Effect(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let mut settings = serde_json::Map::new();
+            let params_supplied = args.params.is_some()
+                || args.x.is_some()
+                || args.y.is_some()
+                || args.blur.is_some()
+                || args.color.is_some();
+            if args.operation != "add"
+                && args.operation != "set"
+                && (params_supplied
+                    || args.kind.is_some()
+                    || args.opacity.is_some()
+                    || args.blend.is_some())
+            {
+                anyhow::bail!("effect settings apply only to add/set")
+            }
+            if args.operation != "add" && args.operation != "move" && args.index.is_some() {
+                anyhow::bail!("--index applies only to effect add/move")
+            }
+            if let Some(kind) = args.kind {
+                settings.insert("kind".into(), serde_json::json!(kind));
+            } else if args.operation == "add" {
+                settings.insert("kind".into(), serde_json::json!("drop-shadow"));
+            }
+            if params_supplied {
+                let mut params: serde_json::Value = args
+                    .params
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or(serde_json::json!({}));
+                if !params.is_object() {
+                    anyhow::bail!("--params must be an object")
+                }
+                for (key, v) in [("x", args.x), ("y", args.y), ("blur", args.blur)] {
+                    if let Some(v) = v {
+                        params[key] = serde_json::json!(v);
+                    }
+                }
+                if let Some(color) = args.color {
+                    params["color"] =
+                        serde_json::from_str(&color).unwrap_or(serde_json::json!(color));
+                }
+                settings.insert("params".into(), params);
+            }
+            if let Some(v) = args.opacity {
+                settings.insert("opacity".into(), serde_json::json!(v));
+            }
+            if let Some(v) = args.blend {
+                settings.insert("blend_mode".into(), serde_json::json!(v));
+            }
+            if let Some(v) = args.index {
+                settings.insert("index".into(), serde_json::json!(v));
+            }
+            if args.operation == "set" && settings.is_empty() {
+                anyhow::bail!("effect set requires a setting")
+            }
+            let result = pentool::effects::edit(
+                &mut raw,
+                selected_page,
+                &args.id,
+                &args.operation,
+                &args.effect_id,
+                &settings.into(),
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                &format!("effect-{}", args.operation),
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Fill(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let mut settings = serde_json::Map::new();
+            if args.operation != "add" && args.layer.is_some() {
+                anyhow::bail!("--layer applies only to fill add")
+            }
+            if let Some(layer) = args.layer {
+                settings.insert("layer".into(), serde_json::json!(layer));
+            }
+            for (key, value) in [
+                ("x", args.x),
+                ("y", args.y),
+                ("width", args.width),
+                ("height", args.height),
+            ] {
+                if let Some(value) = value {
+                    settings.insert(key.into(), serde_json::json!(value));
+                }
+            }
+            if args.kind.is_some() || args.params.is_some() || args.color.is_some() {
+                let mut fill: serde_json::Value = args
+                    .params
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or(serde_json::json!({}));
+                if !fill.is_object() {
+                    anyhow::bail!("--params must be an object")
+                }
+                if let Some(kind) = args.kind {
+                    fill["kind"] = serde_json::json!(kind);
+                }
+                if let Some(color) = args.color {
+                    fill["color"] =
+                        serde_json::from_str(&color).unwrap_or(serde_json::json!(color));
+                }
+                settings.insert("fill".into(), fill);
+            }
+            if settings.is_empty() {
+                anyhow::bail!("fill edit requires at least one setting")
+            }
+            let result = pentool::fill::edit(
+                &mut raw,
+                selected_page,
+                &args.operation,
+                &args.id,
+                &settings.into(),
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                &format!("fill-{}", args.operation),
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Transform(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            if args.operation != "add"
+                && args.operation != "set"
+                && (args.kind.is_some()
+                    || args.params.is_some()
+                    || args.quad.is_some()
+                    || args.mask.is_some()
+                    || args.opacity.is_some()
+                    || args.no_mask)
+            {
+                anyhow::bail!("transform settings apply only to add/set")
+            }
+            if args.operation != "add" && args.operation != "move" && args.index.is_some() {
+                anyhow::bail!("--index applies only to transform add/move")
+            }
+            let geometry_supplied =
+                args.quad.is_some() || args.params.is_some() || args.kind.is_some();
+            if args.operation == "set"
+                && !geometry_supplied
+                && args.mask.is_none()
+                && args.opacity.is_none()
+                && !args.no_mask
+            {
+                anyhow::bail!("transform set requires geometry, opacity, or a mask setting")
+            }
+            if args.operation == "add" && args.no_mask {
+                anyhow::bail!("--no-mask applies only to existing transforms")
+            }
+            let params = if let Some(quad) = args.quad {
+                serde_json::json!({"quad":serde_json::from_str::<serde_json::Value>(&quad)?})
+            } else {
+                args.params
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or(serde_json::json!({}))
+            };
+            let mut result = if args.operation == "set" && !geometry_supplied {
+                serde_json::json!({"node":args.id,"transform":args.op_id})
+            } else {
+                pentool::transform::edit(
+                    &mut raw,
+                    selected_page,
+                    &args.id,
+                    &args.operation,
+                    &args.op_id,
+                    args.kind.as_deref(),
+                    &params,
+                    args.index,
+                )?
+            };
+            let mut metadata = serde_json::Map::new();
+            if let Some(name) = args.mask {
+                metadata.insert("mask".into(), serde_json::json!(name));
+            }
+            if args.no_mask {
+                metadata.insert("mask".into(), serde_json::Value::Null);
+            }
+            if let Some(opacity) = args.opacity {
+                metadata.insert("opacity".into(), serde_json::json!(opacity));
+            }
+            if !metadata.is_empty() {
+                result = pentool::transform::metadata(
+                    &mut raw,
+                    selected_page,
+                    &args.id,
+                    &args.op_id,
+                    &metadata.into(),
+                )?;
+            }
+            let change = transaction::commit_value(
+                &args.input,
+                &format!("transform-{}", args.operation),
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Clip(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            if args.operation != "add" && args.base.is_some() {
+                anyhow::bail!("--base applies only to clip add")
+            }
+            let result = composite::clip_edit(
+                &mut raw,
+                selected_page,
+                &args.operation,
+                &args.id,
+                args.base.as_deref(),
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                &format!("clip-{}", args.operation),
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Mask(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            transaction::validate_value(&raw)?;
+            if !composite::is_document(&raw) {
+                anyhow::bail!("mask commands require `migrate --target 6`")
+            }
+            if args.operation == "list" {
+                if args.id.is_some()
+                    || args.mask.is_some()
+                    || args.from.is_some()
+                    || args.dry_run
+                    || args.if_revision.is_some()
+                {
+                    anyhow::bail!("mask list accepts only the document")
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"masks":raw.get("masks").cloned().unwrap_or(serde_json::json!({}))})
+                    )?
+                );
+                return Ok(());
+            }
+            let id = args
+                .id
+                .as_deref()
+                .context("mask name or node ID is required")?;
+            if args.operation != "create" && args.from.is_some() {
+                anyhow::bail!("--from applies only to mask create")
+            }
+            if args.operation != "attach"
+                && (args.mask.is_some()
+                    || args.invert
+                    || args.density != 1.0
+                    || args.feather != 0.0
+                    || args.unlinked
+                    || !args.transform.is_empty())
+            {
+                anyhow::bail!("mask attachment settings apply only to mask attach")
+            }
+            let settings = serde_json::json!({"invert":args.invert,"density":args.density,"feather":args.feather,"linked":!args.unlinked,
+                "transform":if args.transform.is_empty() {vec![1.0,0.0,0.0,1.0,0.0,0.0]} else {args.transform}});
+            let result = match args.operation.as_str() {
+                "create" => pentool::mask::create(
+                    &mut raw,
+                    &args.input,
+                    selected_page,
+                    id,
+                    args.from
+                        .as_deref()
+                        .context("mask create requires --from")?,
+                )?,
+                "attach" => pentool::mask::attach(
+                    &mut raw,
+                    selected_page,
+                    id,
+                    args.mask
+                        .as_deref()
+                        .context("mask attach requires a mask name")?,
+                    &settings,
+                )?,
+                "detach" => pentool::mask::detach(&mut raw, selected_page, id)?,
+                "delete" => pentool::mask::delete(&mut raw, id)?,
+                "apply" => pentool::mask::apply(&mut raw, &args.input, selected_page, id)?,
+                other => anyhow::bail!("unknown mask operation {other}"),
+            };
+            let change = transaction::commit_value(
+                &args.input,
+                &format!("mask-{}", args.operation),
+                args.dry_run,
+                args.if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":result})
+                )?
+            );
+            Ok(())
+        }
+        Command::Adjustment(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            if args.operation == "list" {
+                if args.id.is_some()
+                    || args.kind.is_some()
+                    || args.params.is_some()
+                    || args.scope.is_some()
+                    || args.layer.is_some()
+                    || args.opacity.is_some()
+                    || args.dry_run
+                    || args.if_revision.is_some()
+                {
+                    anyhow::bail!("adjustment list accepts only the document and page selection")
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&composite::list(&raw, selected_page)?)?
+                );
+                return Ok(());
+            }
+            let id = args
+                .id
+                .as_deref()
+                .context("adjustment node ID is required")?;
+            let mut settings = serde_json::Map::new();
+            if let Some(kind) = args.kind {
+                settings.insert("adjustment".into(), serde_json::json!(kind));
+            }
+            if let Some(params) = args.params {
+                settings.insert(
+                    "params".into(),
+                    serde_json::from_str(&params).context("--params must be valid JSON")?,
+                );
+            }
+            if let Some(scope) = args.scope {
+                settings.insert("scope".into(), composite::parse_scope(&scope)?);
+            }
+            if let Some(layer) = args.layer {
+                settings.insert("layer".into(), serde_json::json!(layer));
+            }
+            if let Some(opacity) = args.opacity {
+                settings.insert("opacity".into(), serde_json::json!(opacity));
+            }
+            if args.operation != "add" && settings.contains_key("layer") {
+                anyhow::bail!("--layer applies only to adjustment add")
+            }
+            if args.operation != "add" && args.operation != "set" && !settings.is_empty() {
+                anyhow::bail!("settings apply only to adjustment add/set")
+            }
+            if args.operation == "set" && settings.is_empty() {
+                anyhow::bail!("adjustment set requires at least one setting")
+            }
+            let result = composite::edit(
+                &mut raw,
+                selected_page,
+                &args.operation,
+                id,
+                &settings.into(),
+            )?;
+            let change = transaction::commit_value(
+                &args.input,
+                &format!("adjustment-{}", args.operation),
                 args.dry_run,
                 args.if_revision.as_deref(),
                 &raw,
@@ -3265,18 +4262,32 @@ async fn run() -> Result<()> {
                 let directory = args.new.parent().unwrap_or_else(|| Path::new("."));
                 let old_png = directory.join(format!("{base}.diff-before.png"));
                 let new_png = directory.join(format!("{base}.diff-after.png"));
-                render::write_export_options(
-                    &read_render_document(&args.old, selected_page)?,
-                    &old_png,
-                    1.0,
-                    false,
-                )?;
-                render::write_export_options(
-                    &read_render_document(&args.new, selected_page)?,
-                    &new_png,
-                    1.0,
-                    false,
-                )?;
+                let raster = |raw: &serde_json::Value, path: &PathBuf| -> Result<Vec<u8>> {
+                    if composite::is_document(raw) {
+                        if let Some(id) = args.node.as_deref() {
+                            let pixels = composite::node_pixels(raw, path, selected_page, id, 1.0)?;
+                            let mut bytes = std::io::Cursor::new(Vec::new());
+                            ::image::DynamicImage::ImageRgba8(pixels)
+                                .write_to(&mut bytes, ::image::ImageFormat::Png)?;
+                            Ok(bytes.into_inner())
+                        } else {
+                            composite::png(raw, path, selected_page, 1.0)
+                        }
+                    } else {
+                        if args.node.is_some() {
+                            anyhow::bail!("--node visual isolation requires v6")
+                        }
+                        if raw["version"] == 5 {
+                            render::scene_to_png(&image::to_svg(raw, path, selected_page)?, 1.0)
+                        } else {
+                            render::to_png(&read_render_document(path, selected_page)?, 1.0)
+                        }
+                    }
+                };
+                let before_bytes = raster(&before, &args.old)?;
+                let after_bytes = raster(&after, &args.new)?;
+                editing::atomic_write(&old_png, &before_bytes)?;
+                editing::atomic_write(&new_png, &after_bytes)?;
                 artifacts.push(old_png);
                 artifacts.push(new_png);
             }
@@ -3395,6 +4406,9 @@ async fn run() -> Result<()> {
             format,
             link_images,
         } => {
+            if !scale.is_finite() || !(0.1..=8.0).contains(&scale) {
+                anyhow::bail!("export scale must be finite and between 0.1 and 8")
+            }
             if link_images
                 && (all_pages || output.extension().and_then(|e| e.to_str()) != Some("svg"))
             {
@@ -3419,12 +4433,13 @@ async fn run() -> Result<()> {
                             .collect()
                     })
                     .unwrap_or_else(|| vec!["page-1".into()]);
-                let has_images = raw.get("version").and_then(serde_json::Value::as_u64)
-                    == Some(image::VERSION)
-                    && raw
-                        .get("image_assets")
-                        .and_then(serde_json::Value::as_object)
-                        .is_some_and(|assets| !assets.is_empty());
+                let has_images = composite::is_document(&raw)
+                    || raw.get("version").and_then(serde_json::Value::as_u64)
+                        == Some(image::VERSION)
+                        && raw
+                            .get("image_assets")
+                            .and_then(serde_json::Value::as_object)
+                            .is_some_and(|assets| !assets.is_empty());
                 if wants_pdf {
                     if has_images {
                         if outline_text {
@@ -3435,6 +4450,12 @@ async fn run() -> Result<()> {
                         let pages = page_ids
                             .iter()
                             .map(|id| {
+                                if composite::is_document(&raw) {
+                                    return Ok((
+                                        composite::png(&raw, &input, Some(id), scale)?,
+                                        Vec::new(),
+                                    ));
+                                }
                                 let scene = image::to_svg(&raw, &input, Some(id))?;
                                 let factor = f64::from(scale);
                                 let texts = scene
@@ -3516,11 +4537,13 @@ async fn run() -> Result<()> {
                 }
             } else {
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
-                if raw.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION)
-                    && raw
-                        .get("image_assets")
-                        .and_then(serde_json::Value::as_object)
-                        .is_some_and(|assets| !assets.is_empty())
+                if composite::is_document(&raw)
+                    || raw.get("version").and_then(serde_json::Value::as_u64)
+                        == Some(image::VERSION)
+                        && raw
+                            .get("image_assets")
+                            .and_then(serde_json::Value::as_object)
+                            .is_some_and(|assets| !assets.is_empty())
                 {
                     write_image_export(
                         &input,
@@ -3551,6 +4574,22 @@ fn write_image_export(
     outline_text: bool,
     link_images: bool,
 ) -> Result<()> {
+    if composite::is_document(raw) {
+        if outline_text || link_images {
+            anyhow::bail!("[unsupported-capability] v6 composite exports require embedded pixels; omit --outline-text and --link-images")
+        }
+        let bytes = match output
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => composite::png(raw, input, page, scale)?,
+            Some("svg") => composite::svg(raw, input, page, scale)?.into_bytes(),
+            _ => anyhow::bail!("output must end in .png or .svg"),
+        };
+        return editing::atomic_write(output, &bytes);
+    }
     if outline_text {
         anyhow::bail!("[unsupported-capability] outlined text with image scenes is not implemented")
     }

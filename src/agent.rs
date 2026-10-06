@@ -63,6 +63,9 @@ pub enum ObjectKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Subcommand)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+// Keep the established public Set variant and its JSON/CLI representation intact.
+// Batch operation counts are bounded; boxing this variant would break Rust callers.
+#[allow(clippy::large_enum_variant)]
 pub enum ObjectAction {
     /// Change only supplied properties, preserving everything else.
     Set {
@@ -103,6 +106,16 @@ pub enum ObjectAction {
         letter_spacing: Option<f64>,
         #[arg(long)]
         line_height: Option<f64>,
+        #[arg(long)]
+        blend: Option<String>,
+        #[arg(long)]
+        blend_space: Option<String>,
+        #[arg(long)]
+        opacity: Option<f64>,
+        #[arg(long)]
+        content_opacity: Option<f64>,
+        #[arg(long)]
+        isolation: Option<String>,
     },
     Rename {
         id: String,
@@ -188,8 +201,21 @@ pub fn apply(doc: &mut Document, action: &ObjectAction) -> Result<Value> {
                 align,
                 letter_spacing,
                 line_height,
+                blend,
+                blend_space,
+                opacity,
+                content_opacity,
+                isolation,
                 ..
             } => {
+                if blend.is_some()
+                    || blend_space.is_some()
+                    || opacity.is_some()
+                    || content_opacity.is_some()
+                    || isolation.is_some()
+                {
+                    bail!("[unsupported-capability] compositing properties require document format version 6")
+                }
                 match kind {
                     ObjectKind::Path => {
                         if [

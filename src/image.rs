@@ -83,7 +83,12 @@ pub fn add(
     fit: Fit,
 ) -> Result<AddResult> {
     let source = decode_source(bytes)?;
-    let mut migrated = crate::scene::migrate_to_v5(raw.clone())?;
+    let mut migrated = if crate::composite::is_document(raw) {
+        crate::scene::validate(raw)?;
+        raw.clone()
+    } else {
+        crate::scene::migrate_to_v5(raw.clone())?
+    };
     let assets = migrated["image_assets"]
         .as_object_mut()
         .context("[malformed-resource] v5 image_assets must be an object")?;
@@ -120,6 +125,9 @@ pub fn add(
                 .find(|layer| layer.get("id").and_then(Value::as_str) == Some(layer_id))
         })
         .with_context(|| format!("layer not found: {layer_id}"))?;
+    if layer["locked"] == true {
+        bail!("[locked-node] image target layer {layer_id} is locked; unlock it first")
+    }
     layer
         .get_mut("nodes")
         .and_then(Value::as_array_mut)
@@ -392,6 +400,47 @@ pub struct TextLine {
 
 pub fn to_svg(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<SceneSvg> {
     to_svg_linked(raw, document, page_id, None)
+}
+
+/// A transparent scene fragment for the shared compositing renderer. Source tables
+/// are borrowed; referenced mask geometry is resolved against the original page.
+pub(crate) fn fragment_svg(
+    raw: &Value,
+    page: &Value,
+    document: &Path,
+    node: &Value,
+    parent: kurbo::Affine,
+) -> Result<SceneSvg> {
+    let width = page["canvas"]["width"]
+        .as_u64()
+        .context("canvas width missing")? as u32;
+    let height = page["canvas"]["height"]
+        .as_u64()
+        .context("canvas height missing")? as u32;
+    let context = SvgContext {
+        root: crate::resource::document_root(document),
+        link_dir: None,
+        proxy_edge: None,
+        texts: std::cell::RefCell::new(Vec::new()),
+    };
+    let [a, b, c, d, e, f] = parent.as_coeffs();
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><g transform="matrix({a} {b} {c} {d} {e} {f})">"#
+    );
+    write_node(&mut svg, node, raw, page, &context, &mut 0)?;
+    svg.push_str("</g></svg>");
+    Ok(SceneSvg {
+        svg,
+        width,
+        height,
+        fonts: raw
+            .get("fonts")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default(),
+        texts: context.texts.take(),
+    })
 }
 
 /// Portable SVG by default. With `link_dir` (the directory that will hold the
@@ -956,7 +1005,7 @@ pub fn decode_source(bytes: &[u8]) -> Result<SourceInfo> {
     decode_source_pixels(bytes).map(|(info, _)| info)
 }
 
-fn decode_source_pixels(bytes: &[u8]) -> Result<(SourceInfo, image::RgbaImage)> {
+pub(crate) fn decode_source_pixels(bytes: &[u8]) -> Result<(SourceInfo, image::RgbaImage)> {
     if bytes.is_empty() || bytes.len() as u64 > MAX_SOURCE_BYTES {
         bail!("[limit-exceeded] image source must contain 1 byte–128 MiB")
     }
@@ -1121,6 +1170,14 @@ pub fn validate_node(
     node: &Map<String, Value>,
     assets: &HashMap<String, (u64, u64)>,
 ) -> Result<()> {
+    validate_node_for_version(node, assets, false)
+}
+
+pub(crate) fn validate_node_for_version(
+    node: &Map<String, Value>,
+    assets: &HashMap<String, (u64, u64)>,
+    compositing: bool,
+) -> Result<()> {
     let id = string(node, "id")?;
     let asset = string(node, "asset")?;
     validate_digest(asset)?;
@@ -1148,7 +1205,7 @@ pub fn validate_node(
     if !(0.0..=1.0).contains(&opacity) {
         bail!("[malformed-resource] image node {id} opacity must be in 0–1")
     }
-    if string(node, "blend_mode")? != "normal" {
+    if !compositing && string(node, "blend_mode")? != "normal" {
         bail!("[unsupported-capability] image node {id} blend mode is unsupported")
     }
     let operations = node
@@ -1165,6 +1222,10 @@ pub fn validate_node(
 }
 
 pub fn validate_masks(page: &Value) -> Result<()> {
+    validate_masks_for_version(page, false)
+}
+
+pub(crate) fn validate_masks_for_version(page: &Value, compositing: bool) -> Result<()> {
     fn collect<'a>(node: &'a Value, nodes: &mut HashMap<&'a str, &'a Value>) {
         if let Some(id) = node.get("id").and_then(Value::as_str) {
             nodes.insert(id, node);
@@ -1175,9 +1236,12 @@ pub fn validate_masks(page: &Value) -> Result<()> {
             }
         }
     }
-    fn check(node: &Value, nodes: &HashMap<&str, &Value>) -> Result<()> {
+    fn check(node: &Value, nodes: &HashMap<&str, &Value>, compositing: bool) -> Result<()> {
         if node.get("kind").and_then(Value::as_str) == Some("image") {
             if let Some(mask) = node.get("mask") {
+                if compositing && mask.get("resource").is_some() {
+                    return Ok(());
+                }
                 let mask = mask
                     .as_object()
                     .context("[malformed-resource] image mask must be an object")?;
@@ -1205,7 +1269,7 @@ pub fn validate_masks(page: &Value) -> Result<()> {
         }
         if let Some(children) = node.get("children").and_then(Value::as_array) {
             for child in children {
-                check(child, nodes)?;
+                check(child, nodes, compositing)?;
             }
         }
         Ok(())
@@ -1223,7 +1287,7 @@ pub fn validate_masks(page: &Value) -> Result<()> {
         }
     }
     for node in nodes.values() {
-        check(node, &nodes)?;
+        check(node, &nodes, compositing)?;
     }
     Ok(())
 }
@@ -1294,7 +1358,16 @@ fn normalized_array(
 }
 
 /// Read an asset's exact source bytes offline and verify them against `digest`.
-fn load_asset_bytes(raw: &Value, document_dir: &Path, digest: &str) -> Result<Vec<u8>> {
+/// Verified source bytes, including offline immutable-cache fallback.
+pub fn load_asset_bytes_for_document(
+    raw: &Value,
+    document: &Path,
+    digest: &str,
+) -> Result<Vec<u8>> {
+    load_asset_bytes(raw, crate::resource::document_root(document), digest)
+}
+
+pub(crate) fn load_asset_bytes(raw: &Value, document_dir: &Path, digest: &str) -> Result<Vec<u8>> {
     let asset = raw["image_assets"]
         .get(digest)
         .and_then(Value::as_object)

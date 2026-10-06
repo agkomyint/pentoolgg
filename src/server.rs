@@ -19,12 +19,14 @@ struct Shared {
     file: Option<PathBuf>,
     project_root: PathBuf,
     gate: Arc<Mutex<()>>,
+    previews: Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
 }
 
 const INDEX: &str = include_str!("../web/index.html");
 const APP_JS: &str = include_str!("../web/app.js");
 const STYLE: &str = include_str!("../web/style.css");
 const IMAGE_PANEL_JS: &str = include_str!("../web/image-panel.js");
+const COMPOSITE_PANEL_JS: &str = include_str!("../web/composite-panel.js");
 
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
     if let Some(path) = &file {
@@ -45,6 +47,14 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
             get(|| async { asset(IMAGE_PANEL_JS, "text/javascript; charset=utf-8") }),
         )
         .route("/api/image/bake", post(image_bake))
+        .route("/api/image/add", post(image_add))
+        .route(
+            "/composite-panel.js",
+            get(|| async { asset(COMPOSITE_PANEL_JS, "text/javascript; charset=utf-8") }),
+        )
+        .route("/api/composite/analyze", post(composite_analyze))
+        .route("/api/composite/dependencies", get(composite_dependencies))
+        .route("/api/composite/cancel", post(composite_cancel))
         .route(
             "/style.css",
             get(|| async { asset(STYLE, "text/css; charset=utf-8") }),
@@ -79,6 +89,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
             file,
             project_root: std::env::current_dir()?,
             gate: Arc::new(Mutex::new(())),
+            previews: Arc::new(Mutex::new(std::collections::HashMap::new())),
         });
     println!("Pentool listening on http://{address}");
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -373,13 +384,93 @@ async fn get_document(State(state): State<Shared>) -> Response {
 
 #[derive(serde::Deserialize)]
 struct SceneRequest {
+    document: Option<serde_json::Value>,
     operations: Vec<serde_json::Value>,
     page: Option<String>,
     revision: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
+
+#[derive(serde::Deserialize)]
+struct AnalysisRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    #[serde(default = "analysis_scope")]
+    scope: String,
+    query: Option<serde_json::Value>,
+    #[serde(default)]
+    samples: Vec<[u32; 2]>,
+    #[serde(default)]
+    compare: bool,
+}
+fn analysis_scope() -> String {
+    "page".into()
+}
+async fn composite_analyze(
+    State(state): State<Shared>,
+    Json(body): Json<AnalysisRequest>,
+) -> Response {
+    let document = state
+        .file
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    // CPU-heavy analysis runs off the async request executor.
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let analysis = crate::inspect::analyze(
+            &body.document,
+            &document,
+            body.page.as_deref(),
+            &body.scope,
+            body.query.as_ref(),
+            &body.samples,
+        )?;
+        let comparison = if body.compare {
+            Some(crate::inspect::compare(
+                &body.document,
+                &document,
+                body.page.as_deref(),
+                &body.scope,
+                body.query.as_ref(),
+            )?)
+        } else {
+            None
+        };
+        Ok(serde_json::json!({"analysis":analysis,"comparison":comparison}))
+    })
+    .await;
+    match result {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(error)) => problem(error),
+        Err(error) => problem(error.into()),
+    }
+}
+async fn composite_dependencies(State(state): State<Shared>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let raw = serde_json::from_slice(&std::fs::read(&file)?)?;
+        crate::linked::report(&raw, &file)
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
 async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneRequest>) -> Response {
+    if let Some(mut raw) = body.document {
+        let result = crate::scene::apply_batch_at(
+            &mut raw,
+            body.page.as_deref(),
+            &body.operations,
+            &state.project_root.join("browser.pen"),
+        );
+        return match result {
+            Ok(changes) => Json(serde_json::json!({"document":raw,"changes":changes,"local":true}))
+                .into_response(),
+            Err(error) => problem(error),
+        };
+    }
     let Some(file) = state.file else {
         return (StatusCode::NOT_FOUND, "No shared document").into_response();
     };
@@ -397,9 +488,16 @@ async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneReques
         {
             anyhow::bail!("document revision changed")
         };
-        let changes = crate::scene::apply_batch(&mut raw, body.page.as_deref(), &body.operations)?;
-        let change =
-            crate::transaction::commit_value(&file, "browser-scene", body.dry_run, None, &raw)?;
+        let changes =
+            crate::scene::apply_batch_at(&mut raw, body.page.as_deref(), &body.operations, &file)?;
+        let expected = crate::transaction::revision(&bytes);
+        let change = crate::transaction::commit_value(
+            &file,
+            "browser-scene",
+            body.dry_run,
+            Some(&expected),
+            &raw,
+        )?;
         Ok(serde_json::json!({"change":change,"changes":changes}))
     })();
     match result {
@@ -407,6 +505,126 @@ async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneReques
         Err(error) => problem(error),
     }
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AddImageRequest {
+    document: Option<serde_json::Value>,
+    id: String,
+    page: Option<String>,
+    layer: String,
+    data: String,
+    #[serde(default)]
+    revision: String,
+    #[serde(default)]
+    migrate: bool,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+fn plan_image_add(
+    raw: &mut serde_json::Value,
+    body: &AddImageRequest,
+) -> Result<serde_json::Value> {
+    use base64::Engine;
+    crate::transaction::validate_value(raw)?;
+    if body.revision != revision(raw) {
+        anyhow::bail!("document revision changed; reload before adding the image")
+    }
+    if body.data.len() > 44 * 1024 * 1024 {
+        anyhow::bail!("[limit-exceeded] browser imports accept images up to 32 MiB")
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&body.data)
+        .context("image data must be base64")?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        anyhow::bail!("[limit-exceeded] browser imports accept images up to 32 MiB")
+    }
+    let mut candidate = raw.clone();
+    if !crate::composite::is_document(raw) && raw["version"] != 5 {
+        if !body.migrate {
+            anyhow::bail!("adding an image requires v5; explicitly allow format migration")
+        }
+        candidate = crate::scene::migrate_to_v5(candidate)?;
+    }
+    let page = crate::scene::page_mut(&mut candidate, body.page.as_deref())?;
+    let layer = page["layers"]
+        .as_array()
+        .context("page layers missing")?
+        .iter()
+        .find(|layer| layer["id"] == body.layer)
+        .context("image target layer not found")?;
+    if layer["locked"] == true {
+        anyhow::bail!("[locked-node] image target layer is locked; unlock it first")
+    }
+    let width = page["canvas"]["width"]
+        .as_f64()
+        .context("canvas width missing")?;
+    let height = page["canvas"]["height"]
+        .as_f64()
+        .context("canvas height missing")?;
+    let source = image::decode_source(&bytes)?;
+    let factor = (width * 0.8 / f64::from(source.pixel_width))
+        .min(height * 0.8 / f64::from(source.pixel_height))
+        .min(1.0);
+    let w = f64::from(source.pixel_width) * factor;
+    let h = f64::from(source.pixel_height) * factor;
+    let added = image::add(
+        &mut candidate,
+        body.page.as_deref(),
+        &body.layer,
+        &body.id,
+        &bytes,
+        image::embedded_storage(&bytes),
+        (width - w) / 2.0,
+        (height - h) / 2.0,
+        w,
+        h,
+        image::Fit::Contain,
+    )?;
+    *raw = candidate;
+    Ok(serde_json::to_value(added)?)
+}
+
+async fn image_add(State(state): State<Shared>, Json(mut body): Json<AddImageRequest>) -> Response {
+    if let Some(mut raw) = body.document.take() {
+        body.revision = revision(&raw);
+        return match plan_image_add(&mut raw, &body) {
+            Ok(result) => Json(serde_json::json!({"document":raw,"result":result,"local":true}))
+                .into_response(),
+            Err(error) => problem(error),
+        };
+    }
+    let Some(file) = state.file else {
+        return (
+            StatusCode::NOT_FOUND,
+            "No shared document; serve a .pen file first",
+        )
+            .into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let _guard = state
+            .gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        let bytes = std::fs::read(&file)?;
+        let mut raw = serde_json::from_slice(&bytes)?;
+        let result = plan_image_add(&mut raw, &body)?;
+        let expected = crate::transaction::revision(&bytes);
+        let change = crate::transaction::commit_value(
+            &file,
+            "browser-image-add",
+            body.dry_run,
+            Some(&expected),
+            &raw,
+        )?;
+        Ok(serde_json::json!({"change":change,"result":result}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct BakeRequest {
     id: String,
@@ -542,6 +760,131 @@ fn asset(body: &'static str, kind: &'static str) -> Response {
 struct PageQuery {
     page: Option<String>,
     max_edge: Option<u32>,
+    job: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CancelRequest {
+    job: String,
+}
+async fn composite_cancel(
+    State(state): State<Shared>,
+    Json(body): Json<CancelRequest>,
+) -> Response {
+    let jobs = state.previews.lock();
+    match jobs {
+        Ok(jobs) => {
+            let found = jobs.get(&body.job);
+            if let Some(flag) = found {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed)
+            }
+            Json(serde_json::json!({"cancelled":found.is_some()})).into_response()
+        }
+        Err(_) => problem(anyhow::anyhow!("preview registry lock failed")),
+    }
+}
+
+async fn composite_job(
+    state: &Shared,
+    value: serde_json::Value,
+    query: PageQuery,
+    svg: bool,
+) -> Result<Vec<u8>> {
+    let scale = composite_preview_scale(&value, query.page.as_deref(), query.max_edge)?;
+    use rand_core::RngCore;
+    let job = query
+        .job
+        .unwrap_or_else(|| format!("export-{:016x}", rand_core::OsRng.next_u64()));
+    if job.is_empty()
+        || job.len() > 128
+        || !job
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        anyhow::bail!("invalid preview job ID")
+    }
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let mut jobs = state
+            .previews
+            .lock()
+            .map_err(|_| anyhow::anyhow!("preview registry lock failed"))?;
+        if jobs.len() >= 4 || jobs.contains_key(&job) {
+            anyhow::bail!("[limit-exceeded] preview workers busy; cancel or retry")
+        }
+        jobs.insert(job.clone(), flag.clone());
+    }
+    struct JobGuard {
+        jobs: Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+        job: String,
+        flag: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl Drop for JobGuard {
+        fn drop(&mut self) {
+            self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut jobs) = self.jobs.lock() {
+                jobs.remove(&self.job);
+            }
+        }
+    }
+    let guard = JobGuard {
+        jobs: state.previews.clone(),
+        job,
+        flag: flag.clone(),
+    };
+    struct CancelOnDrop(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    let cancel_on_drop = CancelOnDrop(flag.clone());
+    let document = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    let result = tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        crate::composite::with_cancel(flag, || {
+            if svg {
+                Ok(
+                    crate::composite::svg(&value, &document, query.page.as_deref(), scale)?
+                        .into_bytes(),
+                )
+            } else {
+                crate::composite::png(&value, &document, query.page.as_deref(), scale)
+            }
+        })
+    })
+    .await
+    .context("preview worker failed")?;
+    drop(cancel_on_drop);
+    result
+}
+
+fn composite_preview_scale(
+    value: &serde_json::Value,
+    page: Option<&str>,
+    max_edge: Option<u32>,
+) -> Result<f32> {
+    let Some(edge) = max_edge else { return Ok(1.0) };
+    if !(1..=4096).contains(&edge) {
+        anyhow::bail!("preview max_edge must be in 1..=4096")
+    }
+    crate::scene::validate(value)?;
+    let pages = value["pages"].as_array().unwrap();
+    let selected = match page {
+        Some(id) => pages
+            .iter()
+            .find(|p| p["id"] == id)
+            .context("preview page missing")?,
+        None => &pages[0],
+    };
+    let longest = selected["canvas"]["width"]
+        .as_u64()
+        .unwrap()
+        .max(selected["canvas"]["height"].as_u64().unwrap());
+    Ok((edge as f32 / longest as f32).min(1.0))
 }
 
 async fn render_png(
@@ -549,7 +892,21 @@ async fn render_png(
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
     Json(value): Json<serde_json::Value>,
 ) -> Response {
+    if crate::composite::is_document(&value) {
+        return match composite_job(&state, value, query, false).await {
+            Ok(bytes) => binary(bytes, "image/png", "artwork.png"),
+            Err(error) => problem(error),
+        };
+    }
     let result = (|| -> Result<Vec<u8>> {
+        if crate::composite::is_document(&value) {
+            let document = state
+                .file
+                .clone()
+                .unwrap_or_else(|| state.project_root.join("browser.pen"));
+            let scale = composite_preview_scale(&value, query.page.as_deref(), query.max_edge)?;
+            return crate::composite::png(&value, &document, query.page.as_deref(), scale);
+        }
         if value.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION) {
             let document = state
                 .file
@@ -582,8 +939,34 @@ async fn render_svg(
     axum::extract::Query(query): axum::extract::Query<PageQuery>,
     Json(value): Json<serde_json::Value>,
 ) -> Response {
+    if crate::composite::is_document(&value) {
+        let proxy = query.max_edge.is_some();
+        return match composite_job(&state, value, query, true).await {
+            Ok(bytes) => {
+                let mut response = binary(bytes, "image/svg+xml", "artwork.svg");
+                response.headers_mut().insert(
+                    "x-pentool-preview",
+                    HeaderValue::from_static(if proxy {
+                        "approximate"
+                    } else {
+                        "authoritative"
+                    }),
+                );
+                response
+            }
+            Err(error) => problem(error),
+        };
+    }
     let max_edge = query.max_edge;
     let result = (|| -> Result<String> {
+        if crate::composite::is_document(&value) {
+            let document = state
+                .file
+                .clone()
+                .unwrap_or_else(|| state.project_root.join("browser.pen"));
+            let scale = composite_preview_scale(&value, query.page.as_deref(), query.max_edge)?;
+            return crate::composite::svg(&value, &document, query.page.as_deref(), scale);
+        }
         if value.get("version").and_then(serde_json::Value::as_u64) == Some(image::VERSION) {
             let document = state
                 .file
@@ -647,6 +1030,76 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn browser_image_add_is_page_aware_atomic_and_requires_explicit_migration() {
+        use base64::Engine;
+        use serde_json::json;
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            2,
+            1,
+            ::image::Rgba([10, 20, 30, 255]),
+        ))
+        .write_to(&mut encoded, ::image::ImageFormat::Png)
+        .unwrap();
+        let mut raw = crate::scene::new_document(20, 20);
+        let mut second = raw["pages"][0].clone();
+        second["id"] = json!("second");
+        raw["pages"].as_array_mut().unwrap().push(second);
+        let mut request = super::AddImageRequest {
+            document: None,
+            id: "photo".into(),
+            page: Some("second".into()),
+            layer: "layer-1".into(),
+            data: base64::engine::general_purpose::STANDARD.encode(encoded.into_inner()),
+            revision: super::revision(&raw),
+            migrate: false,
+            dry_run: false,
+        };
+        let before = raw.clone();
+        assert!(super::plan_image_add(&mut raw, &request).is_err());
+        assert_eq!(raw, before);
+        request.migrate = true;
+        super::plan_image_add(&mut raw, &request).unwrap();
+        assert_eq!(raw["version"], 5);
+        assert!(raw["pages"][0]["layers"][0]["nodes"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(raw["pages"][1]["layers"][0]["nodes"][0]["id"], "photo");
+        let before = raw.clone();
+        assert!(super::plan_image_add(&mut raw, &request).is_err());
+        assert_eq!(raw, before);
+        request.revision = super::revision(&raw);
+        request.id = "other".into();
+        request.data = "invalid".into();
+        assert!(super::plan_image_add(&mut raw, &request).is_err());
+        assert_eq!(raw, before);
+        let mut raw = crate::composite::migrate(before).unwrap();
+        raw["pages"][1]["layers"][0]["locked"] = json!(true);
+        request.revision = super::revision(&raw);
+        request.data = base64::engine::general_purpose::STANDARD.encode(b"not a PNG");
+        let before = raw.clone();
+        assert!(super::plan_image_add(&mut raw, &request)
+            .unwrap_err()
+            .to_string()
+            .contains("locked"));
+        assert_eq!(raw, before);
+    }
+    #[test]
+    fn composite_proxy_bounds_and_cancellation_are_explicit() {
+        let raw = crate::composite::migrate(crate::scene::new_document(16384, 8)).unwrap();
+        let scale = super::composite_preview_scale(&raw, None, Some(1024)).unwrap();
+        assert_eq!(scale, 0.0625);
+        let pixels =
+            crate::composite::render(&raw, std::path::Path::new("target/proxy.pen"), None, scale)
+                .unwrap();
+        assert_eq!(pixels.dimensions(), (1024, 1));
+        assert!(super::composite_preview_scale(&raw, None, Some(0)).is_err());
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        assert!(crate::composite::with_cancel(flag, crate::composite::check_cancelled).is_err());
+        crate::composite::check_cancelled().unwrap();
+    }
     #[test]
     fn revision_tracks_disk_values_without_a_browser_round_trip() {
         let original: serde_json::Value = serde_json::from_str(r#"{"x":100.0}"#).unwrap();

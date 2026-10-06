@@ -376,7 +376,7 @@ fn map_rgb(mut image: RgbaImage, table: &[u8; 256]) -> RgbaImage {
 }
 
 /// `exp(y * ln(x))` from basic arithmetic so every platform agrees bit for bit.
-fn det_pow(x: f64, y: f64) -> f64 {
+pub(crate) fn det_pow(x: f64, y: f64) -> f64 {
     if x <= 0.0 {
         return 0.0;
     }

@@ -46,6 +46,11 @@ fn set_fill(id: &str, layer: &str, fill: &str) -> ObjectAction {
         align: None,
         letter_spacing: None,
         line_height: None,
+        blend: None,
+        blend_space: None,
+        opacity: None,
+        content_opacity: None,
+        isolation: None,
     }
 }
 

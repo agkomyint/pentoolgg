@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/penpreset-v1.json",
+  "title": "Pentool data-only appearance preset v1",
+  "type": "object",
+  "required": ["format", "version", "engine", "color_space", "node_kind", "appearance", "image_assets", "mask_resources", "styles"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {"const": "penpreset"},
+    "version": {"const": 1},
+    "engine": {"const": 1},
+    "color_space": {"const": "srgb8"},
+    "node_kind": {"enum": ["path", "rect", "ellipse", "polygon", "star", "line", "text", "group", "image", "fill", "adjustment"]},
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": {"type": "object"},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "content_opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "blend_mode": {"$ref": "pen-format-v6.schema.json#/$defs/blendMode"},
+        "blend_space": {"enum": ["srgb", "linear"]},
+        "isolation": {"enum": ["isolated", "pass-through"]},
+        "effect_origin": {"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":0,"maximum":16384}},
+        "effects": {"oneOf": [{"type": "array", "maxItems": 32, "items": {"$ref": "pen-format-v6.schema.json#/$defs/effectOperation"}}, {"type": "object", "required": ["ref"]}]},
+        "transforms": {"type": "array", "maxItems": 64, "items": {"$ref": "pen-format-v6.schema.json#/$defs/transformOperation"}},
+        "mask": {"$ref": "pen-format-v6.schema.json#/$defs/mask"},
+        "operations": {"type": "array", "maxItems": 64, "items": {"$ref": "pen-format-v5.schema.json#/$defs/imageOperation"}},
+        "fill": {"$ref": "pen-format-v6.schema.json#/$defs/fill/allOf/1/properties/fill"},
+        "adjustment": {"type": "string"},
+        "params": {"type": "object"},
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "image_assets": {"type": "object", "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"}, "additionalProperties": {"allOf": [{"$ref": "pen-format-v5.schema.json#/$defs/imageAsset"}, {"properties": {"storage": {"$ref": "pen-format-v5.schema.json#/$defs/embeddedStorage"}}}]}},
+    "mask_resources": {"type": "object", "maxProperties": 256, "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"}, "additionalProperties": {"$ref": "pen-format-v6.schema.json#/$defs/maskResource"}},
+    "styles": {"type": "object"}
+  }
+}

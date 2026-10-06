@@ -6,13 +6,13 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
-pub const LATEST_VERSION: u64 = crate::image::VERSION;
+pub const LATEST_VERSION: u64 = crate::composite::VERSION;
 pub const MAX_DEPTH: usize = 64;
 
 pub fn is_scene_document(raw: &Value) -> bool {
     matches!(
         raw.get("version").and_then(Value::as_u64),
-        Some(VERSION) | Some(crate::image::VERSION)
+        Some(VERSION) | Some(crate::image::VERSION) | Some(crate::composite::VERSION)
     )
 }
 
@@ -243,7 +243,75 @@ pub enum GroupOperation {
 }
 
 pub fn apply_group(raw: &mut Value, page_id: Option<&str>, action: GroupAction) -> Result<Value> {
+    if crate::composite::is_document(raw) {
+        let mut candidate = raw.clone();
+        let selected = page_mut(&mut candidate, page_id)?;
+        match &action {
+            GroupAction::Bounds { .. } => {}
+            GroupAction::Create {
+                children, layer, ..
+            } => {
+                ensure_layer_unlocked(selected, layer)?;
+                for id in children {
+                    crate::composite::ensure_unlocked(selected, id)?;
+                }
+            }
+            GroupAction::AddChild { group, child } => {
+                crate::composite::ensure_unlocked(selected, group)?;
+                crate::composite::ensure_unlocked(selected, child)?;
+            }
+            GroupAction::RemoveChild {
+                group,
+                child,
+                layer,
+            } => {
+                crate::composite::ensure_unlocked(selected, group)?;
+                crate::composite::ensure_unlocked(selected, child)?;
+                ensure_layer_unlocked(selected, layer)?;
+            }
+            GroupAction::Duplicate { source, .. } => {
+                crate::composite::ensure_unlocked(selected, source)?
+            }
+            GroupAction::Move { id, .. }
+            | GroupAction::Rotate { id, .. }
+            | GroupAction::Scale { id, .. }
+            | GroupAction::Ungroup { id }
+            | GroupAction::Rename { id, .. }
+            | GroupAction::Reorder { id, .. } => crate::composite::ensure_unlocked(selected, id)?,
+        }
+        if let GroupAction::Ungroup { id } = &action {
+            let node = find_node(selected, id).context("group missing")?;
+            let styled = node["visible"] == false
+                || node.get("opacity").is_some_and(|v| v.as_f64() != Some(1.0))
+                || node
+                    .get("content_opacity")
+                    .is_some_and(|v| v.as_f64() != Some(1.0))
+                || node.get("blend_mode").is_some_and(|v| v != "normal")
+                || ["effects", "transforms", "mask", "clip", "clipping"]
+                    .iter()
+                    .any(|key| node.get(*key).is_some());
+            let backdrop_sensitive = node["children"].as_array().is_some_and(|children| {
+                children.iter().any(|n| {
+                    n["kind"] == "adjustment"
+                        || n["isolation"] == "pass-through"
+                        || n.get("blend_mode").is_some_and(|v| v != "normal")
+                })
+            });
+            if styled || backdrop_sensitive {
+                bail!("[unsupported-capability] ungroup would change compositing; retain the group or explicitly remove its appearance and backdrop-sensitive children first")
+            }
+        }
+        let result = apply_group_inner(&mut candidate, page_id, action)?;
+        validate(&candidate)?;
+        *raw = candidate;
+        return Ok(result);
+    }
+    apply_group_inner(raw, page_id, action)
+}
+
+fn apply_group_inner(raw: &mut Value, page_id: Option<&str>, action: GroupAction) -> Result<Value> {
     validate(raw)?;
+    let compositing = crate::composite::is_document(raw);
     let page = page_mut(raw, page_id)?;
     let result = match action {
         GroupAction::Create {
@@ -343,7 +411,50 @@ pub fn apply_group(raw: &mut Value, page_id: Option<&str>, action: GroupAction) 
             if copy.get("kind").and_then(Value::as_str) != Some("group") {
                 bail!("node is not a group")
             };
+            let mut mapping = HashMap::new();
+            fn collect(node: &Value, prefix: &str, root: bool, map: &mut HashMap<String, String>) {
+                if let Some(old) = node["id"].as_str() {
+                    map.insert(
+                        old.into(),
+                        if root {
+                            prefix.into()
+                        } else {
+                            format!("{prefix}-{old}")
+                        },
+                    );
+                }
+                if let Some(children) = node["children"].as_array() {
+                    for child in children {
+                        collect(child, prefix, false, map);
+                    }
+                }
+            }
+            collect(&copy, &id, true, &mut mapping);
             rename_tree(&mut copy, &id, true);
+            fn refs(node: &mut Value, map: &HashMap<String, String>) {
+                for pointer in ["/clipping/base", "/mask/node", "/clip/node", "/scope/id"] {
+                    if let Some(value) = node.pointer_mut(pointer) {
+                        if let Some(new) = value.as_str().and_then(|old| map.get(old)) {
+                            *value = json!(new);
+                        }
+                    }
+                }
+                if let Some(ids) = node.pointer_mut("/scope/ids").and_then(Value::as_array_mut) {
+                    for id in ids {
+                        if let Some(new) = id.as_str().and_then(|old| map.get(old)) {
+                            *id = json!(new);
+                        }
+                    }
+                }
+                if let Some(children) = node["children"].as_array_mut() {
+                    for child in children {
+                        refs(child, map);
+                    }
+                }
+            }
+            if compositing {
+                refs(&mut copy, &mapping);
+            }
             let next = Affine::translate((dx, dy)) * matrix(copy.get("transform"))?;
             copy["transform"] = json!(next.as_coeffs());
             insert_after(page, &source, copy)?;
@@ -480,6 +591,21 @@ pub fn node_bounds(raw: &Value, page_id: Option<&str>, id: &str) -> Result<Value
 }
 
 fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
+    if let Some(node) = find_node(page, id) {
+        if node["kind"] == "adjustment" {
+            // Adjustments have no geometry. Report a conservative affected region,
+            // preserving the bounds field of the compact discovery API.
+            let width = page["canvas"]["width"]
+                .as_f64()
+                .context("canvas width missing")?;
+            let height = page["canvas"]["height"]
+                .as_f64()
+                .context("canvas height missing")?;
+            return Ok(
+                json!({"id":id,"x":0,"y":0,"width":width,"height":height,"right":width,"bottom":height}),
+            );
+        }
+    }
     fn local(node: &Value, world: Affine) -> Result<Option<Rect>> {
         let transform = world * matrix(node.get("transform"))?;
         let kind = node
@@ -500,7 +626,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                 }
                 return Ok(bounds);
             }
-            "rect" => Rect::new(
+            "rect" | "fill" => Rect::new(
                 node["x"].as_f64().context("x missing")?,
                 node["y"].as_f64().context("y missing")?,
                 node["x"].as_f64().unwrap() + node["width"].as_f64().context("width missing")?,
@@ -832,7 +958,7 @@ fn reorder_node(page: &mut Value, id: &str, requested: usize) -> Result<usize> {
     bail!("group not found")
 }
 
-fn page_mut<'a>(raw: &'a mut Value, id: Option<&str>) -> Result<&'a mut Value> {
+pub(crate) fn page_mut<'a>(raw: &'a mut Value, id: Option<&str>) -> Result<&'a mut Value> {
     let pages = raw.get_mut("pages").and_then(Value::as_array_mut).unwrap();
     match id {
         Some(id) => pages
@@ -842,7 +968,7 @@ fn page_mut<'a>(raw: &'a mut Value, id: Option<&str>) -> Result<&'a mut Value> {
         None => Ok(pages.first_mut().unwrap()),
     }
 }
-fn layer_nodes_mut<'a>(page: &'a mut Value, id: &str) -> Result<&'a mut Vec<Value>> {
+pub(crate) fn layer_nodes_mut<'a>(page: &'a mut Value, id: &str) -> Result<&'a mut Vec<Value>> {
     page.get_mut("layers")
         .and_then(Value::as_array_mut)
         .unwrap()
@@ -874,7 +1000,7 @@ fn find_node<'a>(page: &'a Value, id: &str) -> Option<&'a Value> {
         .iter()
         .find_map(|l| find(l.get("nodes")?.as_array()?, id))
 }
-fn find_node_mut<'a>(page: &'a mut Value, id: &str) -> Option<&'a mut Value> {
+pub(crate) fn find_node_mut<'a>(page: &'a mut Value, id: &str) -> Option<&'a mut Value> {
     fn find<'a>(nodes: &'a mut [Value], id: &str) -> Option<&'a mut Value> {
         for node in nodes {
             if node.get("id").and_then(Value::as_str) == Some(id) {
@@ -1395,6 +1521,16 @@ pub fn apply_batch(
     page: Option<&str>,
     operations: &[Value],
 ) -> Result<Vec<Value>> {
+    apply_batch_at(raw, page, operations, std::path::Path::new("document.pen"))
+}
+
+/// Batch planner with the document root needed for verified linked sources.
+pub fn apply_batch_at(
+    raw: &mut Value,
+    page: Option<&str>,
+    operations: &[Value],
+    document: &std::path::Path,
+) -> Result<Vec<Value>> {
     if operations.is_empty() || operations.len() > 10_000 {
         bail!("batch must contain 1 to 10,000 operations")
     }
@@ -1570,6 +1706,7 @@ pub fn apply_batch(
                 | "image-op-enable" | "image-op-disable" | "image-op-remove" => {
                     crate::image::batch_operation(&mut candidate, page, kind, operation, &resolve)?
                 }
+                other if crate::composite::is_document(&candidate) => crate::composite::batch_operation(&mut candidate,page,document,other,operation,&resolve)?,
                 other => bail!("unsupported v4 batch operation: {other}"),
             };
             if let Some(alias) = operation.get("alias").and_then(Value::as_str) {
@@ -1686,6 +1823,9 @@ fn pages_node_ids(page: &Value) -> HashSet<&str> {
 }
 
 pub fn migrate_to_v4(mut raw: Value) -> Result<Value> {
+    if crate::composite::is_document(&raw) {
+        raw = crate::composite::downgrade(raw)?;
+    }
     let version = raw
         .get("version")
         .and_then(Value::as_u64)
@@ -1765,6 +1905,9 @@ pub fn migrate_to_v4(mut raw: Value) -> Result<Value> {
 }
 
 pub fn migrate_to_v5(raw: Value) -> Result<Value> {
+    if crate::composite::is_document(&raw) {
+        return crate::composite::downgrade(raw);
+    }
     let mut raw = match raw.get("version").and_then(Value::as_u64) {
         Some(crate::image::VERSION) => {
             validate(&raw)?;
@@ -1830,7 +1973,7 @@ fn layer_mut<'a>(page: &'a mut Value, id: &str) -> Result<&'a mut Value> {
         .with_context(|| format!("layer not found: {id}"))
 }
 
-fn ensure_layer_unlocked(page: &mut Value, id: &str) -> Result<()> {
+pub(crate) fn ensure_layer_unlocked(page: &mut Value, id: &str) -> Result<()> {
     if layer_mut(page, id)?
         .get("locked")
         .and_then(Value::as_bool)
@@ -2160,6 +2303,7 @@ pub fn apply_object(
     page_id: Option<&str>,
     action: &crate::agent::ObjectAction,
 ) -> Result<Value> {
+    let compositing = crate::composite::is_document(raw);
     use crate::agent::ObjectAction;
     validate(raw)?;
     let page = page_mut(raw, page_id)?;
@@ -2172,6 +2316,9 @@ pub fn apply_object(
         | ObjectAction::Remove { id, layer } => (id.clone(), layer.clone()),
     };
     ensure_layer_unlocked(page, &layer_id)?;
+    if compositing {
+        crate::composite::ensure_unlocked(page, &id)?;
+    }
     let position = |page: &mut Value| -> Result<usize> {
         layer_nodes_mut(page, &layer_id)?
             .iter()
@@ -2197,11 +2344,50 @@ pub fn apply_object(
             align,
             letter_spacing,
             line_height,
+            blend,
+            blend_space,
+            opacity,
+            content_opacity,
+            isolation,
             ..
         } => {
+            let composite_change = blend.is_some()
+                || blend_space.is_some()
+                || opacity.is_some()
+                || content_opacity.is_some()
+                || isolation.is_some();
+            if composite_change && !compositing {
+                bail!(
+                    "[unsupported-capability] compositing properties require `migrate --target 6`"
+                )
+            }
             let index = position(page)?;
             let node = &mut layer_nodes_mut(page, &layer_id)?[index];
             let kind = node.get("kind").and_then(Value::as_str).unwrap_or_default();
+            if composite_change {
+                let path_settings = d.is_some()
+                    || stroke.is_some()
+                    || width.is_some()
+                    || cap.is_some()
+                    || join.is_some()
+                    || miter_limit.is_some();
+                let text_settings = content.is_some()
+                    || x.is_some()
+                    || y.is_some()
+                    || font.is_some()
+                    || size.is_some()
+                    || weight.is_some()
+                    || italic.is_some()
+                    || align.is_some()
+                    || letter_spacing.is_some()
+                    || line_height.is_some();
+                if (kind != "path" && path_settings)
+                    || (kind != "text" && text_settings)
+                    || (!matches!(kind, "path" | "text") && fill.is_some())
+                {
+                    bail!("object {id}: geometry/text flags do not apply to {kind}; use its matching command")
+                }
+            }
             if kind == "path" {
                 if let Some(d) = d {
                     BezPath::from_svg(d).context("invalid path data")?;
@@ -2248,8 +2434,23 @@ pub fn apply_object(
                 if let Some(v) = fill {
                     node["style"]["fill"] = json!({"fallback": v});
                 }
-            } else {
+            } else if !composite_change {
                 bail!("object {id} is a {kind} node; use the matching command to edit it")
+            }
+            if let Some(v) = blend {
+                node["blend_mode"] = json!(v);
+            }
+            if let Some(v) = blend_space {
+                node["blend_space"] = json!(v);
+            }
+            if let Some(v) = opacity {
+                node["opacity"] = json!(v);
+            }
+            if let Some(v) = content_opacity {
+                node["content_opacity"] = json!(v);
+            }
+            if let Some(v) = isolation {
+                node["isolation"] = json!(v);
             }
             json!({"operation":"set","id":id})
         }
@@ -2380,11 +2581,14 @@ pub fn validate(raw: &Value) -> Result<()> {
         .and_then(Value::as_u64)
         .context("[malformed-resource] document version is missing or invalid")?;
     if raw.get("format").and_then(Value::as_str) != Some("pentool")
-        || !matches!(version, VERSION | crate::image::VERSION)
+        || !matches!(
+            version,
+            VERSION | crate::image::VERSION | crate::composite::VERSION
+        )
     {
         bail!("not a supported Pentool scene document")
     }
-    let image_assets = if version == crate::image::VERSION {
+    let image_assets = if version >= crate::image::VERSION {
         Some(crate::image::validate_assets(raw)?)
     } else {
         None
@@ -2434,7 +2638,13 @@ pub fn validate(raw: &Value) -> Result<()> {
                 .and_then(Value::as_array)
                 .context("v4 layer has no nodes")?
             {
-                validate_node(node, 0, &mut ids, image_assets.as_ref())?;
+                validate_node(
+                    node,
+                    0,
+                    &mut ids,
+                    image_assets.as_ref(),
+                    version == crate::composite::VERSION,
+                )?;
             }
         }
         fn check_instances(node: &Value, components: &HashSet<&str>) -> Result<()> {
@@ -2459,9 +2669,12 @@ pub fn validate(raw: &Value) -> Result<()> {
                 check_instances(node, &component_ids)?;
             }
         }
-        if version == crate::image::VERSION {
-            crate::image::validate_masks(page)?;
+        if version >= crate::image::VERSION {
+            crate::image::validate_masks_for_version(page, version == crate::composite::VERSION)?;
         }
+    }
+    if version == crate::composite::VERSION {
+        crate::composite::validate(raw)?;
     }
     Ok(())
 }
@@ -2728,11 +2941,12 @@ fn ellipse_path(o: &Map<String, Value>) -> Result<String> {
         cx - rx
     ))
 }
-fn validate_node(
+pub(crate) fn validate_node(
     node: &Value,
     depth: usize,
     ids: &mut HashSet<String>,
     image_assets: Option<&HashMap<String, (u64, u64)>>,
+    compositing: bool,
 ) -> Result<()> {
     if depth > MAX_DEPTH {
         bail!("scene graph exceeds maximum nesting depth {MAX_DEPTH}")
@@ -2756,7 +2970,7 @@ fn validate_node(
             .and_then(Value::as_array)
             .context("group children are missing")?
         {
-            validate_node(child, depth + 1, ids, image_assets)?
+            validate_node(child, depth + 1, ids, image_assets, compositing)?
         }
     } else {
         match kind {
@@ -2797,13 +3011,29 @@ fn validate_node(
                 string(o, "component")?;
                 let fallback = o.get("fallback").context("instance fallback is missing")?;
                 let mut fallback_ids = HashSet::new();
-                validate_node(fallback, depth + 1, &mut fallback_ids, image_assets)?;
+                validate_node(
+                    fallback,
+                    depth + 1,
+                    &mut fallback_ids,
+                    image_assets,
+                    compositing,
+                )?;
             }
-            "image" => crate::image::validate_node(
+            "fill" if compositing => {
+                for key in ["x", "y", "width", "height"] {
+                    number(o, key)?;
+                }
+                o.get("fill")
+                    .and_then(Value::as_object)
+                    .context("fill descriptor missing")?;
+            }
+            "adjustment" if compositing => crate::composite::validate_node(node)?,
+            "image" => crate::image::validate_node_for_version(
                 o,
                 image_assets.context(
                     "[unsupported-capability] image nodes require document format version 5",
                 )?,
+                compositing,
             )?,
             _ => bail!("unsupported node kind: {kind}"),
         }

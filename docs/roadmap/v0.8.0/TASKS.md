@@ -6,6 +6,11 @@ clipping, blending, non-destructive transforms, fill layers, and inspection tool
 Pentool adopts the workflows, not Photoshop's entire surface area. Features must
 remain deterministic, scriptable, reviewable in JSON, and suitable for one binary.
 
+Implementation contract and current limitations are recorded in
+[`COMPOSITING-SPEC.md`](COMPOSITING-SPEC.md). The development format is v6;
+released v4/v5 contracts remain unchanged. Checkboxes below remain acceptance
+gates, not a record of partial implementation.
+
 ## What is worth carrying forward
 
 Photoshop's strongest architectural idea is that edits are independent, reorderable
@@ -107,11 +112,11 @@ pentool adjustment add photo.pen grade --kind curves --scope group:hero
 pentool mask create photo.pen portrait-mask --from node-alpha:portrait
 pentool mask attach photo.pen grade portrait-mask --feather 2
 pentool clip add photo.pen texture --base headline
-pentool object set photo.pen texture --blend overlay --opacity 0.6
+pentool object photo.pen set texture --layer content --blend overlay --opacity 0.6
 pentool effect add photo.pen card shadow --x 0 --y 12 --blur 30 --opacity 0.24
 pentool transform add photo.pen screen perspective --quad '...'
-pentool inspect histogram photo.pen --scope group:hero --json
-pentool asset collect photo.pen ./portable-project --dry-run
+pentool analyze photo.pen --scope group:hero --json
+pentool linked collect photo.pen --path ./portable-project --dry-run
 ```
 
 Every mutating command uses v0.6.2 history, dry run, revision guards, structured

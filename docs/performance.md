@@ -34,6 +34,43 @@ Committed CLI imports use a sibling temporary file, retain the exact prior file 
 
 ## Raster image benchmarks and distribution budget (v0.7)
 
+## Development compositing qualification (v6 / v0.8 roadmap)
+
+```sh
+pentool benchmark --composite --source-size 256 --clipped 16 --stack-depth 8 --blur-radius 32 --repetitions 3
+pentool benchmark --composite --source-size 512 --clipped 32 --stack-depth 16 --blur-radius 256 --repetitions 3
+```
+
+The fixture reuses one processed image, one mask resource across clipped nodes,
+deep isolated groups, a reversible grade and a large-radius blur. A fresh private
+cache measures the first cold run; subsequent warm runs must produce identical
+PNG hashes. JSON records the fixture, timings, output size and peak resident
+memory where supported. The temporary directory is removed after measurement.
+
+The compositor limits temporary surfaces to 256 MiB and cumulative work to
+1,073,741,824 pixels, including conservative mask/blur scratch and retained scope
+coverage. Source decoding retains its separate v5 limits; total resident memory
+must therefore be measured, not inferred from the compositor scratch limit.
+Stacks are limited to 64 transforms, 32 effects and 64 adjustments per page;
+resources/names to 256 masks; selection queries to 128 expressions/nesting 16.
+Canvas axes are at most 16384. Large requests fail instead of degrading output.
+Hosted CI on all four release targets remains required for qualification.
+
+Windows development qualification on 2026-10-06 used an Intel Core i9-11900H,
+Rust 1.85.1, and an optimized x86_64-pc-windows-msvc build. These measurements
+are reproducible observations, not release budgets:
+
+| Fixture | Cold | Warm range | Peak RSS | Output |
+|---|---:|---:|---:|---:|
+| 256 px, 16 clips, depth 8, blur 32 | 755 ms | 680–787 ms | 38.7 MB | 31,495 B |
+| 512 px, 32 clips, depth 16, blur 256 | 6.56 s | 7.80–9.35 s | 53.9 MB | 20,395 B |
+
+Every cold/warm run within each fixture produced the same PNG SHA-256. The
+release binary measured 16,342,016 bytes after the compositing implementation.
+Hosted results and platform-specific binary sizes must be recorded before release.
+
+### Existing raster image benchmark
+
 ```sh
 pentool benchmark --images 100 --source-size 512 --operations 2 --repetitions 5
 ```

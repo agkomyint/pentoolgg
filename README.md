@@ -69,6 +69,32 @@ Running `pentool` without a command starts the server.
 
 ## Raster images (v0.7)
 
+In the served editor, use **Images → Add image** to choose a local PNG, JPEG or
+WebP, select its page/layer, and give it a stable ID. Browser imports embed up to
+32 MiB locally and are undoable. Older documents require the explicit v5-upgrade
+checkbox; existing v6 documents keep their compositing format.
+This also works with bare `pentool serve`: add the image to the browser document,
+then use **Save .pen** to download it. Local Undo/Redo includes the import.
+
+The v0.8 compositing work is in development. Explicitly migrate a working copy
+with `pentool migrate design.pen --target 6`, then add a non-destructive grade:
+`pentool adjustment add design.pen grade --kind invert --scope below`.
+Adjustments support `--params` JSON, opacity, enable/disable, dry runs, revision
+guards and undo/redo. See the [development compositing contract](docs/roadmap/v0.8.0/COMPOSITING-SPEC.md)
+for all 13 adjustments, masks, clipping, all 16 blend modes, transforms, fills,
+effects, selection/analysis queries, linked assets, appearance presets, batch
+operations and editor controls. A tiny [v6 conformance fixture](docs/fixtures/v6-composite.pen)
+has exact analytic pixel tests. Hosted cross-platform qualification remains a
+release gate; this work does not bump the package version.
+
+```sh
+pentool analyze design.pen --scope page --compare
+pentool linked report design.pen
+pentool linked collect design.pen --path portable-project --dry-run
+pentool preset save design.pen portrait --file portrait.penpreset
+pentool preset apply design.pen portrait-copy --file portrait.penpreset --dry-run
+```
+
 PNG, JPEG, and WebP sources can be embedded for portability or kept as verified,
 document-relative external files. Imports are content-addressed, deduplicated, and
 decoded offline with bounded dimensions and memory. Crop, fit, focal position,

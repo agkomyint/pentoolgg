@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/pen-v6.json",
+  "title": "Pentool document v6 (compositing development contract)",
+  "type": "object",
+  "required": ["format", "version", "name", "pages", "image_assets", "compositing"],
+  "properties": {
+    "format": {"const": "pentool"},
+    "version": {"const": 6},
+    "name": {"type": "string"},
+    "fonts": {"type": "array"},
+    "styles": {"type": "object"},
+    "components": {"type": "array"},
+    "masks": {"type": "object", "maxProperties": 256, "additionalProperties": {"$ref": "pen-format-v5.schema.json#/$defs/digest"}},
+    "mask_resources": {"type": "object", "maxProperties": 256, "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"}, "additionalProperties": {"$ref": "#/$defs/maskResource"}},
+    "image_assets": {"$ref": "pen-format-v5.schema.json#/properties/image_assets"},
+    "compositing": {
+      "type": "object", "required": ["engine", "color_space"],
+      "properties": {"engine": {"const": 1}, "color_space": {"const": "srgb8"}},
+      "additionalProperties": true
+    },
+    "pages": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/page"}}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "blendMode": {"enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"]},
+    "base": {"allOf": [
+      {"$ref": "pen-format-v5.schema.json#/$defs/base"},
+      {"properties": {
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "content_opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "effect_origin": {"type":"array","minItems":2,"maxItems":2,"items":{"type":"number","minimum":0,"maximum":16384}},
+        "transforms": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/transformOperation"}},
+        "effects": {"oneOf": [{"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/effectOperation"}}, {"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string", "minLength": 1}, "fallback": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/effectOperation"}}}}]},
+        "blend_mode": {"$ref": "#/$defs/blendMode"},
+        "blend_space": {"enum": ["srgb", "linear"]},
+        "mask": {"oneOf": [{"$ref": "#/$defs/mask"}, {"$ref": "pen-format-v5.schema.json#/$defs/imageMask"}]},
+        "clipping": {"type": "object", "required": ["base"], "properties": {"base": {"type": "string", "minLength": 1}}},
+        "isolation": {"enum": ["isolated", "pass-through"]}
+      }}
+    ]},
+    "transformOperation": {
+      "type": "object", "required": ["id", "kind", "enabled", "opacity", "matrix"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "kind": {"enum": ["scale", "rotate", "skew", "translate", "perspective", "four-corner", "matrix"]},
+        "enabled": {"type": "boolean"}, "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "matrix": {"type": "array", "minItems": 9, "maxItems": 9, "items": {"type": "number", "minimum": -1000000000, "maximum": 1000000000}},
+        "mask": {"$ref": "#/$defs/mask"}
+      }
+    },
+    "effectOperation": {
+      "type": "object", "required": ["id", "kind", "params", "enabled", "opacity", "blend_mode"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "kind": {"enum": ["drop-shadow", "inner-shadow", "outer-glow", "inner-glow", "stroke", "color-overlay", "gradient-overlay", "blur"]},
+        "params": {"type": "object"}, "enabled": {"type": "boolean"},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1}, "blend_mode": {"$ref": "#/$defs/blendMode"}, "blend_space": {"enum": ["srgb", "linear"]}
+      }
+    },
+    "fill": {
+      "allOf": [{"$ref": "#/$defs/base"}, {"type": "object", "required": ["x", "y", "width", "height", "fill"], "properties": {
+        "kind": {"const": "fill"}, "x": {"type": "number"}, "y": {"type": "number"}, "width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "exclusiveMinimum": 0},
+        "fill": {"type": "object", "anyOf": [{"required": ["kind"]}, {"required": ["ref", "fallback"]}], "properties": {"ref": {"type": "string", "minLength": 1}, "fallback": {"$ref": "#/$defs/fill/allOf/1/properties/fill"}, "kind": {"enum": ["solid", "linear", "radial", "conic", "pattern"]}, "space": {"enum": ["srgb", "linear"]}, "spread": {"enum": ["pad", "repeat", "reflect"]}, "stops": {"type": "array", "minItems": 2, "maxItems": 64, "items": {"type": "object", "required": ["position", "color"], "properties": {"position": {"type": "number", "minimum": 0, "maximum": 1}, "color": {}}}}, "asset": {"$ref": "pen-format-v5.schema.json#/$defs/digest"}}}
+      }}]
+    },
+    "mask": {
+      "type": "object", "required": ["resource", "invert", "density", "feather", "linked"],
+      "properties": {
+        "resource": {"$ref": "pen-format-v5.schema.json#/$defs/digest"},
+        "invert": {"type": "boolean"}, "linked": {"type": "boolean"},
+        "density": {"type": "number", "minimum": 0, "maximum": 1},
+        "feather": {"type": "number", "minimum": 0, "maximum": 256},
+        "transform": {"$ref": "pen-format-v5.schema.json#/$defs/matrix"},
+        "anchor": {"$ref": "pen-format-v5.schema.json#/$defs/matrix"}
+      }
+    },
+    "maskResource": {"oneOf": [
+      {"type": "object", "required": ["kind", "asset"], "properties": {"kind": {"const": "raster"}, "asset": {"$ref": "pen-format-v5.schema.json#/$defs/digest"}}},
+      {"type": "object", "required": ["kind", "node"], "properties": {"kind": {"const": "vector"}, "node": {"$ref": "#/$defs/node"}}}
+    ]},
+    "scope": {
+      "oneOf": [
+        {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "below"}}},
+        {"type": "object", "required": ["kind", "id"], "properties": {"kind": {"const": "group"}, "id": {"type": "string", "minLength": 1}}},
+        {"type": "object", "required": ["kind", "ids"], "properties": {"kind": {"const": "targets"}, "ids": {"type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}}
+      ]
+    },
+    "adjustment": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "type": "object",
+          "required": ["adjustment", "params", "scope", "enabled", "blend_mode"],
+          "properties": {
+            "kind": {"const": "adjustment"},
+            "adjustment": {"enum": ["exposure", "brightness-contrast", "levels", "curves", "vibrance", "hue-saturation", "color-balance", "black-and-white", "channel-mixer", "gradient-map", "invert", "posterize", "threshold"]},
+            "params": {"type": "object"},
+            "scope": {"$ref": "#/$defs/scope"},
+            "enabled": {"type": "boolean"},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+            "blend_mode": {"$ref": "#/$defs/blendMode"}
+          }
+        }
+      ]
+    },
+    "node": {
+      "oneOf": [
+        {"allOf": [{"$ref": "#/$defs/base"}, {"required": ["children"], "properties": {"kind": {"const": "group"}, "children": {"type": "array", "items": {"$ref": "#/$defs/node"}}}}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"$ref": "pen-format-v5.schema.json#/$defs/node/oneOf/1"}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"$ref": "pen-format-v5.schema.json#/$defs/node/oneOf/2"}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"$ref": "pen-format-v5.schema.json#/$defs/node/oneOf/3"}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"$ref": "pen-format-v5.schema.json#/$defs/node/oneOf/4"}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"$ref": "pen-format-v5.schema.json#/$defs/node/oneOf/5"}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {"required": ["component", "fallback"], "properties": {"kind": {"const": "instance"}, "component": {"type": "string"}, "fallback": {"$ref": "#/$defs/node"}, "overrides": {"type": "object"}}}]},
+        {"allOf": [{"$ref": "#/$defs/base"}, {
+          "required": ["asset", "x", "y", "width", "height", "fit", "position", "crop", "opacity", "blend_mode", "operations"],
+          "properties": {
+            "kind": {"const": "image"},
+            "asset": {"$ref": "pen-format-v5.schema.json#/$defs/digest"},
+            "x": {"type": "number"}, "y": {"type": "number"},
+            "width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "exclusiveMinimum": 0},
+            "fit": {"$ref": "pen-format-v5.schema.json#/$defs/imageNode/allOf/1/properties/fit"},
+            "position": {"$ref": "pen-format-v5.schema.json#/$defs/imageNode/allOf/1/properties/position"},
+            "crop": {"$ref": "pen-format-v5.schema.json#/$defs/imageNode/allOf/1/properties/crop"},
+            "operations": {"$ref": "pen-format-v5.schema.json#/$defs/imageNode/allOf/1/properties/operations"}
+          }
+        }]},
+        {"$ref": "#/$defs/adjustment"},
+        {"$ref": "#/$defs/fill"}
+      ]
+    },
+    "layer": {
+      "type": "object", "required": ["id", "name", "nodes"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "name": {"type": "string"}, "visible": {"type": "boolean"}, "locked": {"type": "boolean"}, "nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}}},
+      "additionalProperties": true
+    },
+    "page": {
+      "type": "object", "required": ["id", "name", "canvas", "layers"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "name": {"type": "string"},
+        "canvas": {"$ref": "pen-format-v5.schema.json#/$defs/page/properties/canvas"},
+        "layers": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/layer"}}
+      },
+      "additionalProperties": true
+    }
+  }
+}

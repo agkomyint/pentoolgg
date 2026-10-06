@@ -22,6 +22,7 @@ pub fn apply(
     to: Option<&str>,
 ) -> Result<Value> {
     crate::scene::validate(raw)?;
+    let compositing = crate::composite::is_document(raw);
     if raw.get("styles").is_none() {
         raw["styles"] = json!({});
     }
@@ -30,10 +31,15 @@ pub fn apply(
         Operation::Set => {
             let name = required(name, "style name")?;
             let kind = required(token_type, "--type")?;
-            if !matches!(
+            if !(matches!(
                 kind,
                 "color" | "stroke" | "typography" | "spacing" | "radius" | "shadow"
-            ) {
+            ) || (compositing
+                && matches!(
+                    kind,
+                    "effects" | "appearance" | "fill" | "adjustment" | "mask" | "operation-stack"
+                )))
+            {
                 bail!("unsupported style type: {kind}")
             }
             let value = required(value, "--value")?;

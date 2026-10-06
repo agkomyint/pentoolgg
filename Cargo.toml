@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2021"
 description = "A single-binary, agent-friendly vector pen tool"
 license = "MIT OR Apache-2.0"
@@ -16,7 +16,8 @@ clap = { version = "4", features = ["derive"] }
 resvg = "0.44"
 ttf-parser = "0.24"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact JSON round trips keep transform coefficients and hashed mask data stable.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 tiny-skia = "0.11"
 svgtypes = "0.15"
 kurbo = "0.11"

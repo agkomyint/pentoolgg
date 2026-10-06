@@ -252,6 +252,11 @@ fn run_smoke(layers: usize, objects: usize, max_ms: Option<u128>) -> Result<Valu
                 align: None,
                 letter_spacing: None,
                 line_height: None,
+                blend: None,
+                blend_space: None,
+                opacity: None,
+                content_opacity: None,
+                isolation: None,
             },
         )?;
     }
@@ -327,6 +332,149 @@ pub struct ImageBenchmark {
 
 fn micros(since: Instant) -> u64 {
     since.elapsed().as_micros() as u64
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CompositeBenchmark {
+    pub clipped: usize,
+    pub depth: usize,
+    pub source_size: u32,
+    pub blur: f64,
+    pub repetitions: usize,
+}
+/// Shared masks, consecutive clipping, deep groups, reversible grade and blur.
+pub fn run_composite(c: CompositeBenchmark) -> Result<Value> {
+    if c.clipped == 0
+        || c.clipped > 128
+        || c.depth > 32
+        || !(8..=1024).contains(&c.source_size)
+        || !(0.0..=256.0).contains(&c.blur)
+        || !(1..=20).contains(&c.repetitions)
+    {
+        bail!("composite benchmark: clipped 1..128, depth 0..32, source 8..1024, blur 0..256, repetitions 1..20")
+    }
+    use rand_core::RngCore;
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let path = std::env::temp_dir().join(format!(
+        "pentool-composite-bench-{:016x}",
+        rand_core::OsRng.next_u64()
+    ));
+    fs::create_dir(&path)?;
+    let scratch = Scratch(path);
+    let document = scratch.0.join("benchmark.pen");
+    let mut pixels = ::image::RgbaImage::new(c.source_size, c.source_size);
+    for (x, y, p) in pixels.enumerate_pixels_mut() {
+        *p = ::image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x ^ y) % 256) as u8, 255]);
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    ::image::DynamicImage::ImageRgba8(pixels).write_to(&mut png, ::image::ImageFormat::Png)?;
+    let png = png.into_inner();
+    let mut raw =
+        crate::composite::migrate(crate::scene::new_document(c.source_size, c.source_size))?;
+    crate::image::add(
+        &mut raw,
+        None,
+        "layer-1",
+        "base",
+        &png,
+        crate::image::embedded_storage(&png),
+        0.0,
+        0.0,
+        f64::from(c.source_size),
+        f64::from(c.source_size),
+        crate::image::Fit::Fill,
+    )?;
+    crate::image::op_add(
+        &mut raw,
+        None,
+        "base",
+        "brightness-contrast",
+        Some("source-grade"),
+        None,
+        crate::image::OpParams(
+            json!({"brightness":4,"contrast":8})
+                .as_object()
+                .unwrap()
+                .clone(),
+        ),
+    )?;
+    crate::mask::create(&mut raw, &document, None, "shared", "node-alpha:base")?;
+    let base = raw["pages"][0]["layers"][0]["nodes"][0].clone();
+    for i in 0..c.clipped {
+        let mut node = base.clone();
+        node["id"] = json!(format!("clipped-{i}"));
+        node["clipping"] = json!({"base":"base"});
+        node["opacity"] = json!(0.1);
+        node["blend_mode"] = json!("overlay");
+        raw["pages"][0]["layers"][0]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(node);
+    }
+    for i in 0..c.clipped {
+        crate::mask::attach(
+            &mut raw,
+            None,
+            &format!("clipped-{i}"),
+            "shared",
+            &json!({"feather":1}),
+        )?;
+    }
+    crate::composite::edit(
+        &mut raw,
+        None,
+        "add",
+        "grade",
+        &json!({"adjustment":"vibrance","params":{"amount":12}}),
+    )?;
+    for i in 0..c.depth {
+        let children = std::mem::take(
+            raw["pages"][0]["layers"][0]["nodes"]
+                .as_array_mut()
+                .unwrap(),
+        );
+        raw["pages"][0]["layers"][0]["nodes"] =
+            json!([{"kind":"group","id":format!("depth-{i}"),"children":children}]);
+    }
+    let target = if c.depth > 0 {
+        format!("depth-{}", c.depth - 1)
+    } else {
+        "base".into()
+    };
+    crate::effects::edit(
+        &mut raw,
+        None,
+        &target,
+        "add",
+        "large-blur",
+        &json!({"kind":"blur","params":{"radius":c.blur}}),
+    )?;
+    crate::scene::validate(&raw)?;
+    let mut runs = Vec::new();
+    let mut expected = None;
+    let cache = scratch.0.join(".pentool");
+    if cache.exists() {
+        fs::remove_dir_all(cache)?;
+    }
+    for i in 0..=c.repetitions {
+        let start = Instant::now();
+        let output = crate::composite::png(&raw, &document, None, 1.0)?;
+        let elapsed = micros(start);
+        let hash = crate::resource::sha256(&output);
+        if expected.as_ref().is_some_and(|expected| *expected != hash) {
+            bail!("cold/warm composite output differs")
+        }
+        expected = Some(hash.clone());
+        runs.push(json!({"cache":if i==0 {"cold"} else {"warm"},"total_us":elapsed,"output_bytes":output.len(),"png_sha256":hash}));
+    }
+    Ok(
+        json!({"schema_version":1,"benchmark":"composite","fixture":{"clipped":c.clipped,"depth":c.depth,"source_size":c.source_size,"blur":c.blur,"shared_masks":1,"json_bytes":serde_json::to_vec(&raw)?.len()},"budgets":{"temporary_bytes":crate::composite::MAX_TEMP_BYTES,"pixel_work":crate::composite::MAX_PIXEL_WORK},"runs":runs,"peak_resident_bytes":peak_resident_bytes()}),
+    )
 }
 
 /// Image-aware benchmark: one reused source placed `images` times with an

@@ -290,12 +290,23 @@ pub fn to_png(doc: &Document, scale: f32) -> Result<Vec<u8>> {
 }
 
 pub fn svg_to_png(svg: &str, canvas_width: u32, canvas_height: u32, scale: f32) -> Result<Vec<u8>> {
+    if !(0.1..=8.0).contains(&scale) {
+        bail!("scale must be between 0.1 and 8")
+    }
     svg_to_png_with_fonts(svg, canvas_width, canvas_height, scale, &[])
 }
 
 /// Rasterizes a scene SVG with the bundled, embedded, and installed fonts so
 /// `<text>` nodes render the same as in the SVG export.
 pub fn scene_to_png(scene: &crate::image::SceneSvg, scale: f32) -> Result<Vec<u8>> {
+    if !(0.1..=8.0).contains(&scale) {
+        bail!("scale must be between 0.1 and 8")
+    }
+    scene_to_png_proxy(scene, scale)
+}
+
+/// Compositor proxy rasterization; released export scale checks stay unchanged.
+pub(crate) fn scene_to_png_proxy(scene: &crate::image::SceneSvg, scale: f32) -> Result<Vec<u8>> {
     svg_to_png_with_fonts(&scene.svg, scene.width, scene.height, scale, &scene.fonts)
 }
 
@@ -306,12 +317,19 @@ fn svg_to_png_with_fonts(
     scale: f32,
     fonts: &[crate::document::FontAsset],
 ) -> Result<Vec<u8>> {
-    if !(0.1..=8.0).contains(&scale) {
-        bail!("scale must be between 0.1 and 8");
+    if !(1.0 / 16384.0..=8.0).contains(&scale) {
+        bail!("proxy scale must be between 1/16384 and 8");
     }
     let mut doc = Document::new(canvas_width, canvas_height);
     doc.fonts = fonts.to_vec();
-    let (width, height, _) = render_dimensions(&doc, scale)?;
+    let width = (f64::from(canvas_width) * f64::from(scale))
+        .round()
+        .max(1.0) as u32;
+    let height = (f64::from(canvas_height) * f64::from(scale))
+        .round()
+        .max(1.0) as u32;
+    let dimensions = Document::new(width, height);
+    render_dimensions(&dimensions, 1.0)?;
     let options = resvg::usvg::Options {
         font_family: fonts::DEFAULT_FAMILY.into(),
         fontdb: std::sync::Arc::new(fonts::database(&doc, true)?),
