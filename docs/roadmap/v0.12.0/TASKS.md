@@ -1,6 +1,6 @@
-# v0.7.6 — Professional color management and print production
+# v0.12.0 — Professional color management and print production
 
-Extend v0.7.5's RGB foundation into professional ICC, CMYK/Lab, proofing, spot
+Extend v0.11.0's RGB foundation into professional ICC, CMYK/Lab, proofing, spot
 color, separation, preflight, and standards-conforming print delivery in Rust.
 
 ## Product contract
@@ -68,7 +68,7 @@ pentool export campaign.pen campaign.pdf --recipe magazine-print
 
 ## Acceptance demo
 
-Open the v0.7.5 wide-gamut master, assign a press condition, add a spot ink,
+Open the v0.11.0 wide-gamut master, assign a press condition, add a spot ink,
 configure overprint, proof paper/ink/gamut/TAC, resolve structured preflight issues,
 inspect every plate, and export validated PDF/X plus proof and report. Collect the
 project and reproduce the declared production output offline on another target.

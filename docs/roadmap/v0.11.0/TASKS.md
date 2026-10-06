@@ -1,9 +1,9 @@
-# v0.7.5 — Professional photography and RAW development
+# v0.11.0 — Professional photography and RAW development
 
-Build a Lightroom-class, non-destructive photography workflow on v0.7.0–v0.7.4.
+Build a Lightroom-class, non-destructive photography workflow on v0.7.0–v0.10.0.
 This milestone owns RAW development, high-bit-depth RGB processing, lens correction,
 local adjustments, variants, organization, and batch delivery. Commercial-print
-color management moves to v0.7.6 so photography can ship as a coherent product.
+color management moves to v0.12.0 so photography can ship as a coherent product.
 
 ## Product contract
 
@@ -14,10 +14,10 @@ color management moves to v0.7.6 so photography can ship as a coherent product.
 - Projects render offline; camera databases and AI providers are not runtime needs.
 - Metadata retention, especially GPS and identity data, is explicit.
 
-v0.7.5 includes the photographic color foundation: declared input profiles,
+v0.11.0 includes the photographic color foundation: declared input profiles,
 scene-linear high-precision processing, wide-gamut RGB spaces, calibrated RGB
 preview where supported, and explicit RGB export conversion. CMYK/Lab, spot inks,
-separations, paper simulation, and PDF/X belong to v0.7.6.
+separations, paper simulation, and PDF/X belong to v0.12.0.
 
 ## Must ship, in order
 
@@ -75,7 +75,7 @@ pentool photo export catalog.pen --selection picks --recipe web-gallery
 - Package sources, profiles, masks, variants, and recipes for offline reproduction.
 - Cancel decode, merge, or export without partial mutation or orphan artifacts.
 
-## Deferred to v0.7.6
+## Deferred to v0.12.0
 
 Complete ICC workflows, CMYK/Lab, device-link profiles, ink limits, spot colors,
 overprint, separations, paper simulation, print preflight, and PDF/X production.

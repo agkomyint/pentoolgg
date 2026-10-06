@@ -47,14 +47,15 @@ The current planned sequence is:
 
 1. `docs/roadmap/v0.6.24/TASKS.md`: trustworthy component updates and overrides;
 2. `docs/roadmap/v0.7.0/TASKS.md`: raster images and non-destructive image editing;
-3. `docs/roadmap/v0.7.2/TASKS.md`: professional compositing;
-4. `docs/roadmap/v0.7.3/TASKS.md`: BYOK image models;
-5. `docs/roadmap/v0.7.4/TASKS.md`: pixel editing and retouching;
-6. `docs/roadmap/v0.7.5/TASKS.md`: photography and RAW development;
-7. `docs/roadmap/v0.7.6/TASKS.md`: color management and print production.
+3. `docs/roadmap/v0.8.0/TASKS.md`: professional compositing;
+4. `docs/roadmap/v0.9.0/TASKS.md`: BYOK image models;
+5. `docs/roadmap/v0.10.0/TASKS.md`: pixel editing and retouching;
+6. `docs/roadmap/v0.11.0/TASKS.md`: photography and RAW development;
+7. `docs/roadmap/v0.12.0/TASKS.md`: color management and print production.
 
-v0.7.1 shipped as the bug-fix release for v0.7.0 (`docs/roadmap/v0.7.0/bug.md`), so the
-planned feature releases start at v0.7.2.
+v0.7.1 shipped as the bug-fix release for v0.7.0 (`docs/roadmap/v0.7.0/bug.md`).
+Roadmap folder numbers are planned milestones, not reserved release numbers; the
+actual version is chosen at release time under the versioning policy below.
 
 Earlier roadmap files are historical requirements and useful regression context.
 When implementing roadmap work:
@@ -70,6 +71,21 @@ When implementing roadmap work:
 If code, public documentation, schema, and roadmap disagree, stop and resolve the
 contract explicitly. The schema and released behavior take precedence over an
 unimplemented proposal.
+
+## Versioning policy
+
+Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
+
+- PATCH (`0.8.0` -> `0.8.1`): bug fixes and documentation only. No new features,
+  no format or CLI changes beyond fixing documented behavior.
+- MINOR (`0.8.x` -> `0.9.0`): new backward-compatible features. While the version
+  is below 1.0, a minor release may also carry a documented, migrated break.
+- MAJOR (`0.x` -> `1.0.0`): declared stable `.pen` format and CLI.
+- Feature roadmaps use minor numbers; patch numbers are reserved for fixes so an
+  urgent fix never collides with planned work.
+- Fixes for a released version are made from its tag and shipped as the next patch.
+- Roadmap folder names are plans. If a fix release or reordering changes the
+  sequence, renumber the roadmap in the same change that ships the release.
 
 ## Repository map
 

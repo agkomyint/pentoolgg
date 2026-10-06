@@ -1,4 +1,4 @@
-# v0.7.2 — Professional compositing and reusable image workflows
+# v0.8.0 — Professional compositing and reusable image workflows
 
 Build on v0.7's image nodes and immutable operation stacks with the most valuable
 professional concepts proven by Photoshop: adjustment layers, reusable masks,
@@ -16,7 +16,7 @@ another layer's alpha; and blend modes define compositing mathematically. These 
 cleanly to Pentool's scene graph, hashes, history, and structured diffs.
 
 Brush painting, dozens of legacy artistic filters, video, 3D, and bundled generative
-models do not fit v0.7.2. AI and content-aware tools remain external-tool operations
+models do not fit v0.8.0. AI and content-aware tools remain external-tool operations
 whose imported results carry provenance.
 
 ## Must ship, in order
@@ -132,12 +132,12 @@ errors, and exactly one transaction.
 - Golden composite pixels pass on Windows, Linux, Intel macOS, and Apple Silicon;
   performance and peak memory remain within documented budgets.
 
-## Deferred beyond v0.7.2
+## Deferred beyond v0.8.0
 
 - Pixel brushes, clone/heal painting, liquify, puppet rigs, and a full raster-layer
   painting engine.
 - CMYK/Lab editing and print-proofing until a complete color-management contract is
-  designed; v0.7.2 remains explicit sRGB.
+  designed; v0.8.0 remains explicit sRGB.
 - Camera RAW development and lens-profile databases.
 - Animation, video timelines, 3D, and neural filters.
 - In-core generative fill, background removal, or content-aware synthesis. These

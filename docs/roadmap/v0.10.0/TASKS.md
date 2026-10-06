@@ -1,7 +1,7 @@
-# v0.7.4 — Rust-native pixel editing and retouching
+# v0.10.0 — Rust-native pixel editing and retouching
 
 Complete the missing hands-on raster workflow after v0.7.0 image operations,
-v0.7.2 compositing, and v0.7.3 model-assisted editing. Add paintable raster layers,
+v0.8.0 compositing, and v0.9.0 model-assisted editing. Add paintable raster layers,
 brushes, erasing, clone/heal, patching, and local retouching through one bounded,
 deterministic Rust engine. Human edits and AI-produced assets use the same masks,
 selections, history, compositing, inspection, and export paths.
@@ -80,7 +80,7 @@ on browser timing. Periodic content-addressed checkpoints bound replay time.
 - [ ] **7. Add healing and patch tools.** Implement deterministic spot healing,
   healing brush, and selection-based patching in Rust with bounded algorithms.
   Separate texture transfer from tone/color matching, expose changed-region
-  previews, and version the algorithm. AI cleanup remains an optional v0.7.3
+  previews, and version the algorithm. AI cleanup remains an optional v0.9.0
   alternative, never the hidden implementation of a core retouch tool.
 
 - [ ] **8. Add flood fill and contiguous selection.** Implement tolerance,
@@ -158,7 +158,7 @@ leaves a partially committed journal or tile set.
 ## Explicitly deferred
 
 - Camera RAW development, ICC-managed wide-gamut editing, CMYK/Lab documents,
-  proofing, separations, and print production; these belong to v0.7.5.
+  proofing, separations, and print production; these belong to v0.11.0.
 - A Photoshop-compatible `.psd` fidelity guarantee. Import/export may be proposed
   later only with a documented mapping and loss report.
 - Unbounded procedural brushes, executable brush scripts, and third-party native
@@ -168,8 +168,8 @@ leaves a partially committed journal or tile set.
 
 ## Acceptance demo
 
-Open a layered campaign assembled in v0.7.2, accept a cleaned product image from
-v0.7.3, then create raster layers for manual finishing. Remove small defects with
+Open a layered campaign assembled in v0.8.0, accept a cleaned product image from
+v0.9.0, then create raster layers for manual finishing. Remove small defects with
 clone and healing, paint edge corrections through a saved mask, dodge and burn the
 product, add hand-painted texture with pressure input, and patch one selected
 region. Show tile-aware diff, undo/redo, checkpoint compaction, package round trip,

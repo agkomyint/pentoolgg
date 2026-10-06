@@ -1,4 +1,4 @@
-# v0.7.3 — BYOK image models as first-class editing tools
+# v0.9.0 — BYOK image models as first-class editing tools
 
 Integrate user-chosen image models into Pentool's existing image workflow without
 turning the editor into an autonomous agent or coupling `.pen` documents to one AI
@@ -147,7 +147,7 @@ explain the change without making ordinary rendering nondeterministic.
   frame geometry, transform, clipping, masks, effects, and stacking unless the
   user deliberately chooses a new placement.
 
-- [ ] **7. Add mask-aware inpaint and object removal.** Reuse v0.7.2 selections
+- [ ] **7. Add mask-aware inpaint and object removal.** Reuse v0.8.0 selections
   and raster/vector masks, rasterizing a request mask through the authoritative
   renderer with declared polarity and dimensions. Preview the exact disclosed
   source and mask. Returned pixels never overwrite areas outside the intended
@@ -228,7 +228,7 @@ money merely because a document gained an AI recipe.
   generate recipe where both support it, with unsupported fields rejected before
   submission.
 - Remove a product background, refine it through a reusable mask, accept one of
-  several candidates, and continue editing it with ordinary v0.7/v0.7.2 tools.
+  several candidates, and continue editing it with ordinary v0.7/v0.8.0 tools.
 - Inpaint a selected region while the review UI shows the precise source, mask,
   prompt privacy, provider, model, settings, and pixels changed.
 - Replace an image asset while preserving its scene placement, crop, transform,
@@ -252,12 +252,12 @@ money merely because a document gained an AI recipe.
 - Claims of pixel reproducibility across provider model updates. Materialized
   output hashes, not seeds or prompts, are authoritative.
 - Video generation, audio generation, general text/chat models, and arbitrary tool
-  execution; v0.7.3 is intentionally limited to image creation and image editing.
+  execution; v0.9.0 is intentionally limited to image creation and image editing.
 
 ## Acceptance demo
 
 Open a product campaign and select one photo. Use a BYOK provider to remove its
-background, refine the returned mask with v0.7.2 tools, outpaint a wider hero, and
+background, refine the returned mask with v0.8.0 tools, outpaint a wider hero, and
 generate four background candidates from a reusable recipe. Accept one candidate,
 apply ordinary curves and effects, then inspect a diff and complete provenance.
 Switch to a second provider and regenerate a variation after reviewing capability
