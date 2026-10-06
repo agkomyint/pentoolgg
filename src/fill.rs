@@ -61,9 +61,9 @@ pub(crate) fn color(value: &Value, styles: &Value) -> Result<[f64; 4]> {
                 out[i] = f64::from((*c as char).to_digit(16).unwrap() * 17) / 255.0;
             }
         } else {
-            for (i, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
-                out[i] =
-                    f64::from(u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)?) / 255.0;
+            for (i, output) in out.iter_mut().take(hex.len() / 2).enumerate() {
+                let start = i * 2;
+                *output = f64::from(u8::from_str_radix(&hex[start..start + 2], 16)?) / 255.0;
             }
         }
         Ok(out)
