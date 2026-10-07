@@ -275,3 +275,86 @@ fn bad_heal_requests_leave_the_document_unchanged() {
     assert_eq!(dry["dry_run"], true);
     assert_eq!(fs::read(&doc).unwrap(), before);
 }
+
+#[test]
+fn patch_heals_only_the_selection_replays_and_requires_one() {
+    let ws = Workspace::new("patch");
+    let doc = ws.document("patch.pen");
+    let before = hash(&doc);
+    let error = fail(&[
+        "raster",
+        &doc,
+        "heal-patch",
+        "p",
+        "--dx",
+        "100",
+        "--dy",
+        "0",
+    ]);
+    assert!(error.contains("selection"), "{error}");
+    assert_eq!(hash(&doc), before, "failed patch must not change the layer");
+    ok(&[
+        "raster",
+        &doc,
+        "select-marquee",
+        "p",
+        "--rect",
+        "88",
+        "88",
+        "24",
+        "24",
+    ]);
+    let result = ok(&[
+        "raster",
+        &doc,
+        "heal-patch",
+        "p",
+        "--dx",
+        "100",
+        "--dy",
+        "0",
+        "--texture",
+        "0.5",
+    ]);
+    let bounds: Vec<u64> = result["result"]["bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_u64().unwrap())
+        .collect();
+    assert!(
+        bounds[0] >= 88 && bounds[1] >= 88 && bounds[2] <= 112 && bounds[3] <= 112,
+        "patch escaped the selection: {bounds:?}"
+    );
+    assert_ne!(hash(&doc), before);
+    let last = journal(&doc).pop().unwrap();
+    assert_eq!(last["blend"], "heal");
+    assert_eq!(last["heal"]["algorithm"], 1);
+    let verify = ok(&["raster", &doc, "verify", "p", "--replay"]);
+    assert_eq!(verify["ok"], true, "{verify}");
+    let again = ws.document("again.pen");
+    ok(&[
+        "raster",
+        &again,
+        "select-marquee",
+        "p",
+        "--rect",
+        "88",
+        "88",
+        "24",
+        "24",
+    ]);
+    ok(&[
+        "raster",
+        &again,
+        "heal-patch",
+        "p",
+        "--dx",
+        "100",
+        "--dy",
+        "0",
+        "--texture",
+        "0.5",
+    ]);
+    assert_eq!(hash(&again), hash(&doc), "patch is deterministic");
+}

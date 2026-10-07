@@ -355,6 +355,74 @@ pub fn spot(
     Ok(result)
 }
 
+/// Patch healing: repair the active selection with texture from the area `dx`,
+/// `dy` pixels away. The selection edge is the tone ring, so only selected pixels
+/// change; this is a heal stroke that covers the selection's bounds.
+pub fn patch(
+    raw: &mut Value,
+    page: Option<&str>,
+    id: &str,
+    offset: (f64, f64),
+    texture: Option<f64>,
+    tone: Option<f64>,
+    seed: u64,
+) -> Result<Value> {
+    ensure_node_unlocked(raw, page, id)?;
+    if !offset.0.is_finite() || !offset.1.is_finite() || offset == (0.0, 0.0) {
+        bail!("[invalid-heal] patch needs a finite, nonzero source offset (dx, dy)")
+    }
+    let node = all_rasters(raw)
+        .into_iter()
+        .find(|node| node["id"] == id)
+        .context("[not-found] raster layer was not found")?;
+    let surface = Surface::load(raw, node)?;
+    let Some((selection, _)) = selection::pin(raw, id, surface.width, surface.height)? else {
+        bail!("[invalid-heal] patch repairs the selection of {id}, but it has none; run `select-marquee`, `select-lasso` or `select-wand` first")
+    };
+    let Some([x0, y0, x1, y1]) = selection.painted_bounds() else {
+        bail!("[invalid-heal] the selection of {id} is empty")
+    };
+    let (cx, cy) = (f64::from(x0 + x1) / 2.0, f64::from(y0 + y1) / 2.0);
+    let diagonal = f64::from(x1 - x0).hypot(f64::from(y1 - y0));
+    let mut brush = json!({
+        "kind": "hard-round",
+        "size": (diagonal + 4.0).min(MAX_BRUSH_SIZE),
+        "hardness": 1.0,
+    });
+    if let Some(texture) = texture {
+        brush["texture"] = json!(texture);
+    }
+    if let Some(tone) = tone {
+        brush["tone"] = json!(tone);
+    }
+    let mut result = paint(
+        raw,
+        page,
+        id,
+        StrokeRequest {
+            brush: Brush::parse(&brush)?,
+            samples: parse_samples(&json!([[cx, cy]]))?,
+            color: [0, 0, 0],
+            blend: Blend::Tool(Tool::Heal),
+            seed,
+            clone: Some(CloneRequest {
+                source: None,
+                sx: cx + offset.0,
+                sy: cy + offset.1,
+                ax: cx,
+                ay: cy,
+                angle: 0.0,
+                scale: 1.0,
+            }),
+        },
+    )?;
+    result["heal"] = json!({
+        "algorithm": ALGORITHM,
+        "patch": {"source_offset": [offset.0, offset.1], "bounds": [x0, y0, x1, y1]},
+    });
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

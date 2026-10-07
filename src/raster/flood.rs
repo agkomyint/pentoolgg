@@ -205,6 +205,20 @@ pub fn fill(
     opacity: f64,
     options: &Options,
 ) -> Result<Value> {
+    fill_sampled(raw, page, id, color, opacity, options, None)
+}
+
+/// [`fill`] with the region measured on `sample` (a same-size view such as the
+/// composite page, `scope: composite`) instead of the layer's own pixels.
+pub fn fill_sampled(
+    raw: &mut Value,
+    page: Option<&str>,
+    id: &str,
+    color: [u8; 3],
+    opacity: f64,
+    options: &Options,
+    sample: Option<&Surface>,
+) -> Result<Value> {
     ensure_node_unlocked(raw, page, id)?;
     if !(0.0..=1.0).contains(&opacity) || !opacity.is_finite() {
         bail!("[invalid-fill] opacity must be between 0 and 1")
@@ -212,7 +226,7 @@ pub fn fill(
     let mut next = raw.clone();
     let snapshot = locate(&mut next, page, id)?.clone();
     let mut surface = Surface::load(&next, &snapshot)?;
-    let coverage = region(&surface, options)?;
+    let coverage = region(sample.unwrap_or(&surface), options)?;
     let selection = selection::pin(&next, id, surface.width, surface.height)?;
     let opacity16 = (opacity * 65535.0).round() as u32;
     let mut changed = 0u64;
@@ -263,9 +277,21 @@ pub fn wand(
     options: &Options,
     mode: selection::Mode,
 ) -> Result<Value> {
+    wand_sampled(raw, page, id, options, mode, None)
+}
+
+/// [`wand`] with the region measured on `sample`; see [`fill_sampled`].
+pub fn wand_sampled(
+    raw: &mut Value,
+    page: Option<&str>,
+    id: &str,
+    options: &Options,
+    mode: selection::Mode,
+    sample: Option<&Surface>,
+) -> Result<Value> {
     let node = locate(&mut raw.clone(), page, id)?.clone();
     let surface = Surface::load(raw, &node)?;
-    let coverage = region(&surface, options)?;
+    let coverage = region(sample.unwrap_or(&surface), options)?;
     let mut next = raw.clone();
     let old = selection::active(&next, id)?;
     if let Some(old) = &old {
@@ -281,6 +307,11 @@ pub fn wand(
     let mut result = selection::summary(&merged);
     result["id"] = json!(id);
     result["algorithm"] = json!(ALGORITHM);
+    result["scope"] = json!(if sample.is_some() {
+        "composite"
+    } else {
+        "layer"
+    });
     Ok(result)
 }
 

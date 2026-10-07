@@ -36,6 +36,11 @@ pub fn apply(
         gap: count("gap"),
         transparent_barrier: args["transparent_barrier"].as_bool().unwrap_or(false),
     };
+    if args["scope"].as_str().is_some_and(|scope| scope != "layer")
+        || args["layer"].as_str() == Some("below")
+    {
+        bail!("[unsupported-capability] scope composite and clone source below render the page from the document's folder; use the CLI (`--scope composite`, `clone-source --layer below`) instead of the shared dispatcher")
+    }
     let result = match action {
         "info" => super::info(raw, page, id)?,
         "fill" => super::fill(
@@ -112,6 +117,15 @@ pub fn apply(
             result["input"] = input_summary;
             result
         }
+        "heal-patch" => super::heal_patch(
+            raw,
+            page,
+            id,
+            (num("dx")?, num("dy")?),
+            args["texture"].as_f64(),
+            args["tone"].as_f64(),
+            args["seed"].as_u64().unwrap_or(0),
+        )?,
         "set-clone-source" => super::set_clone_source(
             raw,
             page,

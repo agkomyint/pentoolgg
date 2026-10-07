@@ -1638,9 +1638,24 @@ struct FloodArgs {
     /// Never let fully transparent pixels join an opaque seed's region.
     #[arg(long)]
     transparent_barrier: bool,
+    /// Measure the region on `layer` (default) or on the visible page `composite`.
+    #[arg(long, default_value = "layer", value_parser = ["layer", "composite"])]
+    scope: String,
 }
 
 impl FloodArgs {
+    /// The visible page cropped to the layer when `--scope composite` is used.
+    fn sample(
+        &self,
+        raw: &serde_json::Value,
+        document: &std::path::Path,
+        page: Option<&str>,
+    ) -> Result<Option<raster::Surface>> {
+        (self.scope == "composite")
+            .then(|| raster::sample_page(raw, document, page, &self.id, raster::Scope::Composite))
+            .transpose()
+    }
+
     fn options(&self) -> raster::FloodOptions {
         raster::FloodOptions {
             x: self.x,
@@ -2024,6 +2039,20 @@ enum RasterAction {
     SelectClear { id: String },
     /// Summarize the layer's selection.
     SelectInfo { id: String },
+    /// Patch healing: repair the layer's selection with texture from `--dx`,`--dy` away.
+    HealPatch {
+        id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        dx: f64,
+        #[arg(long, allow_hyphen_values = true)]
+        dy: f64,
+        #[arg(long)]
+        texture: Option<f64>,
+        #[arg(long)]
+        tone: Option<f64>,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
     /// Spot healing: repair one round spot, choosing the source automatically.
     HealSpot {
         id: String,
@@ -3573,35 +3602,47 @@ async fn run() -> Result<()> {
                     "raster-checkpoint",
                     raster::checkpoint(&mut raw, page, &id, compact)?,
                 ),
-                RasterAction::CloneSource { id, layer, x, y } => (
-                    "raster-clone-source",
-                    raster::set_clone_source(&mut raw, page, &id, layer.as_deref(), x, y)?,
-                ),
+                RasterAction::CloneSource { id, layer, x, y } => {
+                    // `below` freezes what lies under the layer into a hidden raster
+                    // and samples that, so the stroke pins the composite.
+                    let layer = if layer.as_deref() == Some("below") {
+                        raster::snapshot_below(&mut raw, &input, page, &id)?;
+                        Some(format!("{id}-below"))
+                    } else {
+                        layer
+                    };
+                    (
+                        "raster-clone-source",
+                        raster::set_clone_source(&mut raw, page, &id, layer.as_deref(), x, y)?,
+                    )
+                }
                 RasterAction::Fill {
                     region,
                     color,
                     opacity,
-                } => (
-                    "raster-fill",
-                    raster::fill(
+                } => ("raster-fill", {
+                    let sample = region.sample(&raw, &input, page)?;
+                    raster::fill_sampled(
                         &mut raw,
                         page,
                         &region.id,
                         raster::parse_color(&color)?,
                         opacity,
                         &region.options(),
-                    )?,
-                ),
-                RasterAction::SelectWand { region, mode } => (
-                    "raster-select-wand",
-                    raster::select_wand(
+                        sample.as_ref(),
+                    )?
+                }),
+                RasterAction::SelectWand { region, mode } => ("raster-select-wand", {
+                    let sample = region.sample(&raw, &input, page)?;
+                    raster::select_wand_sampled(
                         &mut raw,
                         page,
                         &region.id,
                         &region.options(),
                         raster::SelectionMode::parse(&mode)?,
-                    )?,
-                ),
+                        sample.as_ref(),
+                    )?
+                }),
                 RasterAction::SelectMarquee {
                     id,
                     shape,
@@ -3784,6 +3825,17 @@ async fn run() -> Result<()> {
                     );
                     return Ok(());
                 }
+                RasterAction::HealPatch {
+                    id,
+                    dx,
+                    dy,
+                    texture,
+                    tone,
+                    seed,
+                } => (
+                    "raster-heal-patch",
+                    raster::heal_patch(&mut raw, page, &id, (dx, dy), texture, tone, seed)?,
+                ),
                 RasterAction::HealSpot {
                     id,
                     x,

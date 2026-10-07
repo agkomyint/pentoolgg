@@ -46,8 +46,14 @@ pub use clone::{
     set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
     Request as CloneRequest, Spec as CloneSpec,
 };
-pub use compose::{flatten, merge_visible, orient, stamp_visible, Orient};
-pub use flood::{fill, wand as select_wand, Options as FloodOptions};
+pub use compose::{
+    flatten, merge_visible, orient, sample_page, snapshot_below, stamp_visible, Orient, Scope,
+};
+pub use flood::{
+    fill, fill_sampled, wand as select_wand, wand_sampled as select_wand_sampled,
+    Options as FloodOptions,
+};
+pub use heal::patch as heal_patch;
 pub use heal::spot as heal_spot;
 use input::lerp;
 pub use input::{
@@ -874,7 +880,7 @@ pub fn apply_stroke_selected(
         return apply_stroke(surface, stroke);
     };
     let before = surface.clone();
-    let mut result = apply_stroke(surface, stroke)?;
+    let mut result = apply_stroke_inner(surface, stroke, Some(selection))?;
     selection::blend_through(&before, surface, selection);
     result.tiles_changed = surface
         .tiles
@@ -888,6 +894,14 @@ pub fn apply_stroke_selected(
 }
 
 pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResult> {
+    apply_stroke_inner(surface, stroke, None)
+}
+
+fn apply_stroke_inner(
+    surface: &mut Surface,
+    stroke: &Stroke,
+    selection: Option<&Surface>,
+) -> Result<StrokeResult> {
     let tip = match (&stroke.brush.tip, &stroke.tip) {
         (None, _) => None,
         (Some(_), Some(mask)) if mask.len() == TILE * TILE => Some(&mask[..]),
@@ -949,6 +963,18 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
             surface.width,
             surface.height,
         );
+    }
+    // A heal under a selection repairs exactly the selected pixels: unselected
+    // coverage is dropped before the solver so the selection edge is the tone ring.
+    if let (Blend::Tool(Tool::Heal), Some(selection)) = (stroke.blend, selection) {
+        for (key, cell) in buffer.iter_mut() {
+            let cover = selection.tiles.get(key);
+            for (i, value) in cell.iter_mut().enumerate() {
+                if cover.is_none_or(|c| c[i * 4 + 3] == 0) {
+                    *value = 0;
+                }
+            }
+        }
     }
     let opacity16 = (stroke.brush.opacity * 65535.0).round() as u32;
     let field = match (stroke.blend, cloner) {

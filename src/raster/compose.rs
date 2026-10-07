@@ -202,6 +202,132 @@ fn stamp(raw: &Value, document: &Path, page: Option<&str>) -> Result<Option<(Sur
     Ok(Some((surface, [x0, y0, x1, y1])))
 }
 
+/// How a layer's flood scope or clone source samples the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    /// Everything visible on the page, including the layer itself.
+    Composite,
+    /// Only content stacked beneath the layer.
+    Below,
+}
+
+impl Scope {
+    pub fn parse(text: &str) -> Result<Self> {
+        match text {
+            "composite" => Ok(Self::Composite),
+            "below" => Ok(Self::Below),
+            other => bail!("[invalid-input] sample scope {other:?} must be composite or below"),
+        }
+    }
+}
+
+/// Hide the node `chain` leads to and everything stacked above it. Later siblings
+/// and later layers are above earlier ones.
+fn hide_from(raw: &mut Value, path: &layer::NodePath) {
+    let layers = raw["pages"][path.page]["layers"].as_array_mut().unwrap();
+    for upper in layers.iter_mut().skip(path.layer + 1) {
+        upper["visible"] = json!(false);
+    }
+    let mut list = layers[path.layer]["nodes"].as_array_mut().unwrap();
+    for (depth, index) in path.chain.iter().enumerate() {
+        for upper in list.iter_mut().skip(index + 1) {
+            upper["visible"] = json!(false);
+        }
+        if depth + 1 == path.chain.len() {
+            list[*index]["visible"] = json!(false);
+            return;
+        }
+        list = list[*index]["children"].as_array_mut().unwrap();
+    }
+}
+
+/// The page as seen through the rectangle of raster layer `id`, in layer pixels.
+/// The layer must be unrotated and unscaled so that the two grids coincide.
+pub fn sample_page(
+    raw: &Value,
+    document: &Path,
+    page: Option<&str>,
+    id: &str,
+    scope: Scope,
+) -> Result<Surface> {
+    let path = find_path(raw, page, id)?;
+    let node = all_rasters(raw)
+        .into_iter()
+        .find(|n| n["id"] == id)
+        .with_context(|| format!("[not-found] raster layer {id} was not found"))?;
+    if let Some(transform) = node.get("transform") {
+        if *transform != json!([1, 0, 0, 1, 0, 0])
+            && *transform != json!([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+        {
+            bail!("[unsupported-capability] sampling the page through {id} needs an untransformed layer; its transform is {transform}")
+        }
+    }
+    let (w, h) = (
+        node["width"].as_u64().unwrap_or(0) as u32,
+        node["height"].as_u64().unwrap_or(0) as u32,
+    );
+    ensure_plane(w, h)?;
+    let (x, y) = (
+        node["x"].as_f64().unwrap_or(0.0).round() as i64,
+        node["y"].as_f64().unwrap_or(0.0).round() as i64,
+    );
+    let mut view = raw.clone();
+    if scope == Scope::Below {
+        hide_from(&mut view, &path);
+    }
+    let image = crate::composite::render_content(&view, document, page, 1.0)?;
+    let full = Surface::from_image(&image);
+    let mut out = Surface::empty(w, h);
+    out.blit(&full, -x, -y);
+    Ok(out)
+}
+
+/// Freeze what lies beneath raster layer `id` as a hidden raster `ID-below` placed
+/// just under it, replacing an earlier snapshot. Use that layer as a clone source:
+/// the stroke pins its tiles, so later edits cannot reinterpret the stroke.
+pub fn snapshot_below(
+    raw: &mut Value,
+    document: &Path,
+    page: Option<&str>,
+    id: &str,
+) -> Result<Value> {
+    ensure_node_unlocked(raw, page, id)?;
+    let sample = sample_page(raw, document, page, id, Scope::Below)?;
+    let snapshot_id = format!("{id}-below");
+    let mut next = raw.clone();
+    let path = find_path(&next, page, id)?;
+    let existing = all_rasters(&next)
+        .into_iter()
+        .any(|n| n["id"] == snapshot_id.as_str());
+    if !existing {
+        layer::ensure_new_id(&next, &snapshot_id)?;
+    }
+    let target = all_rasters(&next)
+        .into_iter()
+        .find(|n| n["id"] == id)
+        .context("raster layer vanished")?
+        .clone();
+    let mut node = raster_node(&snapshot_id, [0, 0, sample.width, sample.height]);
+    node["x"] = target["x"].clone();
+    node["y"] = target["y"].clone();
+    node["visible"] = json!(false);
+    let hash = commit_surface(&mut next, &mut node, &sample, "snapshot-below")?;
+    let list = siblings_mut(&mut next, &path)?;
+    if let Some(at) = list.iter().position(|n| n["id"] == snapshot_id.as_str()) {
+        list[at] = node;
+    } else {
+        let at = list.iter().position(|n| n["id"] == id).unwrap_or(0);
+        list.insert(at, node);
+    }
+    collect_garbage(&mut next);
+    crate::scene::validate(&next)?;
+    *raw = next;
+    Ok(json!({
+        "id": snapshot_id, "source_for": id, "algorithm": ALGORITHM,
+        "tiles": sample.tiles.len(), "tile_map_sha256": hash,
+    }))
+}
+
 fn raster_node(new_id: &str, bounds: [u32; 4]) -> Value {
     json!({
         "kind": "raster", "id": new_id, "engine": ENGINE,

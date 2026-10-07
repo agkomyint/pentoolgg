@@ -158,3 +158,100 @@ fn merge_stamp_and_flatten_composite_the_visible_page() {
     let verify = ok(&["raster", &doc, "verify", "--replay"]);
     assert_eq!(verify["ok"], true, "{verify}");
 }
+
+#[test]
+fn composite_scope_and_below_clone_source_see_the_layers_beneath() {
+    let ws = Workspace::new("sample");
+    let path = ws.0.join("sample.pen").to_string_lossy().into_owned();
+    fs::copy("docs/fixtures/v4-scene.pen", &path).unwrap();
+    let doc = path.as_str();
+    ok(&[
+        "raster", doc, "add", "bg", "--width", "100", "--height", "60",
+    ]);
+    stroke(doc, "bg", "[[30,30]]", 20, "#0000FF");
+    ok(&[
+        "raster", doc, "add", "top", "--width", "100", "--height", "60",
+    ]);
+
+    // The empty top layer is one region by itself; through the composite the blue
+    // block bounds the region.
+    let wand = |extra: &[&str]| {
+        let mut args = vec![
+            "raster",
+            doc,
+            "select-wand",
+            "top",
+            "--x",
+            "30",
+            "--y",
+            "30",
+            "--global",
+        ];
+        args.extend(extra);
+        result(&args)["selected_pixels"].as_u64().unwrap()
+    };
+    let layer_only = wand(&[]);
+    let composite = wand(&["--scope", "composite"]);
+    assert_eq!(layer_only, 6000);
+    assert!(
+        composite > 0 && composite < layer_only,
+        "composite wand selected {composite}"
+    );
+    assert!(fail(&[
+        "raster",
+        doc,
+        "select-wand",
+        "top",
+        "--x",
+        "1",
+        "--y",
+        "1",
+        "--scope",
+        "bogus"
+    ])
+    .contains("scope"));
+
+    ok(&["raster", doc, "select-clear", "top"]);
+    // `below` freezes bg into a hidden layer and pins it as the clone source.
+    let source = result(&[
+        "raster",
+        doc,
+        "clone-source",
+        "top",
+        "--layer",
+        "below",
+        "--x",
+        "30",
+        "--y",
+        "30",
+    ]);
+    assert_eq!(source["source"], "top-below");
+    let stamped = ok(&[
+        "raster",
+        doc,
+        "clone-stroke",
+        "top",
+        "--samples",
+        "[[70,30]]",
+        "--brush",
+        r#"{"size":10,"hardness":1}"#,
+    ]);
+    assert!(stamped["result"]["tiles_changed"].as_u64().unwrap() > 0);
+    // Editing bg afterwards cannot reinterpret the recorded stroke.
+    stroke(doc, "bg", "[[30,30]]", 20, "#FF0000");
+    let verify = ok(&["raster", doc, "verify", "top", "--replay"]);
+    assert_eq!(verify["ok"], true, "{verify}");
+    let error = fail(&[
+        "raster",
+        doc,
+        "clone-source",
+        "top",
+        "--layer",
+        "top-below-missing",
+        "--x",
+        "1",
+        "--y",
+        "1",
+    ]);
+    assert!(error.contains("not-found"), "{error}");
+}

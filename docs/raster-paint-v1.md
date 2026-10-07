@@ -183,8 +183,15 @@ the digests of exactly the source tiles the stroke can read (at most 256). Repla
 verify and repair load only those digests, and compaction releases them with the
 entry, so later edits to the source layer never reinterpret an old clone. A stroke
 that would read more than 256 source tiles fails with a request to split it.
-Compositing other scene content as a source (the "below" source) arrives with
-stamp-visible in item 10.
+`clone-source ID --layer below --x X --y Y` samples the content stacked beneath the
+layer: it renders the page with the layer and everything above it hidden, crops that to
+the layer's rectangle and stores it as a hidden raster `ID-below` placed just under the
+layer (replacing an earlier snapshot), then uses that layer as the source. Because it
+is an ordinary raster source, strokes pin its tiles and later changes to the content
+beneath never reinterpret an old stroke; run the command again to take a new
+snapshot. The layer must not be rotated or scaled. This needs the document's folder to
+resolve external images, so it is a CLI command; `POST /api/raster` and `batch` reject
+`layer: "below"` (use `stamp-visible` plus a layer id there).
 
 ### Healing
 
@@ -210,8 +217,18 @@ and chooses the source itself: it scores 64 fixed candidate offsets (4 distances
 same ring shifted by the offset, preferring smooth source interiors, and takes the
 lowest score (first on ties). The result reports `heal.source_offset` and `heal.score`;
 the stroke is journaled as an ordinary heal stroke with an explicit source. It fails if
-the surroundings are not fully painted. Patch healing (selection based) is not
-implemented yet; selections now limit heal like every other paint operation.
+the surroundings are not fully painted.
+
+`heal-patch ID --dx DX --dy DY [--texture T] [--tone T]` (batch action `heal-patch`)
+repairs the layer's active selection with texture from the area `DX, DY` pixels away.
+It requires a selection and fails without one. It is a heal stroke whose hard round
+brush covers the selection's bounds; a heal under a selection drops unselected coverage
+before the solver runs, so the selection edge is the tone ring and only selected pixels
+change (soft selection edges blend as for every other paint operation). The repair
+region is bounded like any heal (1024 px per side). The stroke is journaled as an
+ordinary heal stroke (algorithm 1) and replays from the pinned selection.
+Note that any heal stroke made under a selection now solves over selection and
+stroke coverage together.
 
 ### Flood fill and selections
 
@@ -228,8 +245,10 @@ Region options (flood algorithm 1):
   so breaks up to 2N pixels wide stop the fill, then grows the result back inside the
   original candidates. A seed inside such a gap is an error.
 - edges are anti-aliased with a 3x3 box average unless `--no-antialias`.
-- the sample scope is the layer itself; sampling the visible composite arrives with
-  stamp-visible (item 10).
+- the sample scope is the layer itself by default. `--scope composite` (fill and
+  select-wand, CLI only) measures the region on the visible page cropped to the layer's
+  rectangle instead, which lets a transparent layer follow the artwork beneath it; the
+  layer must not be rotated or scaled. The API and batch reject non-layer scopes.
 
 Layers over 32 megapixels are refused before any plane is allocated. Nothing is
 written until the whole region is known, so a failed fill leaves the document
@@ -544,4 +563,4 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Patch healing, the stamp-visible clone source and composite flood scope, the editor's rulers/guides/snapping/navigator, fuzz/performance suites (roadmap items 6-7, 12, 14).
+The editor's rulers/guides/snapping/navigator, fuzz/performance suites (roadmap items 6-7, 12, 14).
