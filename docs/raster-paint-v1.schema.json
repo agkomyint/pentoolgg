@@ -61,7 +61,7 @@
       "properties": {
         "op": { "const": "stroke", "default": "stroke" },
         "engine": { "type": "integer", "minimum": 1 },
-        "blend": { "enum": ["normal", "erase"] },
+        "blend": { "enum": ["normal", "erase", "background-erase", "smudge", "blur", "sharpen", "dodge", "burn", "sponge", "color-replace"] },
         "color": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
         "seed": { "type": "integer", "minimum": 0 },
         "samples": {
@@ -97,6 +97,10 @@
               "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
               "description": "Journals record the tip digest; required for and only valid with kind textured."
             },
+            "strength": { "type": "number", "minimum": 0, "maximum": 1, "description": "Smudge, blur, sharpen, dodge, burn and sponge only." },
+            "tolerance": { "type": "integer", "minimum": 0, "maximum": 255, "description": "Background-erase and color-replace only." },
+            "range": { "enum": ["shadows", "midtones", "highlights"], "description": "Dodge and burn only." },
+            "mode": { "enum": ["saturate", "desaturate"], "description": "Sponge only." },
             "dynamics": {
               "type": "object",
               "additionalProperties": false,

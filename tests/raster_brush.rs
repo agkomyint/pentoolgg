@@ -356,3 +356,101 @@ fn pen_input_is_normalized_once_and_replays_from_the_journal() {
     ]);
     assert_eq!(fs::read(&doc).unwrap(), before);
 }
+
+#[test]
+fn erase_and_blend_tools_run_through_the_cli_and_replay() {
+    let ws = Workspace::new("tools");
+    let doc = ws.document("tools.pen");
+    let line = "[[20,100],[280,100]]";
+    // Paint a red band, then work on it with every local tool.
+    ok(&[
+        "raster",
+        &doc,
+        "stroke",
+        "p",
+        "--samples",
+        line,
+        "--brush",
+        r#"{"size":60,"hardness":1}"#,
+        "--color",
+        "#C82828",
+    ]);
+    let tools: [(&str, &str); 8] = [
+        ("blur", r#"{"size":100,"strength":0.8}"#),
+        ("sharpen", r#"{"size":100,"strength":0.6}"#),
+        ("dodge", r#"{"size":40,"range":"midtones"}"#),
+        ("burn", r#"{"size":40,"range":"shadows","strength":0.3}"#),
+        ("sponge", r#"{"size":40,"mode":"desaturate"}"#),
+        ("smudge", r#"{"size":100,"strength":0.7}"#),
+        ("color-replace", r#"{"size":50,"tolerance":60}"#),
+        ("background-erase", r#"{"size":30,"tolerance":40}"#),
+    ];
+    for (blend, brush) in tools {
+        let result = ok(&[
+            "raster",
+            &doc,
+            "stroke",
+            "p",
+            "--samples",
+            "[[60,100],[240,100]]",
+            "--brush",
+            brush,
+            "--blend",
+            blend,
+            "--color",
+            "#20C040",
+        ]);
+        assert!(
+            result["result"]["tiles_changed"].as_u64().unwrap() > 0,
+            "{blend} changed nothing: {result}"
+        );
+    }
+    let raw: Value = serde_json::from_str(&fs::read_to_string(&doc).unwrap()).unwrap();
+    let journal = find_node(&raw, "p").unwrap()["journal"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(journal.len(), 9);
+    assert_eq!(journal[8]["blend"], "background-erase");
+    assert_eq!(
+        journal[2]["brush"]["strength"], 0.6,
+        "sharpen strength journaled"
+    );
+    assert!(journal[0]["brush"].get("strength").is_none());
+    let verify = ok(&["raster", &doc, "verify", "--replay"]);
+    assert_eq!(verify["ok"], true, "{verify}");
+
+    // Misuse fails without touching the document.
+    let before = fs::read(&doc).unwrap();
+    for (blend, brush) in [
+        ("normal", r#"{"strength":0.5}"#),
+        ("blur", r#"{"tolerance":9}"#),
+        ("multiply", "{}"),
+    ] {
+        fail(&[
+            "raster",
+            &doc,
+            "stroke",
+            "p",
+            "--samples",
+            "[[60,100]]",
+            "--brush",
+            brush,
+            "--blend",
+            blend,
+        ]);
+    }
+    let empty = ws.document("empty.pen");
+    let message = fail(&[
+        "raster",
+        &empty,
+        "stroke",
+        "p",
+        "--samples",
+        "[[60,100]]",
+        "--blend",
+        "background-erase",
+    ]);
+    assert!(message.contains("transparent"), "{message}");
+    assert_eq!(fs::read(&doc).unwrap(), before);
+}

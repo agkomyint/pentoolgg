@@ -30,6 +30,7 @@ mod input;
 mod layer;
 mod math;
 mod recovery;
+mod retouch;
 mod tip;
 use input::lerp;
 pub use input::{
@@ -39,6 +40,7 @@ pub use input::{
 pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use recovery::{repair, replay, verify, RepairStrategy};
+pub use retouch::Tool;
 pub use tip::{load_tip, resolve_tip, tip_add, tip_from_image, tip_list, tip_remove, TipSource};
 
 // ---------------------------------------------------------------------------
@@ -270,6 +272,11 @@ pub struct Brush {
     pub tip: Option<String>,
     /// Input-driven size, flow, roundness and angle; see [`Dynamics`].
     pub dynamics: Dynamics,
+    /// Local-tool parameters, valid only with the blends that use them.
+    pub strength: Option<f64>,
+    pub tolerance: Option<u32>,
+    pub range: Option<String>,
+    pub mode: Option<String>,
 }
 
 pub const BRUSH_KINDS: [&str; 5] = [
@@ -311,7 +318,7 @@ impl Brush {
         let object = value
             .as_object()
             .context("[invalid-brush] brush must be an object")?;
-        const KNOWN: [&str; 16] = [
+        const KNOWN: [&str; 20] = [
             "kind",
             "size",
             "hardness",
@@ -328,6 +335,10 @@ impl Brush {
             "buildup",
             "tip",
             "dynamics",
+            "strength",
+            "tolerance",
+            "range",
+            "mode",
         ];
         if let Some(key) = object.keys().find(|k| !KNOWN.contains(&k.as_str())) {
             bail!(
@@ -368,6 +379,29 @@ impl Brush {
             (false, true) => bail!("[invalid-brush] tip is only valid for kind \"textured\""),
             _ => {}
         }
+        let optional_text = |key: &str, check: fn(&str) -> Result<()>| -> Result<Option<String>> {
+            match object.get(key) {
+                None => Ok(None),
+                Some(Value::String(text)) => {
+                    check(text)?;
+                    Ok(Some(text.clone()))
+                }
+                Some(_) => bail!("[invalid-brush] {key} must be a string"),
+            }
+        };
+        let strength = match object.get("strength") {
+            None => None,
+            Some(_) => Some(number_in(object, "strength", 0.5, 0.0, 1.0)?),
+        };
+        let tolerance = match object.get("tolerance") {
+            None => None,
+            Some(_) => Some(number_in(object, "tolerance", 32.0, 0.0, 255.0)?),
+        };
+        if tolerance.is_some_and(|t| t.fract() != 0.0) {
+            bail!("[invalid-brush] tolerance must be a whole number between 0 and 255")
+        }
+        let range = optional_text("range", retouch::parse_range)?;
+        let mode = optional_text("mode", retouch::parse_mode)?;
         let dynamics = Dynamics::parse(object.get("dynamics"))?;
         if dynamics.size.is_some() && flag("pressure_size")? {
             bail!("[invalid-brush] use either pressure_size or dynamics.size, not both")
@@ -377,6 +411,10 @@ impl Brush {
         }
         Ok(Brush {
             dynamics,
+            strength,
+            tolerance: tolerance.map(|t| t as u32),
+            range,
+            mode,
             size: number_in(object, "size", 12.0, 1.0, MAX_BRUSH_SIZE)?,
             hardness: number_in(
                 object,
@@ -436,6 +474,18 @@ impl Brush {
         if !self.dynamics.is_empty() {
             out["dynamics"] = self.dynamics.to_json();
         }
+        if let Some(strength) = self.strength {
+            out["strength"] = json!(strength);
+        }
+        if let Some(tolerance) = self.tolerance {
+            out["tolerance"] = json!(tolerance);
+        }
+        if let Some(range) = &self.range {
+            out["range"] = json!(range);
+        }
+        if let Some(mode) = &self.mode {
+            out["mode"] = json!(mode);
+        }
         out
     }
 
@@ -461,24 +511,8 @@ pub fn parse_color(text: &str) -> Result<[u8; 3]> {
 pub enum Blend {
     Normal,
     Erase,
-}
-
-impl Blend {
-    pub fn parse(text: &str) -> Result<Self> {
-        match text {
-            "normal" => Ok(Self::Normal),
-            "erase" => Ok(Self::Erase),
-            other => {
-                bail!("[invalid-stroke] blend {other:?} is not supported; use normal or erase")
-            }
-        }
-    }
-    fn name(self) -> &'static str {
-        match self {
-            Self::Normal => "normal",
-            Self::Erase => "erase",
-        }
-    }
+    /// Erasing and local blending tools; see `retouch.rs`.
+    Tool(Tool),
 }
 
 struct Dab {
@@ -619,15 +653,14 @@ fn tip_coverage(tip: &[u8], tu: f64, tv: f64) -> f64 {
     (top * (1.0 - ay) + bottom * ay) / 255.0
 }
 
-/// Accumulate one dab into the per-stroke coverage buffer: flow build-up, or the
-/// per-pixel maximum when `buildup` is false.
-fn stamp(
-    buffer: &mut StrokeBuffer,
+/// Visit every pixel a dab covers with its coverage in (0, 1].
+fn dab_pixels(
     brush: &Brush,
     tip: Option<&[u8]>,
     dab: &Dab,
     width: u32,
     height: u32,
+    mut visit: impl FnMut(i64, i64, f64),
 ) {
     let radius = dab.size / 2.0;
     // A rotated square tip reaches its corners at radius * sqrt(2).
@@ -638,8 +671,7 @@ fn stamp(
     let x1 = ((dab.x + reach).ceil()).min(f64::from(width)) as i64;
     let y1 = ((dab.y + reach).ceil()).min(f64::from(height)) as i64;
     let (sin, cos) = sin_cos_degrees(dab.angle);
-    let flow16 = (dab.flow * 65535.0).round();
-    if flow16 <= 0.0 || x1 <= x0 || y1 <= y0 {
+    if x1 <= x0 || y1 <= y0 {
         return;
     }
     let pixel_brush = brush.kind == "pixel";
@@ -680,25 +712,43 @@ fn stamp(
                     (radius - d + 0.5).clamp(0.0, 1.0)
                 }
             };
-            if coverage <= 0.0 {
-                continue;
+            if coverage > 0.0 {
+                visit(x, y, coverage);
             }
-            let dab16 = (coverage * flow16).round() as u32;
-            if dab16 == 0 {
-                continue;
-            }
-            let key = ((x as u32) / TILE as u32, (y as u32) / TILE as u32);
-            let cell = buffer.entry(key).or_insert_with(|| vec![0u16; TILE * TILE]);
-            let at = ((y as usize) % TILE) * TILE + (x as usize) % TILE;
-            let current = u32::from(cell[at]);
-            cell[at] = if brush.buildup {
-                let added = (dab16 * (65535 - current) + 32767) / 65535;
-                (current + added).min(65535) as u16
-            } else {
-                current.max(dab16.min(65535)) as u16
-            };
         }
     }
+}
+
+/// Accumulate one dab into the per-stroke coverage buffer: flow build-up, or the
+/// per-pixel maximum when `buildup` is false.
+fn stamp(
+    buffer: &mut StrokeBuffer,
+    brush: &Brush,
+    tip: Option<&[u8]>,
+    dab: &Dab,
+    width: u32,
+    height: u32,
+) {
+    let flow16 = (dab.flow * 65535.0).round();
+    if flow16 <= 0.0 {
+        return;
+    }
+    dab_pixels(brush, tip, dab, width, height, |x, y, coverage| {
+        let dab16 = (coverage * flow16).round() as u32;
+        if dab16 == 0 {
+            return;
+        }
+        let key = ((x as u32) / TILE as u32, (y as u32) / TILE as u32);
+        let cell = buffer.entry(key).or_insert_with(|| vec![0u16; TILE * TILE]);
+        let at = ((y as usize) % TILE) * TILE + (x as usize) % TILE;
+        let current = u32::from(cell[at]);
+        cell[at] = if brush.buildup {
+            let added = (dab16 * (65535 - current) + 32767) / 65535;
+            (current + added).min(65535) as u16
+        } else {
+            current.max(dab16.min(65535)) as u16
+        };
+    });
 }
 
 fn composite(tile: &mut [u8], at: usize, color: [u8; 3], alpha16: u32, blend: Blend) {
@@ -720,6 +770,7 @@ fn composite(tile: &mut [u8], at: usize, color: [u8; 3], alpha16: u32, blend: Bl
             }
             tile[at + 3] = ((oa16 + 128) / 257).min(255) as u8;
         }
+        Blend::Tool(_) => unreachable!("local tools do not composite a color"),
         Blend::Erase => {
             let oa16 = ((u64::from(da16) * u64::from(65535 - alpha16) + 32767) / 65535) as u32;
             tile[at + 3] = ((oa16 + 128) / 257).min(255) as u8;
@@ -747,12 +798,16 @@ pub struct StrokeResult {
 }
 
 /// Apply a stroke to a surface. Fails before any pixel work if limits are exceeded.
+/// A smudged tile waiting to be written back once the stroke finishes.
+type PendingTile = ((u32, u32), Box<[u8]>);
+
 pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResult> {
     let tip = match (&stroke.brush.tip, &stroke.tip) {
         (None, _) => None,
         (Some(_), Some(mask)) if mask.len() == TILE * TILE => Some(&mask[..]),
         (Some(name), _) => bail!("[missing-resource] brush tip {name} is not loaded"),
     };
+    retouch::check(&stroke.brush, stroke.blend)?;
     let dab_list = dabs(&stroke.brush, &stroke.samples, stroke.seed)?;
     let corner = if tip.is_some() { 1.4143 } else { 1.0 };
     // Size and roundness dynamics only shrink a dab, so the narrowest possible
@@ -761,10 +816,29 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
         (stroke.brush.roundness * stroke.brush.dynamics.min_roundness()).max(MIN_ROUNDNESS);
     let footprint =
         (stroke.brush.size * corner / roundness + 3.0).min(MAX_BRUSH_SIZE * 20.0 * corner);
-    let work = (dab_list.len() as f64 * footprint * footprint) as u64;
+    let work = (dab_list.len() as f64 * footprint * footprint) as u64
+        * retouch::work_factor(&stroke.brush, stroke.blend);
     if work > MAX_STROKE_WORK {
         bail!("[limit-exceeded] stroke work {work} exceeds {MAX_STROKE_WORK}; reduce size or sample length")
     }
+    if stroke.blend == Blend::Tool(Tool::Smudge) {
+        let (bounds, tiles_changed) = retouch::smudge(surface, stroke, tip, &dab_list)?;
+        return Ok(StrokeResult {
+            bounds,
+            tiles_changed,
+            dabs: dab_list.len(),
+        });
+    }
+    let local = match stroke.blend {
+        Blend::Tool(tool) => Some(retouch::Context::new(
+            tool,
+            &stroke.brush,
+            stroke.color,
+            surface,
+            dab_list.first(),
+        )?),
+        _ => None,
+    };
     let mut buffer = StrokeBuffer::new();
     for dab in &dab_list {
         stamp(
@@ -781,6 +855,9 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
     let mut bounds: Option<[u32; 4]> = None;
     let mut keys: Vec<_> = buffer.keys().copied().collect();
     keys.sort_unstable();
+    // Results are applied after the loop so neighbor reads never see a tile this
+    // stroke already changed.
+    let mut pending: Vec<PendingTile> = Vec::new();
     for key in keys {
         let cell = &buffer[&key];
         let original = surface.tiles.get(&key).cloned();
@@ -795,9 +872,15 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
             if alpha16 == 0 {
                 continue;
             }
-            composite(&mut tile, index * 4, stroke.color, alpha16, stroke.blend);
             let x = key.0 * TILE as u32 + (index % TILE) as u32;
             let y = key.1 * TILE as u32 + (index / TILE) as u32;
+            match &local {
+                Some(context) => {
+                    let out = context.pixel(surface, x, y, i64::from(alpha16));
+                    tile[index * 4..index * 4 + 4].copy_from_slice(&out);
+                }
+                None => composite(&mut tile, index * 4, stroke.color, alpha16, stroke.blend),
+            }
             let b = bounds.get_or_insert([x, y, x + 1, y + 1]);
             b[0] = b[0].min(x);
             b[1] = b[1].min(y);
@@ -809,6 +892,9 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
         if changed {
             touched += 1;
         }
+        pending.push((key, tile));
+    }
+    for (key, tile) in pending {
         if is_blank(&tile) {
             surface.tiles.remove(&key);
         } else {

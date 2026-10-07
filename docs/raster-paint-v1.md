@@ -70,8 +70,10 @@ Kinds: `hard-round`, `soft-round` (smoothstep falloff from `hardness`), `pixel`
 (unantialiased square, 1 px step), `calligraphic` (rotated ellipse via `angle`,
 `roundness`), `textured` (a stamp tip, below). Properties: `size` 1-2048, `hardness`,
 `spacing` 0-2, `opacity`, `flow`, `angle`, `roundness`, `scatter` 0-5,
-`pressure_size`, `pressure_flow`, `min_size`, `smoothing` 0-0.95, `buildup`, `tip`.
-Blend: `normal` or `erase`. Unknown properties are rejected.
+`pressure_size`, `pressure_flow`, `min_size`, `smoothing` 0-0.95, `buildup`, `tip`,
+`dynamics`, and the local-tool parameters `strength`, `tolerance`, `range` and `mode`
+(below). Blend: `normal`, `erase` or one of the local tools below. Unknown properties
+are rejected.
 
 - `smoothing`: an exponential moving average over position and pressure,
   `p[i] = p[i-1] + (1 - smoothing) * (raw[i] - p[i-1])`, starting at the first
@@ -106,6 +108,53 @@ Blend: `normal` or `erase`. Unknown properties are rejected.
 Properties added after the first engine-1 release (`smoothing`, `buildup`, `tip`, `dynamics`) are
 written to the journal only when they differ from their defaults, so existing
 journals, stroke IDs and replay hashes are unchanged.
+
+### Erasing and local blending
+
+`--blend` selects what a stroke does to the pixels its dabs cover. Dab shape, size,
+hardness, spacing, flow, opacity, smoothing, tips and dynamics work exactly as for
+painting. The per-pixel stroke coverage (0-65535, flow and opacity included) is
+the `amount` below.
+
+- `normal`: paints `--color`. `erase`: pixel eraser, lowers alpha by `amount`
+  (`clear` removes a layer's pixels outright, and a fully erased tile is dropped).
+- `background-erase`: samples the color under the first dab, which must be inside
+  the layer and not transparent. Pixels whose largest channel difference from the
+  sample is within `tolerance` (0-255, default 32) lose alpha by `amount * w`, where
+  `w = (tolerance + 1 - distance) / (tolerance + 1)`. Other pixels are untouched,
+  which protects the subject.
+- `color-replace`: the same sample, tolerance and weight. Matching pixels shift by
+  `(--color - sample) * amount * w`, per channel and clamped, so shading survives.
+- `blur`: lerps each pixel toward the mean of a `(2r+1)` square box, with
+  `r = clamp(round(size / 16), 1, 4)`, in premultiplied color including alpha, by
+  `amount * strength`.
+- `sharpen`: unsharp mask on premultiplied color with that box and gain 2,
+  `p + 2 * (p - mean) * amount * strength`. Alpha is not changed.
+- `dodge` / `burn`: lighten `c += (255 - c) * e` or darken `c -= c * e`, where
+  `e = amount * strength * weight(luma)`. `range` picks the weight: `shadows`
+  `(255-l)^2/255`, `highlights` `l^2/255`, `midtones` `255 - |2l - 255|`
+  (default). `luma = (54R + 183G + 19B + 128) >> 8`. Alpha is not changed.
+- `sponge`: moves each channel away from (`mode: saturate`) or toward
+  (`desaturate`, the default) its luma by `amount * strength`.
+- `smudge`: the only tool that reads its own output. A carried premultiplied color
+  starts as the pixel under the first dab. Each dab moves covered pixels toward the
+  carry by `amount * strength`, then moves the carry toward the pixel under the dab
+  center (read before the dab) by `1 - strength`. At strength 1 the carry never refreshes.
+
+`strength` (0-1, default 0.5) applies to smudge, blur, sharpen, dodge, burn and sponge.
+`tolerance` applies to background-erase and color-replace, `range` to dodge and
+burn, and `mode` to sponge. A parameter given to a blend that does not use it is
+`[invalid-brush]`, never silently ignored. Parameters are journaled only when given.
+
+Every tool except smudge reads from the layer as it was before the stroke, so the
+result does not depend on dab order or tile boundaries. Reads beyond the layer edge
+clamp to the nearest edge pixel, and writes are clipped to the layer. All math is
+integer, with rounding half away from zero. Kernel tools multiply the stroke-work
+estimate by `(2r+1)^2`, and the limit is checked before pixel work.
+
+Selections and layer masks: a raster layer's own mask is a non-destructive display
+mask and does not restrict painting. A pixel selection that multiplies `amount`
+arrives with roadmap item 9; until then the whole layer is selected.
 
 ### Input normalization
 
@@ -195,6 +244,8 @@ pentool raster doc.pen add paint --width 1200 --height 800
 pentool raster doc.pen stroke paint --samples '[[10,60,0.3],[150,30,1]]' \
   --brush '{"kind":"soft-round","size":16,"pressure_size":true}' --color '#D2A184' --seed 1
 pentool raster doc.pen --dry-run stroke paint --samples @stroke.json
+pentool raster doc.pen stroke paint --samples @stroke.json --blend blur \n  --brush '{"size":48,"strength":0.8}'
+pentool raster doc.pen stroke paint --samples @stroke.json --blend color-replace \n  --brush '{"size":40,"tolerance":24}' --color '#3A8F4B'
 pentool raster doc.pen stroke paint --samples '[{"x":10,"y":60,"pressure":0.3,"azimuth":40,"t":0},{"x":150,"y":30,"pressure":1,"azimuth":80,"t":48}]' \
   --brush '{"kind":"calligraphic","dynamics":{"angle":{"input":"azimuth"},"size":{"input":"velocity","curve":[[0,0.4],[3,1]]}}}'
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
@@ -224,6 +275,6 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Clone/heal/fill/selections, rotate/flip, merge visible, stamp
+Clone/heal/fill/selections, pixel-selection limits for the local tools, rotate/flip, merge visible, stamp
 visible, flatten, presets, editor canvas painting, fuzz/performance suites (roadmap
-items 5-12, 14).
+items 6-12, 14).

@@ -1711,7 +1711,8 @@ enum RasterAction {
     /// Apply one deterministic brush stroke.
     Stroke {
         id: String,
-        /// JSON array of [x, y, pressure] samples, or @file.json.
+        /// JSON array of device events ([x, y], [x, y, pressure] or objects with
+        /// tilt, azimuth, twist, velocity, t), or @file.json.
         #[arg(long)]
         samples: String,
         /// Brush JSON (kind, size, hardness, spacing, opacity, flow, ...), or @file.json.
@@ -1719,7 +1720,8 @@ enum RasterAction {
         brush: String,
         #[arg(long, default_value = "#000000")]
         color: String,
-        /// normal or erase.
+        /// normal, erase, background-erase, smudge, blur, sharpen, dodge, burn,
+        /// sponge or color-replace.
         #[arg(long, default_value = "normal")]
         blend: String,
         #[arg(long, default_value_t = 0)]
