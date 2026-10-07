@@ -1652,6 +1652,48 @@ enum RasterAction {
         #[arg(long, default_value = "replay")]
         strategy: String,
     },
+    /// Scale a layer's pixels to a new size (bilinear or nearest); position is kept.
+    Resize {
+        id: String,
+        #[arg(long)]
+        width: u32,
+        #[arg(long)]
+        height: u32,
+        #[arg(long, default_value = "bilinear")]
+        resample: String,
+    },
+    /// Set a layer's bounds to a layer-local rectangle without resampling. The
+    /// rectangle may extend past the old bounds, which grows the layer canvas.
+    Crop {
+        id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        x: i64,
+        #[arg(long, allow_hyphen_values = true)]
+        y: i64,
+        #[arg(long)]
+        width: i64,
+        #[arg(long)]
+        height: i64,
+    },
+    /// Shrink a layer to the bounds of its painted pixels.
+    Trim { id: String },
+    /// Copy a raster layer directly above itself; tiles are shared, not copied.
+    Duplicate {
+        id: String,
+        #[arg(long)]
+        new_id: String,
+    },
+    /// Merge a raster layer into the raster layer directly beneath it.
+    MergeDown { id: String },
+    /// Bake any visible node into a new raster layer placed above it. The source
+    /// is hidden, not deleted, unless --replace is given.
+    Rasterize {
+        id: String,
+        #[arg(long)]
+        new_id: String,
+        #[arg(long)]
+        replace: bool,
+    },
     /// Apply one deterministic brush stroke.
     Stroke {
         id: String,
@@ -3007,6 +3049,49 @@ async fn run() -> Result<()> {
                     )?,
                 ),
                 RasterAction::Clear { id } => ("raster-clear", raster::clear(&mut raw, page, &id)?),
+                RasterAction::Resize {
+                    id,
+                    width,
+                    height,
+                    resample,
+                } => (
+                    "raster-resize",
+                    raster::resize(
+                        &mut raw,
+                        page,
+                        &id,
+                        width,
+                        height,
+                        raster::Resample::parse(&resample)?,
+                    )?,
+                ),
+                RasterAction::Crop {
+                    id,
+                    x,
+                    y,
+                    width,
+                    height,
+                } => (
+                    "raster-crop",
+                    raster::crop(&mut raw, page, &id, [x, y, width, height])?,
+                ),
+                RasterAction::Trim { id } => ("raster-trim", raster::trim(&mut raw, page, &id)?),
+                RasterAction::Duplicate { id, new_id } => (
+                    "raster-duplicate",
+                    raster::duplicate(&mut raw, page, &id, &new_id)?,
+                ),
+                RasterAction::MergeDown { id } => (
+                    "raster-merge-down",
+                    raster::merge_down(&mut raw, page, &id)?,
+                ),
+                RasterAction::Rasterize {
+                    id,
+                    new_id,
+                    replace,
+                } => (
+                    "raster-rasterize",
+                    raster::rasterize(&mut raw, &input, page, &id, &new_id, replace)?,
+                ),
                 RasterAction::Checkpoint { id, compact } => (
                     "raster-checkpoint",
                     raster::checkpoint(&mut raw, page, &id, compact)?,

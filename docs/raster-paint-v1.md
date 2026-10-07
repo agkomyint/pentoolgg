@@ -72,6 +72,42 @@ Kinds: `hard-round`, `soft-round` (smoothstep falloff from `hardness`), `pixel`
 `angle`, `roundness`, `scatter` 0-5, `pressure_size`, `pressure_flow`, `min_size`.
 Blend: `normal` or `erase`. Unknown properties are rejected.
 
+## Layer operations
+
+None of these is replayable stroke math, so each one rolls the layer checkpoint
+(`checkpoint.reason` names the operation) and empties the journal. Each runs in one
+transaction with dry run, `--if-revision` and undo, and a failure leaves the file
+byte-for-byte unchanged.
+
+- `resize ID --width W --height H [--resample bilinear|nearest]`: scales pixels;
+  position is kept. Bilinear runs in premultiplied alpha with pixel-center mapping.
+  Working surfaces are limited to 32 Mi pixels (`MAX_TEMP_BYTES / 8`).
+- `crop ID --x X --y Y --width W --height H`: a layer-local rectangle without
+  resampling. It may extend past the old bounds, which makes it the layer
+  canvas-resize operation as well; pixels keep their page position and
+  `pixels_removed` reports what fell outside.
+- `trim ID`: crop to the painted bounds. An empty layer is refused.
+- `duplicate ID --new-id NEW`: inserted directly above; tiles are shared, not copied.
+- `merge-down ID`: composites the layer into the raster sibling directly beneath it
+  with its opacity and blend mode. The lower layer grows to the union, so no pixels
+  are discarded. Merging is refused, without mutation, when the result could not
+  match what was shown. This covers scale, rotation, skew, warp or fractional
+  offsets; effects, masks, clipping or content opacity on either layer; and
+  opacity or blend on the lower layer. In those cases, use `rasterize` first.
+  The merged layer is stored as 8-bit straight alpha before it meets the page
+  backdrop, so soft edges may differ from the unmerged render by one code value.
+- `rasterize ID --new-id NEW [--replace]`: renders any node exactly as the compositor
+  does, which bakes its effects, masks and children. The result is trimmed to its
+  alpha bounds and becomes a raster layer directly above the source. The source is
+  hidden (`visible:false`), not deleted, unless `--replace` is given. Nodes inside
+  a transformed group are refused; rasterize the group instead.
+
+Raster nodes take part in groups, masks, clipping, effects, opacity, blend modes,
+components and packages through the shared scene paths. Tile retention walks the
+whole document, including component snapshots and instance fallbacks. `diff`
+reports `/raster_tiles/<digest>` changes as `{raster_tile, encoding, data_bytes}`
+summaries, never base64 data.
+
 ## Limits (checked before pixel work)
 
 8192 samples, 100000 dabs, bounded per-stroke work, 4096 tiles, 256 journal entries.
@@ -88,6 +124,12 @@ pentool raster doc.pen checkpoint paint --compact
 pentool raster doc.pen verify --replay
 pentool raster doc.pen repair paint --strategy replay
 pentool raster doc.pen clear paint
+pentool raster doc.pen resize paint --width 600 --height 400 --resample bilinear
+pentool raster doc.pen crop paint --x -20 --y 0 --width 1240 --height 800
+pentool raster doc.pen trim paint
+pentool raster doc.pen duplicate paint --new-id paint-copy
+pentool raster doc.pen merge-down paint-copy
+pentool raster doc.pen rasterize card --new-id card-pixels
 pentool tree doc.pen --kind raster
 ```
 
@@ -99,5 +141,6 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Input normalization, clone/heal/fill/selections, merge-down and layer ops, presets,
-editor canvas painting, fuzz/performance suites (roadmap items 4-12, 14).
+Input normalization, clone/heal/fill/selections, rotate/flip, merge visible, stamp
+visible, flatten, presets, editor canvas painting, fuzz/performance suites (roadmap
+items 4-12, 14).

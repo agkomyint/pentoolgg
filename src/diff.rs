@@ -14,6 +14,28 @@ pub fn structural(before: &Value, after: &Value) -> Vec<Change> {
         if out.len() >= 10_000 || before == after {
             return;
         }
+        // Raster tile store entries are content-addressed PNG payloads; report
+        // that a tile was added, removed or rewritten without its base64 data.
+        if path
+            .strip_prefix("/raster_tiles/")
+            .is_some_and(|rest| !rest.contains('/'))
+        {
+            let summary = |entry: Option<&Value>| {
+                entry.map(|e| {
+                    serde_json::json!({
+                        "raster_tile": true,
+                        "encoding": e["encoding"],
+                        "data_bytes": e["data"].as_str().map_or(0, str::len),
+                    })
+                })
+            };
+            out.push(Change {
+                path: path.into(),
+                before: summary(before),
+                after: summary(after),
+            });
+            return;
+        }
         match (before, after) {
             (Some(Value::Object(a)), Some(Value::Object(b))) => {
                 let mut keys: Vec<_> = a.keys().chain(b.keys()).collect();

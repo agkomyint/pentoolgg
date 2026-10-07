@@ -26,8 +26,10 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("[{code}] {message}")
 }
 
+mod layer;
 mod math;
 mod recovery;
+pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use recovery::{repair, replay, verify, RepairStrategy};
 
@@ -854,9 +856,34 @@ fn all_rasters(raw: &Value) -> Vec<&Value> {
     out
 }
 
+/// Every raster node anywhere in the document, including copies held by component
+/// snapshots and instance fallbacks. Tile retention and validation use this so a
+/// raster reachable only through a component never loses its pixels.
+fn every_raster(raw: &Value) -> Vec<&Value> {
+    fn walk<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+        match value {
+            Value::Object(map) => {
+                if is_raster(value) {
+                    out.push(value);
+                }
+                map.values().for_each(|item| walk(item, out));
+            }
+            Value::Array(items) => items.iter().for_each(|item| walk(item, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for (key, value) in raw.as_object().into_iter().flatten() {
+        if key != "raster_tiles" {
+            walk(value, &mut out);
+        }
+    }
+    out
+}
+
 /// Document-level check: every referenced tile exists with a well-formed entry.
 pub fn validate_document(raw: &Value) -> Result<()> {
-    let rasters = all_rasters(raw);
+    let rasters = every_raster(raw);
     let store = raw.get("raster_tiles");
     if let Some(store) = store {
         if !store.is_object() {
@@ -881,7 +908,7 @@ pub fn validate_document(raw: &Value) -> Result<()> {
 /// document-level raster resources (saved selections and brush presets).
 fn retained_digests(raw: &Value) -> HashSet<String> {
     let mut referenced = HashSet::new();
-    for node in all_rasters(raw) {
+    for node in every_raster(raw) {
         pinned_digests(node, &mut referenced);
     }
     for key in ["raster_selections", "brush_presets"] {
