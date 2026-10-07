@@ -123,8 +123,11 @@ fn parse_key(text: &str) -> Result<(u32, u32)> {
     Ok(key)
 }
 
+/// Tile digests by tile index.
+type Digests = BTreeMap<(u32, u32), String>;
+
 /// The tile-map hash from per-tile digests, in tile order.
-fn digests_hash(digests: &BTreeMap<(u32, u32), String>) -> String {
+fn digests_hash(digests: &Digests) -> String {
     let mut text = String::new();
     for (key, digest) in digests {
         text.push_str(&format!("{},{}={}\n", key.0, key.1, digest));
@@ -219,10 +222,7 @@ impl Surface {
     /// Digest of every non-blank tile. Tiles equal to the same key in `known`
     /// (a previously loaded surface with its digests) reuse that digest instead of
     /// being hashed again.
-    fn digests(
-        &self,
-        known: Option<(&Self, &BTreeMap<(u32, u32), String>)>,
-    ) -> BTreeMap<(u32, u32), String> {
+    fn digests(&self, known: Option<(&Self, &Digests)>) -> BTreeMap<(u32, u32), String> {
         let mut out = BTreeMap::new();
         for (key, tile) in &self.tiles {
             if is_blank(tile) {
