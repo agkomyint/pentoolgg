@@ -1839,6 +1839,119 @@ enum RasterAction {
         #[arg(long, default_value = "replace")]
         mode: String,
     },
+    /// Rectangular or elliptical marquee selection, in layer pixels.
+    SelectMarquee {
+        id: String,
+        /// rect or ellipse.
+        #[arg(long, default_value = "rect")]
+        shape: String,
+        /// X Y WIDTH HEIGHT of the marquee.
+        #[arg(long, num_args = 4, allow_negative_numbers = true, value_names = ["X", "Y", "WIDTH", "HEIGHT"])]
+        rect: Vec<f64>,
+        /// replace, add, subtract or intersect.
+        #[arg(long, default_value = "replace")]
+        mode: String,
+        /// Soften the edge by this many pixels (0-256).
+        #[arg(long, default_value_t = 0)]
+        feather: u32,
+    },
+    /// Free-form polygon (lasso) selection from a JSON array of [x, y] points.
+    SelectLasso {
+        id: String,
+        #[arg(long)]
+        points: String,
+        #[arg(long, default_value = "replace")]
+        mode: String,
+        #[arg(long, default_value_t = 0)]
+        feather: u32,
+    },
+    /// Change the selection: feather, expand, contract, smooth, border, grow,
+    /// similar or invert.
+    SelectModify {
+        id: String,
+        #[arg(long)]
+        op: String,
+        /// Pixels for feather/expand/contract/smooth/border/grow.
+        #[arg(long, default_value_t = 1)]
+        amount: u32,
+        /// Color tolerance for grow and similar (0-255).
+        #[arg(long, default_value_t = 32)]
+        tolerance: u8,
+    },
+    /// Quick-mask painting: a brush stroke adds to (or with --erase, removes from)
+    /// the selection.
+    SelectQuickmask {
+        id: String,
+        #[arg(long)]
+        samples: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        erase: bool,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
+    /// Save the active selection under a name.
+    SelectSave { id: String, name: String },
+    /// Load a saved selection, combined with the current one by --mode.
+    SelectLoad {
+        id: String,
+        name: String,
+        #[arg(long, default_value = "replace")]
+        mode: String,
+    },
+    /// Delete a saved selection.
+    SelectDelete { id: String, name: String },
+    /// Copy (or with --cut, cut) the selected pixels into a new raster layer.
+    Lift {
+        id: String,
+        #[arg(long)]
+        new_id: String,
+        #[arg(long)]
+        cut: bool,
+    },
+    /// Move the selected pixels and their selection by whole pixels.
+    MovePixels {
+        id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        dx: i64,
+        #[arg(long, allow_hyphen_values = true)]
+        dy: i64,
+        /// Leave the original pixels in place.
+        #[arg(long)]
+        copy: bool,
+    },
+    /// Scale and rotate the selected pixels about their center, then shift them.
+    TransformPixels {
+        id: String,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f64,
+        /// Vertical scale; defaults to --scale.
+        #[arg(long)]
+        scale_y: Option<f64>,
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        rotate: f64,
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        dx: f64,
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        dy: f64,
+        #[arg(long)]
+        nearest: bool,
+        #[arg(long)]
+        copy: bool,
+    },
+    /// Paste another raster layer's pixels into this layer at (x, y).
+    Paste {
+        id: String,
+        #[arg(long)]
+        source: String,
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        x: i64,
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        y: i64,
+        #[arg(long, default_value_t = 1.0)]
+        opacity: f64,
+    },
     /// Remove the layer's selection.
     SelectClear { id: String },
     /// Summarize the layer's selection.
@@ -3301,6 +3414,172 @@ async fn run() -> Result<()> {
                         &region.options(),
                         raster::SelectionMode::parse(&mode)?,
                     )?,
+                ),
+                RasterAction::SelectMarquee {
+                    id,
+                    shape,
+                    rect,
+                    mode,
+                    feather,
+                } => {
+                    let rect: [f64; 4] = rect.try_into().map_err(|_| {
+                        anyhow::anyhow!("[invalid-selection] --rect needs X Y WIDTH HEIGHT")
+                    })?;
+                    (
+                        "raster-select-marquee",
+                        raster::select_marquee(
+                            &mut raw,
+                            page,
+                            &id,
+                            raster::Marquee::parse(&shape)?,
+                            rect,
+                            raster::SelectionMode::parse(&mode)?,
+                            feather,
+                        )?,
+                    )
+                }
+                RasterAction::SelectLasso {
+                    id,
+                    points,
+                    mode,
+                    feather,
+                } => {
+                    let body = match points.strip_prefix('@') {
+                        Some(path) => {
+                            if fs::metadata(path)?.len() > 16 << 20 {
+                                bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                            }
+                            fs::read_to_string(path)?
+                        }
+                        None => points.clone(),
+                    };
+                    let points: Vec<[f64; 2]> = serde_json::from_str(&body).map_err(|e| {
+                        anyhow::anyhow!(
+                            "[invalid-selection] --points must be a JSON array of [x, y]: {e}"
+                        )
+                    })?;
+                    (
+                        "raster-select-lasso",
+                        raster::select_lasso(
+                            &mut raw,
+                            page,
+                            &id,
+                            &points,
+                            raster::SelectionMode::parse(&mode)?,
+                            feather,
+                        )?,
+                    )
+                }
+                RasterAction::SelectModify {
+                    id,
+                    op,
+                    amount,
+                    tolerance,
+                } => (
+                    "raster-select-modify",
+                    raster::select_modify(
+                        &mut raw,
+                        page,
+                        &id,
+                        raster::SelectionOp::parse(&op)?,
+                        amount,
+                        tolerance,
+                    )?,
+                ),
+                RasterAction::SelectQuickmask {
+                    id,
+                    samples,
+                    brush,
+                    erase,
+                    seed,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                if fs::metadata(path)?.len() > 16 << 20 {
+                                    bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let normalized = raster::normalize_input(&read(&samples)?)?;
+                    (
+                        "raster-select-quickmask",
+                        raster::select_quickmask(
+                            &mut raw,
+                            page,
+                            &id,
+                            raster::Brush::parse(&read(&brush)?)?,
+                            normalized.samples,
+                            erase,
+                            seed,
+                        )?,
+                    )
+                }
+                RasterAction::SelectSave { id, name } => (
+                    "raster-select-save",
+                    raster::select_save(&mut raw, page, &id, &name)?,
+                ),
+                RasterAction::SelectLoad { id, name, mode } => (
+                    "raster-select-load",
+                    raster::select_load(
+                        &mut raw,
+                        page,
+                        &id,
+                        &name,
+                        raster::SelectionMode::parse(&mode)?,
+                    )?,
+                ),
+                RasterAction::SelectDelete { id, name } => (
+                    "raster-select-delete",
+                    raster::select_delete(&mut raw, &id, &name)?,
+                ),
+                RasterAction::Lift { id, new_id, cut } => (
+                    "raster-lift",
+                    raster::lift_pixels(&mut raw, page, &id, &new_id, cut)?,
+                ),
+                RasterAction::MovePixels { id, dx, dy, copy } => (
+                    "raster-move-pixels",
+                    raster::move_pixels(&mut raw, page, &id, dx, dy, copy)?,
+                ),
+                RasterAction::TransformPixels {
+                    id,
+                    scale,
+                    scale_y,
+                    rotate,
+                    dx,
+                    dy,
+                    nearest,
+                    copy,
+                } => (
+                    "raster-transform-pixels",
+                    raster::transform_pixels(
+                        &mut raw,
+                        page,
+                        &id,
+                        &raster::PixelTransform {
+                            scale_x: scale,
+                            scale_y: scale_y.unwrap_or(scale),
+                            rotate,
+                            dx,
+                            dy,
+                            nearest,
+                            copy,
+                        },
+                    )?,
+                ),
+                RasterAction::Paste {
+                    id,
+                    source,
+                    x,
+                    y,
+                    opacity,
+                } => (
+                    "raster-paste",
+                    raster::paste_pixels(&mut raw, page, &id, &source, x, y, opacity)?,
                 ),
                 RasterAction::SelectClear { id } => {
                     ("raster-select-clear", raster::select_clear(&mut raw, &id)?)

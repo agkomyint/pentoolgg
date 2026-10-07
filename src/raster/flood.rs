@@ -30,7 +30,7 @@ pub struct Options {
     pub transparent_barrier: bool,
 }
 
-fn candidate(p: [u8; 4], seed: [u8; 4], tolerance: u8, barrier: bool) -> bool {
+pub(super) fn candidate(p: [u8; 4], seed: [u8; 4], tolerance: u8, barrier: bool) -> bool {
     if p[3] == 0 && seed[3] == 0 {
         return true;
     }

@@ -249,6 +249,53 @@ result). Each stroke's journal entry pins the selection tiles in `selection`
 (at most 256 tiles), so replay never reads the live selection. A selection whose size no
 longer matches its layer blocks painting with an error that names `select-clear`.
 
+### Selection shapes, modifiers and selected pixels
+
+Selection algorithm 1. Every command works on the layer's selection plane and takes
+`--mode replace|add|subtract|intersect` where it creates a selection.
+
+- `select-marquee ID --rect X Y W H [--shape rect|ellipse] [--feather N]` and
+  `select-lasso ID --points '[[x,y],...]' [--feather N]` (3-4096 points, even-odd
+  rule). Edges are rasterized with 4x4 sub-pixel sampling, so they carry partial
+  coverage; shapes partly outside the layer are clipped, and shapes wholly outside
+  are an error.
+- `select-quickmask ID --samples ... [--brush ...] [--erase]` paints coverage with
+  the brush engine: the same dabs, hardness, flow and dynamics as a color stroke, but
+  into the selection plane. Textured tips are not supported.
+- `select-modify ID --op OP [--amount N] [--tolerance T]` changes the existing
+  selection (an error when nothing is selected):
+  `feather` (three box blurs of radius ceil(N/2), N 1-256, edge clamped), `smooth`
+  (box blur of radius N, then threshold at 50%), `expand`/`contract` (square
+  structuring element, N 1-64; a contraction also eats in from the layer border),
+  `border` (a band N pixels wide centered on the edge), `invert`, `grow` (add
+  4-connected neighbors whose color is within T of the selected pixel they were
+  reached from, for at most N pixels of distance) and `similar` (add every layer pixel
+  within T of any selected color; at most 64 distinct selected colors).
+- `select-save ID NAME`, `select-load ID NAME [--mode M]` and `select-delete ID NAME`
+  keep up to 32 named selections per layer under
+  `raster_selections.saved.<layer id>.<name>`; `select-info` lists the names.
+
+Working with the selected pixels (the layer must be unlocked wherever pixels change):
+
+- `lift ID --new-id NEW [--cut]` copies (or cuts) the selection into a new raster layer
+  placed directly above, sized to the selection and positioned over it. Pixels keep
+  their color and carry `alpha * coverage`, so transparency and soft edges survive.
+  Cutting removes the same share from the source. A floating selection is a cut
+  lift: move the new layer with the ordinary node commands, then `merge-down`.
+- `move-pixels ID --dx DX --dy DY [--copy]` moves the selected pixels and the selection
+  by whole pixels; `--copy` leaves the originals.
+- `transform-pixels ID [--scale S] [--scale-y S] [--rotate DEG] [--dx X --dy Y]
+  [--nearest] [--copy]` scales (0.05-20) and rotates (-360 to 360) the selected pixels
+  and the selection about the center of the selection's bounds, then shifts them. The
+  default resampling is bilinear on straight alpha; `--nearest` keeps hard pixels.
+- `paste ID --source OTHER [--x X --y Y] [--opacity O]` composites another raster
+  layer's pixels over this one at a layer-local position; an active selection limits it.
+
+`move-pixels`, `transform-pixels`, `paste` and a cutting `lift` roll the layer's
+checkpoint (reasons `move`, `copy-move`, `transform`, `paste`, `cut`) and empty its
+journal. Compositing is straight-alpha "over", so alpha is never discarded. Selection
+planes over 32 megapixels are refused before allocation.
+
 ### Input normalization
 
 `stroke --samples` takes device events. Each event is `[x, y]`, `[x, y, pressure]` or
@@ -351,6 +398,16 @@ pentool raster doc.pen heal-stroke paint --samples @heal-stroke.json \
 pentool raster doc.pen heal-spot paint --x 410 --y 233 --radius 10
 pentool raster doc.pen fill paint --x 410 --y 233 --color '#C84B31' --tolerance 24 --gap 2
 pentool raster doc.pen select-wand paint --x 40 --y 40 --mode add --global
+pentool raster doc.pen select-marquee paint --rect 40 40 200 120 --shape ellipse --feather 6
+pentool raster doc.pen select-lasso paint --points '[[10,10],[300,40],[120,260]]' --mode add
+pentool raster doc.pen select-quickmask paint --samples @mask.json --brush '{"size":30}'
+pentool raster doc.pen select-modify paint --op expand --amount 4
+pentool raster doc.pen select-save paint subject
+pentool raster doc.pen select-load paint subject --mode subtract
+pentool raster doc.pen lift paint --new-id subject-copy --cut
+pentool raster doc.pen move-pixels paint --dx 40 --dy -10 --copy
+pentool raster doc.pen transform-pixels paint --scale 1.5 --rotate 12
+pentool raster doc.pen paste paint --source subject-copy --x 200 --y 100 --opacity 0.8
 pentool raster doc.pen select-info paint
 pentool raster doc.pen select-clear paint
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
@@ -380,6 +437,5 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Patch healing, selection shapes and modifiers, selection transforms, rotate/flip, merge visible, stamp
-visible, flatten, presets, editor canvas painting, fuzz/performance suites (roadmap
-items 6-12, 14).
+Patch healing, rotate/flip, merge visible, stamp visible, flatten, presets, editor canvas
+painting, fuzz/performance suites (roadmap items 6-7, 10-12, 14).

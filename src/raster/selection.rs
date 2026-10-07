@@ -252,11 +252,16 @@ pub fn clear_op(raw: &mut Value, id: &str) -> Result<Value> {
 
 /// `select-info`: summary of the layer's selection.
 pub fn info_op(raw: &Value, id: &str) -> Result<Value> {
+    let saved: Vec<&String> = raw["raster_selections"]["saved"][id]
+        .as_object()
+        .map(|m| m.keys().collect())
+        .unwrap_or_default();
     let Some(selection) = active(raw, id)? else {
-        return Ok(json!({"id": id, "selection": null}));
+        return Ok(json!({"id": id, "selection": null, "saved": saved}));
     };
     let mut summary = summary(&selection);
     summary["id"] = json!(id);
+    summary["saved"] = json!(saved);
     Ok(summary)
 }
 

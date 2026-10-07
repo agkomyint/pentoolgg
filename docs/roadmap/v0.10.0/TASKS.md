@@ -1,7 +1,7 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
 > **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
-> 0 of 14 items are ticked; items 1-8 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
+> 0 of 14 items are ticked; items 1-9 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
 > item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
 >
 > | # | Item | State |
@@ -14,7 +14,7 @@
 > | 6 | Clone stamp | Implemented: aligned and non-aligned clone strokes from the target layer or another raster layer with rotation and scale; strokes pin the exact source tiles in the journal so later source edits cannot reinterpret them; replay, verify and dry-run covered (`tests/raster_clone.rs`). Not yet: sampling the composite of other scene content (waits for stamp-visible, item 10), and live preview (item 12). Awaiting hosted CI evidence before ticking. |
 > | 7 | Heal | Implemented: `heal` blend (texture from the source, tone from the surroundings, bounded deterministic solver, algorithm recorded in the journal), `heal-stroke` and automatic-source `heal-spot`; replay, determinism, limits and dry-run covered (`tests/raster_heal.rs`). Not yet: patch healing (needs selection transforms, item 9). Awaiting hosted CI evidence before ticking. |
 > | 8 | Flood fill and contiguous selection | Implemented: `fill` and `select-wand` with tolerance, 4/8 connectivity, global mode, gap policy, transparency handling, anti-aliased edges, bounded allocation, and refine modes (replace/add/subtract/intersect); an active selection limits strokes, clone, heal and fill with the selection pinned in the journal for replay (`tests/raster_fill.rs`). Not yet: composite sampling scope (item 10), mask output (item 9). Awaiting hosted CI evidence before ticking. |
-> | 9 | Selections and transforms | Not started. |
+> | 9 | Selections and transforms | Implemented: `select-marquee` (rect/ellipse), `select-lasso`, `select-quickmask`, `select-modify` (feather, expand, contract, smooth, border, grow, similar, invert), saved selections (`select-save/load/delete`), and for selected pixels `lift` (copy/cut to a new layer, alpha kept), `move-pixels`, `transform-pixels` and `paste`; selections follow moved and transformed pixels (`tests/raster_select.rs`). Not yet: patch healing (item 7 remainder). Awaiting hosted CI evidence before ticking. |
 > | 10 | Layer operations | Partial: trim, canvas resize (crop past bounds), merge down, explicit rasterization (item 2). Missing: rotate/flip, merge visible, stamp visible, flatten. |
 > | 11-12 | Presets, editor UI | Not started. |
 > | 13 | CLI and batch | Partial: `pentool raster ... add/info/clear/checkpoint/stroke/verify/repair/resize/crop/trim/duplicate/merge-down/rasterize/tip-add/tip-remove/tips` with dry-run and limits. Missing: presets, selections/masks, retouch ops, batch. |

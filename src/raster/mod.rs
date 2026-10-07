@@ -32,9 +32,11 @@ mod heal;
 mod input;
 mod layer;
 mod math;
+mod pixels;
 mod recovery;
 mod retouch;
 mod selection;
+mod shape;
 mod tip;
 pub use clone::{
     set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
@@ -49,9 +51,18 @@ pub use input::{
 };
 pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
+pub use pixels::{
+    lift as lift_pixels, move_pixels, paste as paste_pixels, transform_pixels,
+    Transform as PixelTransform,
+};
 pub use recovery::{repair, replay, verify, RepairStrategy};
 pub use retouch::Tool;
 pub use selection::{clear_op as select_clear, info_op as select_info, Mode as SelectionMode};
+pub use shape::{
+    delete as select_delete, lasso as select_lasso, load as select_load, marquee as select_marquee,
+    modify as select_modify, quickmask as select_quickmask, save as select_save, Marquee,
+    Op as SelectionOp,
+};
 pub use tip::{load_tip, resolve_tip, tip_add, tip_from_image, tip_list, tip_remove, TipSource};
 
 // ---------------------------------------------------------------------------

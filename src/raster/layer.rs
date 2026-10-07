@@ -120,13 +120,13 @@ pub(super) fn commit_surface(
 
 /// Location of a node: page index, layer index and the index chain through
 /// `nodes`/`children`. The last index is the node within its sibling list.
-struct NodePath {
-    page: usize,
-    layer: usize,
-    chain: Vec<usize>,
+pub(super) struct NodePath {
+    pub(super) page: usize,
+    pub(super) layer: usize,
+    pub(super) chain: Vec<usize>,
 }
 
-fn find_path(raw: &Value, page: Option<&str>, id: &str) -> Result<NodePath> {
+pub(super) fn find_path(raw: &Value, page: Option<&str>, id: &str) -> Result<NodePath> {
     fn walk(nodes: &[Value], id: &str, chain: &mut Vec<usize>) -> bool {
         for (index, node) in nodes.iter().enumerate() {
             chain.push(index);
@@ -174,7 +174,7 @@ fn find_path(raw: &Value, page: Option<&str>, id: &str) -> Result<NodePath> {
     ))
 }
 
-fn siblings_mut<'a>(raw: &'a mut Value, path: &NodePath) -> Result<&'a mut Vec<Value>> {
+pub(super) fn siblings_mut<'a>(raw: &'a mut Value, path: &NodePath) -> Result<&'a mut Vec<Value>> {
     let mut list = raw["pages"][path.page]["layers"][path.layer]["nodes"]
         .as_array_mut()
         .context("layer nodes are missing")?;
@@ -186,7 +186,7 @@ fn siblings_mut<'a>(raw: &'a mut Value, path: &NodePath) -> Result<&'a mut Vec<V
     Ok(list)
 }
 
-fn ensure_new_id(raw: &Value, id: &str) -> Result<()> {
+pub(super) fn ensure_new_id(raw: &Value, id: &str) -> Result<()> {
     if id.is_empty() {
         bail!("[invalid-input] the new id must not be empty")
     }
@@ -394,7 +394,7 @@ pub fn duplicate(raw: &mut Value, page: Option<&str>, id: &str, new_id: &str) ->
     Ok(json!({"id":new_id,"source":id,"tile_map_sha256":hash}))
 }
 
-fn integer_offset(node: &Value, what: &str) -> Result<(i64, i64)> {
+pub(super) fn integer_offset(node: &Value, what: &str) -> Result<(i64, i64)> {
     let id = node["id"].as_str().unwrap_or("?");
     let t = crate::composite::transform(node)?;
     let c = t.as_coeffs();
