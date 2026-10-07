@@ -186,6 +186,69 @@ that would read more than 256 source tiles fails with a request to split it.
 Compositing other scene content as a source (the "below" source) arrives with
 stamp-visible in item 10.
 
+### Healing
+
+`heal-stroke` takes the same source and options as `clone-stroke` (including
+`--aligned`, `--angle` and `--scale`) but paints with the `heal` blend (heal
+algorithm 1). The source supplies texture; the surroundings supply tone and color:
+
+- brush `texture` (0-1, default 1) scales the source's detail, which is its
+  deviation from its own 5x5 alpha-weighted box mean;
+- brush `tone` (0-1, default 1) scales a correction computed from the difference
+  between the destination and the textured source on the one-pixel ring around the
+  stroked region, filled across the region by harmonic interpolation (fixed row-major
+  Gauss-Seidel sweeps in 1/16 fixed point).
+
+`texture` and `tone` are errors for any other blend. The stroked region is limited to
+1024 pixels per side and a fixed solver budget (`limit-exceeded`); heal larger areas
+in several strokes. All math is integer, and the journal entry carries
+`heal: {"algorithm": 1}`; a journal from a newer algorithm is refused on replay.
+
+`heal-spot ID --x X --y Y [--radius R] [--texture T] [--tone T]` heals one round spot
+and chooses the source itself: it scores 64 fixed candidate offsets (4 distances times
+16 directions) by how well the pixels in a ring around the spot match the pixels at the
+same ring shifted by the offset, preferring smooth source interiors, and takes the
+lowest score (first on ties). The result reports `heal.source_offset` and `heal.score`;
+the stroke is journaled as an ordinary heal stroke with an explicit source. It fails if
+the surroundings are not fully painted. Patch healing (selection based) is not
+implemented yet; selections now limit heal like every other paint operation.
+
+### Flood fill and selections
+
+`fill ID --x X --y Y --color #RRGGBB [--opacity O] [region options]` fills a flood
+region; `select-wand ID --x X --y Y [--mode M] [region options]` selects it instead.
+Region options (flood algorithm 1):
+
+- `--tolerance T` (0-255, default 32): a pixel joins when its largest straight-RGBA
+  channel difference from the seed is at most T. Fully transparent pixels all count as
+  one color; `--transparent-barrier` keeps them out of an opaque seed's region.
+- contiguous by default over 4 neighbors; `--diagonal` uses 8; `--global` takes every
+  similar pixel in the layer.
+- `--gap N` (0-8, contiguous only) erodes the candidates by an N-pixel square first,
+  so breaks up to 2N pixels wide stop the fill, then grows the result back inside the
+  original candidates. A seed inside such a gap is an error.
+- edges are anti-aliased with a 3x3 box average unless `--no-antialias`.
+- the sample scope is the layer itself; sampling the visible composite arrives with
+  stamp-visible (item 10).
+
+Layers over 32 megapixels are refused before any plane is allocated. Nothing is
+written until the whole region is known, so a failed fill leaves the document
+byte-for-byte unchanged; there is no partial result to cancel. `fill` rolls the layer's
+checkpoint like the other non-stroke operations.
+
+A selection is an 8-bit coverage plane stored in `raster_tiles` (`[0,0,0,coverage]`
+tiles) and referenced from `raster_selections.active.<layer id>` as `{width, height,
+tiles}`. No entry means no selection (everything is editable); an entry without tiles
+selects nothing. `--mode` combines a new region with the current selection: `replace`
+(default), `add` (union), `subtract` and `intersect`. `select-info ID` summarizes it
+and `select-clear ID` removes it.
+
+While a selection exists for a layer, strokes, clone, heal and fill change only what it
+covers, in proportion to coverage (premultiplied mix of the unselected and stroked
+result). Each stroke's journal entry pins the selection tiles in `selection`
+(at most 256 tiles), so replay never reads the live selection. A selection whose size no
+longer matches its layer blocks painting with an error that names `select-clear`.
+
 ### Input normalization
 
 `stroke --samples` takes device events. Each event is `[x, y]`, `[x, y, pressure]` or
@@ -274,12 +337,22 @@ pentool raster doc.pen add paint --width 1200 --height 800
 pentool raster doc.pen stroke paint --samples '[[10,60,0.3],[150,30,1]]' \
   --brush '{"kind":"soft-round","size":16,"pressure_size":true}' --color '#D2A184' --seed 1
 pentool raster doc.pen --dry-run stroke paint --samples @stroke.json
-pentool raster doc.pen stroke paint --samples @stroke.json --blend blur \n  --brush '{"size":48,"strength":0.8}'
-pentool raster doc.pen stroke paint --samples @stroke.json --blend color-replace \n  --brush '{"size":40,"tolerance":24}' --color '#3A8F4B'
+pentool raster doc.pen stroke paint --samples @stroke.json --blend blur \
+  --brush '{"size":48,"strength":0.8}'
+pentool raster doc.pen stroke paint --samples @stroke.json --blend color-replace \
+  --brush '{"size":40,"tolerance":24}' --color '#3A8F4B'
 pentool raster doc.pen stroke paint --samples '[{"x":10,"y":60,"pressure":0.3,"azimuth":40,"t":0},{"x":150,"y":30,"pressure":1,"azimuth":80,"t":48}]' \
   --brush '{"kind":"calligraphic","dynamics":{"angle":{"input":"azimuth"},"size":{"input":"velocity","curve":[[0,0.4],[3,1]]}}}'
 pentool raster doc.pen clone-source paint --layer source --x 820 --y 640
-pentool raster doc.pen clone-stroke paint --samples @clone-stroke.json --aligned \n  --brush '{"size":24,"hardness":0.6}'
+pentool raster doc.pen clone-stroke paint --samples @clone-stroke.json --aligned \
+  --brush '{"size":24,"hardness":0.6}'
+pentool raster doc.pen heal-stroke paint --samples @heal-stroke.json \
+  --brush '{"size":30,"texture":0.8}'
+pentool raster doc.pen heal-spot paint --x 410 --y 233 --radius 10
+pentool raster doc.pen fill paint --x 410 --y 233 --color '#C84B31' --tolerance 24 --gap 2
+pentool raster doc.pen select-wand paint --x 40 --y 40 --mode add --global
+pentool raster doc.pen select-info paint
+pentool raster doc.pen select-clear paint
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
 pentool raster doc.pen stroke paint --samples @stroke.json \
   --brush '{"kind":"textured","tip":"grain","size":48,"smoothing":0.6,"buildup":false}'
@@ -307,6 +380,6 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Clone/heal/fill/selections, pixel-selection limits for the local tools, rotate/flip, merge visible, stamp
+Patch healing, selection shapes and modifiers, selection transforms, rotate/flip, merge visible, stamp
 visible, flatten, presets, editor canvas painting, fuzz/performance suites (roadmap
 items 6-12, 14).

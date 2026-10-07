@@ -61,12 +61,29 @@
       "properties": {
         "op": { "const": "stroke", "default": "stroke" },
         "engine": { "type": "integer", "minimum": 1 },
-        "blend": { "enum": ["normal", "erase", "background-erase", "smudge", "blur", "sharpen", "dodge", "burn", "sponge", "color-replace", "clone"] },
+        "blend": { "enum": ["normal", "erase", "background-erase", "smudge", "blur", "sharpen", "dodge", "burn", "sponge", "color-replace", "clone", "heal"] },
+        "selection": {
+          "type": "object",
+          "required": ["width", "height", "tiles"],
+          "description": "The pinned selection coverage this stroke was limited by.",
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "tiles": { "type": "object", "maxProperties": 256 }
+          }
+        },
+        "heal": {
+          "type": "object",
+          "required": ["algorithm"],
+          "additionalProperties": false,
+          "description": "Only with blend heal: the heal algorithm version (1).",
+          "properties": { "algorithm": { "const": 1 } }
+        },
         "clone": {
           "type": "object",
           "required": ["source", "sx", "sy", "ax", "ay", "angle", "scale"],
           "additionalProperties": false,
-          "description": "Only with blend clone. Destination pixel p reads the source at S + R(-angle)(p - A)/scale.",
+          "description": "Only with blends clone and heal. Destination pixel p reads the source at S + R(-angle)(p - A)/scale.",
           "properties": {
             "source": {
               "oneOf": [
@@ -131,6 +148,8 @@
             "tolerance": { "type": "integer", "minimum": 0, "maximum": 255, "description": "Background-erase and color-replace only." },
             "range": { "enum": ["shadows", "midtones", "highlights"], "description": "Dodge and burn only." },
             "mode": { "enum": ["saturate", "desaturate"], "description": "Sponge only." },
+            "texture": { "type": "number", "minimum": 0, "maximum": 1, "description": "Heal only: share of source detail (default 1)." },
+            "tone": { "type": "number", "minimum": 0, "maximum": 1, "description": "Heal only: share of destination tone correction (default 1)." },
             "dynamics": {
               "type": "object",
               "additionalProperties": false,
@@ -148,6 +167,7 @@
   },
   "x-document": {
     "raster_tiles": "top-level object: digest -> {encoding: 'png-base64', data}. Digest is the sha256 of the 256*256*4 straight-RGBA bytes.",
+    "raster_selections": "top-level object: {active: {<layer id>: {width, height, tiles: {\"tx,ty\": digest}}}}. Tiles are straight-RGBA with alpha = coverage 0-255; a missing tile is 0. Stroke journal entries pin the active selection in their `selection` property.",
     "brush_tips": "top-level object (at most 256): name matching ^[A-Za-z0-9._-]{1,64}$ -> sha256 digest of a raster_tiles entry whose alpha channel is the tip coverage."
   }
 }

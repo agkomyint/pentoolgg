@@ -102,7 +102,7 @@ fn check_size(width: i64, height: i64) -> Result<(u32, u32)> {
 }
 
 /// Store a rebuilt surface into a node and roll its checkpoint.
-fn commit_surface(
+pub(super) fn commit_surface(
     raw: &mut Value,
     node: &mut Value,
     surface: &Surface,

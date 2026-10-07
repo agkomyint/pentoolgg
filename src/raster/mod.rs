@@ -27,17 +27,20 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
 }
 
 mod clone;
+mod flood;
 mod heal;
 mod input;
 mod layer;
 mod math;
 mod recovery;
 mod retouch;
+mod selection;
 mod tip;
 pub use clone::{
     set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
     Request as CloneRequest, Spec as CloneSpec,
 };
+pub use flood::{fill, wand as select_wand, Options as FloodOptions};
 pub use heal::spot as heal_spot;
 use input::lerp;
 pub use input::{
@@ -48,6 +51,7 @@ pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use recovery::{repair, replay, verify, RepairStrategy};
 pub use retouch::Tool;
+pub use selection::{clear_op as select_clear, info_op as select_info, Mode as SelectionMode};
 pub use tip::{load_tip, resolve_tip, tip_add, tip_from_image, tip_list, tip_remove, TipSource};
 
 // ---------------------------------------------------------------------------
@@ -831,6 +835,30 @@ pub struct StrokeResult {
 /// A smudged tile waiting to be written back once the stroke finishes.
 type PendingTile = ((u32, u32), Box<[u8]>);
 
+/// Apply a stroke limited by a selection: each pixel keeps the stroke's result in
+/// proportion to its coverage.
+pub fn apply_stroke_selected(
+    surface: &mut Surface,
+    stroke: &Stroke,
+    selection: Option<&Surface>,
+) -> Result<StrokeResult> {
+    let Some(selection) = selection else {
+        return apply_stroke(surface, stroke);
+    };
+    let before = surface.clone();
+    let mut result = apply_stroke(surface, stroke)?;
+    selection::blend_through(&before, surface, selection);
+    result.tiles_changed = surface
+        .tiles
+        .keys()
+        .chain(before.tiles.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .filter(|key| surface.tiles.get(key) != before.tiles.get(key))
+        .count();
+    Ok(result)
+}
+
 pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResult> {
     let tip = match (&stroke.brush.tip, &stroke.tip) {
         (None, _) => None,
@@ -1461,8 +1489,13 @@ pub fn paint(
             None => None,
         },
     };
+    let pinned = selection::pin(&next, id, surface.width, surface.height)?;
     let before = surface.tile_map_hash();
-    let result = apply_stroke(&mut surface, &stroke)?;
+    let result = apply_stroke_selected(
+        &mut surface,
+        &stroke,
+        pinned.as_ref().map(|(selection, _)| selection),
+    )?;
     let after = surface.tile_map_hash();
     let canonical = json!({
         "brush": request.brush.to_json(),
@@ -1477,6 +1510,9 @@ pub fn paint(
         if stroke.blend == Blend::Tool(Tool::Heal) {
             canonical["heal"] = json!({"algorithm": heal::ALGORITHM});
         }
+    }
+    if let Some((_, entry)) = &pinned {
+        canonical["selection"] = entry.clone();
     }
     let node = locate(&mut next, page, id)?;
     let index = node["journal"].as_array().map_or(0, Vec::len)

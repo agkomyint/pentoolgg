@@ -1611,6 +1611,50 @@ fn is_broken_pipe(error: &anyhow::Error) -> bool {
             .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
     })
 }
+/// Region options shared by `fill` and `select-wand`.
+#[derive(Args, Clone)]
+struct FloodArgs {
+    id: String,
+    /// Seed pixel, in layer pixels.
+    #[arg(long)]
+    x: u32,
+    #[arg(long)]
+    y: u32,
+    /// Largest straight-RGBA channel difference from the seed (0-255).
+    #[arg(long, default_value_t = 32)]
+    tolerance: u8,
+    /// Grow through diagonal neighbors too (8-connected).
+    #[arg(long)]
+    diagonal: bool,
+    /// Take every similar pixel in the layer, not only those connected to the seed.
+    #[arg(long)]
+    global: bool,
+    /// Hard edges instead of the 3x3 anti-aliased edge.
+    #[arg(long)]
+    no_antialias: bool,
+    /// Stop at breaks up to 2N pixels wide (0-8, contiguous only).
+    #[arg(long, default_value_t = 0)]
+    gap: u32,
+    /// Never let fully transparent pixels join an opaque seed's region.
+    #[arg(long)]
+    transparent_barrier: bool,
+}
+
+impl FloodArgs {
+    fn options(&self) -> raster::FloodOptions {
+        raster::FloodOptions {
+            x: self.x,
+            y: self.y,
+            tolerance: self.tolerance,
+            diagonal: self.diagonal,
+            contiguous: !self.global,
+            antialias: !self.no_antialias,
+            gap: self.gap,
+            transparent_barrier: self.transparent_barrier,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum RasterAction {
     /// Create an empty raster layer (upgrades the document to v6).
@@ -1778,6 +1822,27 @@ enum RasterAction {
         #[arg(long, default_value_t = 0)]
         seed: u64,
     },
+    /// Flood-fill a region with a color; the active selection limits the result.
+    Fill {
+        #[command(flatten)]
+        region: FloodArgs,
+        #[arg(long)]
+        color: String,
+        #[arg(long, default_value_t = 1.0)]
+        opacity: f64,
+    },
+    /// Select a flood region (magic wand) as the layer's selection.
+    SelectWand {
+        #[command(flatten)]
+        region: FloodArgs,
+        /// replace, add, subtract or intersect.
+        #[arg(long, default_value = "replace")]
+        mode: String,
+    },
+    /// Remove the layer's selection.
+    SelectClear { id: String },
+    /// Summarize the layer's selection.
+    SelectInfo { id: String },
     /// Spot healing: repair one round spot, choosing the source automatically.
     HealSpot {
         id: String,
@@ -3212,6 +3277,41 @@ async fn run() -> Result<()> {
                     "raster-clone-source",
                     raster::set_clone_source(&mut raw, page, &id, layer.as_deref(), x, y)?,
                 ),
+                RasterAction::Fill {
+                    region,
+                    color,
+                    opacity,
+                } => (
+                    "raster-fill",
+                    raster::fill(
+                        &mut raw,
+                        page,
+                        &region.id,
+                        raster::parse_color(&color)?,
+                        opacity,
+                        &region.options(),
+                    )?,
+                ),
+                RasterAction::SelectWand { region, mode } => (
+                    "raster-select-wand",
+                    raster::select_wand(
+                        &mut raw,
+                        page,
+                        &region.id,
+                        &region.options(),
+                        raster::SelectionMode::parse(&mode)?,
+                    )?,
+                ),
+                RasterAction::SelectClear { id } => {
+                    ("raster-select-clear", raster::select_clear(&mut raw, &id)?)
+                }
+                RasterAction::SelectInfo { id } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&raster::select_info(&raw, &id)?)?
+                    );
+                    return Ok(());
+                }
                 RasterAction::HealSpot {
                     id,
                     x,

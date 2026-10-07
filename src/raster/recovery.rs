@@ -79,7 +79,11 @@ pub(crate) fn replay_entry(raw: &Value, surface: &mut Surface, entry: &Value) ->
                     None => None,
                 },
             };
-            apply_stroke(surface, &stroke)?;
+            let selection = match entry.get("selection") {
+                Some(value) => Some(selection::from_json(raw, value)?),
+                None => None,
+            };
+            apply_stroke_selected(surface, &stroke, selection.as_ref())?;
             Ok(())
         }
         other => bail!("[not-replayable] journal operation {other:?} is not replayable"),
