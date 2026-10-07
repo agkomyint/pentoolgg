@@ -26,47 +26,10 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("[{code}] {message}")
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic math
-// ---------------------------------------------------------------------------
-
-/// Sine and cosine of an angle in degrees using a fixed-length Taylor series, so the
-/// result never depends on a platform's libm.
-fn sin_cos_degrees(degrees: f64) -> (f64, f64) {
-    let mut d = degrees % 360.0;
-    if d > 180.0 {
-        d -= 360.0;
-    }
-    if d < -180.0 {
-        d += 360.0;
-    }
-    let x = d * (std::f64::consts::PI / 180.0);
-    let x2 = x * x;
-    let (mut sin, mut cos) = (x, 1.0);
-    let (mut sin_term, mut cos_term) = (x, 1.0);
-    for k in 1..=14 {
-        let n = f64::from(2 * k);
-        cos_term *= -x2 / ((n - 1.0) * n);
-        cos += cos_term;
-        sin_term *= -x2 / (n * (n + 1.0));
-        sin += sin_term;
-    }
-    (sin, cos)
-}
-
-fn splitmix64(state: &mut u64) -> u64 {
-    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-/// Uniform in [-1, 1) from a 53-bit mantissa; exact in f64.
-fn signed_unit(state: &mut u64) -> f64 {
-    let bits = splitmix64(state) >> 11;
-    (bits as f64) / ((1u64 << 52) as f64) - 1.0
-}
+mod math;
+mod recovery;
+use math::{signed_unit, sin_cos_degrees, smoothstep};
+pub use recovery::{repair, replay, verify, RepairStrategy};
 
 // ---------------------------------------------------------------------------
 // Tiles and surfaces
@@ -151,13 +114,18 @@ fn decode_tile(entry: &Value, digest: &str) -> Result<Tile> {
 impl Surface {
     pub fn load(raw: &Value, node: &Value) -> Result<Self> {
         let (width, height) = dimensions(node)?;
+        Self::load_map(raw, width, height, &node["tiles"])
+    }
+
+    /// Load a surface from any `"x,y" -> digest` map (live tiles or a checkpoint).
+    pub fn load_map(raw: &Value, width: u32, height: u32, tiles: &Value) -> Result<Self> {
         let mut surface = Surface {
             width,
             height,
             tiles: BTreeMap::new(),
         };
         let store = raw.get("raster_tiles").and_then(Value::as_object);
-        for (key, digest) in node["tiles"].as_object().into_iter().flatten() {
+        for (key, digest) in tiles.as_object().into_iter().flatten() {
             let digest = digest.as_str().context("tile digest must be a string")?;
             let entry = store.and_then(|s| s.get(digest)).with_context(|| {
                 format!("[missing-resource] raster tile {digest} is not in raster_tiles")
@@ -171,6 +139,12 @@ impl Surface {
 
     /// Write the tile map back, adding new tiles to the store and dropping blanks.
     pub fn store(&self, raw: &mut Value, node: &mut Value) -> Result<()> {
+        self.store_with(raw, node, false)
+    }
+
+    /// Like [`Surface::store`]; `rewrite` replaces existing store entries, which
+    /// repairs a damaged entry whose digest is still correct.
+    pub fn store_with(&self, raw: &mut Value, node: &mut Value, rewrite: bool) -> Result<()> {
         let mut map = Map::new();
         let store = raw
             .as_object_mut()
@@ -184,7 +158,7 @@ impl Surface {
                 continue;
             }
             let digest = tile_hash(tile);
-            if !store.contains_key(&digest) {
+            if rewrite || !store.contains_key(&digest) {
                 store.insert(
                     digest.clone(),
                     json!({"encoding":"png-base64","data":encode_tile(tile)?}),
@@ -561,10 +535,6 @@ fn dabs(brush: &Brush, samples: &[Sample], seed: u64) -> Result<Vec<Dab>> {
 
 type StrokeBuffer = HashMap<(u32, u32), Vec<u16>>;
 
-fn smoothstep(t: f64) -> f64 {
-    t * t * (3.0 - 2.0 * t)
-}
-
 /// Accumulate one dab into the per-stroke coverage buffer (flow build-up).
 fn stamp(buffer: &mut StrokeBuffer, brush: &Brush, dab: &Dab, width: u32, height: u32) {
     let radius = dab.size / 2.0;
@@ -777,20 +747,88 @@ pub fn validate_node(node: &Value) -> Result<()> {
         if tx >= across || ty >= down {
             bail!("[malformed-raster] raster {id}: tile {key} lies outside the {width}x{height} bounds")
         }
-        let digest = digest.as_str().unwrap_or_default();
-        if digest.len() != 71 || !digest.starts_with("sha256:") {
+        if !digest.as_str().is_some_and(is_digest) {
             bail!("[malformed-raster] raster {id}: tile {key} digest must be sha256:<64 hex>")
         }
     }
-    if let Some(journal) = object.get("journal") {
-        let journal = journal
-            .as_array()
-            .with_context(|| format!("[malformed-raster] raster {id}: journal must be an array"))?;
-        if journal.len() > MAX_JOURNAL {
-            bail!("[limit-exceeded] raster {id} journal exceeds {MAX_JOURNAL} entries; run `raster checkpoint --compact`")
+    node_engine(node)?;
+    let journal_len = match object.get("journal") {
+        None => 0,
+        Some(journal) => {
+            let journal = journal.as_array().with_context(|| {
+                format!("[malformed-raster] raster {id}: journal must be an array")
+            })?;
+            if journal.len() > MAX_JOURNAL {
+                bail!("[limit-exceeded] raster {id} journal exceeds {MAX_JOURNAL} entries; run `raster checkpoint --compact`")
+            }
+            journal.len()
+        }
+    };
+    if let Some(checkpoint) = object.get("checkpoint") {
+        let checkpoint = checkpoint.as_object().with_context(|| {
+            format!("[malformed-raster] raster {id}: checkpoint must be an object")
+        })?;
+        if let Some(tiles) = checkpoint.get("tiles") {
+            let tiles = tiles.as_object().with_context(|| {
+                format!("[malformed-raster] raster {id}: checkpoint tiles must be an object")
+            })?;
+            if tiles.len() > MAX_TILES {
+                bail!("[limit-exceeded] raster {id} checkpoint has more than {MAX_TILES} tiles")
+            }
+            for (key, digest) in tiles {
+                parse_key(key)?;
+                if !digest.as_str().is_some_and(is_digest) {
+                    bail!("[malformed-raster] raster {id}: checkpoint tile {key} digest must be sha256:<64 hex>")
+                }
+            }
+        }
+        let offset = checkpoint
+            .get("journal_offset")
+            .map_or(Some(0), Value::as_u64)
+            .with_context(|| {
+                format!(
+                    "[malformed-raster] raster {id}: checkpoint journal_offset must be an integer"
+                )
+            })?;
+        if offset as usize > journal_len {
+            bail!("[malformed-raster] raster {id}: checkpoint journal_offset {offset} is past the {journal_len}-entry journal")
         }
     }
     Ok(())
+}
+
+fn is_digest(text: &str) -> bool {
+    text.len() == 71
+        && text.starts_with("sha256:")
+        && text[7..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The raster engine version that last wrote a node (1 when absent).
+pub fn node_engine(node: &Value) -> Result<u64> {
+    match node.get("engine") {
+        None => Ok(1),
+        Some(value) => value.as_u64().filter(|n| *n >= 1).with_context(|| {
+            format!(
+                "[malformed-raster] raster {}: engine must be a positive integer",
+                node["id"].as_str().unwrap_or("?")
+            )
+        }),
+    }
+}
+
+/// Every content digest a raster node pins: live tiles, checkpoint tiles and any
+/// digests recorded in journal entries (for example clone sources).
+fn pinned_digests(value: &Value, out: &mut HashSet<String>) {
+    match value {
+        Value::String(text) if is_digest(text) => {
+            out.insert(text.clone());
+        }
+        Value::Array(items) => items.iter().for_each(|item| pinned_digests(item, out)),
+        Value::Object(map) => map.values().for_each(|item| pinned_digests(item, out)),
+        _ => {}
+    }
 }
 
 fn walk_rasters<'a>(nodes: &'a [Value], out: &mut Vec<&'a Value>) {
@@ -839,19 +877,24 @@ pub fn validate_document(raw: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Remove stored tiles no raster node references.
+/// Digests that must stay in `raster_tiles`: everything pinned by raster nodes plus
+/// document-level raster resources (saved selections and brush presets).
+fn retained_digests(raw: &Value) -> HashSet<String> {
+    let mut referenced = HashSet::new();
+    for node in all_rasters(raw) {
+        pinned_digests(node, &mut referenced);
+    }
+    for key in ["raster_selections", "brush_presets"] {
+        if let Some(value) = raw.get(key) {
+            pinned_digests(value, &mut referenced);
+        }
+    }
+    referenced
+}
+
+/// Remove stored tiles nothing references.
 pub fn collect_garbage(raw: &mut Value) -> usize {
-    let referenced: HashSet<String> = all_rasters(raw)
-        .iter()
-        .flat_map(|node| {
-            node["tiles"]
-                .as_object()
-                .into_iter()
-                .flatten()
-                .filter_map(|(_, d)| d.as_str().map(str::to_owned))
-                .collect::<Vec<_>>()
-        })
-        .collect();
+    let referenced = retained_digests(raw);
     let mut removed = 0;
     if let Some(store) = raw.get_mut("raster_tiles").and_then(Value::as_object_mut) {
         let before = store.len();
@@ -917,14 +960,36 @@ fn locate<'a>(raw: &'a mut Value, page: Option<&str>, id: &str) -> Result<&'a mu
     })
 }
 
+/// A raster node may be mutated only when it exists, is unlocked and was written by
+/// an engine this build implements. Newer-engine layers stay viewable and
+/// exportable from their materialized tiles but are never rewritten or replayed.
 fn ensure_node_unlocked(raw: &Value, page: Option<&str>, id: &str) -> Result<()> {
-    if !all_rasters(raw).iter().any(|node| node["id"] == id) {
+    let Some(node) = all_rasters(raw).into_iter().find(|node| node["id"] == id) else {
         return Err(bad(
             "not-found",
             format!("raster layer {id} was not found; list nodes with `pentool tree DOCUMENT --kind raster`"),
         ));
+    };
+    let engine = node_engine(node)?;
+    if engine > ENGINE {
+        bail!("[unsupported-capability] raster {id} was written by raster engine {engine}; this build implements engine {ENGINE}. It can be viewed and exported, but editing needs a newer pentool")
     }
     crate::composite::ensure_unlocked(page_value(raw, page)?, id)
+}
+
+/// Replace the checkpoint with the node's current tiles and empty the journal. Used
+/// when the journal is full and after operations whose result is not replayable.
+pub(crate) fn roll_checkpoint(node: &mut Value, tile_map_sha256: &str) {
+    let entries = node["journal"].as_array().map_or(0, Vec::len) as u64;
+    let dropped = node["checkpoint"]["journal_dropped"].as_u64().unwrap_or(0);
+    node["checkpoint"] = json!({
+        "engine": ENGINE,
+        "tiles": node["tiles"].clone(),
+        "tile_map_sha256": tile_map_sha256,
+        "journal_offset": 0,
+        "journal_dropped": dropped + entries,
+    });
+    node["journal"] = json!([]);
 }
 
 /// Create an empty raster layer in the first (or named) layer of a v6 document.
@@ -975,6 +1040,7 @@ pub fn add(
         .push(json!({
             "kind": "raster",
             "id": id,
+            "engine": ENGINE,
             "x": x,
             "y": y,
             "width": width,
@@ -1041,13 +1107,16 @@ pub fn checkpoint(raw: &mut Value, page: Option<&str>, id: &str, compact: bool) 
     let dropped = node["checkpoint"]["journal_dropped"].as_u64().unwrap_or(0);
     let hash = surface.tile_map_hash();
     if compact {
-        node["journal"] = json!([]);
+        roll_checkpoint(node, &hash);
+    } else {
+        node["checkpoint"] = json!({
+            "engine": ENGINE,
+            "tiles": node["tiles"].clone(),
+            "tile_map_sha256": hash,
+            "journal_offset": entries,
+            "journal_dropped": dropped,
+        });
     }
-    node["checkpoint"] = json!({
-        "engine": ENGINE,
-        "tile_map_sha256": hash,
-        "journal_dropped": dropped + if compact { entries as u64 } else { 0 },
-    });
     crate::scene::validate(&next)?;
     *raw = next;
     Ok(json!({"id":id,"tile_map_sha256":hash,"journal_compacted":if compact {entries} else {0}}))
@@ -1107,21 +1176,16 @@ pub fn paint(
     entry["bounds"] = json!(result.bounds);
     entry["tiles_changed"] = json!(result.tiles_changed);
     entry["tile_map_sha256"] = json!(after);
-    {
-        let journal = node["journal"].as_array_mut().context("journal missing")?;
-        journal.push(entry);
-        let mut dropped_now = 0u64;
-        while journal.len() > MAX_JOURNAL {
-            journal.remove(0);
-            dropped_now += 1;
-        }
-        if dropped_now > 0 {
-            let prior = node["checkpoint"]["journal_dropped"].as_u64().unwrap_or(0);
-            node["checkpoint"] = json!({"engine":ENGINE,"tile_map_sha256":before,"journal_dropped":prior + dropped_now});
-        }
-    }
+    node["journal"]
+        .as_array_mut()
+        .context("journal missing")?
+        .push(entry);
     let mut node_copy = node.clone();
     surface.store(&mut next, &mut node_copy)?;
+    let rolled = node_copy["journal"].as_array().map_or(0, Vec::len) >= MAX_JOURNAL;
+    if rolled {
+        roll_checkpoint(&mut node_copy, &after);
+    }
     *locate(&mut next, page, id)? = node_copy;
     let released = collect_garbage(&mut next);
     crate::scene::validate(&next)?;
@@ -1134,6 +1198,7 @@ pub fn paint(
         "tiles_total": surface.tiles.len(),
         "tile_map_sha256": after,
         "tiles_released": released,
+        "checkpoint_rolled": rolled,
     }))
 }
 
@@ -1168,14 +1233,6 @@ mod tests {
             blend: Blend::Normal,
             seed: 42,
         }
-    }
-
-    #[test]
-    fn sin_cos_matches_known_values_without_libm() {
-        let (s, c) = sin_cos_degrees(30.0);
-        assert!((s - 0.5).abs() < 1e-12 && (c - 0.866_025_403_784_438_6).abs() < 1e-12);
-        let (s, c) = sin_cos_degrees(-270.0);
-        assert!((s - 1.0).abs() < 1e-12 && c.abs() < 1e-12);
     }
 
     #[test]
@@ -1234,5 +1291,74 @@ mod tests {
         assert!(Brush::parse(&json!({"bogus":1})).is_err());
         assert!(parse_samples(&json!([])).is_err());
         assert!(parse_samples(&json!([[1, 2, 3]])).is_err());
+    }
+
+    fn document_with_layer() -> Value {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../../docs/fixtures/v4-scene.pen")).unwrap();
+        add(&mut raw, None, None, "p", 0.0, 0.0, 300, 40).unwrap();
+        raw
+    }
+
+    fn dot(x: f64) -> StrokeRequest {
+        StrokeRequest {
+            brush: Brush::parse(&json!({"size":3})).unwrap(),
+            samples: parse_samples(&json!([[x, 20]])).unwrap(),
+            color: [x as u8, 40, 200],
+            blend: Blend::Normal,
+            seed: 0,
+        }
+    }
+
+    fn node(raw: &Value) -> Value {
+        all_rasters(raw)[0].clone()
+    }
+
+    #[test]
+    fn full_journal_rolls_into_a_checkpoint_that_still_replays() {
+        let mut raw = document_with_layer();
+        let mut rolled_at = None;
+        for index in 0..(MAX_JOURNAL + 3) {
+            let result = paint(&mut raw, None, "p", dot(index as f64)).unwrap();
+            if result["checkpoint_rolled"] == true {
+                rolled_at.get_or_insert(index);
+            }
+        }
+        assert_eq!(rolled_at, Some(MAX_JOURNAL - 1));
+        let n = node(&raw);
+        assert_eq!(n["journal"].as_array().unwrap().len(), 3);
+        assert_eq!(n["checkpoint"]["journal_dropped"], MAX_JOURNAL as u64);
+        let live = Surface::load(&raw, &n).unwrap().tile_map_hash();
+        assert_eq!(replay(&raw, &n).unwrap().tile_map_hash(), live);
+        // Stroke ids keep counting across the roll.
+        assert!(n["journal"][0]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("s{MAX_JOURNAL}-")));
+    }
+
+    #[test]
+    fn non_compact_checkpoint_replays_only_the_later_entries() {
+        let mut raw = document_with_layer();
+        paint(&mut raw, None, "p", dot(10.0)).unwrap();
+        checkpoint(&mut raw, None, "p", false).unwrap();
+        paint(&mut raw, None, "p", dot(30.0)).unwrap();
+        let n = node(&raw);
+        assert_eq!(n["checkpoint"]["journal_offset"], 1);
+        let live = Surface::load(&raw, &n).unwrap().tile_map_hash();
+        assert_eq!(replay(&raw, &n).unwrap().tile_map_hash(), live);
+        // Clearing the live tiles must not release tiles the checkpoint pins.
+        let pinned = n["checkpoint"]["tiles"]["0,0"].as_str().unwrap().to_owned();
+        let mut copy = raw.clone();
+        for node in copy["pages"][0]["layers"][0]["nodes"]
+            .as_array_mut()
+            .unwrap()
+        {
+            if node["id"] == "p" {
+                node["tiles"] = json!({});
+            }
+        }
+        collect_garbage(&mut copy);
+        assert!(copy["raster_tiles"].get(&pinned).is_some());
     }
 }

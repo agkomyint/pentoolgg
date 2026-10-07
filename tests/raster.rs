@@ -320,4 +320,173 @@ fn normative_fixture_replays_to_its_recorded_hash() {
         "paint"
     ])
     .contains("missing-resource"));
+
+    let corrupt = ws.path("corrupt.pen");
+    fs::copy("docs/fixtures/raster-v6-corrupt-tile.pen", &corrupt).unwrap();
+    let out = run(&["raster", &corrupt, "verify", "--replay"]);
+    assert!(!out.status.success());
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["layers"][0]["corrupt"].as_array().unwrap().len(), 1);
+    assert_eq!(report["layers"][0]["replay"]["status"], "rebuildable");
+    ok(&["raster", &corrupt, "repair", "paint"]);
+    assert_eq!(
+        ok(&["raster", &corrupt, "info", "paint"])["tile_map_sha256"],
+        fixture["tile_map_sha256"]
+    );
+}
+
+fn read_json(path: &str) -> Value {
+    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+}
+
+fn write_json(path: &str, value: &Value) {
+    fs::write(path, serde_json::to_vec_pretty(value).unwrap()).unwrap();
+}
+
+/// Point the first tile of `p` at another tile's pixels without changing its digest.
+fn corrupt_first_tile(doc: &str) -> String {
+    let mut raw = read_json(doc);
+    let tiles = raw["pages"][0]["layers"][0]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == "p")
+        .unwrap()["tiles"]
+        .as_object()
+        .unwrap()
+        .clone();
+    let mut digests = tiles.values().map(|d| d.as_str().unwrap().to_owned());
+    let (victim, donor) = (digests.next().unwrap(), digests.next().unwrap());
+    let data = raw["raster_tiles"][&donor]["data"].clone();
+    raw["raster_tiles"][&victim]["data"] = data;
+    write_json(doc, &raw);
+    tiles.iter().find(|(_, d)| **d == victim).unwrap().0.clone()
+}
+
+#[test]
+fn verify_reports_healthy_layers_and_proves_replay() {
+    let ws = Workspace::new("verify");
+    let doc = ws.document("a.pen");
+    ok(&[
+        "raster", &doc, "add", "p", "--width", "600", "--height", "300",
+    ]);
+    paint(&doc, "p");
+    ok(&["raster", &doc, "checkpoint", "p"]);
+    paint(&doc, "p");
+    let report = ok(&["raster", &doc, "verify", "--replay"]);
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["layers"][0]["replay"]["status"], "match");
+    assert_eq!(report["layers"][0]["checkpoint"]["replay_base"], true);
+    assert_eq!(report["orphan_tiles"], 0);
+    assert!(fail(&["raster", &doc, "verify", "nope"]).contains("not-found"));
+}
+
+#[test]
+fn corrupt_tile_is_detected_and_rebuilt_exactly_by_replay() {
+    let ws = Workspace::new("repair-replay");
+    let doc = ws.document("a.pen");
+    ok(&[
+        "raster", &doc, "add", "p", "--width", "600", "--height", "300",
+    ]);
+    paint(&doc, "p");
+    let healthy = ok(&["raster", &doc, "info", "p"]);
+    let key = corrupt_first_tile(&doc);
+    let out = run(&["raster", &doc, "verify", "p", "--replay"]);
+    assert!(!out.status.success());
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["layers"][0]["corrupt"], json!([key]));
+    assert_eq!(report["layers"][0]["replay"]["status"], "rebuildable");
+    assert!(fail(&["raster", &doc, "info", "p"]).contains("corrupt-raster"));
+
+    let dry_before = fs::read(&doc).unwrap();
+    ok(&[
+        "raster",
+        &doc,
+        "--dry-run",
+        "repair",
+        "p",
+        "--strategy",
+        "replay",
+    ]);
+    assert_eq!(fs::read(&doc).unwrap(), dry_before);
+    let repaired = ok(&["raster", &doc, "repair", "p", "--strategy", "replay"]);
+    assert_eq!(repaired["result"]["tiles_corrupt"], 1);
+    assert_eq!(repaired["result"]["lost_tiles"], json!([]));
+    assert_eq!(
+        ok(&["raster", &doc, "info", "p"])["tile_map_sha256"],
+        healthy["tile_map_sha256"]
+    );
+    assert_eq!(ok(&["raster", &doc, "verify", "--replay"])["ok"], true);
+}
+
+#[test]
+fn unreplayable_damage_needs_explicit_transparent_repair() {
+    let ws = Workspace::new("repair-transparent");
+    let doc = ws.document("a.pen");
+    ok(&[
+        "raster", &doc, "add", "p", "--width", "600", "--height", "300",
+    ]);
+    paint(&doc, "p");
+    ok(&["raster", &doc, "checkpoint", "p", "--compact"]);
+    let key = corrupt_first_tile(&doc);
+    let before = fs::read(&doc).unwrap();
+    // The compacted checkpoint pins the same damaged tile, so replay cannot help.
+    fail(&["raster", &doc, "repair", "p", "--strategy", "replay"]);
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    assert!(fail(&["raster", &doc, "repair", "p", "--strategy", "guess"]).contains("transparent"));
+    let repaired = ok(&["raster", &doc, "repair", "p", "--strategy", "transparent"]);
+    assert_eq!(repaired["result"]["lost_tiles"], json!([key]));
+    assert_eq!(repaired["result"]["checkpoint_rolled"], true);
+    let info = ok(&["raster", &doc, "info", "p"]);
+    assert_eq!(info["tiles"], 3);
+    let raw = read_json(&doc);
+    let node = &raw["pages"][0]["layers"][0]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == "p")
+        .unwrap()
+        .clone();
+    assert_eq!(node["checkpoint"]["repaired_lost_tiles"], json!([key]));
+    assert_eq!(ok(&["raster", &doc, "verify", "--replay"])["ok"], true);
+}
+
+#[test]
+fn layers_from_a_newer_engine_render_but_refuse_edits() {
+    let ws = Workspace::new("engine");
+    let doc = ws.document("a.pen");
+    ok(&[
+        "raster", &doc, "add", "p", "--width", "600", "--height", "300",
+    ]);
+    paint(&doc, "p");
+    let mut raw = read_json(&doc);
+    for node in raw["pages"][0]["layers"][0]["nodes"]
+        .as_array_mut()
+        .unwrap()
+    {
+        if node["id"] == "p" {
+            node["engine"] = json!(99);
+        }
+    }
+    write_json(&doc, &raw);
+    let before = fs::read(&doc).unwrap();
+    assert_eq!(ok(&["raster", &doc, "info", "p"])["tiles"], 4);
+    let png = ws.path("future.png");
+    assert!(run(&["export", &doc, &png]).status.success());
+    for args in [
+        vec!["stroke", "p", "--samples", "[[1,2]]"],
+        vec!["clear", "p"],
+        vec!["checkpoint", "p"],
+        vec!["repair", "p"],
+    ] {
+        let mut full = vec!["raster", doc.as_str()];
+        full.extend(args);
+        let message = fail(&full);
+        assert!(message.contains("unsupported-capability"), "{message}");
+        assert_eq!(fs::read(&doc).unwrap(), before);
+    }
+    assert_eq!(
+        ok(&["raster", &doc, "verify", "p"])["layers"][0]["editable"],
+        false
+    );
 }

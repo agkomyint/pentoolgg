@@ -7,6 +7,10 @@
   "properties": {
     "kind": { "const": "raster" },
     "id": { "type": "string", "minLength": 1 },
+    "engine": {
+      "type": "integer", "minimum": 1, "default": 1,
+      "description": "Raster engine that last wrote the node. Readers render any value from the materialized tiles; writers refuse to mutate or replay a node whose engine exceeds their own."
+    },
     "x": { "type": "number" },
     "y": { "type": "number" },
     "width": { "type": "integer", "minimum": 1, "maximum": 16384 },
@@ -22,10 +26,17 @@
     "journal": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/stroke" } },
     "checkpoint": {
       "type": "object",
+      "description": "Replay base: replaying journal[journal_offset..] from tiles reproduces the live tile map.",
       "properties": {
-        "engine": { "const": 1 },
+        "engine": { "type": "integer", "minimum": 1 },
+        "tiles": { "$ref": "#/properties/tiles" },
         "tile_map_sha256": { "type": "string" },
-        "journal_dropped": { "type": "integer", "minimum": 0 }
+        "journal_offset": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "journal_dropped": { "type": "integer", "minimum": 0 },
+        "repaired_lost_tiles": {
+          "type": "array", "items": { "type": "string" },
+          "description": "Tile keys dropped to transparency by `raster repair --strategy transparent`."
+        }
       }
     }
   },
@@ -34,7 +45,8 @@
       "type": "object",
       "required": ["id", "engine", "brush", "samples", "color", "blend", "seed"],
       "properties": {
-        "engine": { "const": 1 },
+        "op": { "const": "stroke", "default": "stroke" },
+        "engine": { "type": "integer", "minimum": 1 },
         "blend": { "enum": ["normal", "erase"] },
         "color": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
         "seed": { "type": "integer", "minimum": 0 },

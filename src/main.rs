@@ -1637,6 +1637,21 @@ enum RasterAction {
         #[arg(long)]
         compact: bool,
     },
+    /// Check every tile against its digest; --replay also proves the journal
+    /// still reaches the live pixels. Read-only; exits nonzero when damaged.
+    Verify {
+        /// One raster layer; omit to check every raster on the selected page(s).
+        id: Option<String>,
+        #[arg(long)]
+        replay: bool,
+    },
+    /// Rebuild damaged tiles: `replay` re-runs the checkpoint and journal exactly;
+    /// `transparent` drops unrecoverable tiles and records them in the checkpoint.
+    Repair {
+        id: String,
+        #[arg(long, default_value = "replay")]
+        strategy: String,
+    },
     /// Apply one deterministic brush stroke.
     Stroke {
         id: String,
@@ -2974,6 +2989,23 @@ async fn run() -> Result<()> {
                     );
                     return Ok(());
                 }
+                RasterAction::Verify { id, replay } => {
+                    let report = raster::verify(&raw, page, id.as_deref(), replay)?;
+                    println!("{}", serde_json::to_string(&report)?);
+                    if report["ok"] != true {
+                        bail!("[corrupt-raster] raster verification found damage; see the report for the fix")
+                    }
+                    return Ok(());
+                }
+                RasterAction::Repair { id, strategy } => (
+                    "raster-repair",
+                    raster::repair(
+                        &mut raw,
+                        page,
+                        &id,
+                        raster::RepairStrategy::parse(&strategy)?,
+                    )?,
+                ),
                 RasterAction::Clear { id } => ("raster-clear", raster::clear(&mut raw, page, &id)?),
                 RasterAction::Checkpoint { id, compact } => (
                     "raster-checkpoint",

@@ -1,12 +1,12 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
-> **Status (dev, unreleased, local commit `f229080`, not yet pushed or CI-verified):**
-> 0 of 14 items are complete; 3 are substantially built. Boxes stay unticked until every
+> **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
+> 0 of 14 items are ticked; item 1 is implemented and items 2, 3 and 13 are partial. Boxes stay unticked until every
 > item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
 >
 > | # | Item | State |
 > |---|------|-------|
-> | 1 | Spec, schema, fixtures | Built: `docs/raster-paint-v1.md`, `.schema.json`, valid and invalid fixtures. Missing: corruption-recovery tooling, compatibility rules for future engines, CI evidence. |
+> | 1 | Spec, schema, fixtures | Implemented: `docs/raster-paint-v1.md` + schema, valid/missing-tile/corrupt-tile fixtures, replayable checkpoints with auto-rolling journal, `raster verify [--replay]`, `raster repair --strategy replay\|transparent`, node `engine` with view-only rule for newer engines. Awaiting hosted CI evidence before ticking. |
 > | 2 | Raster layers | Partial: add, clear, info, checkpoint, tree/search, render, undo, v5 downgrade guard. Missing: resize, crop, duplicate, merge, rasterize, groups/masks/clip/effects/components/packages/diff. |
 > | 3 | Brush engine | Partial: hard-round, soft-round, pixel, calligraphic, seeded scatter. Missing: textured stamp, smoothing, buildup. |
 > | 4-12 | Input, erase/blend tools, clone, heal, fill, selections, layer ops, presets, editor UI | Not started (plain erase blend exists only as part of item 3). |
