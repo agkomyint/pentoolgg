@@ -1,10 +1,10 @@
 use pentool::{
     agent, ai, asset, benchmark, composite, diff, document, editing, fonts, geometry, history,
-    image, import, instance, layout, library, package, page, pdf, render, replace, scene, server,
-    style, text, transaction,
+    image, import, instance, layout, library, package, page, pdf, raster, render, replace, scene,
+    server, style, text, transaction,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand};
 use document::Document;
 use std::{
@@ -462,6 +462,8 @@ enum SearchKind {
     Text,
     /// v5 raster image nodes.
     Image,
+    /// v6 raster-paint layers.
+    Raster,
 }
 
 impl SearchKind {
@@ -470,6 +472,7 @@ impl SearchKind {
             Self::Path => "path",
             Self::Text => "text",
             Self::Image => "image",
+            Self::Raster => "raster",
         }
     }
     fn legacy(self) -> Result<agent::ObjectKind> {
@@ -478,6 +481,9 @@ impl SearchKind {
             Self::Text => Ok(agent::ObjectKind::Text),
             Self::Image => anyhow::bail!(
                 "[unsupported-capability] --kind image requires a v5 document; migrate with `pentool migrate`"
+            ),
+            Self::Raster => anyhow::bail!(
+                "[unsupported-capability] --kind raster requires a v6 document; migrate with `pentool migrate`"
             ),
         }
     }
@@ -890,6 +896,16 @@ enum Command {
         if_revision: Option<String>,
         #[command(subcommand)]
         action: page::PageAction,
+    },
+    /// Raster-paint layers: sparse tiles, deterministic brush strokes, checkpoints.
+    Raster {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long = "if-revision", visible_alias = "revision")]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: RasterAction,
     },
     /// Optional BYOK image models: agent-first setup, generation, review, and local cutouts.
     Ai {
@@ -1595,6 +1611,51 @@ fn is_broken_pipe(error: &anyhow::Error) -> bool {
             .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
     })
 }
+#[derive(Subcommand)]
+enum RasterAction {
+    /// Create an empty raster layer (upgrades the document to v6).
+    Add {
+        id: String,
+        #[arg(long, default_value_t = 0.0)]
+        x: f64,
+        #[arg(long, default_value_t = 0.0)]
+        y: f64,
+        #[arg(long)]
+        width: u32,
+        #[arg(long)]
+        height: u32,
+        #[arg(long)]
+        layer: Option<String>,
+    },
+    /// Report size, tile count, journal length and the tile-map hash.
+    Info { id: String },
+    /// Remove all pixels and the stroke journal.
+    Clear { id: String },
+    /// Record a checkpoint; --compact drops the replayable journal.
+    Checkpoint {
+        id: String,
+        #[arg(long)]
+        compact: bool,
+    },
+    /// Apply one deterministic brush stroke.
+    Stroke {
+        id: String,
+        /// JSON array of [x, y, pressure] samples, or @file.json.
+        #[arg(long)]
+        samples: String,
+        /// Brush JSON (kind, size, hardness, spacing, opacity, flow, ...), or @file.json.
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long, default_value = "#000000")]
+        color: String,
+        /// normal or erase.
+        #[arg(long, default_value = "normal")]
+        blend: String,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
+}
+
 fn ai_error_json(error: &anyhow::Error) -> serde_json::Value {
     if let Some(ai) = error.chain().find_map(|e| e.downcast_ref::<ai::AiError>()) {
         return serde_json::json!({"code":ai.code,"message":ai.message,"fix":ai.fix});
@@ -2882,6 +2943,82 @@ async fn run() -> Result<()> {
                     },
                 )
             }
+        }
+        Command::Raster {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if !scene::is_scene_document(&raw) {
+                bail!("[unsupported-version] raster layers need a v6 scene document; run `pentool migrate` first")
+            }
+            let page = selected_page;
+            let (operation, result) = match action {
+                RasterAction::Add {
+                    id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    layer,
+                } => (
+                    "raster-add",
+                    raster::add(&mut raw, page, layer.as_deref(), &id, x, y, width, height)?,
+                ),
+                RasterAction::Info { id } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&raster::info(&raw, page, &id)?)?
+                    );
+                    return Ok(());
+                }
+                RasterAction::Clear { id } => ("raster-clear", raster::clear(&mut raw, page, &id)?),
+                RasterAction::Checkpoint { id, compact } => (
+                    "raster-checkpoint",
+                    raster::checkpoint(&mut raw, page, &id, compact)?,
+                ),
+                RasterAction::Stroke {
+                    id,
+                    samples,
+                    brush,
+                    color,
+                    blend,
+                    seed,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => fs::read_to_string(path)?,
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let request = raster::StrokeRequest {
+                        brush: raster::Brush::parse(&read(&brush)?)?,
+                        samples: raster::parse_samples(&read(&samples)?)?,
+                        color: raster::parse_color(&color)?,
+                        blend: raster::Blend::parse(&blend)?,
+                        seed,
+                    };
+                    (
+                        "raster-stroke",
+                        raster::paint(&mut raw, page, &id, request)?,
+                    )
+                }
+            };
+            let summary = transaction::commit_value(
+                &input,
+                operation,
+                dry_run,
+                if_revision.as_deref(),
+                &raw,
+            )?;
+            println!(
+                "{}",
+                serde_json::json!({"result": result, "dry_run": dry_run, "change": summary})
+            );
+            Ok(())
         }
         Command::Ai { action } => {
             println!(

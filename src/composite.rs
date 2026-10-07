@@ -265,10 +265,12 @@ pub fn downgrade(mut raw: Value) -> Result<Value> {
                     || object.get("isolation").is_some()
                     || object.get("blend_space").is_some()
                     || object.get("blend_mode").is_some_and(|v| v != "normal")
-                    || (object.get("kind").and_then(Value::as_str) != Some("image")
-                        && object
-                            .get("opacity")
-                            .is_some_and(|v| v.as_f64() != Some(1.0)))
+                    || (!matches!(
+                        object.get("kind").and_then(Value::as_str),
+                        Some("image" | "raster")
+                    ) && object
+                        .get("opacity")
+                        .is_some_and(|v| v.as_f64() != Some(1.0)))
                 {
                     bail!("[unsupported-capability] version 5 cannot represent required compositing properties; detach or explicitly bake them first")
                 }
@@ -283,6 +285,9 @@ pub fn downgrade(mut raw: Value) -> Result<Value> {
                 }
                 if object.get("kind").and_then(Value::as_str) == Some("fill") {
                     bail!("[unsupported-capability] version 5 cannot represent fill nodes")
+                }
+                if object.get("kind").and_then(Value::as_str) == Some("raster") {
+                    bail!("[unsupported-capability] version 5 cannot represent raster layer {}; export it as an image first", object["id"])
                 }
                 for child in object.values() {
                     check(child)?;
@@ -1225,7 +1230,7 @@ impl Renderer<'_> {
                 // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
                 self.reserve()?;
                 let mut content = node.clone();
-                if content["kind"] == "image" {
+                if content["kind"] == "image" || content["kind"] == "raster" {
                     content["opacity"] = json!(1.0);
                     content["blend_mode"] = json!("normal");
                 }

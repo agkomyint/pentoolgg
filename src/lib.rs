@@ -26,6 +26,7 @@ pub mod package;
 pub mod page;
 pub mod pdf;
 pub mod preset;
+pub mod raster;
 pub mod render;
 pub mod replace;
 pub mod resource;

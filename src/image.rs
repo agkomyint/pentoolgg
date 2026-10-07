@@ -682,6 +682,7 @@ fn write_node(
         )?,
         "text" => write_text(svg, object, root)?,
         "image" => write_image(svg, object, raw, root, clip_index)?,
+        "raster" => write_raster(svg, node, raw)?,
         kind => bail!("[unsupported-capability] cannot render node kind {kind}"),
     }
     svg.push_str("</g>");
@@ -757,6 +758,24 @@ fn write_mask_geometry(svg: &mut String, node: &Value, fill_rule: &str) -> Resul
         kind => bail!("[invalid-mask] node kind {kind} cannot be a mask"),
     }
     svg.push_str("</g>");
+    Ok(())
+}
+
+fn write_raster(svg: &mut String, node: &Value, raw: &Value) -> Result<()> {
+    let object = node.as_object().context("raster node must be an object")?;
+    use base64::Engine as _;
+    let png = crate::raster::render_png(raw, node)?;
+    let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
+    write!(
+        svg,
+        r#"<image x="{}" y="{}" width="{}" height="{}" opacity="{}" preserveAspectRatio="none" href="data:image/png;base64,{}"/>"#,
+        finite(object, "x")?,
+        finite(object, "y")?,
+        finite(object, "width")?,
+        finite(object, "height")?,
+        opacity,
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )?;
     Ok(())
 }
 

@@ -702,7 +702,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                     });
                 Rect::new(x, y - size, x + width, y - size + height)
             }
-            "image" => Rect::new(
+            "image" | "raster" => Rect::new(
                 node["x"].as_f64().context("image x missing")?,
                 node["y"].as_f64().context("image y missing")?,
                 node["x"].as_f64().unwrap()
@@ -2623,6 +2623,9 @@ pub fn validate(raw: &Value) -> Result<()> {
     if let Some(styles) = raw.get("styles") {
         crate::style::validate_aliases(styles)?;
     }
+    if version >= crate::composite::VERSION {
+        crate::raster::validate_document(raw)?;
+    }
     let mut component_ids = HashSet::new();
     if let Some(components) = raw.get("components").and_then(Value::as_array) {
         for component in components {
@@ -2842,6 +2845,13 @@ fn flatten_node(node: &Value, parent: Affine, out: &mut Vec<Flat>) -> Result<()>
             value.insert("transform".into(), json!(world.as_coeffs()));
             out.push(Flat::Text(Value::Object(value)));
         }
+        "raster" => bail!(
+            "[unsupported-capability] v3 flattening cannot represent raster node {}",
+            object
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ),
         "image" => bail!(
             "[unsupported-capability] v3 flattening cannot represent image node {}",
             object
@@ -3065,6 +3075,7 @@ pub(crate) fn validate_node(
                     .context("fill descriptor missing")?;
             }
             "adjustment" if compositing => crate::composite::validate_node(node)?,
+            "raster" if compositing => crate::raster::validate_node(node)?,
             "image" => crate::image::validate_node_for_version(
                 o,
                 image_assets.context(

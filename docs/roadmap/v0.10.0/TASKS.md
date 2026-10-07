@@ -1,5 +1,9 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
+> **Status (dev, unreleased):** items 1-3 and the CLI core of 13 are implemented on `main`
+> (`src/raster.rs`, `docs/raster-paint-v1.md`, `tests/raster.rs`). Checkboxes stay unticked until
+> hosted cross-platform CI evidence exists. Items 4-12 and 14 are not started.
+
 Complete the missing hands-on raster workflow after v0.7.0 image operations,
 v0.8.0 compositing, and v0.9.0 model-assisted editing. Add paintable raster layers,
 brushes, erasing, clone/heal, patching, and local retouching through one bounded,
