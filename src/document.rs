@@ -148,6 +148,9 @@ pub struct Text {
     pub fill: String,
     #[serde(default)]
     pub align: TextAlign,
+    /// Optional text-box width; centred and right-aligned lines anchor inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
     #[serde(default)]
     pub letter_spacing: f64,
     #[serde(default = "default_line_height")]

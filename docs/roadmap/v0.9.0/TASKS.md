@@ -1,5 +1,13 @@
 # v0.9.0 — BYOK image models as first-class editing tools
 
+> **Shipped in 0.9.0 (subset):** zero-touch setup/connect/doctor/resolve, Gemini and
+> OpenAI-compatible generate, Gemini edit and flat-key background removal, local
+> `keyout`, reviewable runs with accept/replace and provenance, `--allow-model-call`
+> gating, env-settable limits. See `docs/ai.md`. **Deferred (checkboxes below stay
+> open):** inpaint/outpaint with masks, recipes and regenerate, the editor UI, the AI
+> SDK bridge and external adapters, OS keyring, `PENTOOL_AI_MAX_COST`, catalog refresh.
+
+
 Integrate user-chosen image models into Pentool's existing image workflow without
 turning the editor into an autonomous agent or coupling `.pen` documents to one AI
 vendor. Users bring their own provider account, API key, gateway, or local model.
@@ -47,6 +55,11 @@ network connection.
   show exactly what will leave the machine before submission.
 - No provider may receive the whole document implicitly. Only the selected,
   flattened inputs, masks, references, and declared metadata are disclosed.
+- AI is optional. A build, install, document, or user that never configures a
+  provider sees no AI prompts, network access, background tasks, or required
+  settings. Every non-AI command behaves identically with AI unconfigured, and the
+  `ai` command group and editor panel only appear as an unobtrusive entry point
+  (or can be disabled entirely by `[ai] enabled = false` / `PENTOOL_AI=off`).
 - Provider terms, licenses, output restrictions, and safety policy remain visible;
   Pentool does not claim ownership or commercial rights for model output.
 
@@ -110,6 +123,88 @@ results create or replace normal image assets through one transaction. The run
 record links source, result, mask, and recipe so structural diff and history can
 explain the change without making ordinary rendering nondeterministic.
 
+## Provider setup experience: agent-first, human optional
+
+The primary user of setup is a software agent that is handed an environment
+(variables, a config file, or a local endpoint) and must configure everything by
+itself, with no human at a keyboard. A human-friendly guided flow is a thin,
+optional layer over the same non-interactive core. [opencode](https://opencode.ai)
+is the model for approachability (provider list, `provider/model` IDs, `{env:VAR}`
+and `{file:PATH}` substitution, OpenAI-compatible custom endpoints); Pentool keeps
+its own boundaries (offline by default, no credentials in documents, no required
+runtime or cloud service).
+
+### Zero-touch contract
+
+- **Nothing ever prompts unless asked.** Every `ai` command is non-interactive by
+  default, never reads stdin for a secret, never opens a browser, and exits with a
+  structured result. Interactive prompts exist only behind an explicit
+  `--interactive` flag for humans.
+- **Environment-only setup works end to end.** With no config file at all, Pentool
+  derives profiles from the environment: `pentool ai setup --from-env --json`
+  scans a documented list of well-known variables (for example `OPENAI_API_KEY`,
+  and each catalog provider's declared variable) plus the generic
+  `PENTOOL_AI_PROVIDER`, `PENTOOL_AI_ENDPOINT`, `PENTOOL_AI_KEY` /
+  `PENTOOL_AI_KEY_FILE`, `PENTOOL_AI_MODEL`, and `PENTOOL_AI_ADAPTER`. It creates
+  or updates profiles idempotently and reports what it found and what it chose.
+- **Fully flag-driven alternative.** The same result is reachable with one command
+  and no prior state: `pentool ai connect --name studio --adapter openai-compatible
+  --endpoint URL --credential-env STUDIO_KEY --default-model studio/model-id`.
+  Re-running with identical input is a no-op that reports `changed: false`.
+- **Ephemeral mode.** `PENTOOL_AI_EPHEMERAL=1` (or `--ephemeral`) resolves profiles
+  from the environment for the current process only and writes nothing to disk, so a
+  sandboxed or read-only agent environment still works.
+- **Secrets are references, never values.** Agents pass `--credential-env NAME` or
+  `--credential-file PATH`; Pentool stores only the reference. Passing a raw key
+  on the command line is rejected (it leaks into process listings and shell
+  history); a key may arrive via environment or a file path.
+- **Machine-readable everything.** `ai setup`, `connect`, `doctor`, `provider
+  list`, and `model list` emit compact JSON with stable error codes
+  (`missing-credential`, `unreachable-endpoint`, `unsupported-capability`,
+  `policy-denied`, ...) and a `fix` field naming the exact corrective command or
+  variable, so an agent can repair its own setup without a human.
+- **Self-verification without spending money.** `pentool ai doctor --json` reports
+  the resolved profile, credential source (never the value), endpoint policy,
+  offline-mode state, and per-capability readiness from the local snapshot.
+  `--check` additionally makes one explicit, non-billable call (such as listing
+  models) where the provider offers one, and says clearly when it cannot verify
+  without a billable request.
+- **Capability-first discovery.** `pentool ai resolve --capability inpaint --json`
+  returns the best configured `provider/model` for a capability, or the reason none
+  exists, so an agent never guesses model IDs.
+- **Model calls stay explicitly gated.** Zero-touch setup does not remove the
+  spending boundary: running a model still requires `--allow-model-call`, and
+  agents are bounded by environment-settable limits (`PENTOOL_AI_MAX_CALLS`,
+  `PENTOOL_AI_MAX_COST`, `PENTOOL_AI_MAX_PIXELS`, endpoint allowlist). Setup
+  being automatic does not make spending automatic.
+
+### Shared ergonomics (agents and humans)
+
+- **Bundled provider catalog.** A small, versioned catalog compiled into the
+  binary names well-known providers, adapter kind, default endpoint, and the
+  environment variable each expects. It is a convenience list, not an allowlist:
+  any OpenAI-compatible endpoint or external adapter can be added. It changes with
+  releases or an explicit `pentool ai catalog refresh`; it is never fetched at
+  startup or while opening a document.
+- **`provider/model` shorthand and defaults.** Commands accept `studio/model-id`,
+  and `pentool ai default --capability inpaint studio/model-id` (or
+  `PENTOOL_AI_MODEL`) removes the need for `--provider`/`--model` in later calls.
+- **Layered config.** Optional user config (`pentool-ai.toml` in the platform config
+  directory) and project config next to the document, merged with environment on
+  top. Values support `{env:NAME}` and `{file:PATH}`; the project layer holds only
+  non-secret choices and cannot add an endpoint the user layer has not allowed.
+- **Credential sources, in order:** environment variable reference; credential
+  file reference (user-only permissions, outside any project, refused if too
+  open); optional OS credential store behind an `ai-keyring` Cargo feature
+  (never required, measured against the binary-size budget). A plaintext key is
+  never written to a `.pen`, project config, history, packages, or `.penpreset`.
+- **Human path (optional).** `pentool ai setup --interactive`, `ai connect
+  <provider>` with a hidden-input key prompt, and the editor's "Connect a
+  provider" dialog call the same core. They add convenience, not capability.
+- **Opt out entirely.** `[ai] enabled = false` or `PENTOOL_AI=off` hides the `ai`
+  commands and editor panel. A user or agent that never configures a provider sees
+  no AI network access or behavior change.
+
 ## Must ship, in order
 
 - [ ] **1. Freeze the AI image protocol and threat model.** Specify portable
@@ -118,7 +213,12 @@ explain the change without making ordinary rendering nondeterministic.
   timeouts, usage reporting, and output validation. Publish normative schemas and
   valid/invalid fixtures before enabling any network adapter.
 
-- [ ] **2. Add provider profiles and a model registry.** Support named local
+- [ ] **2. Add provider profiles, a model registry, and guided setup.** Implement
+  the agent-first setup above: zero-touch `ai setup --from-env`, flag-only
+  `ai connect`, ephemeral mode, `resolve`/`default`/`doctor` with structured JSON
+  and `fix` hints, bundled catalog, layered config with `{env:}`/`{file:}`
+  substitution, and credential references, all optional and inert until used.
+  Interactive prompts are opt-in only. Support named local
   profiles containing adapter kind, endpoint policy, credential source, and safe
   defaults. Discover or configure models with stable string IDs and cached
   capability snapshots. Listing models may contact a provider only through an
@@ -132,9 +232,23 @@ explain the change without making ordinary rendering nondeterministic.
 
 - [ ] **4. Ship a small reference adapter set.** Choose adapters from maintained
   providers only after conformance tests exist. Include one OpenAI-compatible
-  remote path, one provider that supports masked editing, and one local/external
+  remote path (which also covers most gateways and self-hosted servers via a custom
+  endpoint), one provider that supports masked editing, and one local/external
   reference adapter. Keep provider code feature-gated where dependencies or binary
   size threaten the default artifact. Do not freeze model IDs in the schema.
+
+  **Optional AI SDK bridge.** Ship, outside the binary (under `adapters/ai-sdk/`
+  in the repository and release archive), a small reference external-process
+  adapter written against the Vercel AI SDK's `generateImage`. It lets a user or
+  agent who already has Node.js reach every image model the SDK supports (OpenAI,
+  Google, Fal, Black Forest Labs, Bedrock, and others) with no per-provider Rust
+  code. It maps Pentool's portable request onto `prompt`, `size`/`aspectRatio`, `n`,
+  `seed`, `providerOptions`, and `abortSignal`; reports capabilities from each
+  model's `supportsFileInputs` and `supportsMaskInputs` (only `true` counts as
+  supported); and returns SDK `warnings` and `providerMetadata` into the run record.
+  Pentool still validates and hashes every returned image, still discloses exactly
+  what is sent, and still never requires Node: the bridge is opt-in, and the default
+  binary keeps its native OpenAI-compatible adapter.
 
 - [ ] **5. Add generation with candidate review.** Generate one or more bounded
   candidates at an explicit size/aspect ratio, validate and hash all results, show
@@ -177,7 +291,7 @@ explain the change without making ordinary rendering nondeterministic.
   include accepted outputs and sanitized provenance, never credentials or required
   remote calls.
 
-- [ ] **12. Build editor-native controls.** Add model/profile selection,
+- [ ] **12. Build editor-native controls.** Add the optional "Connect a provider" flow, model/profile selection (searchable `provider/model` picker),
   capability-aware controls, prompt privacy choice, exact input disclosure,
   candidate grid, before/after and changed-region views, cancel/retry, usage, and
   provenance inspection. Controls appear in the relevant image-editing context,
@@ -199,6 +313,11 @@ explain the change without making ordinary rendering nondeterministic.
 ## CLI direction
 
 ```sh
+pentool ai setup --from-env --json        # agent: configure from the environment, no prompts
+pentool ai connect --name studio --adapter openai-compatible \n  --endpoint https://example.invalid/v1 --credential-env STUDIO_IMAGE_KEY --json
+pentool ai resolve --capability inpaint --json
+pentool ai doctor --json [--check]
+pentool ai setup --interactive            # optional human flow
 pentool ai provider add studio --adapter openai-compatible \
   --endpoint https://example.invalid/v1 --credential-env STUDIO_IMAGE_KEY
 pentool ai model refresh --provider studio
@@ -224,6 +343,12 @@ money merely because a document gained an AI recipe.
 
 ## Acceptance targets
 
+- An agent given only environment variables (or one `ai connect` command) configures
+  a working provider with no human input, no prompts, and no files written in
+  ephemeral mode; re-running setup is a no-op, and every failure includes a `fix`
+  hint it can act on. A human can do the same interactively in under a minute. A user who never connects a provider sees no behavior
+  change and no AI network access.
+- Switch default provider/model with one command or one selector change.
 - Configure two providers with different capability sets and use the same portable
   generate recipe where both support it, with unsupported fields rejected before
   submission.

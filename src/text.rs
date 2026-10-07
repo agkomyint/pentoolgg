@@ -135,6 +135,7 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
                 italic,
                 fill,
                 align,
+                width: None,
                 letter_spacing,
                 line_height,
                 transform: identity(),

@@ -21,6 +21,7 @@ fn sample() -> Document {
         italic: false,
         fill: "#ffffff".into(),
         align: TextAlign::Left,
+        width: None,
         letter_spacing: 0.0,
         line_height: 1.2,
         transform: identity(),

@@ -1037,8 +1037,10 @@ struct Renderer<'a> {
 
 impl Renderer<'_> {
     fn reserve(&mut self) -> Result<()> {
+        self.reserve_pixels(u64::from(self.width) * u64::from(self.height))
+    }
+    fn reserve_pixels(&mut self, pixels: u64) -> Result<()> {
         check_cancelled()?;
-        let pixels = u64::from(self.width) * u64::from(self.height);
         self.pixel_work = self
             .pixel_work
             .checked_add(pixels)
@@ -1278,21 +1280,43 @@ impl Renderer<'_> {
             }
             let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
             if node.get("effects").is_some() || node.get("content_opacity").is_some() {
-                // Conservative bound includes the image engine's f64 blur planes.
-                for _ in 0..32 {
-                    self.reserve()?;
-                }
-                self.pixel_work += crate::effects::stack(self.raw, node)?.len() as u64
-                    * u64::from(self.width)
-                    * u64::from(self.height)
-                    * 32;
-                if self.pixel_work > MAX_PIXEL_WORK {
-                    bail!("[limit-exceeded] effect pixel-work budget exceeded")
-                }
-                surface =
-                    crate::effects::apply(self.raw, node, &surface, self.document, self.scale)?;
-                for _ in 0..32 {
-                    self.release();
+                // Effects run on the content's bounds plus the effect reach, never the
+                // whole canvas; the budget below follows that region.
+                let (cx, cy, cw, ch) =
+                    crate::effects::region(self.raw, node, &surface, self.scale)?;
+                if cw > 0 && ch > 0 {
+                    let pixels = u64::from(cw) * u64::from(ch);
+                    // Conservative bound includes the image engine's f64 blur planes.
+                    for _ in 0..32 {
+                        self.reserve_pixels(pixels)?;
+                    }
+                    self.pixel_work +=
+                        crate::effects::stack(self.raw, node)?.len() as u64 * pixels * 32;
+                    if self.pixel_work > MAX_PIXEL_WORK {
+                        bail!("[limit-exceeded] effect pixel-work budget exceeded")
+                    }
+                    let full = (cw, ch) == surface.dimensions();
+                    let source = if full {
+                        surface.clone()
+                    } else {
+                        image::imageops::crop_imm(&surface, cx, cy, cw, ch).to_image()
+                    };
+                    let applied =
+                        crate::effects::apply(self.raw, node, &source, self.document, self.scale)?;
+                    if full {
+                        surface = applied;
+                    } else {
+                        surface = RgbaImage::new(surface.width(), surface.height());
+                        image::imageops::replace(
+                            &mut surface,
+                            &applied,
+                            i64::from(cx),
+                            i64::from(cy),
+                        );
+                    }
+                    for _ in 0..32 {
+                        self.live_bytes -= pixels * 4;
+                    }
                 }
             }
             for pixel in surface.pixels_mut() {

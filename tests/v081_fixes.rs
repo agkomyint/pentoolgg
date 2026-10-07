@@ -357,3 +357,130 @@ fn batch_upsert_is_idempotent_and_the_error_names_it() {
     let tree = ok(&["tree", &doc]);
     assert_eq!(tree.matches("\"kind\": \"image\"").count(), 1, "{tree}");
 }
+
+#[test]
+fn effects_budget_follows_the_content_not_the_canvas() {
+    // B16: a glow on a small circle must export on a large canvas.
+    let ws = Workspace::new("glow-large");
+    let doc = ws.path("v.pen");
+    ok(&["new", &doc, "--width", "1600", "--height", "1600"]);
+    ok(&["migrate", &doc, "--target", "6"]);
+    let batch = ws.path("v.json");
+    fs::write(
+        &batch,
+        r##"[{"type":"put-shape","shape":"circle","id":"m","layer":"layer-1","cx":800,"cy":800,"radius":70,"fill":"#ff0000"}]"##,
+    )
+    .unwrap();
+    ok(&["batch", &doc, &batch]);
+    ok(&[
+        "effect",
+        "add",
+        &doc,
+        "m",
+        "g",
+        "--kind",
+        "outer-glow",
+        "--color",
+        "#22D3EE",
+        "--blur",
+        "40",
+        "--opacity",
+        "0.9",
+    ]);
+    let png = ws.path("v.png");
+    ok(&["export", &doc, &png]);
+    // Glow is visible just outside the circle, absent far away, circle intact.
+    assert!(near(pixel(&png, 800, 800), [255, 0, 0]));
+    assert_ne!(pixel(&png, 800 + 85, 800), [255, 255, 255]);
+    assert_eq!(pixel(&png, 10, 10), [255, 255, 255]);
+}
+
+fn ink_center(png: &str) -> f64 {
+    let image = ::image::open(png).unwrap().to_rgb8();
+    let (mut min, mut max) = (u32::MAX, 0u32);
+    for (x, _, p) in image.enumerate_pixels() {
+        if p[0] < 128 {
+            min = min.min(x);
+            max = max.max(x);
+        }
+    }
+    assert!(min <= max, "no ink found");
+    f64::from(min + max) / 2.0
+}
+
+#[test]
+fn centered_text_box_anchors_inside_its_width() {
+    // The renderer used to centre around the box's left edge and clip the text.
+    for target in [None, Some("6")] {
+        let ws = Workspace::new("textbox-center");
+        let doc = ws.path("t.pen");
+        ok(&["new", &doc, "--width", "1000", "--height", "200"]);
+        if let Some(version) = target {
+            ok(&["migrate", &doc, "--target", version]);
+        }
+        for (id, align, x) in [("c", "center", "100"), ("r", "right", "100")] {
+            ok(&[
+                "text-box",
+                &doc,
+                id,
+                "--layer",
+                "layer-1",
+                "--content",
+                "MMMM",
+                "--x",
+                x,
+                "--y",
+                "20",
+                "--width",
+                "600",
+                "--size",
+                "60",
+                "--weight",
+                "700",
+                "--fill",
+                "#000000",
+                "--align",
+                align,
+                "--anchor",
+                "top",
+            ]);
+            let png = ws.path("t.png");
+            ok(&["export", &doc, &png]);
+            let center = ink_center(&png);
+            let expected = if align == "center" { 400.0 } else { 700.0 };
+            if align == "center" {
+                assert!(
+                    (center - expected).abs() < 6.0,
+                    "{target:?} {align}: {center}"
+                );
+            } else {
+                // Right alignment: the ink hugs the box's right edge (x + width).
+                let image = ::image::open(&png).unwrap().to_rgb8();
+                let max = image
+                    .enumerate_pixels()
+                    .filter(|(_, _, p)| p[0] < 128)
+                    .map(|(x, _, _)| x)
+                    .max()
+                    .unwrap();
+                assert!(
+                    (f64::from(max) - expected).abs() < 8.0,
+                    "{target:?} right: {max}"
+                );
+            }
+            ok(&["text", &doc, "remove", "--layer", "layer-1", id]);
+        }
+    }
+}
+
+#[test]
+fn import_names_the_unsupported_version_instead_of_a_canvas_error() {
+    let ws = Workspace::new("import-version");
+    let (a, b) = (ws.path("a.pen"), ws.path("b.pen"));
+    ok(&["new", &a, "--width", "200", "--height", "200"]);
+    ok(&["new", &b, "--width", "100", "--height", "100"]);
+    let out = run(&["import", &a, &b]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("[unsupported-version]"), "{stderr}");
+    assert!(!stderr.contains("no canvas"), "{stderr}");
+}

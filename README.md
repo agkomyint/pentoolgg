@@ -67,6 +67,20 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Optional image models (v0.9)
+
+`pentool ai` connects your own Gemini or OpenAI-compatible account, generates reviewable
+candidates, and accepts one into the document as an ordinary image asset. Setup is
+non-interactive (`pentool ai setup --from-env`), keys are never stored, every model call
+needs `--allow-model-call`, and nothing runs unless you configure it. See
+[docs/ai.md](docs/ai.md).
+
+```sh
+pentool ai setup --from-env && pentool ai doctor --check
+pentool ai generate poster.pen hero --prompt "a fox" --allow-model-call
+pentool ai run accept poster.pen RUN --candidate 1 --id hero
+```
+
 ## Raster images (v0.7)
 
 In the served editor, use **Images → Add image** to choose a local PNG, JPEG or

@@ -303,7 +303,7 @@ fn find_node_mut<'a>(page: &'a mut Value, id: &str) -> Option<&'a mut Value> {
         .find_map(|layer| find(layer.get_mut("nodes")?.as_array_mut()?, id))
 }
 
-fn document_references_asset(raw: &Value, digest: &str) -> bool {
+pub(crate) fn document_references_asset(raw: &Value, digest: &str) -> bool {
     fn references(value: &Value, digest: &str) -> bool {
         match value {
             Value::Object(object) => {
@@ -863,6 +863,17 @@ fn write_text(svg: &mut String, object: &Map<String, Value>, root: &SvgContext) 
         Some("center") => "middle",
         Some("right") => "end",
         _ => "start",
+    };
+    // A text box's `x` is its left edge; centred and right-aligned lines anchor inside its width.
+    let box_width = object
+        .get("width")
+        .and_then(Value::as_f64)
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .unwrap_or(0.0);
+    let x = match anchor {
+        "middle" => x + box_width / 2.0,
+        "end" => x + box_width,
+        _ => x,
     };
     let spacing = object
         .get("letter_spacing")

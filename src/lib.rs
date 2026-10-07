@@ -1,5 +1,6 @@
 //! Browser-independent document, editing, geometry, and rendering engine.
 pub mod agent;
+pub mod ai;
 pub mod asset;
 pub mod benchmark;
 pub mod blend;

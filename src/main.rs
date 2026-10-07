@@ -1,7 +1,7 @@
 use pentool::{
-    agent, asset, benchmark, composite, diff, document, editing, fonts, geometry, history, image,
-    import, instance, layout, library, package, page, pdf, render, replace, scene, server, style,
-    text, transaction,
+    agent, ai, asset, benchmark, composite, diff, document, editing, fonts, geometry, history,
+    image, import, instance, layout, library, package, page, pdf, render, replace, scene, server,
+    style, text, transaction,
 };
 
 use anyhow::{Context, Result};
@@ -891,6 +891,11 @@ enum Command {
         #[command(subcommand)]
         action: page::PageAction,
     },
+    /// Optional BYOK image models: agent-first setup, generation, review, and local cutouts.
+    Ai {
+        #[command(subcommand)]
+        action: ai::AiAction,
+    },
     /// Copy a page from another .pen file into the selected destination page.
     Import {
         destination: PathBuf,
@@ -1566,7 +1571,7 @@ fn cli_main() -> Result<()> {
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "ok":false,
-                    "error":{"code":error_code(&error),"message":error.to_string(),"context":format!("{error:#}"),"suggestions":error_suggestions(&error),"hint":"Run the command with --help and verify page, layer, group, and object IDs."}
+                    "error":ai_error_json(&error)
                 }))?
             );
             std::process::exit(2)
@@ -1590,6 +1595,13 @@ fn is_broken_pipe(error: &anyhow::Error) -> bool {
             .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
     })
 }
+fn ai_error_json(error: &anyhow::Error) -> serde_json::Value {
+    if let Some(ai) = error.chain().find_map(|e| e.downcast_ref::<ai::AiError>()) {
+        return serde_json::json!({"code":ai.code,"message":ai.message,"fix":ai.fix});
+    }
+    serde_json::json!({"code":error_code(error),"message":error.to_string(),"context":format!("{error:#}"),"suggestions":error_suggestions(error),"hint":"Run the command with --help and verify page, layer, group, and object IDs."})
+}
+
 fn error_code(error: &anyhow::Error) -> &'static str {
     let message = error.to_string();
     if message.contains("not found") {
@@ -2871,6 +2883,13 @@ async fn run() -> Result<()> {
                 )
             }
         }
+        Command::Ai { action } => {
+            println!(
+                "{}",
+                serde_json::to_string(&ai::run(action, selected_page)?)?
+            );
+            Ok(())
+        }
         Command::Import {
             destination,
             source,
@@ -2902,9 +2921,25 @@ async fn run() -> Result<()> {
                         .replace(|c: char| c.is_whitespace(), "-")
                 }))
             };
+            let source_bytes = fs::read(&source)?;
+            for (role, path, bytes) in [
+                ("destination", &destination, &destination_bytes),
+                ("source", &source, &source_bytes),
+            ] {
+                let version = serde_json::from_slice::<serde_json::Value>(bytes)
+                    .ok()
+                    .and_then(|raw| raw.get("version").and_then(serde_json::Value::as_u64));
+                if version.is_some_and(|v| v >= 4) {
+                    anyhow::bail!(
+                        "[unsupported-version] import works on legacy v1-v3 documents; the {role} {} is v{}. Place its contents with `image add`, `batch`, or `asset` commands, or rebuild it from a v3 export (`pentool migrate --target 3`).",
+                        path.display(),
+                        version.unwrap_or_default()
+                    );
+                }
+            }
             let result = import::compose(
                 serde_json::from_slice(&destination_bytes)?,
-                serde_json::from_slice(&fs::read(&source)?)?,
+                serde_json::from_slice(&source_bytes)?,
                 &import::ImportOptions {
                     destination_page: selected_page.map(str::to_owned),
                     source_page,

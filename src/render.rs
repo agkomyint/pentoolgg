@@ -210,7 +210,16 @@ fn write_text_svg(svg: &mut String, text: &Text) -> Result<()> {
         let end = rest.find(['\n', '\r']).unwrap_or(rest.len());
         let line = &rest[..end];
         let line_y = text.y + index as f64 * text.font_size * text.line_height;
-        write!(svg, r#"<tspan x="{}" y="{line_y}">"#, text.x)?;
+        let box_width = text
+            .width
+            .filter(|w| w.is_finite() && *w > 0.0)
+            .unwrap_or(0.0);
+        let line_x = match text.align.anchor() {
+            "middle" => text.x + box_width / 2.0,
+            "end" => text.x + box_width,
+            _ => text.x,
+        };
+        write!(svg, r#"<tspan x="{line_x}" y="{line_y}">"#)?;
         if text.align.anchor() == "start" {
             push_text_runs(svg, line, line_y);
         } else {

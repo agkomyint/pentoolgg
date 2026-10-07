@@ -433,6 +433,50 @@ pub(crate) fn apply(
     Ok(result)
 }
 
+/// The sub-rectangle `(x, y, width, height)` of `surface` an effect stack needs: the
+/// visible content grown by the stack's reach. Position-dependent stacks
+/// (gradient overlays) use the whole surface; empty content yields zero size.
+pub(crate) fn region(
+    raw: &Value,
+    node: &Value,
+    surface: &RgbaImage,
+    scale: f32,
+) -> Result<(u32, u32, u32, u32)> {
+    let (w, h) = surface.dimensions();
+    let ops = stack(raw, node)?;
+    if ops.iter().any(|op| op["kind"] == "gradient-overlay") {
+        return Ok((0, 0, w, h));
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0u32, 0u32);
+    for (x, y, p) in surface.enumerate_pixels() {
+        if p[3] > 0 {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x + 1);
+            y1 = y1.max(y + 1);
+        }
+    }
+    if x1 <= x0 || y1 <= y0 {
+        return Ok((0, 0, 0, 0));
+    }
+    let scale = f64::from(scale);
+    let mut reach = 4.0;
+    for op in ops.iter().filter(|op| op["enabled"] == true) {
+        let p = &op["params"];
+        let get = |key: &str| p.get(key).and_then(Value::as_f64).unwrap_or(0.0).abs();
+        reach += (get("blur") + get("radius")) * scale * 4.0
+            + (get("x") + get("y") + get("size")) * scale
+            + 2.0;
+    }
+    // Inner effects read the complement of the alpha; stay on the canvas edge there.
+    let reach = reach.min(f64::from(w.max(h))).ceil() as u32;
+    let nx0 = x0.saturating_sub(reach);
+    let ny0 = y0.saturating_sub(reach);
+    let nx1 = x1.saturating_add(reach).min(w);
+    let ny1 = y1.saturating_add(reach).min(h);
+    Ok((nx0, ny0, nx1 - nx0, ny1 - ny0))
+}
+
 /// A node's effect stack in order, without mutating the document.
 pub fn list(raw: &Value, page: Option<&str>, id: &str) -> Result<Value> {
     crate::scene::validate(raw)?;

@@ -298,6 +298,7 @@ pub fn generate(layer_count: usize, object_count: usize, paths_only: bool) -> Do
                 italic: false,
                 fill: "#111827".into(),
                 align: Default::default(),
+                width: None,
                 letter_spacing: 0.0,
                 line_height: 1.2,
                 transform: crate::document::identity(),
