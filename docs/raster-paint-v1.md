@@ -486,8 +486,15 @@ marquee/lasso edges. The canvas supports zoom and 15-degree rotation steps; poin
 coordinates are mapped back through both. Pressure comes from pointer events. The preview
 image is a bounded proxy rendered by Rust (`/api/render/png`).
 
-Not implemented in this milestone: rulers, guides, snapping, a navigator, tilt/twist from
-pointer events, and marching-ants animation of soft selection edges.
+View aids, all browser-side and never saved: **Rulers** (layer-pixel ticks along the top and
+left of the preview; click a ruler to drop a guide, the top one makes a horizontal guide),
+**guides** (cleared with "Clear guides"), **Snap** (pointer coordinates snap to the grid
+step and to guides within 6 layer pixels) and a **navigator** thumbnail whose red box
+shows the visible window and whose click recenters the view. Rulers and guides are drawn
+on the overlay, so they zoom and rotate with the canvas.
+
+Not implemented in this milestone: tilt/twist from pointer events and marching-ants
+animation of soft selection edges.
 
 ## Limits (checked before pixel work)
 
@@ -563,4 +570,4 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-The editor's rulers/guides/snapping/navigator, fuzz/performance suites (roadmap items 6-7, 12, 14).
+Tilt/twist input and marching-ants animation in the editor; rotate and scale for the "below" source and composite scope (they require an untransformed layer); `layer: "below"` and `scope: composite` through the API and batch.

@@ -19,3 +19,4 @@
 #rasterView{position:relative;display:inline-block;transform-origin:center}
 #rasterImage{display:block;max-width:100%}
 #rasterOverlay{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:none}
+#rasterNavigator{display:block;margin:6px 0;border:1px solid #888;max-width:100%;cursor:pointer}

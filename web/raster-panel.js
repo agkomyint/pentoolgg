@@ -3,7 +3,7 @@
 // lag line, clone source marker, quick mask and selection edges - is a disposable overlay.
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { doc: null, page: null, layers: [], zoom: 1, rotate: 0, stroke: null, busy: false, source: null, selection: null, lasso: [], tool: 'brush', pointer: null, generation: 0, mask: false };
+  const state = { doc: null, page: null, layers: [], zoom: 1, rotate: 0, stroke: null, busy: false, source: null, selection: null, panX: 0, panY: 0, guides: [], lasso: [], tool: 'brush', pointer: null, generation: 0, mask: false };
   const view = $('rasterView'), overlay = $('rasterOverlay'), image = $('rasterImage');
   const ctx = overlay.getContext('2d');
   const notify = (m) => { $('rasterStatus').textContent = m; };
@@ -30,7 +30,7 @@
     const response = await fetch(`/api/render/png?page=${encodeURIComponent(state.page)}&max_edge=1024`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(state.doc) });
     if (generation !== state.generation || !response.ok) return;
     const url = URL.createObjectURL(await response.blob());
-    image.onload = () => { URL.revokeObjectURL(url); fit(); };
+    image.onload = () => { URL.revokeObjectURL(url); fit(); drawNavigator(); };
     image.src = url;
   }
 
@@ -43,8 +43,64 @@
   }
   function fit() { overlay.width = image.naturalWidth; overlay.height = image.naturalHeight; applyView(); drawOverlay(); }
   function applyView() {
-    view.style.transform = `rotate(${state.rotate}deg) scale(${state.zoom})`;
+    view.style.transform = `translate(${state.panX}px, ${state.panY}px) rotate(${state.rotate}deg) scale(${state.zoom})`;
     $('rasterZoomLabel').textContent = `${Math.round(state.zoom * 100)}% / ${state.rotate}°`;
+    drawNavigator();
+  }
+
+  // View aids (rulers, guides, snapping, navigator) never touch the document.
+  const SNAP = 6;
+  function snap(p) {
+    const g = geometry();
+    if (!g || !$('rasterSnap').checked) return p;
+    let { x, y } = p;
+    const grid = +$('rasterGrid').value;
+    if (grid > 0) { x = Math.round(x / grid) * grid; y = Math.round(y / grid) * grid; }
+    for (const guide of state.guides) {
+      if (guide.axis === 'x' && Math.abs(p.x - guide.at) <= SNAP) x = guide.at;
+      if (guide.axis === 'y' && Math.abs(p.y - guide.at) <= SNAP) y = guide.at;
+    }
+    return { ...p, x, y, px: (x + g.lx) * g.sx, py: (y + g.ly) * g.sy };
+  }
+  function drawRulers(g) {
+    ctx.save(); ctx.font = '10px sans-serif'; ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(0, 0, overlay.width, 12); ctx.fillRect(0, 0, 12, overlay.height);
+    ctx.fillStyle = '#000'; ctx.strokeStyle = '#000';
+    for (let x = 0; x <= g.node.width; x += 10) {
+      const px = (g.lx + x) * g.sx; const long = x % 50 === 0;
+      ctx.beginPath(); ctx.moveTo(px, long ? 0 : 7); ctx.lineTo(px, 12); ctx.stroke();
+      if (long) ctx.fillText(String(x), px + 2, 9);
+    }
+    for (let y = 0; y <= g.node.height; y += 10) {
+      const py = (g.ly + y) * g.sy; const long = y % 50 === 0;
+      ctx.beginPath(); ctx.moveTo(long ? 0 : 7, py); ctx.lineTo(12, py); ctx.stroke();
+      if (long) ctx.fillText(String(y), 1, py - 2);
+    }
+    ctx.restore();
+  }
+  function drawGuides(g) {
+    ctx.save(); ctx.strokeStyle = '#00c8ff'; ctx.lineWidth = 1;
+    for (const guide of state.guides) {
+      ctx.beginPath();
+      if (guide.axis === 'x') { const px = (g.lx + guide.at) * g.sx; ctx.moveTo(px, 0); ctx.lineTo(px, overlay.height); }
+      else { const py = (g.ly + guide.at) * g.sy; ctx.moveTo(0, py); ctx.lineTo(overlay.width, py); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function drawNavigator() {
+    const nav = $('rasterNavigator'), nctx = nav.getContext('2d');
+    nctx.clearRect(0, 0, nav.width, nav.height);
+    if (!image.naturalWidth) return;
+    const scale = Math.min(nav.width / image.naturalWidth, nav.height / image.naturalHeight);
+    const w = image.naturalWidth * scale, h = image.naturalHeight * scale;
+    nctx.drawImage(image, 0, 0, w, h);
+    // The stage shows 1/zoom of the page, centered on the pan offset.
+    const stage = view.parentElement.getBoundingClientRect();
+    const k = w / (view.offsetWidth || w);
+    const vw = Math.min(w, stage.width / state.zoom * k), vh = Math.min(h, stage.height / state.zoom * k);
+    const cx = w / 2 - state.panX / state.zoom * k, cy = h / 2 - state.panY / state.zoom * k;
+    nctx.strokeStyle = '#ff375f'; nctx.lineWidth = 2; nctx.strokeRect(cx - vw / 2, cy - vh / 2, vw, vh);
   }
 
   // Client point -> layer pixel, through zoom and rotation.
@@ -66,6 +122,8 @@
     ctx.clearRect(0, 0, overlay.width, overlay.height);
     const g = geometry();
     if (!g) return;
+    if ($('rasterRulers').checked) drawRulers(g);
+    drawGuides(g);
     if (state.mask) { ctx.fillStyle = 'rgba(255,0,0,.3)'; ctx.fillRect(g.lx * g.sx, g.ly * g.sy, g.node.width * g.sx, g.node.height * g.sy); }
     if (state.selection) {
       const s = state.selection;
@@ -112,8 +170,15 @@
   }
 
   overlay.addEventListener('pointerdown', (event) => {
-    const p = toLayer(event);
+    let p = toLayer(event);
     if (!p || state.busy) return;
+    if ($('rasterRulers').checked && (p.py < 12 || p.px < 12)) {
+      // A click on a ruler drops a guide: top ruler -> horizontal, left ruler -> vertical.
+      state.guides.push(p.py < 12 ? { axis: 'y', at: Math.round(p.y) } : { axis: 'x', at: Math.round(p.x) });
+      drawOverlay();
+      return;
+    }
+    p = snap(p);
     overlay.setPointerCapture(event.pointerId);
     const tool = state.tool;
     if (tool === 'source') { state.source = { x: p.x, y: p.y }; call('set-clone-source', { x: p.x, y: p.y }); return; }
@@ -124,7 +189,7 @@
     drawOverlay();
   });
   overlay.addEventListener('pointermove', (event) => {
-    const p = toLayer(event);
+    const p = (() => { const q = toLayer(event); return q && snap(q); })();
     if (!p) return;
     state.pointer = p;
     const s = state.stroke;
@@ -164,7 +229,16 @@
   $('rasterZoomIn').addEventListener('click', () => { state.zoom = Math.min(8, state.zoom * 1.25); applyView(); });
   $('rasterZoomOut').addEventListener('click', () => { state.zoom = Math.max(0.1, state.zoom / 1.25); applyView(); });
   $('rasterRotate').addEventListener('click', () => { state.rotate = (state.rotate + 15) % 360; applyView(); });
-  $('rasterReset').addEventListener('click', () => { state.zoom = 1; state.rotate = 0; applyView(); });
+  $('rasterReset').addEventListener('click', () => { state.zoom = 1; state.rotate = 0; state.panX = 0; state.panY = 0; applyView(); });
+  for (const id of ['rasterRulers', 'rasterSnap', 'rasterGrid']) $(id).addEventListener('input', drawOverlay);
+  $('rasterClearGuides').addEventListener('click', () => { state.guides = []; drawOverlay(); });
+  $('rasterNavigator').addEventListener('pointerdown', (event) => {
+    const rect = $('rasterNavigator').getBoundingClientRect();
+    const u = (event.clientX - rect.left) / rect.width - 0.5, v = (event.clientY - rect.top) / rect.height - 0.5;
+    // Center the clicked spot: pan opposite to its offset from the page center.
+    state.panX = -u * (view.offsetWidth || 0) * state.zoom; state.panY = -v * (view.offsetHeight || 0) * state.zoom;
+    applyView();
+  });
   $('rasterClearSelection').addEventListener('click', () => call('select-clear', {}));
   document.addEventListener('pentool-document-changed', (event) => loadDocument(event.detail));
   document.dispatchEvent(new Event('pentool-request-document'));

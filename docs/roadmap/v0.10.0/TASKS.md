@@ -1,7 +1,7 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
 > **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
-> 0 of 14 items are ticked; items 1-14 are implemented (editor rulers, guides, snapping and navigator are still missing). Boxes stay unticked until every
+> 0 of 14 items are ticked; items 1-14 are implemented. Boxes stay unticked until every
 > item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
 >
 > | # | Item | State |
@@ -17,7 +17,7 @@
 > | 9 | Selections and transforms | Implemented: `select-marquee` (rect/ellipse), `select-lasso`, `select-quickmask`, `select-modify` (feather, expand, contract, smooth, border, grow, similar, invert), saved selections (`select-save/load/delete`), and for selected pixels `lift` (copy/cut to a new layer, alpha kept), `move-pixels`, `transform-pixels` and `paste`; selections follow moved and transformed pixels (`tests/raster_select.rs`). Awaiting hosted CI evidence before ticking. |
 > | 10 | Layer operations | Implemented: trim, canvas resize (crop past bounds), merge down, explicit rasterization, `rotate`/`flip` (lossless, selections follow), `merge-visible`, `stamp-visible`, `flatten` (`tests/raster_compose.rs`). `clone-source --layer below` (frozen hidden snapshot) and `--scope composite` for fill and select-wand (CLI). Awaiting hosted CI evidence before ticking. |
 > | 11 | Presets and assets | Implemented: document `brush_presets` (`preset-add/remove/show`, `presets`), `--preset` on stroke, clone, heal and quick-mask, portable `preset-export`/`preset-import` with content-addressed tips, opt-in `preset-import-gbr` and `preset-import-mypaint` that report unsupported settings (`tests/raster_presets.rs`). Awaiting hosted CI evidence before ticking. |
-> | 12 | Editor UI | Implemented in part: `POST /api/raster` and the Raster canvas panel (brush/eraser/clone/heal/quick mask/marquee/lasso/wand, cursor outline, live preview, stabilizer line, clone marker, zoom/rotate; `server::tests`). Missing: rulers, guides, snapping, navigator. Awaiting hosted CI evidence before ticking. |
+> | 12 | Editor UI | Implemented: `POST /api/raster` and the Raster canvas panel (brush/eraser/clone/heal/quick mask/marquee/lasso/wand, cursor outline, live preview, stabilizer line, clone marker, zoom/rotate; `server::tests`). Rulers, guides (click a ruler), snapping to grid and guides, and a navigator are browser-side view aids (`web/raster-panel.js`; not covered by automated browser tests). Awaiting hosted CI evidence before ticking. |
 > | 13 | CLI and batch | Implemented: every raster operation has a CLI command, and `pentool raster DOC batch OPS.json` (shared dispatcher with `/api/raster`) runs up to 256 operations atomically with presets, selections and retouch actions, event/sample/file limits checked first, and summaries of changed bounds and tile hashes (`tests/raster_batch.rs`). Awaiting hosted CI evidence before ticking. |
 > | 14 | Performance, fuzz, goldens | Implemented locally: seeded fuzzers, seam/alpha/pressure/replay tests (`tests/raster_hardening.rs`) and ignored benchmarks (`tests/raster_perf.rs`, results in `docs/performance.md`). Known limit: per-stroke cost grows over a long session. Cross-platform pixel goldens still need hosted CI. Awaiting hosted CI evidence before ticking. |
 

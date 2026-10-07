@@ -237,8 +237,10 @@
           <label>Marquee <select id="rasterShape"><option>rect</option><option>ellipse</option></select></label>
           <label>Wand tolerance <input id="rasterTolerance" type="range" min="0" max="255" value="32"></label>
           <div class="section-head"><button id="rasterZoomOut">-</button><span id="rasterZoomLabel">100%</span><button id="rasterZoomIn">+</button><button id="rasterRotate">Rotate 15&deg;</button><button id="rasterReset">Reset view</button><button id="rasterClearSelection">Deselect</button></div>
+          <div class="section-head"><label><input id="rasterRulers" type="checkbox"> Rulers</label><label><input id="rasterSnap" type="checkbox"> Snap</label><label>Grid <input id="rasterGrid" type="number" min="0" max="512" value="0" title="Grid step in layer pixels; 0 turns the grid off"></label><button id="rasterClearGuides">Clear guides</button></div>
+          <canvas id="rasterNavigator" width="160" height="100" aria-label="Navigator: click to center the view"></canvas>
           <div class="raster-stage"><div id="rasterView"><img id="rasterImage" alt="Raster page preview"><canvas id="rasterOverlay" aria-label="Raster painting surface"></canvas></div></div>
-          <p>Strokes are sent to the Rust engine on release; the outline, stabilizer line, clone marker and quick mask are overlays only. Rulers, guides, snapping and a navigator are not implemented yet.</p>
+          <p>Strokes are sent to the Rust engine on release; the outline, stabilizer line, clone marker and quick mask are overlays only. Rulers, guides (click a ruler to add one), snapping and the navigator are view aids kept in the browser only.</p>
         </div>
       </section>
       <section class="agent-card">
