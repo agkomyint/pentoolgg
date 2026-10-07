@@ -240,8 +240,13 @@ impl Spec {
     /// Straight-alpha RGBA read for destination pixel `x, y`; `current` is the
     /// target layer before the stroke.
     pub(super) fn pixel(&self, current: &Surface, x: u32, y: u32) -> [u8; 4] {
+        self.pixel_at(current, i64::from(x), i64::from(y))
+    }
+
+    /// Like [`Spec::pixel`] for coordinates that may lie outside the layer.
+    pub(super) fn pixel_at(&self, current: &Surface, x: i64, y: i64) -> [u8; 4] {
         let source = self.source.as_ref().map_or(current, |p| &p.surface);
-        let (u, v) = self.request.map(f64::from(x) + 0.5, f64::from(y) + 0.5);
+        let (u, v) = self.request.map(x as f64 + 0.5, y as f64 + 0.5);
         let (u, v) = (u - 0.5, v - 0.5);
         let (fx, fy) = (u.floor(), v.floor());
         let wx = (((u - fx) * 256.0).round() as i64).clamp(0, 256);
@@ -331,6 +336,7 @@ pub struct Options {
 }
 
 /// Run a clone stroke from the source stored by [`set_source`].
+#[allow(clippy::too_many_arguments)]
 pub fn stroke(
     raw: &mut Value,
     page: Option<&str>,
@@ -339,6 +345,7 @@ pub fn stroke(
     samples: Vec<Sample>,
     options: &Options,
     seed: u64,
+    tool: Tool,
 ) -> Result<Value> {
     let state = state_for(raw, id).cloned().ok_or_else(|| {
         bad(
@@ -379,7 +386,7 @@ pub fn stroke(
             brush,
             samples,
             color: [0, 0, 0],
-            blend: Blend::Tool(Tool::Clone),
+            blend: Blend::Tool(tool),
             seed,
             clone: Some(request),
         },

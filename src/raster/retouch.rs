@@ -22,10 +22,12 @@ pub enum Tool {
     ColorReplace,
     /// Copies pixels from a pinned source; see `clone.rs`.
     Clone,
+    /// Clone with tone matched to the surroundings; see `heal.rs`.
+    Heal,
 }
 
 impl Blend {
-    pub const NAMES: [&'static str; 11] = [
+    pub const NAMES: [&'static str; 12] = [
         "normal",
         "erase",
         "background-erase",
@@ -37,6 +39,7 @@ impl Blend {
         "sponge",
         "color-replace",
         "clone",
+        "heal",
     ];
 
     pub fn parse(text: &str) -> Result<Self> {
@@ -52,6 +55,7 @@ impl Blend {
             "sponge" => Self::Tool(Tool::Sponge),
             "color-replace" => Self::Tool(Tool::ColorReplace),
             "clone" => Self::Tool(Tool::Clone),
+            "heal" => Self::Tool(Tool::Heal),
             other => bail!(
                 "[invalid-stroke] blend {other:?} is not supported; use one of {}",
                 Self::NAMES.join(", ")
@@ -72,6 +76,7 @@ impl Blend {
             Self::Tool(Tool::Sponge) => "sponge",
             Self::Tool(Tool::ColorReplace) => "color-replace",
             Self::Tool(Tool::Clone) => "clone",
+            Self::Tool(Tool::Heal) => "heal",
         }
     }
 }
@@ -90,11 +95,14 @@ pub(super) fn check(brush: &Brush, blend: Blend) -> Result<()> {
     let uses_tolerance = matches!(tool, Some(Tool::BackgroundErase | Tool::ColorReplace));
     let uses_range = matches!(tool, Some(Tool::Dodge | Tool::Burn));
     let uses_mode = matches!(tool, Some(Tool::Sponge));
+    let uses_heal = matches!(tool, Some(Tool::Heal));
     for (given, used, key) in [
         (brush.strength.is_some(), uses_strength, "strength"),
         (brush.tolerance.is_some(), uses_tolerance, "tolerance"),
         (brush.range.is_some(), uses_range, "range"),
         (brush.mode.is_some(), uses_mode, "mode"),
+        (brush.texture.is_some(), uses_heal, "texture"),
+        (brush.tone.is_some(), uses_heal, "tone"),
     ] {
         if given && !used {
             bail!(
@@ -104,6 +112,7 @@ pub(super) fn check(brush: &Brush, blend: Blend) -> Result<()> {
                     "strength" => "smudge, blur, sharpen, dodge, burn and sponge",
                     "tolerance" => "background-erase and color-replace",
                     "range" => "dodge and burn",
+                    "texture" | "tone" => "heal",
                     _ => "sponge",
                 }
             )
@@ -130,7 +139,7 @@ fn div_round(n: i64, d: i64) -> i64 {
     (n + if n >= 0 { d / 2 } else { -d / 2 }) / d
 }
 
-fn luma(p: [u8; 4]) -> i64 {
+pub(super) fn luma(p: [u8; 4]) -> i64 {
     (54 * i64::from(p[0]) + 183 * i64::from(p[1]) + 19 * i64::from(p[2]) + 128) >> 8
 }
 
@@ -236,7 +245,7 @@ impl Context {
         let px = surface.pixel(x, y);
         let eff = amount * self.strength16 / 65535;
         match self.tool {
-            Tool::Smudge | Tool::Clone => px,
+            Tool::Smudge | Tool::Clone | Tool::Heal => px,
             Tool::BackgroundErase => {
                 if px[3] == 0 {
                     return px;

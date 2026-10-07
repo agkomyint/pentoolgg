@@ -1761,6 +1761,40 @@ enum RasterAction {
         #[arg(long, default_value_t = 0)]
         seed: u64,
     },
+    /// Healing brush: clone-stamp from the stored source, then match tone to the
+    /// surroundings. Brush `texture` and `tone` (0-1) blend detail and tone.
+    HealStroke {
+        id: String,
+        #[arg(long)]
+        samples: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        aligned: bool,
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        angle: f64,
+        #[arg(long, default_value_t = 1.0)]
+        scale: f64,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
+    /// Spot healing: repair one round spot, choosing the source automatically.
+    HealSpot {
+        id: String,
+        #[arg(long)]
+        x: f64,
+        #[arg(long)]
+        y: f64,
+        /// Spot radius in pixels (1-256).
+        #[arg(long, default_value_t = 8.0)]
+        radius: f64,
+        #[arg(long)]
+        texture: Option<f64>,
+        #[arg(long)]
+        tone: Option<f64>,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
 }
 
 fn ai_error_json(error: &anyhow::Error) -> serde_json::Value {
@@ -3062,6 +3096,7 @@ async fn run() -> Result<()> {
                 bail!("[unsupported-version] raster layers need a v6 scene document; run `pentool migrate` first")
             }
             let page = selected_page;
+            let heal_tool = matches!(action, RasterAction::HealStroke { .. });
             let (operation, result) = match action {
                 RasterAction::Add {
                     id,
@@ -3177,7 +3212,28 @@ async fn run() -> Result<()> {
                     "raster-clone-source",
                     raster::set_clone_source(&mut raw, page, &id, layer.as_deref(), x, y)?,
                 ),
+                RasterAction::HealSpot {
+                    id,
+                    x,
+                    y,
+                    radius,
+                    texture,
+                    tone,
+                    seed,
+                } => (
+                    "raster-heal-spot",
+                    raster::heal_spot(&mut raw, page, &id, x, y, radius, texture, tone, seed)?,
+                ),
                 RasterAction::CloneStroke {
+                    id,
+                    samples,
+                    brush,
+                    aligned,
+                    angle,
+                    scale,
+                    seed,
+                }
+                | RasterAction::HealStroke {
                     id,
                     samples,
                     brush,
@@ -3212,9 +3268,21 @@ async fn run() -> Result<()> {
                             scale,
                         },
                         seed,
+                        if heal_tool {
+                            raster::Tool::Heal
+                        } else {
+                            raster::Tool::Clone
+                        },
                     )?;
                     result["input"] = input_summary;
-                    ("raster-clone-stroke", result)
+                    (
+                        if heal_tool {
+                            "raster-heal-stroke"
+                        } else {
+                            "raster-clone-stroke"
+                        },
+                        result,
+                    )
                 }
                 RasterAction::Stroke {
                     id,

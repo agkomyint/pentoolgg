@@ -61,6 +61,12 @@ pub(crate) fn replay_entry(raw: &Value, surface: &mut Surface, entry: &Value) ->
                 bail!("[malformed-raster] journal brush tips must be recorded as sha256: digests")
             }
             let tip = resolve_tip(raw, &mut brush)?;
+            if let Some(heal) = entry.get("heal") {
+                let algorithm = heal["algorithm"].as_u64().unwrap_or(0);
+                if algorithm != super::heal::ALGORITHM {
+                    bail!("[unsupported-capability] journal entry used heal algorithm {algorithm}; this build implements {}", super::heal::ALGORITHM)
+                }
+            }
             let stroke = Stroke {
                 brush,
                 tip,

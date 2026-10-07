@@ -27,6 +27,7 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
 }
 
 mod clone;
+mod heal;
 mod input;
 mod layer;
 mod math;
@@ -37,6 +38,7 @@ pub use clone::{
     set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
     Request as CloneRequest, Spec as CloneSpec,
 };
+pub use heal::spot as heal_spot;
 use input::lerp;
 pub use input::{
     normalize_input, parse_samples, sample_json, Dynamic, Dynamics, Input, NormalizedInput, Sample,
@@ -282,6 +284,9 @@ pub struct Brush {
     pub tolerance: Option<u32>,
     pub range: Option<String>,
     pub mode: Option<String>,
+    /// Heal only: share of source detail and of destination tone, 0-1 (default 1).
+    pub texture: Option<f64>,
+    pub tone: Option<f64>,
 }
 
 pub const BRUSH_KINDS: [&str; 5] = [
@@ -323,7 +328,7 @@ impl Brush {
         let object = value
             .as_object()
             .context("[invalid-brush] brush must be an object")?;
-        const KNOWN: [&str; 20] = [
+        const KNOWN: [&str; 22] = [
             "kind",
             "size",
             "hardness",
@@ -344,6 +349,8 @@ impl Brush {
             "tolerance",
             "range",
             "mode",
+            "texture",
+            "tone",
         ];
         if let Some(key) = object.keys().find(|k| !KNOWN.contains(&k.as_str())) {
             bail!(
@@ -405,6 +412,14 @@ impl Brush {
         if tolerance.is_some_and(|t| t.fract() != 0.0) {
             bail!("[invalid-brush] tolerance must be a whole number between 0 and 255")
         }
+        let texture = match object.get("texture") {
+            None => None,
+            Some(_) => Some(number_in(object, "texture", 1.0, 0.0, 1.0)?),
+        };
+        let tone = match object.get("tone") {
+            None => None,
+            Some(_) => Some(number_in(object, "tone", 1.0, 0.0, 1.0)?),
+        };
         let range = optional_text("range", retouch::parse_range)?;
         let mode = optional_text("mode", retouch::parse_mode)?;
         let dynamics = Dynamics::parse(object.get("dynamics"))?;
@@ -420,6 +435,8 @@ impl Brush {
             tolerance: tolerance.map(|t| t as u32),
             range,
             mode,
+            texture,
+            tone,
             size: number_in(object, "size", 12.0, 1.0, MAX_BRUSH_SIZE)?,
             hardness: number_in(
                 object,
@@ -490,6 +507,12 @@ impl Brush {
         }
         if let Some(mode) = &self.mode {
             out["mode"] = json!(mode);
+        }
+        if let Some(texture) = self.texture {
+            out["texture"] = json!(texture);
+        }
+        if let Some(tone) = self.tone {
+            out["tone"] = json!(tone);
         }
         out
     }
@@ -837,15 +860,20 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
         });
     }
     let cloner = match (stroke.blend, &stroke.clone) {
-        (Blend::Tool(Tool::Clone), Some(spec)) => Some(spec),
+        (Blend::Tool(Tool::Clone | Tool::Heal), Some(spec)) => Some(spec),
         (Blend::Tool(Tool::Clone), None) => {
             bail!("[invalid-stroke] blend clone needs a clone source; use `raster clone-stroke`")
         }
-        (_, Some(_)) => bail!("[invalid-stroke] a clone source only applies to blend clone"),
+        (Blend::Tool(Tool::Heal), None) => {
+            bail!("[invalid-stroke] blend heal needs a clone source; use `raster heal-stroke`")
+        }
+        (_, Some(_)) => {
+            bail!("[invalid-stroke] a clone source only applies to blends clone and heal")
+        }
         _ => None,
     };
     let local = match stroke.blend {
-        Blend::Tool(Tool::Clone) => None,
+        Blend::Tool(Tool::Clone | Tool::Heal) => None,
         Blend::Tool(tool) => Some(retouch::Context::new(
             tool,
             &stroke.brush,
@@ -867,6 +895,16 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
         );
     }
     let opacity16 = (stroke.brush.opacity * 65535.0).round() as u32;
+    let field = match (stroke.blend, cloner) {
+        (Blend::Tool(Tool::Heal), Some(spec)) => Some(heal::solve(
+            surface,
+            spec,
+            &buffer,
+            opacity16,
+            &stroke.brush,
+        )?),
+        _ => None,
+    };
     let mut touched = 0usize;
     let mut bounds: Option<[u32; 4]> = None;
     let mut keys: Vec<_> = buffer.keys().copied().collect();
@@ -891,7 +929,10 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
             let x = key.0 * TILE as u32 + (index % TILE) as u32;
             let y = key.1 * TILE as u32 + (index / TILE) as u32;
             if let Some(spec) = cloner {
-                let p = spec.pixel(surface, x, y);
+                let p = match &field {
+                    Some(field) => field.pixel(x, y),
+                    None => spec.pixel(surface, x, y),
+                };
                 let alpha = (alpha16 * u32::from(p[3]) + 127) / 255;
                 if alpha > 0 {
                     composite(
@@ -1433,6 +1474,9 @@ pub fn paint(
     let mut canonical = canonical;
     if let Some(spec) = &stroke.clone {
         canonical["clone"] = spec.to_json();
+        if stroke.blend == Blend::Tool(Tool::Heal) {
+            canonical["heal"] = json!({"algorithm": heal::ALGORITHM});
+        }
     }
     let node = locate(&mut next, page, id)?;
     let index = node["journal"].as_array().map_or(0, Vec::len)
