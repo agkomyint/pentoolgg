@@ -53,11 +53,17 @@ pub fn replay(raw: &Value, node: &Value) -> Result<Surface> {
 }
 
 /// Re-apply one journal entry. Every replayable operation is dispatched here.
-pub(crate) fn replay_entry(_raw: &Value, surface: &mut Surface, entry: &Value) -> Result<()> {
+pub(crate) fn replay_entry(raw: &Value, surface: &mut Surface, entry: &Value) -> Result<()> {
     match entry["op"].as_str().unwrap_or("stroke") {
         "stroke" => {
+            let mut brush = Brush::parse(&entry["brush"])?;
+            if brush.tip.as_deref().is_some_and(|tip| !is_digest(tip)) {
+                bail!("[malformed-raster] journal brush tips must be recorded as sha256: digests")
+            }
+            let tip = resolve_tip(raw, &mut brush)?;
             let stroke = Stroke {
-                brush: Brush::parse(&entry["brush"])?,
+                brush,
+                tip,
                 samples: parse_samples(&entry["samples"])?,
                 color: parse_color(entry["color"].as_str().unwrap_or_default())?,
                 blend: Blend::parse(entry["blend"].as_str().unwrap_or("normal"))?,
@@ -188,13 +194,33 @@ pub fn verify(
         .map_or(0, |store| {
             store.keys().filter(|d| !retained.contains(*d)).count()
         });
-    let ok = layers.iter().all(|layer| layer["ok"] == true);
+    let store = raw.get("raster_tiles").and_then(Value::as_object);
+    let mut tips_checked = 0usize;
+    let mut damaged_tips = Vec::new();
+    for (name, digest) in raw
+        .get("brush_tips")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        tips_checked += 1;
+        let digest = digest.as_str().unwrap_or_default();
+        let problem = match store.and_then(|s| s.get(digest)) {
+            None => Some("missing"),
+            Some(entry) => decode_tile(entry, digest).err().map(|_| "corrupt"),
+        };
+        if let Some(problem) = problem {
+            damaged_tips.push(json!({"name": name, "tip": digest, "problem": problem}));
+        }
+    }
+    let ok = layers.iter().all(|layer| layer["ok"] == true) && damaged_tips.is_empty();
     Ok(json!({
         "ok": ok,
         "layers": layers,
+        "tips": {"checked": tips_checked, "damaged": damaged_tips},
         "orphan_tiles": orphans,
         "fix": if ok { Value::Null } else {
-            json!("run `pentool raster DOCUMENT repair ID --strategy replay`, or --strategy transparent to drop unrecoverable tiles")
+            json!("run `pentool raster DOCUMENT repair ID --strategy replay`, or --strategy transparent to drop unrecoverable tiles; re-add a damaged brush tip with `tip-remove` then `tip-add`")
         },
     }))
 }

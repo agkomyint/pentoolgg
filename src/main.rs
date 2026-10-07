@@ -1694,6 +1694,20 @@ enum RasterAction {
         #[arg(long)]
         replace: bool,
     },
+    /// Register a textured brush tip from a PNG, JPEG or WebP image. The image is
+    /// fitted into 256x256; use the name or returned digest as the brush "tip".
+    TipAdd {
+        name: String,
+        #[arg(long)]
+        image: PathBuf,
+        /// darkness (black paints) or alpha (opaque paints).
+        #[arg(long, default_value = "darkness")]
+        source: String,
+    },
+    /// Remove a tip name; its pixels stay while a journal entry still uses them.
+    TipRemove { name: String },
+    /// List named brush tips.
+    Tips,
     /// Apply one deterministic brush stroke.
     Stroke {
         id: String,
@@ -3092,6 +3106,33 @@ async fn run() -> Result<()> {
                     "raster-rasterize",
                     raster::rasterize(&mut raw, &input, page, &id, &new_id, replace)?,
                 ),
+                RasterAction::TipAdd {
+                    name,
+                    image,
+                    source,
+                } => {
+                    const MAX_TIP_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+                    if fs::metadata(&image)?.len() > MAX_TIP_SOURCE_BYTES {
+                        bail!("[limit-exceeded] tip images are limited to 16 MiB")
+                    }
+                    let bytes = fs::read(&image)?;
+                    (
+                        "raster-tip-add",
+                        raster::tip_add(
+                            &mut raw,
+                            &name,
+                            &bytes,
+                            raster::TipSource::parse(&source)?,
+                        )?,
+                    )
+                }
+                RasterAction::TipRemove { name } => {
+                    ("raster-tip-remove", raster::tip_remove(&mut raw, &name)?)
+                }
+                RasterAction::Tips => {
+                    println!("{}", serde_json::to_string(&raster::tip_list(&raw))?);
+                    return Ok(());
+                }
                 RasterAction::Checkpoint { id, compact } => (
                     "raster-checkpoint",
                     raster::checkpoint(&mut raw, page, &id, compact)?,

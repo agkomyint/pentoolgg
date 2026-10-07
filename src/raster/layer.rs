@@ -226,7 +226,7 @@ impl Resample {
 
 /// Deterministic resample with pixel-center mapping. Bilinear filtering runs in
 /// premultiplied alpha so transparent pixels never bleed color.
-fn resample(
+pub(super) fn resample(
     source: &image::RgbaImage,
     width: u32,
     height: u32,

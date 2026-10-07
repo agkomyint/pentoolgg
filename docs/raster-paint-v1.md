@@ -32,7 +32,7 @@ checkpoint replays from transparency.
   Stroke IDs (`s<index>-<hash>`) keep counting across rolls.
 - Garbage collection keeps every `sha256:` digest a raster node pins (live tiles,
   checkpoint tiles, digests recorded in journal entries) plus those in document-level
-  `raster_selections` and `brush_presets`.
+  `brush_tips`, `raster_selections` and `brush_presets`.
 
 ## Corruption recovery
 
@@ -68,9 +68,46 @@ stroke; the stroke then composites onto tiles in straight alpha with integer mat
 
 Kinds: `hard-round`, `soft-round` (smoothstep falloff from `hardness`), `pixel`
 (unantialiased square, 1 px step), `calligraphic` (rotated ellipse via `angle`,
-`roundness`). Properties: `size` 1-2048, `hardness`, `spacing` 0-2, `opacity`, `flow`,
-`angle`, `roundness`, `scatter` 0-5, `pressure_size`, `pressure_flow`, `min_size`.
+`roundness`), `textured` (a stamp tip, below). Properties: `size` 1-2048, `hardness`,
+`spacing` 0-2, `opacity`, `flow`, `angle`, `roundness`, `scatter` 0-5,
+`pressure_size`, `pressure_flow`, `min_size`, `smoothing` 0-0.95, `buildup`, `tip`.
 Blend: `normal` or `erase`. Unknown properties are rejected.
+
+- `smoothing`: an exponential moving average over position and pressure,
+  `p[i] = p[i-1] + (1 - smoothing) * (raw[i] - p[i-1])`, starting at the first
+  sample. If the average lags, the raw last sample is appended so the stroke still
+  ends where the pen lifted. 0 (the default) leaves samples untouched.
+- `buildup`: `true` (the default) accumulates overlapping dabs,
+  `c += dab * (1 - c)` in 16-bit. `false` keeps the per-pixel maximum, so one stroke
+  never exceeds a single dab's `flow`.
+- `textured`: `tip` names a `brush_tips` entry or gives its `sha256:` digest. The
+  tip is a 256x256 coverage plane stored as an ordinary `raster_tiles` tile, and
+  coverage is its alpha channel. The tip square spans the dab diameter and is
+  rotated by `angle`. Its height is scaled by `roundness`, and it is sampled
+  bilinearly with zero outside the square. Tip names are resolved before a stroke
+  is journaled, so journals always record the digest and replay never depends on
+  a name.
+
+Properties added after the first engine-1 release (`smoothing`, `buildup`, `tip`) are
+written to the journal only when they differ from their defaults, so existing
+journals, stroke IDs and replay hashes are unchanged.
+
+### Brush tips
+
+`tip-add NAME --image FILE [--source darkness|alpha]` reads a PNG, JPEG or WebP
+image of up to 16 MiB through the bounded image decoder. With `darkness` (the
+default), coverage is `(255 - luma) * alpha`, where
+`luma = (54R + 183G + 19B + 128) >> 8`, so black paints. With `alpha`, coverage is
+the alpha channel. The image is fitted so its longer side is 256, using the
+deterministic premultiplied bilinear resampler, and is centered. Color channels are
+stored as zero, so identical tips share one digest.
+
+Document-level `brush_tips` maps a name (1-64 of `A-Z a-z 0-9 . _ -`) to a digest;
+at most 256 names. Named tips are always retained. A tip that is only in a journal
+is kept while that journal entry exists. `checkpoint --compact` releases it, and
+the result reports `tiles_released`. `tip-remove NAME` drops the name, and `tips`
+lists the names. `verify` decodes every named tip and reports `tips.damaged` as
+`missing` or `corrupt`. A damaged tip cannot be rebuilt: re-add it from its image.
 
 ## Layer operations
 
@@ -119,6 +156,11 @@ pentool raster doc.pen add paint --width 1200 --height 800
 pentool raster doc.pen stroke paint --samples '[[10,60,0.3],[150,30,1]]' \
   --brush '{"kind":"soft-round","size":16,"pressure_size":true}' --color '#D2A184' --seed 1
 pentool raster doc.pen --dry-run stroke paint --samples @stroke.json
+pentool raster doc.pen tip-add grain --image grain.png --source darkness
+pentool raster doc.pen stroke paint --samples @stroke.json \
+  --brush '{"kind":"textured","tip":"grain","size":48,"smoothing":0.6,"buildup":false}'
+pentool raster doc.pen tips
+pentool raster doc.pen tip-remove grain
 pentool raster doc.pen info paint
 pentool raster doc.pen checkpoint paint --compact
 pentool raster doc.pen verify --replay

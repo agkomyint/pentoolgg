@@ -29,9 +29,11 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
 mod layer;
 mod math;
 mod recovery;
+mod tip;
 pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use recovery::{repair, replay, verify, RepairStrategy};
+pub use tip::{load_tip, resolve_tip, tip_add, tip_from_image, tip_list, tip_remove, TipSource};
 
 // ---------------------------------------------------------------------------
 // Tiles and surfaces
@@ -253,9 +255,25 @@ pub struct Brush {
     pub pressure_size: bool,
     pub pressure_flow: bool,
     pub min_size: f64,
+    /// EMA weight of the previous smoothed sample (0 = off, max 0.95).
+    pub smoothing: f64,
+    /// true: overlapping dabs accumulate flow; false: coverage is the per-pixel max.
+    pub buildup: bool,
+    /// `textured` only: a `sha256:` digest of a stamp tip, or a `brush_tips` name
+    /// until [`resolve_tip`] replaces it with the digest.
+    pub tip: Option<String>,
 }
 
-pub const BRUSH_KINDS: [&str; 4] = ["hard-round", "soft-round", "pixel", "calligraphic"];
+pub const BRUSH_KINDS: [&str; 5] = [
+    "hard-round",
+    "soft-round",
+    "pixel",
+    "calligraphic",
+    "textured",
+];
+pub const MAX_SMOOTHING: f64 = 0.95;
+/// A textured tip is one 256x256 coverage plane stored as a raster tile.
+pub type TipMask = std::sync::Arc<[u8]>;
 
 fn number_in(
     object: &Map<String, Value>,
@@ -284,7 +302,7 @@ impl Brush {
         let object = value
             .as_object()
             .context("[invalid-brush] brush must be an object")?;
-        const KNOWN: [&str; 12] = [
+        const KNOWN: [&str; 15] = [
             "kind",
             "size",
             "hardness",
@@ -297,6 +315,9 @@ impl Brush {
             "pressure_size",
             "pressure_flow",
             "min_size",
+            "smoothing",
+            "buildup",
+            "tip",
         ];
         if let Some(key) = object.keys().find(|k| !KNOWN.contains(&k.as_str())) {
             bail!(
@@ -316,14 +337,27 @@ impl Brush {
             )
         }
         let calligraphic = kind == "calligraphic";
-        let flag = |key: &str| -> Result<bool> {
+        let flag_or = |key: &str, default: bool| -> Result<bool> {
             match object.get(key) {
-                None => Ok(false),
+                None => Ok(default),
                 Some(Value::Bool(b)) => Ok(*b),
                 _ => bail!("[invalid-brush] {key} must be true or false"),
             }
         };
+        let flag = |key: &str| flag_or(key, false);
         let pixel = kind == "pixel";
+        let tip = match object.get("tip") {
+            None => None,
+            Some(Value::String(text)) if !text.is_empty() && text.len() <= 128 => {
+                Some(text.clone())
+            }
+            Some(_) => bail!("[invalid-brush] tip must be a sha256: digest or a brush_tips name"),
+        };
+        match (kind == "textured", tip.is_some()) {
+            (true, false) => bail!("[invalid-brush] a textured brush needs \"tip\"; add one with `pentool raster DOC tip-add NAME --image tip.png`"),
+            (false, true) => bail!("[invalid-brush] tip is only valid for kind \"textured\""),
+            _ => {}
+        }
         Ok(Brush {
             size: number_in(object, "size", 12.0, 1.0, MAX_BRUSH_SIZE)?,
             hardness: number_in(
@@ -354,18 +388,34 @@ impl Brush {
             pressure_size: flag("pressure_size")?,
             pressure_flow: flag("pressure_flow")?,
             min_size: number_in(object, "min_size", 0.1, 0.0, 1.0)?,
+            smoothing: number_in(object, "smoothing", 0.0, 0.0, MAX_SMOOTHING)?,
+            buildup: flag_or("buildup", true)?,
+            tip,
             kind,
         })
     }
 
+    /// Canonical journal form. Properties added after engine 1 first shipped are
+    /// written only when they differ from their defaults, so earlier journals and
+    /// stroke IDs stay byte-identical.
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut out = json!({
             "kind": self.kind, "size": self.size, "hardness": self.hardness,
             "spacing": self.spacing, "opacity": self.opacity, "flow": self.flow,
             "angle": self.angle, "roundness": self.roundness, "scatter": self.scatter,
             "pressure_size": self.pressure_size, "pressure_flow": self.pressure_flow,
             "min_size": self.min_size,
-        })
+        });
+        if self.smoothing != 0.0 {
+            out["smoothing"] = json!(self.smoothing);
+        }
+        if !self.buildup {
+            out["buildup"] = json!(false);
+        }
+        if let Some(tip) = &self.tip {
+            out["tip"] = json!(tip);
+        }
+        out
     }
 
     fn step(&self) -> f64 {
@@ -475,7 +525,36 @@ struct Dab {
     flow: f64,
 }
 
+/// Exponential moving average over position and pressure:
+/// `p[i] = p[i-1] + (1 - smoothing) * (raw[i] - p[i-1])`, starting at the first raw
+/// sample. The raw last sample is appended when the average lags behind it, so a
+/// smoothed stroke still ends where the pen lifted.
+fn smooth(samples: &[Sample], smoothing: f64) -> Vec<Sample> {
+    if smoothing <= 0.0 || samples.len() < 2 {
+        return samples.to_vec();
+    }
+    let k = 1.0 - smoothing;
+    let mut out = Vec::with_capacity(samples.len() + 1);
+    let mut p = samples[0];
+    out.push(p);
+    for s in &samples[1..] {
+        p = Sample {
+            x: p.x + k * (s.x - p.x),
+            y: p.y + k * (s.y - p.y),
+            pressure: p.pressure + k * (s.pressure - p.pressure),
+        };
+        out.push(p);
+    }
+    let last = samples[samples.len() - 1];
+    if p.x != last.x || p.y != last.y || p.pressure != last.pressure {
+        out.push(last);
+    }
+    out
+}
+
 fn dabs(brush: &Brush, samples: &[Sample], seed: u64) -> Result<Vec<Dab>> {
+    let smoothed = smooth(samples, brush.smoothing);
+    let samples = &smoothed[..];
     let step = brush.step();
     let mut points: Vec<(f64, f64, f64)> = Vec::new();
     let mut total = 0.0_f64;
@@ -537,10 +616,43 @@ fn dabs(brush: &Brush, samples: &[Sample], seed: u64) -> Result<Vec<Dab>> {
 
 type StrokeBuffer = HashMap<(u32, u32), Vec<u16>>;
 
-/// Accumulate one dab into the per-stroke coverage buffer (flow build-up).
-fn stamp(buffer: &mut StrokeBuffer, brush: &Brush, dab: &Dab, width: u32, height: u32) {
+/// Bilinear sample of a 256x256 tip at tip-space `(tu, tv)` in `[-1, 1]`, where the
+/// tip square spans the dab's diameter. Outside the tip is zero coverage.
+fn tip_coverage(tip: &[u8], tu: f64, tv: f64) -> f64 {
+    let side = TILE as f64;
+    let fx = (tu + 1.0) * (side / 2.0) - 0.5;
+    let fy = (tv + 1.0) * (side / 2.0) - 0.5;
+    if fx <= -1.0 || fy <= -1.0 || fx >= side || fy >= side {
+        return 0.0;
+    }
+    let (x0, y0) = (fx.floor(), fy.floor());
+    let (ax, ay) = (fx - x0, fy - y0);
+    let at = |x: f64, y: f64| -> f64 {
+        if x < 0.0 || y < 0.0 || x >= side || y >= side {
+            0.0
+        } else {
+            f64::from(tip[y as usize * TILE + x as usize])
+        }
+    };
+    let top = at(x0, y0) * (1.0 - ax) + at(x0 + 1.0, y0) * ax;
+    let bottom = at(x0, y0 + 1.0) * (1.0 - ax) + at(x0 + 1.0, y0 + 1.0) * ax;
+    (top * (1.0 - ay) + bottom * ay) / 255.0
+}
+
+/// Accumulate one dab into the per-stroke coverage buffer: flow build-up, or the
+/// per-pixel maximum when `buildup` is false.
+fn stamp(
+    buffer: &mut StrokeBuffer,
+    brush: &Brush,
+    tip: Option<&[u8]>,
+    dab: &Dab,
+    width: u32,
+    height: u32,
+) {
     let radius = dab.size / 2.0;
-    let reach = radius / brush.roundness.clamp(0.05, 1.0) + 1.0;
+    // A rotated square tip reaches its corners at radius * sqrt(2).
+    let corner = if tip.is_some() { 1.4143 } else { 1.0 };
+    let reach = radius * corner / brush.roundness.clamp(0.05, 1.0) + 1.0;
     let x0 = ((dab.x - reach).floor()).max(0.0) as i64;
     let y0 = ((dab.y - reach).floor()).max(0.0) as i64;
     let x1 = ((dab.x + reach).ceil()).min(f64::from(width)) as i64;
@@ -573,7 +685,9 @@ fn stamp(buffer: &mut StrokeBuffer, brush: &Brush, dab: &Dab, width: u32, height
                 let u = dx * cos + dy * sin;
                 let v = (-dx * sin + dy * cos) / brush.roundness;
                 let d = (u * u + v * v).sqrt();
-                if brush.kind == "soft-round" && brush.hardness < 1.0 {
+                if let Some(tip) = tip {
+                    tip_coverage(tip, u / radius, v / radius)
+                } else if brush.kind == "soft-round" && brush.hardness < 1.0 {
                     let inner = radius * brush.hardness;
                     if d <= inner {
                         1.0
@@ -597,8 +711,12 @@ fn stamp(buffer: &mut StrokeBuffer, brush: &Brush, dab: &Dab, width: u32, height
             let cell = buffer.entry(key).or_insert_with(|| vec![0u16; TILE * TILE]);
             let at = ((y as usize) % TILE) * TILE + (x as usize) % TILE;
             let current = u32::from(cell[at]);
-            let added = (dab16 * (65535 - current) + 32767) / 65535;
-            cell[at] = (current + added).min(65535) as u16;
+            cell[at] = if brush.buildup {
+                let added = (dab16 * (65535 - current) + 32767) / 65535;
+                (current + added).min(65535) as u16
+            } else {
+                current.max(dab16.min(65535)) as u16
+            };
         }
     }
 }
@@ -638,6 +756,8 @@ pub struct Stroke {
     pub color: [u8; 3],
     pub blend: Blend,
     pub seed: u64,
+    /// Decoded coverage of `brush.tip`; see [`load_tip`].
+    pub tip: Option<TipMask>,
 }
 
 pub struct StrokeResult {
@@ -648,9 +768,15 @@ pub struct StrokeResult {
 
 /// Apply a stroke to a surface. Fails before any pixel work if limits are exceeded.
 pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResult> {
+    let tip = match (&stroke.brush.tip, &stroke.tip) {
+        (None, _) => None,
+        (Some(_), Some(mask)) if mask.len() == TILE * TILE => Some(&mask[..]),
+        (Some(name), _) => bail!("[missing-resource] brush tip {name} is not loaded"),
+    };
     let dab_list = dabs(&stroke.brush, &stroke.samples, stroke.seed)?;
-    let footprint =
-        (stroke.brush.size / stroke.brush.roundness.max(0.05) + 3.0).min(MAX_BRUSH_SIZE * 20.0);
+    let corner = if tip.is_some() { 1.4143 } else { 1.0 };
+    let footprint = (stroke.brush.size * corner / stroke.brush.roundness.max(0.05) + 3.0)
+        .min(MAX_BRUSH_SIZE * 20.0 * corner);
     let work = (dab_list.len() as f64 * footprint * footprint) as u64;
     if work > MAX_STROKE_WORK {
         bail!("[limit-exceeded] stroke work {work} exceeds {MAX_STROKE_WORK}; reduce size or sample length")
@@ -660,6 +786,7 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
         stamp(
             &mut buffer,
             &stroke.brush,
+            tip,
             dab,
             surface.width,
             surface.height,
@@ -901,17 +1028,17 @@ pub fn validate_document(raw: &Value) -> Result<()> {
             }
         }
     }
-    Ok(())
+    tip::validate_tips(raw)
 }
 
 /// Digests that must stay in `raster_tiles`: everything pinned by raster nodes plus
-/// document-level raster resources (saved selections and brush presets).
+/// document-level raster resources (named tips, saved selections, brush presets).
 fn retained_digests(raw: &Value) -> HashSet<String> {
     let mut referenced = HashSet::new();
     for node in every_raster(raw) {
         pinned_digests(node, &mut referenced);
     }
-    for key in ["raster_selections", "brush_presets"] {
+    for key in ["brush_tips", "raster_selections", "brush_presets"] {
         if let Some(value) = raw.get(key) {
             pinned_digests(value, &mut referenced);
         }
@@ -1144,9 +1271,16 @@ pub fn checkpoint(raw: &mut Value, page: Option<&str>, id: &str, compact: bool) 
             "journal_dropped": dropped,
         });
     }
+    // Compaction can unpin digests only the dropped journal recorded (brush tips).
+    let released = collect_garbage(&mut next);
     crate::scene::validate(&next)?;
     *raw = next;
-    Ok(json!({"id":id,"tile_map_sha256":hash,"journal_compacted":if compact {entries} else {0}}))
+    Ok(json!({
+        "id": id,
+        "tile_map_sha256": hash,
+        "journal_compacted": if compact { entries } else { 0 },
+        "tiles_released": released,
+    }))
 }
 
 pub struct StrokeRequest {
@@ -1168,12 +1302,15 @@ pub fn paint(
     let mut next = raw.clone();
     let snapshot = locate(&mut next, page, id)?.clone();
     let mut surface = Surface::load(&next, &snapshot)?;
+    let mut request = request;
+    let tip = resolve_tip(&next, &mut request.brush)?;
     let stroke = Stroke {
         brush: request.brush.clone(),
         samples: request.samples.clone(),
         color: request.color,
         blend: request.blend,
         seed: request.seed,
+        tip,
     };
     let before = surface.tile_map_hash();
     let result = apply_stroke(&mut surface, &stroke)?;
@@ -1259,12 +1396,13 @@ mod tests {
             color: [210, 161, 132],
             blend: Blend::Normal,
             seed: 42,
+            tip: None,
         }
     }
 
     #[test]
     fn replaying_a_stroke_reproduces_identical_tiles() {
-        for kind in BRUSH_KINDS {
+        for kind in BRUSH_KINDS.into_iter().filter(|k| *k != "textured") {
             let (mut a, mut b) = (surface(), surface());
             apply_stroke(&mut a, &stroke(kind)).unwrap();
             apply_stroke(&mut b, &stroke(kind)).unwrap();
@@ -1318,6 +1456,97 @@ mod tests {
         assert!(Brush::parse(&json!({"bogus":1})).is_err());
         assert!(parse_samples(&json!([])).is_err());
         assert!(parse_samples(&json!([[1, 2, 3]])).is_err());
+    }
+
+    /// A tip whose left half (tip x < 128) is fully covered.
+    fn left_half_tip() -> TipMask {
+        (0..TILE * TILE)
+            .map(|i| if i % TILE < 128 { 255 } else { 0 })
+            .collect()
+    }
+
+    #[test]
+    fn textured_tip_shapes_the_dab_and_follows_angle() {
+        let mut request = stroke("hard-round");
+        request.brush =
+            Brush::parse(&json!({"kind":"textured","tip":"sha256:x","size":40})).unwrap();
+        request.samples = parse_samples(&json!([[100, 100]])).unwrap();
+        let mut s = surface();
+        assert!(apply_stroke(&mut s, &request).is_err(), "tip not loaded");
+        request.tip = Some(left_half_tip());
+        apply_stroke(&mut s, &request).unwrap();
+        assert_eq!(s.pixel(90, 100)[3], 255);
+        assert_eq!(s.pixel(110, 100)[3], 0);
+        // Rotating the tip 180 degrees mirrors the covered half.
+        request.brush =
+            Brush::parse(&json!({"kind":"textured","tip":"sha256:x","size":40,"angle":180}))
+                .unwrap();
+        let mut r = surface();
+        apply_stroke(&mut r, &request).unwrap();
+        assert_eq!(r.pixel(90, 100)[3], 0);
+        assert_eq!(r.pixel(110, 100)[3], 255);
+        let mut again = surface();
+        apply_stroke(&mut again, &request).unwrap();
+        assert_eq!(r.tile_map_hash(), again.tile_map_hash());
+    }
+
+    #[test]
+    fn buildup_false_caps_coverage_at_one_dab() {
+        let paint = |buildup: bool| {
+            let mut request = stroke("hard-round");
+            request.brush =
+                Brush::parse(&json!({"size":20,"flow":0.3,"spacing":0.05,"buildup":buildup}))
+                    .unwrap();
+            request.samples = parse_samples(&json!([[100, 100], [140, 100]])).unwrap();
+            let mut s = surface();
+            apply_stroke(&mut s, &request).unwrap();
+            s.pixel(120, 100)[3]
+        };
+        assert_eq!(paint(false), 77);
+        assert!(paint(true) > 200);
+    }
+
+    #[test]
+    fn smoothing_damps_jitter_and_still_reaches_the_end() {
+        let paint = |smoothing: f64| {
+            let mut request = stroke("hard-round");
+            request.brush = Brush::parse(&json!({"size":2,"smoothing":smoothing})).unwrap();
+            request.samples = parse_samples(&json!([
+                [20, 100],
+                [40, 140],
+                [60, 60],
+                [80, 140],
+                [100, 60],
+                [120, 140],
+                [200, 100]
+            ]))
+            .unwrap();
+            let mut s = surface();
+            apply_stroke(&mut s, &request).unwrap();
+            s
+        };
+        let (raw, smooth) = (paint(0.0), paint(0.8));
+        let extent = |s: &Surface| {
+            let rows: Vec<u32> = (0..300)
+                .filter(|y| (0..600).any(|x| s.pixel(x, *y)[3] != 0))
+                .collect();
+            rows.last().unwrap() - rows.first().unwrap()
+        };
+        assert!(extent(&smooth) * 2 < extent(&raw));
+        assert_ne!(smooth.pixel(200, 100)[3], 0, "ends at the last raw sample");
+        assert!(Brush::parse(&json!({"smoothing":1.0})).is_err());
+    }
+
+    #[test]
+    fn default_brush_json_is_unchanged_by_new_properties() {
+        let brush = Brush::parse(&json!({})).unwrap();
+        let json = brush.to_json();
+        for key in ["smoothing", "buildup", "tip"] {
+            assert!(json.get(key).is_none(), "{key}");
+        }
+        assert_eq!(Brush::parse(&json).unwrap(), brush);
+        assert!(Brush::parse(&json!({"kind":"textured"})).is_err());
+        assert!(Brush::parse(&json!({"tip":"sha256:x"})).is_err());
     }
 
     fn document_with_layer() -> Value {

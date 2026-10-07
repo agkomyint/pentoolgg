@@ -57,13 +57,20 @@
         "brush": {
           "type": "object",
           "properties": {
-            "kind": { "enum": ["hard-round", "soft-round", "pixel", "calligraphic"] }
+            "kind": { "enum": ["hard-round", "soft-round", "pixel", "calligraphic", "textured"] },
+            "smoothing": { "type": "number", "minimum": 0, "maximum": 0.95, "default": 0 },
+            "buildup": { "type": "boolean", "default": true },
+            "tip": {
+              "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "Journals record the tip digest; required for and only valid with kind textured."
+            }
           }
         }
       }
     }
   },
   "x-document": {
-    "raster_tiles": "top-level object: digest -> {encoding: 'png-base64', data}. Digest is the sha256 of the 256*256*4 straight-RGBA bytes."
+    "raster_tiles": "top-level object: digest -> {encoding: 'png-base64', data}. Digest is the sha256 of the 256*256*4 straight-RGBA bytes.",
+    "brush_tips": "top-level object (at most 256): name matching ^[A-Za-z0-9._-]{1,64}$ -> sha256 digest of a raster_tiles entry whose alpha channel is the tip coverage."
   }
 }
