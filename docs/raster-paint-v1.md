@@ -430,6 +430,23 @@ whole document, including component snapshots and instance fallbacks. `diff`
 reports `/raster_tiles/<digest>` changes as `{raster_tile, encoding, data_bytes}`
 summaries, never base64 data.
 
+### Batch
+
+`pentool raster doc.pen batch ops.json` applies a JSON array of
+`{"action", "id", "args"?, "page"?}` operations in order as one recoverable transaction.
+The actions are those of `POST /api/raster` (`stroke`, `quickmask`, `clone`, `heal`, `fill`,
+`clear`, `set-clone-source`, `select-marquee`, `select-lasso`, `select-wand`, `select-info`,
+`select-clear`, `info`) and `args` mirror the CLI flags, including `preset`. Both entry
+points share one dispatcher, so a batch produces the same tile hashes as the same
+commands run one by one.
+
+Limits are checked before any pixel work: 1-256 operations, at most 2,000,000 stroke
+samples in total, a 64 MiB file, and only the fields `action`, `id`, `args` and `page`.
+The summary lists, per operation, the engine's compact result (changed `bounds`,
+`tiles_changed`, input summary) and the layer's `tile_map_sha256`; it never contains
+pixels. If any operation fails, the error names its index and action and the document is
+left byte-for-byte unchanged. `--dry-run` runs the same planner and writes nothing.
+
 ## Editor canvas
 
 `pentool serve` embeds a **Raster canvas** panel (`web/raster-panel.js`) for v6 documents.

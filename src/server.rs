@@ -389,134 +389,16 @@ async fn raster_command(Json(body): Json<RasterRequest>) -> Response {
 }
 
 fn raster_apply(body: RasterRequest) -> Result<serde_json::Value> {
-    {
-        use crate::raster;
-        let mut raw = body.document;
-        let page = body.page.as_deref();
-        let id = body.id.as_str();
-        let args = &body.args;
-        let num = |k: &str| {
-            args[k]
-                .as_f64()
-                .context(format!("[invalid-input] args.{k} must be a number"))
-        };
-        let text = |k: &str, d: &'static str| args[k].as_str().unwrap_or(d).to_owned();
-        let count = |k: &str| args[k].as_u64().unwrap_or(0) as u32;
-        let result = match body.action.as_str() {
-            "info" => raster::info(&raw, page, id)?,
-            "select-info" => raster::select_info(&raw, id)?,
-            "select-clear" => raster::select_clear(&mut raw, id)?,
-            "stroke" | "quickmask" | "clone" | "heal" => {
-                let normalized = raster::normalize_input(&args["samples"])?;
-                let input_summary = normalized.summary();
-                let brush = raster::Brush::parse(&raster::resolve_preset(
-                    &raw,
-                    &args["brush"],
-                    args["preset"].as_str(),
-                )?)?;
-                let seed = args["seed"].as_u64().unwrap_or(0);
-                let erase = args["erase"].as_bool().unwrap_or(false);
-                let mut result = match body.action.as_str() {
-                    "stroke" => raster::paint(
-                        &mut raw,
-                        page,
-                        id,
-                        raster::StrokeRequest {
-                            brush,
-                            samples: normalized.samples,
-                            color: raster::parse_color(&text("color", "#000000"))?,
-                            blend: raster::Blend::parse(&text("blend", "normal"))?,
-                            seed,
-                            clone: None,
-                        },
-                    )?,
-                    "quickmask" => raster::select_quickmask(
-                        &mut raw,
-                        page,
-                        id,
-                        brush,
-                        normalized.samples,
-                        erase,
-                        seed,
-                    )?,
-                    other => {
-                        let options = raster::CloneOptions {
-                            aligned: args["aligned"].as_bool().unwrap_or(true),
-                            angle: args["angle"].as_f64().unwrap_or(0.0),
-                            scale: args["scale"].as_f64().unwrap_or(1.0)
-                        };
-                        let tool = if other == "heal" {
-                            raster::Tool::Heal
-                        } else {
-                            raster::Tool::Clone
-                        };
-                        raster::clone_stroke(
-                            &mut raw,
-                            page,
-                            id,
-                            brush,
-                            normalized.samples,
-                            &options,
-                            seed,
-                            tool,
-                        )?
-                    }
-                };
-                result["input"] = input_summary;
-                result
-            }
-            "set-clone-source" => raster::set_clone_source(
-                &mut raw,
-                page,
-                id,
-                args["layer"].as_str(),
-                num("x")?,
-                num("y")?,
-            )?,
-            "select-marquee" => raster::select_marquee(
-                &mut raw,
-                page,
-                id,
-                raster::Marquee::parse(&text("shape", "rect"))?,
-                [num("x")?, num("y")?, num("width")?, num("height")?],
-                raster::SelectionMode::parse(&text("mode", "replace"))?,
-                count("feather"),
-            )?,
-            "select-lasso" => {
-                let points: Vec<[f64; 2]> = serde_json::from_value(args["points"].clone())
-                    .context("[invalid-input] args.points must be [[x,y],...]")?;
-                raster::select_lasso(
-                    &mut raw,
-                    page,
-                    id,
-                    &points,
-                    raster::SelectionMode::parse(&text("mode", "replace"))?,
-                    count("feather"),
-                )?
-            }
-            "select-wand" => raster::select_wand(
-                &mut raw,
-                page,
-                id,
-                &raster::FloodOptions {
-                    x: count("x"),
-                    y: count("y"),
-                    tolerance: args["tolerance"].as_u64().unwrap_or(32).min(255) as u8,
-                    diagonal: args["diagonal"].as_bool().unwrap_or(false),
-                    contiguous: args["contiguous"].as_bool().unwrap_or(true),
-                    antialias: args["antialias"].as_bool().unwrap_or(true),
-                    gap: count("gap"),
-                    transparent_barrier: args["transparent_barrier"].as_bool().unwrap_or(false),
-                },
-                raster::SelectionMode::parse(&text("mode", "replace"))?,
-            )?,
-            other => anyhow::bail!(
-                "[invalid-input] unknown raster action {other:?}; use info, stroke, quickmask, clone, heal, set-clone-source, select-marquee, select-lasso, select-wand, select-info or select-clear"
-            ),
-        };
-        crate::transaction::validate_value(&raw)?;
-        Ok(serde_json::json!({"document": raw, "result": result}))
-    }
+    let mut raw = body.document;
+    let result = crate::raster::apply(
+        &mut raw,
+        body.page.as_deref(),
+        &body.id,
+        &body.action,
+        &body.args,
+    )?;
+    crate::transaction::validate_value(&raw)?;
+    Ok(serde_json::json!({"document": raw, "result": result}))
 }
 
 async fn get_document(State(state): State<Shared>) -> Response {

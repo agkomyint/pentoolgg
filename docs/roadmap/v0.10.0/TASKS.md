@@ -1,7 +1,7 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
 > **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
-> 0 of 14 items are ticked; items 1-12 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
+> 0 of 14 items are ticked; items 1-13 are implemented and item 10 is partial. Boxes stay unticked until every
 > item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
 >
 > | # | Item | State |
@@ -18,7 +18,7 @@
 > | 10 | Layer operations | Implemented: trim, canvas resize (crop past bounds), merge down, explicit rasterization, `rotate`/`flip` (lossless, selections follow), `merge-visible`, `stamp-visible`, `flatten` (`tests/raster_compose.rs`). Not yet: the "below" clone source and composite flood scope that build on stamp-visible. Awaiting hosted CI evidence before ticking. |
 > | 11 | Presets and assets | Implemented: document `brush_presets` (`preset-add/remove/show`, `presets`), `--preset` on stroke, clone, heal and quick-mask, portable `preset-export`/`preset-import` with content-addressed tips, opt-in `preset-import-gbr` and `preset-import-mypaint` that report unsupported settings (`tests/raster_presets.rs`). Awaiting hosted CI evidence before ticking. |
 > | 12 | Editor UI | Implemented in part: `POST /api/raster` and the Raster canvas panel (brush/eraser/clone/heal/quick mask/marquee/lasso/wand, cursor outline, live preview, stabilizer line, clone marker, zoom/rotate; `server::tests`). Missing: rulers, guides, snapping, navigator. Awaiting hosted CI evidence before ticking. |
-> | 13 | CLI and batch | Partial: `pentool raster ... add/info/clear/checkpoint/stroke/verify/repair/resize/crop/trim/duplicate/merge-down/rasterize/tip-add/tip-remove/tips` with dry-run and limits. Missing: presets, selections/masks, retouch ops, batch. |
+> | 13 | CLI and batch | Implemented: every raster operation has a CLI command, and `pentool raster DOC batch OPS.json` (shared dispatcher with `/api/raster`) runs up to 256 operations atomically with presets, selections and retouch actions, event/sample/file limits checked first, and summaries of changed bounds and tile hashes (`tests/raster_batch.rs`). Awaiting hosted CI evidence before ticking. |
 > | 14 | Performance, fuzz, goldens | Not started (one replay-hash test exists). |
 
 Complete the missing hands-on raster workflow after v0.7.0 image operations,

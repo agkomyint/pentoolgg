@@ -26,6 +26,7 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("[{code}] {message}")
 }
 
+mod api;
 mod clone;
 mod compose;
 mod flood;
@@ -40,6 +41,7 @@ mod retouch;
 mod selection;
 mod shape;
 mod tip;
+pub use api::{apply, batch, MAX_BATCH_OPS, MAX_BATCH_SAMPLES};
 pub use clone::{
     set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
     Request as CloneRequest, Spec as CloneSpec,

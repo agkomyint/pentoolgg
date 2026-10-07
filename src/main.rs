@@ -1752,6 +1752,8 @@ enum RasterAction {
     TipRemove { name: String },
     /// List named brush tips.
     Tips,
+    /// Apply a JSON array of raster operations ({action, id, args}) atomically.
+    Batch { operations: PathBuf },
     /// Create a brush preset from brush JSON.
     PresetAdd {
         name: String,
@@ -3552,6 +3554,16 @@ async fn run() -> Result<()> {
                             &name,
                         )?,
                     )
+                }
+                RasterAction::Batch { operations } => {
+                    if fs::metadata(&operations)?.len() > 64 << 20 {
+                        bail!("[limit-exceeded] a raster batch file is limited to 64 MiB")
+                    }
+                    let list: Vec<serde_json::Value> =
+                        serde_json::from_slice(&fs::read(&operations)?).map_err(|e| {
+                            anyhow::anyhow!("[invalid-input] operations must be a JSON array: {e}")
+                        })?;
+                    ("raster-batch", raster::batch(&mut raw, page, &list)?)
                 }
                 RasterAction::Tips => {
                     println!("{}", serde_json::to_string(&raster::tip_list(&raw))?);
