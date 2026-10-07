@@ -123,6 +123,25 @@ fn parse_key(text: &str) -> Result<(u32, u32)> {
     Ok(key)
 }
 
+/// The tile-map hash from per-tile digests, in tile order.
+fn digests_hash(digests: &BTreeMap<(u32, u32), String>) -> String {
+    let mut text = String::new();
+    for (key, digest) in digests {
+        text.push_str(&format!("{},{}={}\n", key.0, key.1, digest));
+    }
+    crate::resource::sha256(text.as_bytes())
+}
+
+/// Digests of a node's live tile map, as loaded.
+fn node_digests(node: &Value) -> Result<BTreeMap<(u32, u32), String>> {
+    let mut out = BTreeMap::new();
+    for (key, digest) in node["tiles"].as_object().into_iter().flatten() {
+        let digest = digest.as_str().context("tile digest must be a string")?;
+        out.insert(parse_key(key)?, digest.to_owned());
+    }
+    Ok(out)
+}
+
 fn tiles_across(extent: u32) -> u32 {
     extent.div_ceil(TILE as u32)
 }
@@ -194,6 +213,36 @@ impl Surface {
     /// Like [`Surface::store`]; `rewrite` replaces existing store entries, which
     /// repairs a damaged entry whose digest is still correct.
     pub fn store_with(&self, raw: &mut Value, node: &mut Value, rewrite: bool) -> Result<()> {
+        self.store_digested(raw, node, rewrite, &self.digests(None))
+    }
+
+    /// Digest of every non-blank tile. Tiles equal to the same key in `known`
+    /// (a previously loaded surface with its digests) reuse that digest instead of
+    /// being hashed again.
+    fn digests(
+        &self,
+        known: Option<(&Self, &BTreeMap<(u32, u32), String>)>,
+    ) -> BTreeMap<(u32, u32), String> {
+        let mut out = BTreeMap::new();
+        for (key, tile) in &self.tiles {
+            if is_blank(tile) {
+                continue;
+            }
+            let reused = known.and_then(|(old, digests)| {
+                (old.tiles.get(key) == Some(tile)).then(|| digests.get(key).cloned())?
+            });
+            out.insert(*key, reused.unwrap_or_else(|| tile_hash(tile)));
+        }
+        out
+    }
+
+    fn store_digested(
+        &self,
+        raw: &mut Value,
+        node: &mut Value,
+        rewrite: bool,
+        digests: &BTreeMap<(u32, u32), String>,
+    ) -> Result<()> {
         let mut map = Map::new();
         let store = raw
             .as_object_mut()
@@ -203,10 +252,9 @@ impl Surface {
             .as_object_mut()
             .context("raster_tiles must be an object")?;
         for (key, tile) in &self.tiles {
-            if is_blank(tile) {
+            let Some(digest) = digests.get(key).cloned() else {
                 continue;
-            }
-            let digest = tile_hash(tile);
+            };
             if rewrite || !store.contains_key(&digest) {
                 store.insert(
                     digest.clone(),
@@ -223,13 +271,7 @@ impl Surface {
     }
 
     pub fn tile_map_hash(&self) -> String {
-        let mut text = String::new();
-        for (key, tile) in &self.tiles {
-            if !is_blank(tile) {
-                text.push_str(&format!("{},{}={}\n", key.0, key.1, tile_hash(tile)));
-            }
-        }
-        crate::resource::sha256(text.as_bytes())
+        digests_hash(&self.digests(None))
     }
 
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
@@ -1545,13 +1587,19 @@ pub fn paint(
         },
     };
     let pinned = selection::pin(&next, id, surface.width, surface.height)?;
-    let before = surface.tile_map_hash();
+    // Loading verified every tile against its digest, so the loaded digests stand
+    // in for hashing the surface again; only changed tiles are hashed afterwards.
+    let loaded = node_digests(&snapshot)?;
+    let before = digests_hash(&loaded);
+    let original = surface.clone();
     let result = apply_stroke_selected(
         &mut surface,
         &stroke,
         pinned.as_ref().map(|(selection, _)| selection),
     )?;
-    let after = surface.tile_map_hash();
+    let digests = surface.digests(Some((&original, &loaded)));
+    drop(original);
+    let after = digests_hash(&digests);
     let canonical = json!({
         "brush": request.brush.to_json(),
         "samples": request.samples.iter().map(sample_json).collect::<Vec<_>>(),
@@ -1592,7 +1640,7 @@ pub fn paint(
         .context("journal missing")?
         .push(entry);
     let mut node_copy = node.clone();
-    surface.store(&mut next, &mut node_copy)?;
+    surface.store_digested(&mut next, &mut node_copy, false, &digests)?;
     let rolled = node_copy["journal"].as_array().map_or(0, Vec::len) >= MAX_JOURNAL;
     if rolled {
         roll_checkpoint(&mut node_copy, &after);

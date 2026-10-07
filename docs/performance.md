@@ -104,14 +104,14 @@ developer machine, release build, 40-sample strokes with pressure:
 | Case | Result |
 | --- | --- |
 | Stroke latency, 24 px brush, 1000x1000 / 4000x5000 / 8000x8000 layers | p50 5.7-7.3 ms, p95 9.6-10.8 ms; at most 4 tiles dirtied per stroke; layer size does not change latency |
-| 10,000 strokes on a 1024x1024 layer | 146 s total (about 4 ms per stroke at the start, 17 ms near the end); journal held at 16 entries by checkpoints; `verify --replay` 79 ms; replay 51 ms; document 0.1 MiB |
-| Same strokes on a 4000x5000 layer spread over the canvas | 500 strokes 9 s, 1500 strokes 47 s, 2500 strokes 111 s |
+| 10,000 strokes on a 1024x1024 layer | 86 s total (about 4.6 ms per stroke at the start, 10 ms near the end; 146 s before a stroke stopped re-hashing every tile); journal held at 16 entries by checkpoints; `verify --replay` 79 ms; replay 51 ms; document 0.1 MiB |
+| Same strokes on a 4000x5000 layer spread over the canvas (measured before the re-hashing change) | 500 strokes 9 s, 1500 strokes 47 s, 2500 strokes 111 s |
 | Compositing 60 large strokes, 2000x2000 page | 1.5 s |
 
 Known limit: the per-stroke cost of a long editing session grows with the number of
 strokes already painted (the second row), and grows faster when strokes touch many
 distinct tiles (the third). Reopening is not affected: the bounded checkpoint plus
-journal keeps replay under 100 ms. Reducing the growing per-stroke cost is future work;
+journal keeps replay under 100 ms. What remains is decoding every stored tile of the layer on each stroke; loading only the tiles a stroke touches is future work;
 these numbers are not a hosted-CI performance claim.
 
 Correctness hardening lives in `tests/raster_hardening.rs`: seeded fuzzers for sample
