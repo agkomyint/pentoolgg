@@ -1704,7 +1704,21 @@ pub fn apply_batch_at(
                 "add-page"=>{let id=resolve("id")?;let name=operation.get("name").and_then(Value::as_str).unwrap_or(&id);let width=operation.get("width").and_then(Value::as_u64).unwrap_or(1200);let height=operation.get("height").and_then(Value::as_u64).unwrap_or(800);let layer=operation.get("layer").and_then(Value::as_str).unwrap_or("content");let pages=candidate.get_mut("pages").and_then(Value::as_array_mut).unwrap();if pages.iter().any(|page|page.get("id").and_then(Value::as_str)==Some(&id)){bail!("page already exists: {id}")}pages.push(json!({"id":id,"name":name,"canvas":{"width":width,"height":height,"background":operation.get("background").and_then(Value::as_str).unwrap_or("#ffffff")},"layers":[{"id":layer,"name":"Content","visible":true,"locked":false,"nodes":[]}]}));json!({"type":kind,"id":id})}
                 "put-image" | "set-image" | "image-op-add" | "image-op-set" | "image-op-move"
                 | "image-op-enable" | "image-op-disable" | "image-op-remove" => {
-                    crate::image::batch_operation(&mut candidate, page, kind, operation, &resolve)?
+                    let replacing = kind == "put-image" && is_replace(operation)?;
+                    let target = resolve("id").ok().filter(|_| replacing);
+                    let previous = match (&target, operation.get("layer").and_then(Value::as_str)) {
+                        (Some(id), Some(_)) => take_for_replace(page_mut(&mut candidate, page)?, id)?,
+                        _ => None,
+                    };
+                    let result =
+                        crate::image::batch_operation(&mut candidate, page, kind, operation, &resolve)?;
+                    if let (Some(id), Some(layer)) =
+                        (&target, operation.get("layer").and_then(Value::as_str))
+                    {
+                        let layer = resolve("layer").unwrap_or_else(|_| layer.to_owned());
+                        restore_position(page_mut(&mut candidate, page)?, previous, &layer, id);
+                    }
+                    result
                 }
                 other if crate::composite::is_document(&candidate) => crate::composite::batch_operation(&mut candidate,page,document,other,operation,&resolve)?,
                 other => bail!("unsupported v4 batch operation: {other}"),
@@ -1718,6 +1732,19 @@ pub fn apply_batch_at(
             }
             Ok(result)
         })()
+        .map_err(|error| {
+            if operation
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.starts_with("put-"))
+                && error.to_string().contains("already exists on page") {
+                anyhow::anyhow!(
+                    "{error}; pass `batch --upsert` or set \"mode\":\"replace\" on the operation to replace it"
+                )
+            } else {
+                error
+            }
+        })
         .with_context(|| {
             format!(
                 "operation {index} failed (page {}, layer {}, group {}, object {})",
@@ -2725,6 +2752,16 @@ pub fn flatten_to_v3(raw: &Value) -> Result<Value> {
         }
     }
     // A flattened file contains only v3 fields at the scene-bearing levels.
+    Ok(output)
+}
+
+/// A copy of `raw` whose `ref` bindings carry their token's current value as
+/// `fallback`, so every render path (plain, image, composite) follows tokens.
+pub(crate) fn with_resolved_tokens(raw: &Value) -> Result<Value> {
+    let mut output = raw.clone();
+    if let Some(styles) = raw.get("styles").filter(|styles| !styles.is_null()) {
+        resolve_style_fallbacks(&mut output, styles)?;
+    }
     Ok(output)
 }
 

@@ -213,11 +213,18 @@ pub fn apply(raw: &mut Value, page: Option<&str>, id: &str, preset: &Value) -> R
     crate::composite::ensure_unlocked(page, id)?;
     let node = crate::scene::find_node_mut(page, id).context("target node missing")?;
     let node = node.as_object_mut().unwrap();
+    // A mask crops the node; it is kept unless the preset deliberately carries one.
+    let kept_mask = node.get("mask").cloned();
     for key in KEYS {
         node.remove(*key);
     }
     node.extend(appearance.clone());
+    let mut preserved = Vec::new();
+    if let Some(mask) = kept_mask.filter(|_| !appearance.contains_key("mask")) {
+        node.insert("mask".into(), mask);
+        preserved.push("mask");
+    }
     crate::scene::validate(&candidate)?;
     *raw = candidate;
-    Ok(json!({"node":id,"properties":appearance.keys().collect::<Vec<_>>()}))
+    Ok(json!({"node":id,"properties":appearance.keys().collect::<Vec<_>>(),"preserved":preserved}))
 }

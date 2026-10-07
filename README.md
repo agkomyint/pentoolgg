@@ -511,6 +511,8 @@ Batch files may create a node with its whole stack atomically:
   "operations":[{"kind":"grayscale","id":"g"},{"kind":"blur","id":"b","params":{"radius":1}}]}]
 ```
 
+See [docs/params-reference.md](docs/params-reference.md) for `--params` keys.
+
 See [docs/image-workflow.md](docs/image-workflow.md) for the complete raster image
 workflow: storage, operations, bake, batch, packages, cache repair, the browser
 panel, and benchmarks.

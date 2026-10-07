@@ -343,10 +343,21 @@ pub fn validate_settings(kind: &str, params: &Value) -> Result<()> {
         "threshold" => &["level"],
         _ => &[],
     };
-    for key in object.keys() {
-        if !allowed.contains(&key.as_str()) {
-            bail!("[invalid-adjustment] unknown {kind} parameter {key}")
-        }
+    let unknown: Vec<&str> = object
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !allowed.contains(key))
+        .collect();
+    if !unknown.is_empty() {
+        bail!(
+            "[invalid-adjustment] unknown {kind} parameter {}; valid parameters: {}",
+            unknown.join(", "),
+            if allowed.is_empty() {
+                "(none)".to_string()
+            } else {
+                allowed.join(", ")
+            }
+        )
     }
     match kind {
         "exposure" => {
@@ -985,6 +996,30 @@ pub fn clip_edit(
 }
 
 /// Straight-alpha Porter-Duff source-over. Transparent RGB never contributes.
+/// Bounding box `(x, y, width, height)` of every nonzero byte in the coverage
+/// masks, or `None` when nothing is covered.
+fn coverage_bounds<'a>(
+    masks: impl Iterator<Item = &'a Vec<u8>>,
+    width: u32,
+    height: u32,
+) -> Option<(u32, u32, u32, u32)> {
+    let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
+    for mask in masks {
+        for (y, row) in mask.chunks_exact(width as usize).enumerate() {
+            let Some(first) = row.iter().position(|a| *a != 0) else {
+                continue;
+            };
+            let last = row.iter().rposition(|a| *a != 0).unwrap();
+            let y = y as u32;
+            x0 = x0.min(first as u32);
+            x1 = x1.max(last as u32 + 1);
+            y0 = y0.min(y);
+            y1 = y1.max(y + 1);
+        }
+    }
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
+}
+
 fn over(dst: &mut RgbaImage, src: &RgbaImage) {
     crate::blend::over(dst, src, "normal", "srgb").expect("internal surface dimensions match");
 }
@@ -1051,6 +1086,7 @@ impl Renderer<'_> {
             bail!("[limit-exceeded] clipping coverage budget exceeded")
         }
         let mut clip_alpha: Option<Vec<u8>> = None;
+        let any_clipping = nodes.iter().any(|node| node.get("clipping").is_some());
         for node in nodes {
             if node.get("visible").and_then(Value::as_bool) == Some(false) {
                 if node.get("clipping").is_none() {
@@ -1075,44 +1111,67 @@ impl Renderer<'_> {
                 } else {
                     let ids = scope_ids(node);
                     let mask = self.mask(node, parent)?;
-                    let mut adjusted = result.clone();
-                    adjust(&mut adjusted, kind, &node["params"], 1.0)?;
-                    for (index, (pixel, graded)) in
-                        result.pixels_mut().zip(adjusted.pixels()).enumerate()
-                    {
-                        let alpha: u32 = if node["scope"]["kind"] == "below" {
-                            255
-                        } else {
-                            ids.iter()
-                                .filter_map(|id| coverage.get(id))
-                                .map(|mask| u32::from(mask[index]))
-                                .sum()
-                        };
-                        let amount = opacity * f64::from(alpha.min(255)) / 255.0
-                            * mask.as_ref().map_or(1.0, |m| f64::from(m[index]) / 255.0);
+                    let (canvas_w, canvas_h) = (result.width(), result.height());
+                    // Adjustments are per-pixel, so only the scoped nodes' bounding
+                    // box needs grading: cost follows the target, not the canvas.
+                    let below = node["scope"]["kind"] == "below";
+                    let region = if below {
+                        Some((0, 0, canvas_w, canvas_h))
+                    } else {
+                        coverage_bounds(
+                            ids.iter().filter_map(|id| coverage.get(id)),
+                            canvas_w,
+                            canvas_h,
+                        )
+                    };
+                    if let Some((x0, y0, rw, rh)) = region {
+                        let mut adjusted =
+                            image::imageops::crop_imm(&result, x0, y0, rw, rh).to_image();
+                        adjust(&mut adjusted, kind, &node["params"], 1.0)?;
                         let space = node["blend_space"].as_str().unwrap_or("srgb");
-                        let mut b = [0.0; 3];
-                        let mut s = [0.0; 3];
-                        for i in 0..3 {
-                            b[i] = f64::from(pixel[i]) / 255.0;
-                            s[i] = f64::from(graded[i]) / 255.0;
-                            if space == "linear" {
-                                b[i] = crate::blend::to_linear(b[i]);
-                                s[i] = crate::blend::to_linear(s[i]);
-                            }
-                        }
-                        let mixed = crate::blend::rgb(mode, b, s);
-                        for i in 0..3 {
-                            let value = 255.0
-                                * if space == "linear" {
-                                    crate::blend::to_srgb(mixed[i].clamp(0.0, 1.0))
+                        for ry in 0..rh {
+                            for rx in 0..rw {
+                                let (x, y) = (x0 + rx, y0 + ry);
+                                let index = y as usize * canvas_w as usize + x as usize;
+                                let alpha: u32 = if below {
+                                    255
                                 } else {
-                                    mixed[i]
+                                    ids.iter()
+                                        .filter_map(|id| coverage.get(id))
+                                        .map(|mask| u32::from(mask[index]))
+                                        .sum()
                                 };
-                            pixel[i] = round(
-                                f64::from(pixel[i]) * (1.0 - amount)
-                                    + f64::from(round(value)) * amount,
-                            );
+                                let amount = opacity * f64::from(alpha.min(255)) / 255.0
+                                    * mask.as_ref().map_or(1.0, |m| f64::from(m[index]) / 255.0);
+                                if amount == 0.0 {
+                                    continue;
+                                }
+                                let graded = adjusted.get_pixel(rx, ry);
+                                let pixel = result.get_pixel_mut(x, y);
+                                let mut b = [0.0; 3];
+                                let mut s = [0.0; 3];
+                                for i in 0..3 {
+                                    b[i] = f64::from(pixel[i]) / 255.0;
+                                    s[i] = f64::from(graded[i]) / 255.0;
+                                    if space == "linear" {
+                                        b[i] = crate::blend::to_linear(b[i]);
+                                        s[i] = crate::blend::to_linear(s[i]);
+                                    }
+                                }
+                                let mixed = crate::blend::rgb(mode, b, s);
+                                for i in 0..3 {
+                                    let value = 255.0
+                                        * if space == "linear" {
+                                            crate::blend::to_srgb(mixed[i].clamp(0.0, 1.0))
+                                        } else {
+                                            mixed[i]
+                                        };
+                                    pixel[i] = round(
+                                        f64::from(pixel[i]) * (1.0 - amount)
+                                            + f64::from(round(value)) * amount,
+                                    );
+                                }
+                            }
                         }
                     }
                     if mask.is_some() {
@@ -1181,8 +1240,7 @@ impl Renderer<'_> {
                     &content,
                     render_parent,
                 )?;
-                let png = crate::render::scene_to_png_proxy(&fragment, self.scale)?;
-                image::load_from_memory_with_format(&png, image::ImageFormat::Png)?.to_rgba8()
+                crate::render::scene_to_rgba_proxy(&fragment, self.scale)?
             };
             if let Some(stack) = node
                 .get("transforms")
@@ -1203,6 +1261,18 @@ impl Renderer<'_> {
                 surface = crate::transform::warp(&surface, stack, &masks, self.scale)?;
                 for _ in masks.iter().flatten() {
                     self.release();
+                }
+                self.release();
+            }
+            // Layer-style order: the mask defines the silhouette first, so effects
+            // (glows, shadows, strokes) follow the masked shape instead of being
+            // clipped away by a second mask pass.
+            if let Some(mask) = self.mask(node, parent)? {
+                for (pixel, alpha) in surface.pixels_mut().zip(mask) {
+                    pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha) + 127) / 255) as u8;
+                    if pixel[3] == 0 {
+                        *pixel = Rgba([0, 0, 0, 0]);
+                    }
                 }
                 self.release();
             }
@@ -1228,15 +1298,6 @@ impl Renderer<'_> {
             for pixel in surface.pixels_mut() {
                 pixel[3] = round(f64::from(pixel[3]) * opacity);
             }
-            if let Some(mask) = self.mask(node, parent)? {
-                for (pixel, alpha) in surface.pixels_mut().zip(mask) {
-                    pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha) + 127) / 255) as u8;
-                    if pixel[3] == 0 {
-                        *pixel = Rgba([0, 0, 0, 0]);
-                    }
-                }
-                self.release();
-            }
             if node.get("clipping").is_some() {
                 for (index, pixel) in surface.pixels_mut().enumerate() {
                     let alpha = clip_alpha.as_ref().map_or(0, |a| a[index]);
@@ -1245,7 +1306,7 @@ impl Renderer<'_> {
                         *pixel = Rgba([0, 0, 0, 0]);
                     }
                 }
-            } else {
+            } else if any_clipping {
                 clip_alpha = Some(surface.pixels().map(|p| p[3]).collect());
             }
             for mask in coverage.values_mut() {
@@ -1318,9 +1379,7 @@ impl Renderer<'_> {
         self.reserve()?;
         let fragment =
             crate::image::fragment_svg(self.raw, self.page, self.document, &content, space)?;
-        let bytes = crate::render::scene_to_png_proxy(&fragment, self.scale)?;
-        let mut pixels =
-            image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)?.to_rgba8();
+        let mut pixels = crate::render::scene_to_rgba_proxy(&fragment, self.scale)?;
         for pixel in pixels.pixels_mut() {
             let alpha = if resource["kind"] == "vector" {
                 pixel[3]
@@ -1590,6 +1649,8 @@ pub fn render(
     if !is_document(raw) {
         bail!("compositing requires document version 6")
     }
+    let resolved = crate::scene::with_resolved_tokens(raw)?;
+    let raw = &resolved;
     if !(1.0 / 16384.0..=8.0).contains(&scale) {
         bail!("composite scale must be in 1/16384..=8")
     }
@@ -1627,8 +1688,7 @@ pub fn render(
         "style":{"fill":{"fallback":page["canvas"]["background"]}}});
     let fragment =
         crate::image::fragment_svg(raw, page, document, &background, kurbo::Affine::IDENTITY)?;
-    let png = crate::render::scene_to_png_proxy(&fragment, scale)?;
-    let mut result = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?.to_rgba8();
+    let mut result = crate::render::scene_to_rgba_proxy(&fragment, scale)?;
     for layer in page["layers"].as_array().unwrap() {
         if layer.get("visible").and_then(Value::as_bool) == Some(false) {
             continue;
@@ -1639,6 +1699,100 @@ pub fn render(
         renderer.release();
     }
     Ok(result)
+}
+
+/// Visible text lines of one page in canvas coordinates (group and node
+/// transforms applied), for the searchable PDF text layer of v6 documents.
+pub fn text_lines(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+) -> Result<Vec<crate::image::TextLine>> {
+    crate::scene::validate(raw)?;
+    let resolved = crate::scene::with_resolved_tokens(raw)?;
+    let raw = &resolved;
+    let pages = raw["pages"].as_array().context("document has no pages")?;
+    let page = match page_id {
+        Some(id) => pages
+            .iter()
+            .find(|p| p["id"] == id)
+            .with_context(|| format!("page not found: {id}"))?,
+        None => pages.first().context("document has no pages")?,
+    };
+    fn walk(
+        nodes: &[Value],
+        parent: kurbo::Affine,
+        raw: &Value,
+        page: &Value,
+        document: &Path,
+        out: &mut Vec<crate::image::TextLine>,
+    ) -> Result<()> {
+        for node in nodes {
+            if node.get("visible").and_then(Value::as_bool) == Some(false) {
+                continue;
+            }
+            let world = parent * transform(node)?;
+            match node["kind"].as_str() {
+                Some("group") => walk(
+                    node["children"].as_array().unwrap(),
+                    world,
+                    raw,
+                    page,
+                    document,
+                    out,
+                )?,
+                Some("instance") => walk(
+                    std::slice::from_ref(&node["fallback"]),
+                    world,
+                    raw,
+                    page,
+                    document,
+                    out,
+                )?,
+                Some("text") => {
+                    let mut local = node.clone();
+                    if let Some(object) = local.as_object_mut() {
+                        object.remove("transform");
+                    }
+                    let fragment = crate::image::fragment_svg(
+                        raw,
+                        page,
+                        document,
+                        &local,
+                        kurbo::Affine::IDENTITY,
+                    )?;
+                    let [a, b, c, d, _, _] = world.as_coeffs();
+                    let factor = (a * d - b * c).abs().sqrt();
+                    for line in fragment.texts {
+                        let point = world * kurbo::Point::new(line.x, line.y);
+                        out.push(crate::image::TextLine {
+                            x: point.x,
+                            y: point.y,
+                            size: line.size * factor,
+                            content: line.content,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    for layer in page["layers"].as_array().unwrap() {
+        if layer.get("visible").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        walk(
+            layer["nodes"].as_array().unwrap(),
+            kurbo::Affine::IDENTITY,
+            raw,
+            page,
+            document,
+            &mut out,
+        )?;
+    }
+    Ok(out)
 }
 
 pub fn png(raw: &Value, document: &Path, page: Option<&str>, scale: f32) -> Result<Vec<u8>> {

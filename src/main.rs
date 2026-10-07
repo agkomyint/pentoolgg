@@ -223,7 +223,8 @@ struct EffectArgs {
     operation: String,
     input: PathBuf,
     id: String,
-    effect_id: String,
+    /// Required for every operation except `list`.
+    effect_id: Option<String>,
     #[arg(long)]
     kind: Option<String>,
     #[arg(long)]
@@ -708,6 +709,11 @@ enum ImageAction {
         embed: bool,
         #[arg(long, conflicts_with = "embed")]
         external: bool,
+        /// Clip the new image with the vector shape SHAPE_ID.
+        #[arg(long)]
+        mask: Option<String>,
+        #[arg(long, default_value = "nonzero", requires = "mask")]
+        mask_fill_rule: String,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -1872,6 +1878,8 @@ async fn run() -> Result<()> {
                 fit,
                 embed: _,
                 external,
+                mask,
+                mask_fill_rule,
                 dry_run,
                 if_revision,
             } => {
@@ -1908,6 +1916,13 @@ async fn run() -> Result<()> {
                     height,
                     fit,
                 )?;
+                if let Some(node) = mask {
+                    let update = image::Update {
+                        mask: Some((node, mask_fill_rule)),
+                        ..Default::default()
+                    };
+                    image::set(&mut raw, selected_page, &id, &update)?;
+                }
                 let change = transaction::commit_value(
                     &input,
                     "image-add",
@@ -2797,7 +2812,7 @@ async fn run() -> Result<()> {
                     for action in &mut actions {
                         let is_put = matches!(
                             action.get("type").and_then(serde_json::Value::as_str),
-                            Some("put-shape" | "put-path" | "put-text")
+                            Some("put-shape" | "put-path" | "put-text" | "put-image")
                         );
                         if let (true, Some(object)) = (is_put, action.as_object_mut()) {
                             object
@@ -3315,8 +3330,15 @@ async fn run() -> Result<()> {
                     let preset =
                         pentool::preset::capture(&raw, &args.input, selected_page, &args.id)?;
                     if args.operation == "save" {
-                        if args.name.is_some() || args.if_revision.is_some() {
-                            anyhow::bail!("preset save does not mutate the document")
+                        if args.name.is_some() {
+                            anyhow::bail!(
+                                "--name only applies to `preset copy` and `preset paste` (named appearances stored in the document); `preset save` writes --file and does not mutate the document"
+                            )
+                        }
+                        if args.if_revision.is_some() {
+                            anyhow::bail!(
+                                "--if-revision does not apply to `preset save`, which does not mutate the document"
+                            )
                         }
                         let file = args
                             .file
@@ -3612,6 +3634,24 @@ async fn run() -> Result<()> {
         }
         Command::Effect(args) => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            if args.operation == "list" {
+                if args.effect_id.is_some() {
+                    anyhow::bail!("effect list takes only FILE and NODE_ID")
+                }
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pentool::effects::list(
+                        &raw,
+                        selected_page,
+                        &args.id
+                    )?)?
+                );
+                return Ok(());
+            }
+            let effect_id = args
+                .effect_id
+                .clone()
+                .context("effect operations other than list require EFFECT_ID")?;
             let mut settings = serde_json::Map::new();
             let params_supplied = args.params.is_some()
                 || args.x.is_some()
@@ -3673,7 +3713,7 @@ async fn run() -> Result<()> {
                 selected_page,
                 &args.id,
                 &args.operation,
-                &args.effect_id,
+                &effect_id,
                 &settings.into(),
             )?;
             let change = transaction::commit_value(
@@ -4450,14 +4490,23 @@ async fn run() -> Result<()> {
                         let pages = page_ids
                             .iter()
                             .map(|id| {
+                                let factor = f64::from(scale);
                                 if composite::is_document(&raw) {
+                                    let texts = composite::text_lines(&raw, &input, Some(id))?
+                                        .into_iter()
+                                        .map(|line| image::TextLine {
+                                            x: line.x * factor,
+                                            y: line.y * factor,
+                                            size: line.size * factor,
+                                            content: line.content,
+                                        })
+                                        .collect();
                                     return Ok((
                                         composite::png(&raw, &input, Some(id), scale)?,
-                                        Vec::new(),
+                                        texts,
                                     ));
                                 }
                                 let scene = image::to_svg(&raw, &input, Some(id))?;
-                                let factor = f64::from(scale);
                                 let texts = scene
                                     .texts
                                     .iter()

@@ -339,9 +339,9 @@ fn missing_image_file_reports_code_and_path() {
 }
 
 #[test]
-fn image_add_help_documents_no_mask_and_set_does() {
+fn image_add_and_set_both_document_mask() {
     let add = String::from_utf8_lossy(&run(&["image", "add", "--help"]).stdout).into_owned();
-    assert!(!add.contains("--mask"));
+    assert!(add.contains("--mask"));
     let set = String::from_utf8_lossy(&run(&["image", "set", "--help"]).stdout).into_owned();
     assert!(set.contains("--mask"));
     let docs = fs::read_to_string("docs/image-workflow.md").unwrap();

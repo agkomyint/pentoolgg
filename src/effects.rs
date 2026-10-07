@@ -103,7 +103,10 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
         };
         for key in params.keys() {
             if !keys.contains(&key.as_str()) {
-                bail!("unknown effect parameter {key}")
+                bail!(
+                    "unknown effect parameter {key} for {kind}; valid parameters: {}",
+                    keys.join(", ")
+                )
             }
         }
         let p = &op["params"];
@@ -130,6 +133,11 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             }
         }
         if kind == "gradient-overlay" {
+            if !p.get("fill").is_some_and(Value::is_object) {
+                bail!(
+                    "gradient-overlay requires --params '{{\"fill\":{{\"kind\":\"linear\",\"stops\":[{{\"offset\":0,\"color\":\"#000000\"}},{{\"offset\":1,\"color\":\"#ffffff\"}}]}}}}' (a gradient fill object)"
+                )
+            }
             let fill = json!({"kind":"fill","id":"effect-fill","x":0,"y":0,"width":raw["pages"][0]["canvas"]["width"],"height":raw["pages"][0]["canvas"]["height"],"fill":p["fill"]});
             crate::fill::validate(raw, &fill)?;
             if !matches!(
@@ -423,6 +431,19 @@ pub(crate) fn apply(
         }
     }
     Ok(result)
+}
+
+/// A node's effect stack in order, without mutating the document.
+pub fn list(raw: &Value, page: Option<&str>, id: &str) -> Result<Value> {
+    crate::scene::validate(raw)?;
+    if !crate::composite::is_document(raw) {
+        bail!("effects require `migrate --target 6`")
+    }
+    let mut copy = raw.clone();
+    let selected = crate::scene::page_mut(&mut copy, page)?;
+    let node = crate::scene::find_node_mut(selected, id).context("effect node missing")?;
+    let effects = node.get("effects").cloned().unwrap_or(json!([]));
+    Ok(json!({"node":id,"effects":effects}))
 }
 
 pub fn edit(

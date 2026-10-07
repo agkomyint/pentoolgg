@@ -310,6 +310,20 @@ pub(crate) fn scene_to_png_proxy(scene: &crate::image::SceneSvg, scale: f32) -> 
     svg_to_png_with_fonts(&scene.svg, scene.width, scene.height, scale, &scene.fonts)
 }
 
+/// The same pixels as `scene_to_png_proxy` without the PNG encode/decode round trip.
+pub(crate) fn scene_to_rgba_proxy(
+    scene: &crate::image::SceneSvg,
+    scale: f32,
+) -> Result<image::RgbaImage> {
+    let pixmap = rasterize(&scene.svg, scene.width, scene.height, scale, &scene.fonts)?;
+    let mut out = image::RgbaImage::new(pixmap.width(), pixmap.height());
+    for (target, pixel) in out.pixels_mut().zip(pixmap.pixels()) {
+        let c = pixel.demultiply();
+        *target = image::Rgba([c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+    Ok(out)
+}
+
 fn svg_to_png_with_fonts(
     svg: &str,
     canvas_width: u32,
@@ -317,6 +331,18 @@ fn svg_to_png_with_fonts(
     scale: f32,
     fonts: &[crate::document::FontAsset],
 ) -> Result<Vec<u8>> {
+    rasterize(svg, canvas_width, canvas_height, scale, fonts)?
+        .encode_png()
+        .context("could not encode PNG")
+}
+
+fn rasterize(
+    svg: &str,
+    canvas_width: u32,
+    canvas_height: u32,
+    scale: f32,
+    fonts: &[crate::document::FontAsset],
+) -> Result<tiny_skia::Pixmap> {
     if !(1.0 / 16384.0..=8.0).contains(&scale) {
         bail!("proxy scale must be between 1/16384 and 8");
     }
@@ -344,7 +370,7 @@ fn svg_to_png_with_fonts(
         tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
-    pixmap.encode_png().context("could not encode PNG")
+    Ok(pixmap)
 }
 
 pub fn to_png_profiled(doc: &Document, scale: f32) -> Result<ProfiledPng> {

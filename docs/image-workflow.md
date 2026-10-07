@@ -28,9 +28,9 @@ pentool image info art.pen hero
 `crop` is a normalized `[x, y, w, h]` rectangle of the source. `fit` (`fill`,
 `contain`, `cover`, `none`, `scale-down`) maps the cropped region into the frame;
 `position` (`[0..1, 0..1]`) is the focal alignment inside any slack. A mask is a
-vector shape in the parent space. Set it after adding the image with
-`image set` (`--mask SHAPE_ID`, `--mask-fill-rule`); `image add` does not accept
-mask flags. The frame always clips the result.
+vector shape in the parent space. Set it with `--mask SHAPE_ID` and
+`--mask-fill-rule` on `image add` or `image set`. The frame always clips the
+result.
 
 ## Operations
 
@@ -151,3 +151,14 @@ Pixels are treated as 8-bit sRGB RGBA; embedded ICC profiles are not applied and
 are not preserved in derived output. RAW development, ICC conversion, and
 non-PNG/JPEG/WebP codecs are out of scope for v0.7; use an external tool and
 re-import the result.
+
+## v0.8.1 behaviour notes
+
+- `image add --mask SHAPE_ID [--mask-fill-rule]` attaches a mask at creation.
+- `batch --upsert` (or `"mode":"replace"` per op) replaces an existing ID for
+  `put-shape`, `put-text`, `put-path`, and `put-image`, keeping its stacking position.
+- `preset paste` keeps the target's mask.
+- `linked report` lists status, digest, length, and referencing `nodes`; it never
+  prints embedded pixel data.
+- Design-token changes apply to exports whether or not the document has images.
+- v6 PDFs keep a selectable text layer.

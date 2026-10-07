@@ -155,7 +155,21 @@ pub fn over(dst: &mut RgbaImage, src: &RgbaImage, mode: &str, space: &str) -> Re
     if dst.dimensions() != src.dimensions() {
         bail!("[invalid-composite] surface dimensions differ")
     }
+    let plain = mode == "normal" && space == "srgb";
     for (d, s) in dst.pixels_mut().zip(src.pixels()) {
+        if plain {
+            // Exact shortcuts for the common cases: nothing to add / fully opaque source.
+            if s[3] == 0 {
+                if d[3] == 0 {
+                    *d = image::Rgba([0, 0, 0, 0]);
+                }
+                continue;
+            }
+            if s[3] == 255 {
+                *d = *s;
+                continue;
+            }
+        }
         let (sa, da) = (f64::from(s[3]) / 255.0, f64::from(d[3]) / 255.0);
         let a = sa + da * (1.0 - sa);
         if a == 0.0 {

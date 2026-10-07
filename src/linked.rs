@@ -24,6 +24,30 @@ fn read_path_bounded(document: &Path, relative: &Path, remaining: &mut usize) ->
     Ok(fs::read(file)?)
 }
 
+fn referencing_nodes(raw: &Value, asset: &str) -> Vec<String> {
+    fn visit(node: &Value, asset: &str, out: &mut Vec<String>) {
+        if node["kind"] == "image" && node["asset"] == asset {
+            if let Some(id) = node["id"].as_str() {
+                out.push(id.to_owned());
+            }
+        }
+        if let Some(children) = node["children"].as_array() {
+            for child in children {
+                visit(child, asset, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for page in raw["pages"].as_array().into_iter().flatten() {
+        for layer in page["layers"].as_array().into_iter().flatten() {
+            for node in layer["nodes"].as_array().into_iter().flatten() {
+                visit(node, asset, &mut out);
+            }
+        }
+    }
+    out
+}
+
 pub fn report(raw: &Value, document: &Path) -> Result<Value> {
     crate::transaction::validate_value(raw)?;
     let assets = raw["image_assets"]
@@ -50,7 +74,12 @@ pub fn report(raw: &Value, document: &Path) -> Result<Value> {
                     Err(_) => "missing-or-unsafe",
                 }
             };
-            json!({"asset":id,"storage":storage,"status":status,"byte_length":asset["byte_length"]})
+            let mut summary = storage.clone();
+            if let Some(object) = summary.as_object_mut() {
+                // Report the embedded pixels' size and digest, never the payload.
+                object.remove("data");
+            }
+            json!({"asset":id,"storage":summary,"status":status,"byte_length":asset["byte_length"],"nodes":referencing_nodes(raw, id)})
         })
         .collect::<Vec<_>>();
     let portable = entries

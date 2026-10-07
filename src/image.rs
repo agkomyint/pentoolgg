@@ -482,6 +482,8 @@ fn build_svg(
     if raw.get("version").and_then(Value::as_u64) != Some(VERSION) {
         bail!("image rendering requires a version 5 document")
     }
+    let resolved = crate::scene::with_resolved_tokens(raw)?;
+    let raw = &resolved;
     let pages = raw["pages"].as_array().context("document has no pages")?;
     let page = if let Some(page_id) = page_id {
         pages

@@ -88,6 +88,18 @@ fn stops(fill: &Value, styles: &Value) -> Result<Vec<(f64, [f64; 4])>> {
     }
     Ok(out)
 }
+/// Gradient geometry defaults span the node: left to right, centred, and
+/// reaching the corners. Geometry is node-local pixels.
+fn geometry_default(kind: &str, key: &str, width: f64, height: f64) -> f64 {
+    match (kind, key) {
+        ("linear", "x2") => width,
+        ("radial", "radius") => width.hypot(height) / 2.0,
+        (_, "cx") => width / 2.0,
+        (_, "cy") => height / 2.0,
+        _ => 0.0,
+    }
+}
+
 pub(crate) fn resolved<'a>(raw: &'a Value, mut fill: &'a Value) -> Result<&'a Value> {
     for _ in 0..64 {
         let Some(reference) = fill.get("ref") else {
@@ -123,6 +135,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
         bail!("fill dimensions must be positive")
     }
     let kind = fill["kind"].as_str().context("fill kind missing")?;
+    let (w, h) = (n(node, "width", 0.0)?, n(node, "height", 0.0)?);
     let keys: &[&str] = match kind {
         "solid" => &["kind", "color", "transform"],
         "linear" => &[
@@ -220,25 +233,48 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             match kind {
                 "linear" => {
                     let (x1, y1, x2, y2) = (
-                        n(fill, "x1", 0.0)?,
-                        n(fill, "y1", 0.0)?,
-                        n(fill, "x2", 1.0)?,
-                        n(fill, "y2", 0.0)?,
+                        n(fill, "x1", geometry_default(kind, "x1", w, h))?,
+                        n(fill, "y1", geometry_default(kind, "y1", w, h))?,
+                        n(fill, "x2", geometry_default(kind, "x2", w, h))?,
+                        n(fill, "y2", geometry_default(kind, "y2", w, h))?,
                     );
                     if x1 == x2 && y1 == y2 {
                         bail!("gradient endpoints must differ")
                     }
+                    let (dx, dy) = (x2 - x1, y2 - y1);
+                    let t = |x: f64, y: f64| ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy);
+                    let corners = [t(0.0, 0.0), t(w, 0.0), t(0.0, h), t(w, h)];
+                    let spread = fill.get("spread").and_then(Value::as_str).unwrap_or("pad");
+                    if fill.get("transform").is_none_or(|t| t.is_null())
+                        && spread == "pad"
+                        && (corners.iter().all(|t| *t <= 0.0) || corners.iter().all(|t| *t >= 1.0))
+                    {
+                        bail!(
+                            "[invalid-fill] linear gradient endpoints ({x1},{y1})-({x2},{y2}) leave the {w}x{h} node flat; gradient geometry is node-local pixels (0,0 is the node's top-left), not page coordinates"
+                        )
+                    }
                 }
                 "radial" => {
-                    n(fill, "cx", 0.0)?;
-                    n(fill, "cy", 0.0)?;
-                    if n(fill, "radius", 1.0)? <= 0.0 {
+                    let cx = n(fill, "cx", geometry_default(kind, "cx", w, h))?;
+                    let cy = n(fill, "cy", geometry_default(kind, "cy", w, h))?;
+                    let radius = n(fill, "radius", geometry_default(kind, "radius", w, h))?;
+                    if radius <= 0.0 {
                         bail!("radial gradient radius must be positive")
+                    }
+                    let nearest = (cx - cx.clamp(0.0, w)).hypot(cy - cy.clamp(0.0, h));
+                    let spread = fill.get("spread").and_then(Value::as_str).unwrap_or("pad");
+                    if fill.get("transform").is_none_or(|t| t.is_null())
+                        && spread == "pad"
+                        && nearest >= radius
+                    {
+                        bail!(
+                            "[invalid-fill] radial gradient centre ({cx},{cy}) radius {radius} misses the {w}x{h} node; gradient geometry is node-local pixels (0,0 is the node's top-left), not page coordinates"
+                        )
                     }
                 }
                 _ => {
-                    n(fill, "cx", 0.0)?;
-                    n(fill, "cy", 0.0)?;
+                    n(fill, "cx", geometry_default(kind, "cx", w, h))?;
+                    n(fill, "cy", geometry_default(kind, "cy", w, h))?;
                     n(fill, "angle", 0.0)?;
                 }
             }
@@ -358,7 +394,9 @@ pub(crate) fn render(
     } else {
         None
     };
+    let (node_w, node_h) = (bounds.2, bounds.3);
     let get = |key, default| n(fill, key, default).unwrap();
+    let geo = |key: &str| n(fill, key, geometry_default(kind, key, node_w, node_h)).unwrap();
     let mut out = RgbaImage::new(width, height);
     for (x, y, pixel) in out.enumerate_pixels_mut() {
         if x == 0 {
@@ -405,19 +443,15 @@ pub(crate) fn render(
             } else {
                 let t = match kind {
                     "linear" => {
-                        let (dx, dy) = (
-                            get("x2", 1.0) - get("x1", 0.0),
-                            get("y2", 0.0) - get("y1", 0.0),
-                        );
-                        ((p.x - get("x1", 0.0)) * dx + (p.y - get("y1", 0.0)) * dy)
-                            / (dx * dx + dy * dy)
+                        let (dx, dy) = (geo("x2") - geo("x1"), geo("y2") - geo("y1"));
+                        ((p.x - geo("x1")) * dx + (p.y - geo("y1")) * dy) / (dx * dx + dy * dy)
                     }
                     "radial" => {
-                        let (dx, dy) = (p.x - get("cx", 0.0), p.y - get("cy", 0.0));
-                        (dx * dx + dy * dy).sqrt() / get("radius", 1.0)
+                        let (dx, dy) = (p.x - geo("cx"), p.y - geo("cy"));
+                        (dx * dx + dy * dy).sqrt() / geo("radius")
                     }
                     _ => {
-                        (atan2(p.y - get("cy", 0.0), p.x - get("cx", 0.0))
+                        (atan2(p.y - geo("cy"), p.x - geo("cx"))
                             - get("angle", 0.0) * std::f64::consts::PI / 180.0)
                             .rem_euclid(std::f64::consts::TAU)
                             / std::f64::consts::TAU
