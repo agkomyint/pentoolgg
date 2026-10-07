@@ -430,6 +430,29 @@ whole document, including component snapshots and instance fallbacks. `diff`
 reports `/raster_tiles/<digest>` changes as `{raster_tile, encoding, data_bytes}`
 summaries, never base64 data.
 
+## Editor canvas
+
+`pentool serve` embeds a **Raster canvas** panel (`web/raster-panel.js`) for v6 documents.
+It never edits pixels itself: on pointer release it sends one request to the stateless
+`POST /api/raster` endpoint, `{document, page?, id, action, args}`, and gets back
+`{document, result}` or a `{error}` problem. The document is validated before it is
+returned and a rejected request changes nothing. Actions: `info`, `stroke` (erase with
+`"blend":"erase"`), `quickmask`, `clone`, `heal`, `set-clone-source`, `select-marquee`,
+`select-lasso`, `select-wand`, `select-info` and `select-clear`; `args` mirror the CLI
+flags (`samples`, `brush`, `preset`, `color`, `blend`, `seed`, `x`/`y`/`width`/`height`,
+`points`, `mode`, `feather`, `tolerance`, ...). The browser applies the returned document
+as a local change, so Undo and Save work as for any other panel.
+
+Overlays are drawn client-side and are disposable: the brush-size cursor outline, a live
+stroke preview, the stabilizer line (smoothing 0-0.95 is the engine's EMA weight; the line
+runs from the smoothed dab to the pen), the clone source marker, the quick-mask tint and
+marquee/lasso edges. The canvas supports zoom and 15-degree rotation steps; pointer
+coordinates are mapped back through both. Pressure comes from pointer events. The preview
+image is a bounded proxy rendered by Rust (`/api/render/png`).
+
+Not implemented in this milestone: rulers, guides, snapping, a navigator, tilt/twist from
+pointer events, and marching-ants animation of soft selection edges.
+
 ## Limits (checked before pixel work)
 
 65536 input events, 8192 samples, 16 MiB per `@file` argument, 100000 dabs, bounded per-stroke work, 4096 tiles, 256 journal entries.
@@ -504,5 +527,4 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Patch healing, the stamp-visible clone source and composite flood scope, editor canvas
-painting, fuzz/performance suites (roadmap items 6-7, 12, 14).
+Patch healing, the stamp-visible clone source and composite flood scope, the editor's rulers/guides/snapping/navigator, fuzz/performance suites (roadmap items 6-7, 12, 14).

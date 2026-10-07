@@ -221,6 +221,26 @@
         <div class="section-head"><button id="compositeBefore">Before</button><button id="compositeAfter">After</button><button id="compositeCancel">Cancel preview</button></div>
         <p>Previews are approximate, bounded proxies. Export uses the shared Rust renderer.</p>
       </section>
+      <section class="agent-card" id="rasterPanel">
+        <h2>Raster canvas</h2>
+        <p id="rasterStatus" role="status" aria-live="polite">Open a v6 document with a raster layer.</p>
+        <div id="rasterEditing" hidden>
+          <label>Layer <select id="rasterLayer"></select></label>
+          <label>Tool <select id="rasterTool"><option value="brush">Brush</option><option value="eraser">Eraser</option><option value="clone">Clone</option><option value="heal">Heal</option><option value="source">Set clone source</option><option value="quickmask">Quick mask</option><option value="marquee">Marquee</option><option value="lasso">Lasso</option><option value="wand">Magic wand</option></select></label>
+          <label>Brush <select id="rasterKind"><option>hard-round</option><option>soft-round</option><option>pixel</option></select></label>
+          <label>Size <input id="rasterSize" type="range" min="1" max="200" value="24"></label>
+          <label>Hardness <input id="rasterHardness" type="range" min="0" max="1" step="0.05" value="0.8"></label>
+          <label>Flow <input id="rasterFlow" type="range" min="0.05" max="1" step="0.05" value="1"></label>
+          <label>Stabilizer <input id="rasterStabilizer" type="range" min="0" max="0.95" step="0.05" value="0"></label>
+          <label>Color <input id="rasterColor" type="color" value="#000000"></label>
+          <label>Selection mode <select id="rasterMode"><option>replace</option><option>add</option><option>subtract</option><option>intersect</option></select></label>
+          <label>Marquee <select id="rasterShape"><option>rect</option><option>ellipse</option></select></label>
+          <label>Wand tolerance <input id="rasterTolerance" type="range" min="0" max="255" value="32"></label>
+          <div class="section-head"><button id="rasterZoomOut">-</button><span id="rasterZoomLabel">100%</span><button id="rasterZoomIn">+</button><button id="rasterRotate">Rotate 15&deg;</button><button id="rasterReset">Reset view</button><button id="rasterClearSelection">Deselect</button></div>
+          <div class="raster-stage"><div id="rasterView"><img id="rasterImage" alt="Raster page preview"><canvas id="rasterOverlay" aria-label="Raster painting surface"></canvas></div></div>
+          <p>Strokes are sent to the Rust engine on release; the outline, stabilizer line, clone marker and quick mask are overlays only. Rulers, guides, snapping and a navigator are not implemented yet.</p>
+        </div>
+      </section>
       <section class="agent-card">
         <h2>Agent API</h2>
         <p>Generate paths with JSON, then render them through this server.</p>
@@ -233,5 +253,6 @@
   <script src="/app.js"></script>
   <script src="/image-panel.js"></script>
   <script src="/composite-panel.js"></script>
+  <script src="/raster-panel.js"></script>
 </body>
 </html>

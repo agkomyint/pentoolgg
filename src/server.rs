@@ -27,6 +27,7 @@ const APP_JS: &str = include_str!("../web/app.js");
 const STYLE: &str = include_str!("../web/style.css");
 const IMAGE_PANEL_JS: &str = include_str!("../web/image-panel.js");
 const COMPOSITE_PANEL_JS: &str = include_str!("../web/composite-panel.js");
+const RASTER_PANEL_JS: &str = include_str!("../web/raster-panel.js");
 
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
     if let Some(path) = &file {
@@ -42,6 +43,11 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
             "/app.js",
             get(|| async { asset(APP_JS, "text/javascript; charset=utf-8") }),
         )
+        .route(
+            "/raster-panel.js",
+            get(|| async { asset(RASTER_PANEL_JS, "text/javascript; charset=utf-8") }),
+        )
+        .route("/api/raster", post(raster_command))
         .route(
             "/image-panel.js",
             get(|| async { asset(IMAGE_PANEL_JS, "text/javascript; charset=utf-8") }),
@@ -360,6 +366,156 @@ async fn geometry_command(Json(body): Json<GeometryRequest>) -> Response {
     match result {
         Ok(value) => Json(value).into_response(),
         Err(e) => problem(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct RasterRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    id: String,
+    action: String,
+    #[serde(default)]
+    args: serde_json::Value,
+}
+
+/// Stateless raster editing for the canvas: the whole document in, the changed
+/// document and a compact result out. Nothing is written unless it validates.
+async fn raster_command(Json(body): Json<RasterRequest>) -> Response {
+    match raster_apply(body) {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+fn raster_apply(body: RasterRequest) -> Result<serde_json::Value> {
+    {
+        use crate::raster;
+        let mut raw = body.document;
+        let page = body.page.as_deref();
+        let id = body.id.as_str();
+        let args = &body.args;
+        let num = |k: &str| {
+            args[k]
+                .as_f64()
+                .context(format!("[invalid-input] args.{k} must be a number"))
+        };
+        let text = |k: &str, d: &'static str| args[k].as_str().unwrap_or(d).to_owned();
+        let count = |k: &str| args[k].as_u64().unwrap_or(0) as u32;
+        let result = match body.action.as_str() {
+            "info" => raster::info(&raw, page, id)?,
+            "select-info" => raster::select_info(&raw, id)?,
+            "select-clear" => raster::select_clear(&mut raw, id)?,
+            "stroke" | "quickmask" | "clone" | "heal" => {
+                let normalized = raster::normalize_input(&args["samples"])?;
+                let input_summary = normalized.summary();
+                let brush = raster::Brush::parse(&raster::resolve_preset(
+                    &raw,
+                    &args["brush"],
+                    args["preset"].as_str(),
+                )?)?;
+                let seed = args["seed"].as_u64().unwrap_or(0);
+                let erase = args["erase"].as_bool().unwrap_or(false);
+                let mut result = match body.action.as_str() {
+                    "stroke" => raster::paint(
+                        &mut raw,
+                        page,
+                        id,
+                        raster::StrokeRequest {
+                            brush,
+                            samples: normalized.samples,
+                            color: raster::parse_color(&text("color", "#000000"))?,
+                            blend: raster::Blend::parse(&text("blend", "normal"))?,
+                            seed,
+                            clone: None,
+                        },
+                    )?,
+                    "quickmask" => raster::select_quickmask(
+                        &mut raw,
+                        page,
+                        id,
+                        brush,
+                        normalized.samples,
+                        erase,
+                        seed,
+                    )?,
+                    other => {
+                        let options = raster::CloneOptions {
+                            aligned: args["aligned"].as_bool().unwrap_or(true),
+                            angle: args["angle"].as_f64().unwrap_or(0.0),
+                            scale: args["scale"].as_f64().unwrap_or(1.0)
+                        };
+                        let tool = if other == "heal" {
+                            raster::Tool::Heal
+                        } else {
+                            raster::Tool::Clone
+                        };
+                        raster::clone_stroke(
+                            &mut raw,
+                            page,
+                            id,
+                            brush,
+                            normalized.samples,
+                            &options,
+                            seed,
+                            tool,
+                        )?
+                    }
+                };
+                result["input"] = input_summary;
+                result
+            }
+            "set-clone-source" => raster::set_clone_source(
+                &mut raw,
+                page,
+                id,
+                args["layer"].as_str(),
+                num("x")?,
+                num("y")?,
+            )?,
+            "select-marquee" => raster::select_marquee(
+                &mut raw,
+                page,
+                id,
+                raster::Marquee::parse(&text("shape", "rect"))?,
+                [num("x")?, num("y")?, num("width")?, num("height")?],
+                raster::SelectionMode::parse(&text("mode", "replace"))?,
+                count("feather"),
+            )?,
+            "select-lasso" => {
+                let points: Vec<[f64; 2]> = serde_json::from_value(args["points"].clone())
+                    .context("[invalid-input] args.points must be [[x,y],...]")?;
+                raster::select_lasso(
+                    &mut raw,
+                    page,
+                    id,
+                    &points,
+                    raster::SelectionMode::parse(&text("mode", "replace"))?,
+                    count("feather"),
+                )?
+            }
+            "select-wand" => raster::select_wand(
+                &mut raw,
+                page,
+                id,
+                &raster::FloodOptions {
+                    x: count("x"),
+                    y: count("y"),
+                    tolerance: args["tolerance"].as_u64().unwrap_or(32).min(255) as u8,
+                    diagonal: args["diagonal"].as_bool().unwrap_or(false),
+                    contiguous: args["contiguous"].as_bool().unwrap_or(true),
+                    antialias: args["antialias"].as_bool().unwrap_or(true),
+                    gap: count("gap"),
+                    transparent_barrier: args["transparent_barrier"].as_bool().unwrap_or(false),
+                },
+                raster::SelectionMode::parse(&text("mode", "replace"))?,
+            )?,
+            other => anyhow::bail!(
+                "[invalid-input] unknown raster action {other:?}; use info, stroke, quickmask, clone, heal, set-clone-source, select-marquee, select-lasso, select-wand, select-info or select-clear"
+            ),
+        };
+        crate::transaction::validate_value(&raw)?;
+        Ok(serde_json::json!({"document": raw, "result": result}))
     }
 }
 
@@ -1030,6 +1186,46 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raster_endpoint_paints_selects_and_rejects_without_mutation() {
+        use serde_json::json;
+        let mut raw = crate::scene::new_document(40, 40);
+        crate::raster::add(&mut raw, None, None, "p", 0.0, 0.0, 40, 40).unwrap();
+        let request = |document: &serde_json::Value, action: &str, args: serde_json::Value| {
+            super::raster_apply(super::RasterRequest {
+                document: document.clone(),
+                page: None,
+                id: "p".into(),
+                action: action.into(),
+                args,
+            })
+        };
+        let painted = request(
+            &raw,
+            "stroke",
+            json!({"samples":[{"x":5,"y":5},{"x":30,"y":30}],"brush":{"size":6},"color":"#ff0000"}),
+        )
+        .unwrap();
+        assert_ne!(painted["document"], raw);
+        assert_eq!(painted["result"]["input"]["samples"], 2);
+        let selected = request(
+            &painted["document"],
+            "select-marquee",
+            json!({"x":2,"y":2,"width":10,"height":10}),
+        )
+        .unwrap();
+        let info = request(&selected["document"], "select-info", json!({})).unwrap();
+        assert!(
+            info["result"]["selected_pixels"].as_u64().unwrap() == 100,
+            "{info}"
+        );
+        // A bad action or malformed input is an error and the caller's document is untouched.
+        let before = painted["document"].clone();
+        assert!(request(&before, "nope", json!({})).is_err());
+        assert!(request(&before, "stroke", json!({"samples":[]})).is_err());
+        assert_eq!(before, painted["document"]);
+    }
+
     #[test]
     fn browser_image_add_is_page_aware_atomic_and_requires_explicit_migration() {
         use base64::Engine;
