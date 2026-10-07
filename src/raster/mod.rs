@@ -26,10 +26,16 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("[{code}] {message}")
 }
 
+mod input;
 mod layer;
 mod math;
 mod recovery;
 mod tip;
+use input::lerp;
+pub use input::{
+    normalize_input, parse_samples, sample_json, Dynamic, Dynamics, Input, NormalizedInput, Sample,
+    FOLD_DISTANCE, MAX_EVENTS, MAX_VELOCITY,
+};
 pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use recovery::{repair, replay, verify, RepairStrategy};
@@ -262,6 +268,8 @@ pub struct Brush {
     /// `textured` only: a `sha256:` digest of a stamp tip, or a `brush_tips` name
     /// until [`resolve_tip`] replaces it with the digest.
     pub tip: Option<String>,
+    /// Input-driven size, flow, roundness and angle; see [`Dynamics`].
+    pub dynamics: Dynamics,
 }
 
 pub const BRUSH_KINDS: [&str; 5] = [
@@ -272,6 +280,7 @@ pub const BRUSH_KINDS: [&str; 5] = [
     "textured",
 ];
 pub const MAX_SMOOTHING: f64 = 0.95;
+pub const MIN_ROUNDNESS: f64 = 0.05;
 /// A textured tip is one 256x256 coverage plane stored as a raster tile.
 pub type TipMask = std::sync::Arc<[u8]>;
 
@@ -302,7 +311,7 @@ impl Brush {
         let object = value
             .as_object()
             .context("[invalid-brush] brush must be an object")?;
-        const KNOWN: [&str; 15] = [
+        const KNOWN: [&str; 16] = [
             "kind",
             "size",
             "hardness",
@@ -318,6 +327,7 @@ impl Brush {
             "smoothing",
             "buildup",
             "tip",
+            "dynamics",
         ];
         if let Some(key) = object.keys().find(|k| !KNOWN.contains(&k.as_str())) {
             bail!(
@@ -358,7 +368,15 @@ impl Brush {
             (false, true) => bail!("[invalid-brush] tip is only valid for kind \"textured\""),
             _ => {}
         }
+        let dynamics = Dynamics::parse(object.get("dynamics"))?;
+        if dynamics.size.is_some() && flag("pressure_size")? {
+            bail!("[invalid-brush] use either pressure_size or dynamics.size, not both")
+        }
+        if dynamics.flow.is_some() && flag("pressure_flow")? {
+            bail!("[invalid-brush] use either pressure_flow or dynamics.flow, not both")
+        }
         Ok(Brush {
+            dynamics,
             size: number_in(object, "size", 12.0, 1.0, MAX_BRUSH_SIZE)?,
             hardness: number_in(
                 object,
@@ -415,6 +433,9 @@ impl Brush {
         if let Some(tip) = &self.tip {
             out["tip"] = json!(tip);
         }
+        if !self.dynamics.is_empty() {
+            out["dynamics"] = self.dynamics.to_json();
+        }
         out
     }
 
@@ -425,64 +446,6 @@ impl Brush {
             (self.spacing * self.size).max(0.25)
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Sample {
-    pub x: f64,
-    pub y: f64,
-    pub pressure: f64,
-}
-
-/// Samples are rounded to 1/1000 pixel so a journal replays exactly.
-fn canon(value: f64) -> f64 {
-    (value * 1000.0).round() / 1000.0
-}
-
-pub fn parse_samples(value: &Value) -> Result<Vec<Sample>> {
-    let list = value
-        .as_array()
-        .context("[invalid-stroke] samples must be an array")?;
-    if list.is_empty() || list.len() > MAX_SAMPLES {
-        bail!(
-            "[limit-exceeded] a stroke needs 1-{MAX_SAMPLES} samples, got {}",
-            list.len()
-        )
-    }
-    let mut out = Vec::with_capacity(list.len());
-    for (index, item) in list.iter().enumerate() {
-        let (x, y, pressure) = match item {
-            Value::Array(values) if (2..=3).contains(&values.len()) => (
-                values[0].as_f64(),
-                values[1].as_f64(),
-                values.get(2).map(Value::as_f64).unwrap_or(Some(1.0)),
-            ),
-            Value::Object(object) => (
-                object.get("x").and_then(Value::as_f64),
-                object.get("y").and_then(Value::as_f64),
-                object
-                    .get("pressure")
-                    .map(Value::as_f64)
-                    .unwrap_or(Some(1.0)),
-            ),
-            _ => (None, None, None),
-        };
-        let (Some(x), Some(y), Some(pressure)) = (x, y, pressure) else {
-            bail!("[invalid-stroke] sample {index} must be [x, y], [x, y, pressure] or {{x, y, pressure}}")
-        };
-        if !x.is_finite() || !y.is_finite() || x.abs() > 1.0e6 || y.abs() > 1.0e6 {
-            bail!("[invalid-stroke] sample {index} has a non-finite or absurd coordinate")
-        }
-        if !(0.0..=1.0).contains(&pressure) {
-            bail!("[invalid-stroke] sample {index} pressure must be between 0 and 1")
-        }
-        out.push(Sample {
-            x: canon(x),
-            y: canon(y),
-            pressure: canon(pressure),
-        });
-    }
-    Ok(out)
 }
 
 pub fn parse_color(text: &str) -> Result<[u8; 3]> {
@@ -523,12 +486,15 @@ struct Dab {
     y: f64,
     size: f64,
     flow: f64,
+    angle: f64,
+    roundness: f64,
 }
 
 /// Exponential moving average over position and pressure:
 /// `p[i] = p[i-1] + (1 - smoothing) * (raw[i] - p[i-1])`, starting at the first raw
 /// sample. The raw last sample is appended when the average lags behind it, so a
-/// smoothed stroke still ends where the pen lifted.
+/// smoothed stroke still ends where the pen lifted. Tilt, azimuth, twist and
+/// velocity pass through unsmoothed.
 fn smooth(samples: &[Sample], smoothing: f64) -> Vec<Sample> {
     if smoothing <= 0.0 || samples.len() < 2 {
         return samples.to_vec();
@@ -542,6 +508,7 @@ fn smooth(samples: &[Sample], smoothing: f64) -> Vec<Sample> {
             x: p.x + k * (s.x - p.x),
             y: p.y + k * (s.y - p.y),
             pressure: p.pressure + k * (s.pressure - p.pressure),
+            ..*s
         };
         out.push(p);
     }
@@ -556,7 +523,7 @@ fn dabs(brush: &Brush, samples: &[Sample], seed: u64) -> Result<Vec<Dab>> {
     let smoothed = smooth(samples, brush.smoothing);
     let samples = &smoothed[..];
     let step = brush.step();
-    let mut points: Vec<(f64, f64, f64)> = Vec::new();
+    let mut points: Vec<Sample> = Vec::new();
     let mut total = 0.0_f64;
     for pair in samples.windows(2) {
         let (dx, dy) = (pair[1].x - pair[0].x, pair[1].y - pair[0].y);
@@ -565,50 +532,63 @@ fn dabs(brush: &Brush, samples: &[Sample], seed: u64) -> Result<Vec<Dab>> {
     if total / step + 1.0 > MAX_DABS as f64 {
         bail!("[limit-exceeded] this stroke needs more than {MAX_DABS} dabs; use a larger spacing or split the stroke")
     }
-    points.push((samples[0].x, samples[0].y, samples[0].pressure));
+    points.push(samples[0]);
     let mut traveled = 0.0_f64;
     let mut next = step;
     for pair in samples.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
+        let (a, b) = (&pair[0], &pair[1]);
         let (dx, dy) = (b.x - a.x, b.y - a.y);
         let length = (dx * dx + dy * dy).sqrt();
         if length == 0.0 {
             continue;
         }
         while next <= traveled + length {
-            let t = (next - traveled) / length;
-            points.push((
-                a.x + dx * t,
-                a.y + dy * t,
-                a.pressure + (b.pressure - a.pressure) * t,
-            ));
+            points.push(lerp(a, b, (next - traveled) / length));
             next += step;
         }
         traveled += length;
     }
+    let dynamics = &brush.dynamics;
     let mut state = seed;
     let mut out = Vec::with_capacity(points.len());
-    for (x, y, pressure) in points {
+    for point in points {
+        let pressure = point.pressure;
         let mut size = brush.size;
         if brush.pressure_size {
             size *= brush.min_size + (1.0 - brush.min_size) * pressure;
         }
-        let (mut px, mut py) = (x, y);
+        if let Some(dynamic) = &dynamics.size {
+            size *= dynamic.eval(&point);
+        }
+        let (mut px, mut py) = (point.x, point.y);
         if brush.scatter > 0.0 {
             let reach = brush.scatter * brush.size;
             px += signed_unit(&mut state) * reach;
             py += signed_unit(&mut state) * reach;
         }
-        let flow = if brush.pressure_flow {
+        let mut flow = if brush.pressure_flow {
             brush.flow * pressure
         } else {
             brush.flow
+        };
+        if let Some(dynamic) = &dynamics.flow {
+            flow *= dynamic.eval(&point);
+        }
+        let roundness = match &dynamics.roundness {
+            Some(dynamic) => (brush.roundness * dynamic.eval(&point)).max(MIN_ROUNDNESS),
+            None => brush.roundness,
+        };
+        let angle = match &dynamics.angle {
+            Some(dynamic) => brush.angle + dynamic.eval(&point),
+            None => brush.angle,
         };
         out.push(Dab {
             x: px,
             y: py,
             size: size.max(1.0),
             flow,
+            angle,
+            roundness,
         });
     }
     Ok(out)
@@ -652,12 +632,12 @@ fn stamp(
     let radius = dab.size / 2.0;
     // A rotated square tip reaches its corners at radius * sqrt(2).
     let corner = if tip.is_some() { 1.4143 } else { 1.0 };
-    let reach = radius * corner / brush.roundness.clamp(0.05, 1.0) + 1.0;
+    let reach = radius * corner / dab.roundness.clamp(MIN_ROUNDNESS, 1.0) + 1.0;
     let x0 = ((dab.x - reach).floor()).max(0.0) as i64;
     let y0 = ((dab.y - reach).floor()).max(0.0) as i64;
     let x1 = ((dab.x + reach).ceil()).min(f64::from(width)) as i64;
     let y1 = ((dab.y + reach).ceil()).min(f64::from(height)) as i64;
-    let (sin, cos) = sin_cos_degrees(brush.angle);
+    let (sin, cos) = sin_cos_degrees(dab.angle);
     let flow16 = (dab.flow * 65535.0).round();
     if flow16 <= 0.0 || x1 <= x0 || y1 <= y0 {
         return;
@@ -683,7 +663,7 @@ fn stamp(
             } else {
                 let (dx, dy) = (x as f64 + 0.5 - dab.x, y as f64 + 0.5 - dab.y);
                 let u = dx * cos + dy * sin;
-                let v = (-dx * sin + dy * cos) / brush.roundness;
+                let v = (-dx * sin + dy * cos) / dab.roundness;
                 let d = (u * u + v * v).sqrt();
                 if let Some(tip) = tip {
                     tip_coverage(tip, u / radius, v / radius)
@@ -775,8 +755,12 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
     };
     let dab_list = dabs(&stroke.brush, &stroke.samples, stroke.seed)?;
     let corner = if tip.is_some() { 1.4143 } else { 1.0 };
-    let footprint = (stroke.brush.size * corner / stroke.brush.roundness.max(0.05) + 3.0)
-        .min(MAX_BRUSH_SIZE * 20.0 * corner);
+    // Size and roundness dynamics only shrink a dab, so the narrowest possible
+    // roundness bounds the work.
+    let roundness =
+        (stroke.brush.roundness * stroke.brush.dynamics.min_roundness()).max(MIN_ROUNDNESS);
+    let footprint =
+        (stroke.brush.size * corner / roundness + 3.0).min(MAX_BRUSH_SIZE * 20.0 * corner);
     let work = (dab_list.len() as f64 * footprint * footprint) as u64;
     if work > MAX_STROKE_WORK {
         bail!("[limit-exceeded] stroke work {work} exceeds {MAX_STROKE_WORK}; reduce size or sample length")
@@ -1317,7 +1301,7 @@ pub fn paint(
     let after = surface.tile_map_hash();
     let canonical = json!({
         "brush": request.brush.to_json(),
-        "samples": request.samples.iter().map(|s| json!([s.x, s.y, s.pressure])).collect::<Vec<_>>(),
+        "samples": request.samples.iter().map(sample_json).collect::<Vec<_>>(),
         "color": format!("#{:02X}{:02X}{:02X}", request.color[0], request.color[1], request.color[2]),
         "blend": request.blend.name(),
         "seed": request.seed,

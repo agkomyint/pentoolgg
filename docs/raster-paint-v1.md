@@ -88,9 +88,48 @@ Blend: `normal` or `erase`. Unknown properties are rejected.
   is journaled, so journals always record the digest and replay never depends on
   a name.
 
-Properties added after the first engine-1 release (`smoothing`, `buildup`, `tip`) are
+- `dynamics`: maps `size`, `flow`, `roundness` or `angle` to
+  `{input, curve, fallback}`. `input` is `pressure`, `tilt` (0-90°), `azimuth`
+  (0-360°), `twist` (0-360°) or `velocity` (px/ms, 0-100). `curve` holds 2-16
+  `[input, output]` points with strictly increasing inputs inside the input's
+  range. It is piecewise linear and clamps beyond its end points. `size`, `flow`
+  and `roundness` multiply the brush value, with outputs 0-1 and roundness floored
+  at 0.05. `angle` adds degrees, with outputs from -360 to 360. If `curve` is
+  omitted, multipliers ramp from 0 to 1 across the input range, and `angle` follows
+  `tilt`, `azimuth` or `twist` one-to-one. `fallback` is the input value used when
+  a stroke's samples do not report that channel, for example a mouse; it defaults
+  to 1 for pressure and 0 otherwise. `pressure_size` cannot be combined with
+  `dynamics.size`, and `pressure_flow` cannot be combined with `dynamics.flow`.
+  Channels are interpolated per dab, and azimuth and twist take the shorter way
+  around the circle. `smoothing` affects only position and pressure.
+
+Properties added after the first engine-1 release (`smoothing`, `buildup`, `tip`, `dynamics`) are
 written to the journal only when they differ from their defaults, so existing
 journals, stroke IDs and replay hashes are unchanged.
+
+### Input normalization
+
+`stroke --samples` takes device events. Each event is `[x, y]`, `[x, y, pressure]` or
+`{x, y, pressure?, tilt?, azimuth?, twist?, velocity?, t?}`, where `t` is in
+milliseconds. A device reports only the channels it has. Every optional channel must
+appear on all events of a stroke or on none, and unknown channels are rejected.
+Events are normalized once, before anything is journaled:
+
+1. Validation: pressure 0-1 (default 1), tilt 0-90, azimuth and twist 0-360 (360
+   wraps to 0), velocity 0-100, and `t` non-decreasing. `t` and `velocity` cannot
+   both be given.
+2. Velocity: with `t`, each event gets `distance / dt` in px/ms, clamped to 100.
+   A zero `dt` repeats the previous value, and the first event copies the second.
+3. Folding: an event closer than 0.5 px to the last kept sample is dropped. The
+   final event is always kept.
+4. Values are rounded to 1/1000. At most 65536 events are accepted, and they must
+   fold to 8192 samples or fewer.
+
+The journal records only the canonical samples. Samples without extended channels
+are `[x, y, pressure]` arrays, as before. Others are objects carrying `velocity`
+but never `t`, so replay does not depend on event timing. The stroke result reports
+`input: {events, samples, folded}`. Palm rejection and gestures are editor
+concerns: they decide which events form a stroke, but they never alter this math.
 
 ### Brush tips
 
@@ -147,7 +186,7 @@ summaries, never base64 data.
 
 ## Limits (checked before pixel work)
 
-8192 samples, 100000 dabs, bounded per-stroke work, 4096 tiles, 256 journal entries.
+65536 input events, 8192 samples, 16 MiB per `@file` argument, 100000 dabs, bounded per-stroke work, 4096 tiles, 256 journal entries.
 
 ## CLI
 
@@ -156,6 +195,8 @@ pentool raster doc.pen add paint --width 1200 --height 800
 pentool raster doc.pen stroke paint --samples '[[10,60,0.3],[150,30,1]]' \
   --brush '{"kind":"soft-round","size":16,"pressure_size":true}' --color '#D2A184' --seed 1
 pentool raster doc.pen --dry-run stroke paint --samples @stroke.json
+pentool raster doc.pen stroke paint --samples '[{"x":10,"y":60,"pressure":0.3,"azimuth":40,"t":0},{"x":150,"y":30,"pressure":1,"azimuth":80,"t":48}]' \
+  --brush '{"kind":"calligraphic","dynamics":{"angle":{"input":"azimuth"},"size":{"input":"velocity","curve":[[0,0.4],[3,1]]}}}'
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
 pentool raster doc.pen stroke paint --samples @stroke.json \
   --brush '{"kind":"textured","tip":"grain","size":48,"smoothing":0.6,"buildup":false}'
@@ -183,6 +224,6 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Input normalization, clone/heal/fill/selections, rotate/flip, merge visible, stamp
+Clone/heal/fill/selections, rotate/flip, merge visible, stamp
 visible, flatten, presets, editor canvas painting, fuzz/performance suites (roadmap
-items 4-12, 14).
+items 5-12, 14).

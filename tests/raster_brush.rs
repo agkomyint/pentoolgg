@@ -257,3 +257,102 @@ fn damaged_tips_are_reported_and_invalid_tip_input_is_refused() {
     assert_eq!(dry["dry_run"], true);
     assert_eq!(ok(&["raster", &fresh, "tips"])["returned"], 1);
 }
+
+fn find_node<'a>(value: &'a Value, id: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(map) => {
+            if map.get("id").and_then(Value::as_str) == Some(id) && map.contains_key("tiles") {
+                return Some(value);
+            }
+            map.values().find_map(|v| find_node(v, id))
+        }
+        Value::Array(items) => items.iter().find_map(|v| find_node(v, id)),
+        _ => None,
+    }
+}
+
+#[test]
+fn pen_input_is_normalized_once_and_replays_from_the_journal() {
+    let ws = Workspace::new("input");
+    let doc = ws.document("pen.pen");
+    let events: Vec<Value> = (0..=40)
+        .map(|i| {
+            json!({"x": 20 + i * 6, "y": 100, "pressure": 0.4 + f64::from(i) * 0.01,
+                "tilt": 30, "azimuth": i * 9, "t": i * 4})
+        })
+        .chain([json!({"x": 260.2, "y": 100, "pressure": 0.8, "tilt": 30, "azimuth": 0, "t": 170})])
+        .collect();
+    let samples = ws.path("events.json");
+    fs::write(&samples, serde_json::to_string(&events).unwrap()).unwrap();
+    let brush = json!({"kind": "calligraphic", "size": 24, "roundness": 0.3, "dynamics": {
+        "angle": {"input": "azimuth"},
+        "size": {"input": "velocity", "curve": [[0, 0.4], [3, 1]]},
+        "flow": {"input": "pressure", "curve": [[0, 0.2], [1, 1]]}
+    }})
+    .to_string();
+    let at_samples = format!("@{samples}");
+    let stroke = [
+        "raster",
+        &doc,
+        "stroke",
+        "p",
+        "--samples",
+        &at_samples,
+        "--brush",
+        &brush,
+        "--seed",
+        "3",
+    ];
+    let result = ok(&stroke);
+    assert_eq!(result["result"]["input"]["events"], 42);
+    assert_eq!(
+        result["result"]["input"]["folded"], 0,
+        "last event is always kept"
+    );
+    let raw: Value = serde_json::from_str(&fs::read_to_string(&doc).unwrap()).unwrap();
+    let entry = &find_node(&raw, "p").unwrap()["journal"][0];
+    let first = &entry["samples"][1];
+    assert_eq!(first["velocity"], 1.5, "6 px in 4 ms");
+    assert!(first.get("t").is_none(), "journals never record timestamps");
+    assert_eq!(entry["brush"]["dynamics"]["angle"]["input"], "azimuth");
+    let verify = ok(&["raster", &doc, "verify", "--replay"]);
+    assert_eq!(verify["ok"], true, "{verify}");
+
+    // Deterministic: the same events give the same tiles in a fresh document.
+    let other = ws.document("again.pen");
+    let again = ok(&[
+        "raster",
+        &other,
+        "stroke",
+        "p",
+        "--samples",
+        &at_samples,
+        "--brush",
+        &brush,
+        "--seed",
+        "3",
+    ]);
+    assert_eq!(
+        again["result"]["tile_map_sha256"],
+        result["result"]["tile_map_sha256"]
+    );
+
+    // Malformed input fails without touching the document.
+    let before = fs::read(&doc).unwrap();
+    let mixed = json!([{"x": 1, "y": 1, "tilt": 5}, {"x": 9, "y": 9}]).to_string();
+    let message = fail(&["raster", &doc, "stroke", "p", "--samples", &mixed]);
+    assert!(message.contains("every sample"), "{message}");
+    let conflict =
+        json!({"pressure_flow": true, "dynamics": {"flow": {"input": "pressure"}}}).to_string();
+    fail(&[
+        "raster",
+        &doc,
+        "stroke",
+        "p",
+        "--samples",
+        "[[1,1]]",
+        "--brush",
+        &conflict,
+    ]);
+    assert_eq!(fs::read(&doc).unwrap(), before);
+}

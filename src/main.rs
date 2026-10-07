@@ -3147,22 +3147,29 @@ async fn run() -> Result<()> {
                 } => {
                     let read = |text: &str| -> Result<serde_json::Value> {
                         let body = match text.strip_prefix('@') {
-                            Some(path) => fs::read_to_string(path)?,
+                            Some(path) => {
+                                const MAX_JSON: u64 = 16 << 20;
+                                if fs::metadata(path)?.len() > MAX_JSON {
+                                    bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
                             None => text.to_owned(),
                         };
                         Ok(serde_json::from_str(&body)?)
                     };
+                    let normalized = raster::normalize_input(&read(&samples)?)?;
+                    let input_summary = normalized.summary();
                     let request = raster::StrokeRequest {
                         brush: raster::Brush::parse(&read(&brush)?)?,
-                        samples: raster::parse_samples(&read(&samples)?)?,
+                        samples: normalized.samples,
                         color: raster::parse_color(&color)?,
                         blend: raster::Blend::parse(&blend)?,
                         seed,
                     };
-                    (
-                        "raster-stroke",
-                        raster::paint(&mut raw, page, &id, request)?,
-                    )
+                    let mut result = raster::paint(&mut raw, page, &id, request)?;
+                    result["input"] = input_summary;
+                    ("raster-stroke", result)
                 }
             };
             let summary = transaction::commit_value(

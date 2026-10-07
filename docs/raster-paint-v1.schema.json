@@ -41,6 +41,20 @@
     }
   },
   "$defs": {
+    "dynamic": {
+      "type": "object",
+      "required": ["input", "curve", "fallback"],
+      "additionalProperties": false,
+      "description": "Journal form; curve and fallback are always written. size/flow/roundness outputs are 0-1 multipliers, angle outputs are -360..360 degrees added to the brush angle.",
+      "properties": {
+        "input": { "enum": ["pressure", "tilt", "azimuth", "twist", "velocity"] },
+        "curve": {
+          "type": "array", "minItems": 2, "maxItems": 16,
+          "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
+        },
+        "fallback": { "type": "number", "minimum": 0 }
+      }
+    },
     "stroke": {
       "type": "object",
       "required": ["id", "engine", "brush", "samples", "color", "blend", "seed"],
@@ -52,7 +66,26 @@
         "seed": { "type": "integer", "minimum": 0 },
         "samples": {
           "type": "array", "minItems": 1, "maxItems": 8192,
-          "items": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } }
+          "description": "Canonical samples: every optional channel is present on all samples or none. Timestamps are never journaled.",
+          "items": {
+            "oneOf": [
+              { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } },
+              {
+                "type": "object",
+                "required": ["x", "y", "pressure"],
+                "additionalProperties": false,
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" },
+                  "pressure": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "tilt": { "type": "number", "minimum": 0, "maximum": 90 },
+                  "azimuth": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
+                  "twist": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
+                  "velocity": { "type": "number", "minimum": 0, "maximum": 100 }
+                }
+              }
+            ]
+          }
         },
         "brush": {
           "type": "object",
@@ -63,6 +96,16 @@
             "tip": {
               "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
               "description": "Journals record the tip digest; required for and only valid with kind textured."
+            },
+            "dynamics": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "size": { "$ref": "#/$defs/dynamic" },
+                "flow": { "$ref": "#/$defs/dynamic" },
+                "roundness": { "$ref": "#/$defs/dynamic" },
+                "angle": { "$ref": "#/$defs/dynamic" }
+              }
             }
           }
         }
