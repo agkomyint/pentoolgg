@@ -20,10 +20,12 @@ pub enum Tool {
     Burn,
     Sponge,
     ColorReplace,
+    /// Copies pixels from a pinned source; see `clone.rs`.
+    Clone,
 }
 
 impl Blend {
-    pub const NAMES: [&'static str; 10] = [
+    pub const NAMES: [&'static str; 11] = [
         "normal",
         "erase",
         "background-erase",
@@ -34,6 +36,7 @@ impl Blend {
         "burn",
         "sponge",
         "color-replace",
+        "clone",
     ];
 
     pub fn parse(text: &str) -> Result<Self> {
@@ -48,6 +51,7 @@ impl Blend {
             "burn" => Self::Tool(Tool::Burn),
             "sponge" => Self::Tool(Tool::Sponge),
             "color-replace" => Self::Tool(Tool::ColorReplace),
+            "clone" => Self::Tool(Tool::Clone),
             other => bail!(
                 "[invalid-stroke] blend {other:?} is not supported; use one of {}",
                 Self::NAMES.join(", ")
@@ -67,6 +71,7 @@ impl Blend {
             Self::Tool(Tool::Burn) => "burn",
             Self::Tool(Tool::Sponge) => "sponge",
             Self::Tool(Tool::ColorReplace) => "color-replace",
+            Self::Tool(Tool::Clone) => "clone",
         }
     }
 }
@@ -231,7 +236,7 @@ impl Context {
         let px = surface.pixel(x, y);
         let eff = amount * self.strength16 / 65535;
         match self.tool {
-            Tool::Smudge => px,
+            Tool::Smudge | Tool::Clone => px,
             Tool::BackgroundErase => {
                 if px[3] == 0 {
                     return px;
@@ -505,6 +510,7 @@ mod tests {
             samples: parse_samples(&samples)?,
             color: [0, 200, 0],
             blend: Blend::parse(blend)?,
+            clone: None,
             seed: 1,
             tip: None,
         };

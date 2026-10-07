@@ -61,7 +61,37 @@
       "properties": {
         "op": { "const": "stroke", "default": "stroke" },
         "engine": { "type": "integer", "minimum": 1 },
-        "blend": { "enum": ["normal", "erase", "background-erase", "smudge", "blur", "sharpen", "dodge", "burn", "sponge", "color-replace"] },
+        "blend": { "enum": ["normal", "erase", "background-erase", "smudge", "blur", "sharpen", "dodge", "burn", "sponge", "color-replace", "clone"] },
+        "clone": {
+          "type": "object",
+          "required": ["source", "sx", "sy", "ax", "ay", "angle", "scale"],
+          "additionalProperties": false,
+          "description": "Only with blend clone. Destination pixel p reads the source at S + R(-angle)(p - A)/scale.",
+          "properties": {
+            "source": {
+              "oneOf": [
+                { "const": "current", "description": "The target layer before the stroke." },
+                {
+                  "type": "object",
+                  "required": ["layer", "width", "height", "tiles"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "layer": { "type": "string", "minLength": 1 },
+                    "width": { "type": "integer", "minimum": 1, "maximum": 16384 },
+                    "height": { "type": "integer", "minimum": 1, "maximum": 16384 },
+                    "tiles": { "$ref": "#/properties/tiles", "maxProperties": 256 }
+                  }
+                }
+              ]
+            },
+            "sx": { "type": "number" },
+            "sy": { "type": "number" },
+            "ax": { "type": "number" },
+            "ay": { "type": "number" },
+            "angle": { "type": "number", "minimum": -360, "maximum": 360 },
+            "scale": { "type": "number", "minimum": 0.1, "maximum": 10 }
+          }
+        },
         "color": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
         "seed": { "type": "integer", "minimum": 0 },
         "samples": {

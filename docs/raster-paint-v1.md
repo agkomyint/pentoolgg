@@ -156,6 +156,36 @@ Selections and layer masks: a raster layer's own mask is a non-destructive displ
 mask and does not restrict painting. A pixel selection that multiplies `amount`
 arrives with roadmap item 9; until then the whole layer is selected.
 
+### Clone stamp
+
+`raster DOC clone-source TARGET [--layer SOURCE] --x X --y Y` stores a source point
+for a target layer in the document-level `raster_clone` map (`layer`, `x`, `y` and
+`anchor`). `raster DOC clone-stroke TARGET --samples ... [--brush ...] [--aligned]
+[--angle DEG] [--scale S]` then paints with the `clone` blend. It takes dab, size,
+hardness, spacing, opacity, flow, tip and dynamics options from `--brush`;
+`strength`, `tolerance`, `range` and `mode` do not apply. `--blend clone` on a plain
+`stroke` is refused because it has no source.
+
+A destination pixel `p` reads the source at `S + R(-angle) * (p - A) / scale`, with
+`S` the source point and `A` the anchor: the stroke's first sample, or, with
+`--aligned`, the first sample of the session, kept in `raster_clone` so later
+strokes keep one source-to-destination offset. `clone-source` resets the anchor.
+Content turns clockwise by `angle` degrees (-360 to 360), `scale` is 0.1 to 10.
+Sampling is bilinear on premultiplied color with 8-bit fixed-point weights, with no
+minification prefilter. Source pixels outside the source layer are transparent
+(clone never clamps to an edge). The sampled color is composited over the
+destination with the stroke coverage.
+
+Sources are the target layer (`--layer` omitted, `current` or the target's own id),
+read as it was before the stroke, or another raster layer. For another layer the
+journal entry records `clone.source` with the layer id, its width and height, and
+the digests of exactly the source tiles the stroke can read (at most 256). Replay,
+verify and repair load only those digests, and compaction releases them with the
+entry, so later edits to the source layer never reinterpret an old clone. A stroke
+that would read more than 256 source tiles fails with a request to split it.
+Compositing other scene content as a source (the "below" source) arrives with
+stamp-visible in item 10.
+
 ### Input normalization
 
 `stroke --samples` takes device events. Each event is `[x, y]`, `[x, y, pressure]` or
@@ -248,6 +278,8 @@ pentool raster doc.pen stroke paint --samples @stroke.json --blend blur \n  --br
 pentool raster doc.pen stroke paint --samples @stroke.json --blend color-replace \n  --brush '{"size":40,"tolerance":24}' --color '#3A8F4B'
 pentool raster doc.pen stroke paint --samples '[{"x":10,"y":60,"pressure":0.3,"azimuth":40,"t":0},{"x":150,"y":30,"pressure":1,"azimuth":80,"t":48}]' \
   --brush '{"kind":"calligraphic","dynamics":{"angle":{"input":"azimuth"},"size":{"input":"velocity","curve":[[0,0.4],[3,1]]}}}'
+pentool raster doc.pen clone-source paint --layer source --x 820 --y 640
+pentool raster doc.pen clone-stroke paint --samples @clone-stroke.json --aligned \n  --brush '{"size":24,"hardness":0.6}'
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
 pentool raster doc.pen stroke paint --samples @stroke.json \
   --brush '{"kind":"textured","tip":"grain","size":48,"smoothing":0.6,"buildup":false}'

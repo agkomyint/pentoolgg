@@ -26,12 +26,17 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!("[{code}] {message}")
 }
 
+mod clone;
 mod input;
 mod layer;
 mod math;
 mod recovery;
 mod retouch;
 mod tip;
+pub use clone::{
+    set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
+    Request as CloneRequest, Spec as CloneSpec,
+};
 use input::lerp;
 pub use input::{
     normalize_input, parse_samples, sample_json, Dynamic, Dynamics, Input, NormalizedInput, Sample,
@@ -789,6 +794,8 @@ pub struct Stroke {
     pub seed: u64,
     /// Decoded coverage of `brush.tip`; see [`load_tip`].
     pub tip: Option<TipMask>,
+    /// Required by (and only valid with) the `clone` blend.
+    pub clone: Option<CloneSpec>,
 }
 
 pub struct StrokeResult {
@@ -829,7 +836,16 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
             dabs: dab_list.len(),
         });
     }
+    let cloner = match (stroke.blend, &stroke.clone) {
+        (Blend::Tool(Tool::Clone), Some(spec)) => Some(spec),
+        (Blend::Tool(Tool::Clone), None) => {
+            bail!("[invalid-stroke] blend clone needs a clone source; use `raster clone-stroke`")
+        }
+        (_, Some(_)) => bail!("[invalid-stroke] a clone source only applies to blend clone"),
+        _ => None,
+    };
     let local = match stroke.blend {
+        Blend::Tool(Tool::Clone) => None,
         Blend::Tool(tool) => Some(retouch::Context::new(
             tool,
             &stroke.brush,
@@ -874,12 +890,26 @@ pub fn apply_stroke(surface: &mut Surface, stroke: &Stroke) -> Result<StrokeResu
             }
             let x = key.0 * TILE as u32 + (index % TILE) as u32;
             let y = key.1 * TILE as u32 + (index / TILE) as u32;
-            match &local {
-                Some(context) => {
-                    let out = context.pixel(surface, x, y, i64::from(alpha16));
-                    tile[index * 4..index * 4 + 4].copy_from_slice(&out);
+            if let Some(spec) = cloner {
+                let p = spec.pixel(surface, x, y);
+                let alpha = (alpha16 * u32::from(p[3]) + 127) / 255;
+                if alpha > 0 {
+                    composite(
+                        &mut tile,
+                        index * 4,
+                        [p[0], p[1], p[2]],
+                        alpha,
+                        Blend::Normal,
+                    );
                 }
-                None => composite(&mut tile, index * 4, stroke.color, alpha16, stroke.blend),
+            } else {
+                match &local {
+                    Some(context) => {
+                        let out = context.pixel(surface, x, y, i64::from(alpha16));
+                        tile[index * 4..index * 4 + 4].copy_from_slice(&out);
+                    }
+                    None => composite(&mut tile, index * 4, stroke.color, alpha16, stroke.blend),
+                }
             }
             let b = bounds.get_or_insert([x, y, x + 1, y + 1]);
             b[0] = b[0].min(x);
@@ -1359,6 +1389,7 @@ pub struct StrokeRequest {
     pub color: [u8; 3],
     pub blend: Blend,
     pub seed: u64,
+    pub clone: Option<CloneRequest>,
 }
 
 /// Apply one stroke to a raster layer inside `raw` and append its journal entry.
@@ -1381,6 +1412,13 @@ pub fn paint(
         blend: request.blend,
         seed: request.seed,
         tip,
+        clone: match request.clone.clone() {
+            Some(clone) => {
+                let dab_list = dabs(&request.brush, &request.samples, request.seed)?;
+                Some(CloneSpec::build(&next, id, clone, &dab_list)?)
+            }
+            None => None,
+        },
     };
     let before = surface.tile_map_hash();
     let result = apply_stroke(&mut surface, &stroke)?;
@@ -1392,6 +1430,10 @@ pub fn paint(
         "blend": request.blend.name(),
         "seed": request.seed,
     });
+    let mut canonical = canonical;
+    if let Some(spec) = &stroke.clone {
+        canonical["clone"] = spec.to_json();
+    }
     let node = locate(&mut next, page, id)?;
     let index = node["journal"].as_array().map_or(0, Vec::len)
         + node["checkpoint"]["journal_dropped"].as_u64().unwrap_or(0) as usize;
@@ -1467,6 +1509,7 @@ mod tests {
             blend: Blend::Normal,
             seed: 42,
             tip: None,
+            clone: None,
         }
     }
 
@@ -1633,6 +1676,7 @@ mod tests {
             color: [x as u8, 40, 200],
             blend: Blend::Normal,
             seed: 0,
+            clone: None,
         }
     }
 

@@ -1,7 +1,7 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
 > **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
-> 0 of 14 items are ticked; items 1-5 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
+> 0 of 14 items are ticked; items 1-6 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
 > item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
 >
 > | # | Item | State |
@@ -11,7 +11,8 @@
 > | 3 | Brush engine | Implemented: hard-round, soft-round, pixel, calligraphic and textured stamp (content-addressed `brush_tips` stored as tiles), size, hardness, spacing, opacity, flow, angle, roundness, seeded scatter, EMA `smoothing`, `buildup` on/off; journals pin tip digests; cross-platform tile-hash golden (`tests/raster_brush.rs`). Awaiting hosted CI evidence before ticking. |
 > | 4 | Input normalization | Implemented: `src/raster/input.rs` normalizes events with position, pressure and optional tilt, azimuth, twist and velocity (all-or-none per stroke). Velocity is derived from `t`, sub-0.5 px events are folded, and the last event is always kept. Journals hold canonical samples without timestamps. Brush `dynamics` maps inputs to size, flow, roundness and angle through explicit piecewise-linear curves with stable fallbacks. Existing journals and hashes are unchanged (`tests/raster_brush.rs`). Awaiting hosted CI evidence before ticking. |
 > | 5 | Erase and local blending | Implemented: pixel eraser, clear-to-transparency (`raster clear` and the `erase` blend), background eraser, smudge, blur, sharpen, dodge, burn, sponge and color-replace as stroke blends with defined sampling radius, accumulation, alpha behavior, clamped edge mode, tolerance and tone range; misapplied parameters are errors; replayable from the journal (`tests/raster_brush.rs`). Selection and mask interaction waits for item 9. Awaiting hosted CI evidence before ticking. |
-> | 6-9 | Clone, heal, fill, selections | Not started. |
+> | 6 | Clone stamp | Implemented: aligned and non-aligned clone strokes from the target layer or another raster layer with rotation and scale; strokes pin the exact source tiles in the journal so later source edits cannot reinterpret them; replay, verify and dry-run covered (`tests/raster_clone.rs`). Not yet: sampling the composite of other scene content (waits for stamp-visible, item 10), and live preview (item 12). Awaiting hosted CI evidence before ticking. |
+> | 7-9 | Heal, fill, selections | Not started. |
 > | 10 | Layer operations | Partial: trim, canvas resize (crop past bounds), merge down, explicit rasterization (item 2). Missing: rotate/flip, merge visible, stamp visible, flatten. |
 > | 11-12 | Presets, editor UI | Not started. |
 > | 13 | CLI and batch | Partial: `pentool raster ... add/info/clear/checkpoint/stroke/verify/repair/resize/crop/trim/duplicate/merge-down/rasterize/tip-add/tip-remove/tips` with dry-run and limits. Missing: presets, selections/masks, retouch ops, batch. |

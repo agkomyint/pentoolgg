@@ -1727,6 +1727,40 @@ enum RasterAction {
         #[arg(long, default_value_t = 0)]
         seed: u64,
     },
+    /// Choose where clone strokes on a layer copy from (resets the aligned anchor).
+    CloneSource {
+        /// Target raster layer that clone strokes paint into.
+        id: String,
+        /// Raster layer to sample; omit to sample the target before each stroke.
+        #[arg(long)]
+        layer: Option<String>,
+        #[arg(long, allow_negative_numbers = true)]
+        x: f64,
+        #[arg(long, allow_negative_numbers = true)]
+        y: f64,
+    },
+    /// Clone-stamp from the stored source. Dab, opacity, flow and tip options come
+    /// from --brush; source tiles of another layer are pinned in the journal.
+    CloneStroke {
+        id: String,
+        /// Device events, as for `stroke`, or @file.json.
+        #[arg(long)]
+        samples: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        /// Keep one source-to-destination offset across strokes instead of
+        /// restarting at the source point each stroke.
+        #[arg(long)]
+        aligned: bool,
+        /// Rotate the cloned content clockwise, in degrees (-360 to 360).
+        #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+        angle: f64,
+        /// Scale the cloned content (0.1 to 10).
+        #[arg(long, default_value_t = 1.0)]
+        scale: f64,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
 }
 
 fn ai_error_json(error: &anyhow::Error) -> serde_json::Value {
@@ -3139,6 +3173,49 @@ async fn run() -> Result<()> {
                     "raster-checkpoint",
                     raster::checkpoint(&mut raw, page, &id, compact)?,
                 ),
+                RasterAction::CloneSource { id, layer, x, y } => (
+                    "raster-clone-source",
+                    raster::set_clone_source(&mut raw, page, &id, layer.as_deref(), x, y)?,
+                ),
+                RasterAction::CloneStroke {
+                    id,
+                    samples,
+                    brush,
+                    aligned,
+                    angle,
+                    scale,
+                    seed,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                if fs::metadata(path)?.len() > 16 << 20 {
+                                    bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let normalized = raster::normalize_input(&read(&samples)?)?;
+                    let input_summary = normalized.summary();
+                    let mut result = raster::clone_stroke(
+                        &mut raw,
+                        page,
+                        &id,
+                        raster::Brush::parse(&read(&brush)?)?,
+                        normalized.samples,
+                        &raster::CloneOptions {
+                            aligned,
+                            angle,
+                            scale,
+                        },
+                        seed,
+                    )?;
+                    result["input"] = input_summary;
+                    ("raster-clone-stroke", result)
+                }
                 RasterAction::Stroke {
                     id,
                     samples,
@@ -3168,6 +3245,7 @@ async fn run() -> Result<()> {
                         color: raster::parse_color(&color)?,
                         blend: raster::Blend::parse(&blend)?,
                         seed,
+                        clone: None,
                     };
                     let mut result = raster::paint(&mut raw, page, &id, request)?;
                     result["input"] = input_summary;

@@ -68,6 +68,10 @@ pub(crate) fn replay_entry(raw: &Value, surface: &mut Surface, entry: &Value) ->
                 color: parse_color(entry["color"].as_str().unwrap_or_default())?,
                 blend: Blend::parse(entry["blend"].as_str().unwrap_or("normal"))?,
                 seed: entry["seed"].as_u64().unwrap_or(0),
+                clone: match entry.get("clone") {
+                    Some(value) => Some(CloneSpec::from_json(raw, value)?),
+                    None => None,
+                },
             };
             apply_stroke(surface, &stroke)?;
             Ok(())

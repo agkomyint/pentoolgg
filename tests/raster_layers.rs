@@ -25,6 +25,7 @@ fn stroke(raw: &mut Value, page: Option<&str>, id: &str, color: &str, samples: V
             color: raster::parse_color(color).unwrap(),
             blend: raster::Blend::parse("normal").unwrap(),
             seed: 3,
+            clone: None,
         },
     )
     .unwrap();

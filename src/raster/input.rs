@@ -594,6 +594,7 @@ mod tests {
             samples: parse_samples(&json!([sample])).unwrap(),
             color: [0, 0, 0],
             blend: Blend::Normal,
+            clone: None,
             seed: 0,
             tip: None,
         };
