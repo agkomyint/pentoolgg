@@ -1,8 +1,17 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
-> **Status (dev, unreleased):** items 1-3 and the CLI core of 13 are implemented on `main`
-> (`src/raster.rs`, `docs/raster-paint-v1.md`, `tests/raster.rs`). Checkboxes stay unticked until
-> hosted cross-platform CI evidence exists. Items 4-12 and 14 are not started.
+> **Status (dev, unreleased, local commit `f229080`, not yet pushed or CI-verified):**
+> 0 of 14 items are complete; 3 are substantially built. Boxes stay unticked until every
+> item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
+>
+> | # | Item | State |
+> |---|------|-------|
+> | 1 | Spec, schema, fixtures | Built: `docs/raster-paint-v1.md`, `.schema.json`, valid and invalid fixtures. Missing: corruption-recovery tooling, compatibility rules for future engines, CI evidence. |
+> | 2 | Raster layers | Partial: add, clear, info, checkpoint, tree/search, render, undo, v5 downgrade guard. Missing: resize, crop, duplicate, merge, rasterize, groups/masks/clip/effects/components/packages/diff. |
+> | 3 | Brush engine | Partial: hard-round, soft-round, pixel, calligraphic, seeded scatter. Missing: textured stamp, smoothing, buildup. |
+> | 4-12 | Input, erase/blend tools, clone, heal, fill, selections, layer ops, presets, editor UI | Not started (plain erase blend exists only as part of item 3). |
+> | 13 | CLI and batch | Partial: `pentool raster ... add/info/clear/checkpoint/stroke` with dry-run and limits. Missing: presets, selections/masks, retouch ops, batch. |
+> | 14 | Performance, fuzz, goldens | Not started (one replay-hash test exists). |
 
 Complete the missing hands-on raster workflow after v0.7.0 image operations,
 v0.8.0 compositing, and v0.9.0 model-assisted editing. Add paintable raster layers,
