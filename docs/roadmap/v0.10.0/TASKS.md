@@ -1,7 +1,7 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
 > **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
-> 0 of 14 items are ticked; items 1-10 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
+> 0 of 14 items are ticked; items 1-11 are implemented and items 10 and 13 are partial. Boxes stay unticked until every
 > item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
 >
 > | # | Item | State |
@@ -16,7 +16,8 @@
 > | 8 | Flood fill and contiguous selection | Implemented: `fill` and `select-wand` with tolerance, 4/8 connectivity, global mode, gap policy, transparency handling, anti-aliased edges, bounded allocation, and refine modes (replace/add/subtract/intersect); an active selection limits strokes, clone, heal and fill with the selection pinned in the journal for replay (`tests/raster_fill.rs`). Not yet: composite sampling scope (item 10), mask output (item 9). Awaiting hosted CI evidence before ticking. |
 > | 9 | Selections and transforms | Implemented: `select-marquee` (rect/ellipse), `select-lasso`, `select-quickmask`, `select-modify` (feather, expand, contract, smooth, border, grow, similar, invert), saved selections (`select-save/load/delete`), and for selected pixels `lift` (copy/cut to a new layer, alpha kept), `move-pixels`, `transform-pixels` and `paste`; selections follow moved and transformed pixels (`tests/raster_select.rs`). Not yet: patch healing (item 7 remainder). Awaiting hosted CI evidence before ticking. |
 > | 10 | Layer operations | Implemented: trim, canvas resize (crop past bounds), merge down, explicit rasterization, `rotate`/`flip` (lossless, selections follow), `merge-visible`, `stamp-visible`, `flatten` (`tests/raster_compose.rs`). Not yet: the "below" clone source and composite flood scope that build on stamp-visible. Awaiting hosted CI evidence before ticking. |
-> | 11-12 | Presets, editor UI | Not started. |
+> | 11 | Presets and assets | Implemented: document `brush_presets` (`preset-add/remove/show`, `presets`), `--preset` on stroke, clone, heal and quick-mask, portable `preset-export`/`preset-import` with content-addressed tips, opt-in `preset-import-gbr` and `preset-import-mypaint` that report unsupported settings (`tests/raster_presets.rs`). Awaiting hosted CI evidence before ticking. |
+> | 12 | Editor UI | Not started. |
 > | 13 | CLI and batch | Partial: `pentool raster ... add/info/clear/checkpoint/stroke/verify/repair/resize/crop/trim/duplicate/merge-down/rasterize/tip-add/tip-remove/tips` with dry-run and limits. Missing: presets, selections/masks, retouch ops, batch. |
 > | 14 | Performance, fuzz, goldens | Not started (one replay-hash test exists). |
 

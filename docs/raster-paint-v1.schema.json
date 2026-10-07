@@ -168,6 +168,7 @@
   "x-document": {
     "raster_tiles": "top-level object: digest -> {encoding: 'png-base64', data}. Digest is the sha256 of the 256*256*4 straight-RGBA bytes.",
     "raster_selections": "top-level object: {active: {<layer id>: {width, height, tiles: {\"tx,ty\": digest}}}, saved: {<layer id>: {<name matching ^[A-Za-z0-9._-]{1,64}$, at most 32 per layer>: {width, height, tiles}}}}. Tiles are straight-RGBA with alpha = coverage 0-255; a missing tile is 0. Stroke journal entries pin the active selection in their `selection` property.",
+    "brush_presets": "top-level object (at most 256): name matching ^[A-Za-z0-9._-]{1,64}$ -> {engine: raster engine required (>= 1, not above the build), brush: an object limited to the brush properties, description?: plain text up to 280 characters}. Strokes record the resolved brush and, when used, its preset name.",
     "brush_tips": "top-level object (at most 256): name matching ^[A-Za-z0-9._-]{1,64}$ -> sha256 digest of a raster_tiles entry whose alpha channel is the tip coverage."
   }
 }

@@ -26,7 +26,7 @@ impl TipSource {
     }
 }
 
-fn check_name(name: &str) -> Result<()> {
+pub(super) fn check_name(name: &str) -> Result<()> {
     if name.is_empty()
         || name.len() > 64
         || is_digest(name)
@@ -133,7 +133,25 @@ pub fn tip_add(raw: &mut Value, name: &str, bytes: &[u8], source: TipSource) -> 
         bail!("[limit-exceeded] a document may name at most {MAX_TIPS} brush tips")
     }
     let (_, image) = crate::image::decode_source_pixels(bytes)?;
-    let tile = tip_from_image(&image, source)?;
+    tip_register(raw, name, &image, source)
+}
+
+/// Name a tip made from decoded pixels; shared by `tip_add` and brush imports.
+pub(super) fn tip_register(
+    raw: &mut Value,
+    name: &str,
+    image: &image::RgbaImage,
+    source: TipSource,
+) -> Result<Value> {
+    check_name(name)?;
+    let tips = raw.get("brush_tips").and_then(Value::as_object);
+    if tips.is_some_and(|t| t.contains_key(name)) {
+        bail!("[conflict] brush tip {name:?} already exists; remove it with `tip-remove` first")
+    }
+    if tips.map_or(0, Map::len) >= MAX_TIPS {
+        bail!("[limit-exceeded] a document may name at most {MAX_TIPS} brush tips")
+    }
+    let tile = tip_from_image(image, source)?;
     let digest = tile_hash(&tile);
     let mut next = raw.clone();
     let object = next.as_object_mut().context("document must be an object")?;

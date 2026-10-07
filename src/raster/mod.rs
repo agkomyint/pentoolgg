@@ -34,6 +34,7 @@ mod input;
 mod layer;
 mod math;
 mod pixels;
+mod preset;
 mod recovery;
 mod retouch;
 mod selection;
@@ -56,6 +57,10 @@ use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use pixels::{
     lift as lift_pixels, move_pixels, paste as paste_pixels, transform_pixels,
     Transform as PixelTransform,
+};
+pub use preset::{
+    preset_add, preset_export, preset_import, preset_import_gbr, preset_import_mypaint,
+    preset_list, preset_remove, preset_show, resolve_preset,
 };
 pub use recovery::{repair, replay, verify, RepairStrategy};
 pub use retouch::Tool;
@@ -304,6 +309,8 @@ pub struct Brush {
     /// Heal only: share of source detail and of destination tone, 0-1 (default 1).
     pub texture: Option<f64>,
     pub tone: Option<f64>,
+    /// Name of the document preset this brush was resolved from (informational).
+    pub preset: Option<String>,
 }
 
 pub const BRUSH_KINDS: [&str; 5] = [
@@ -345,7 +352,7 @@ impl Brush {
         let object = value
             .as_object()
             .context("[invalid-brush] brush must be an object")?;
-        const KNOWN: [&str; 22] = [
+        const KNOWN: [&str; 23] = [
             "kind",
             "size",
             "hardness",
@@ -368,6 +375,7 @@ impl Brush {
             "mode",
             "texture",
             "tone",
+            "preset",
         ];
         if let Some(key) = object.keys().find(|k| !KNOWN.contains(&k.as_str())) {
             bail!(
@@ -437,6 +445,7 @@ impl Brush {
             None => None,
             Some(_) => Some(number_in(object, "tone", 1.0, 0.0, 1.0)?),
         };
+        let preset = optional_text("preset", preset::check_name)?;
         let range = optional_text("range", retouch::parse_range)?;
         let mode = optional_text("mode", retouch::parse_mode)?;
         let dynamics = Dynamics::parse(object.get("dynamics"))?;
@@ -447,6 +456,7 @@ impl Brush {
             bail!("[invalid-brush] use either pressure_flow or dynamics.flow, not both")
         }
         Ok(Brush {
+            preset,
             dynamics,
             strength,
             tolerance: tolerance.map(|t| t as u32),
@@ -530,6 +540,9 @@ impl Brush {
         }
         if let Some(tone) = self.tone {
             out["tone"] = json!(tone);
+        }
+        if let Some(preset) = &self.preset {
+            out["preset"] = json!(preset);
         }
         out
     }
@@ -1210,7 +1223,8 @@ pub fn validate_document(raw: &Value) -> Result<()> {
             }
         }
     }
-    tip::validate_tips(raw)
+    tip::validate_tips(raw)?;
+    preset::validate_presets(raw)
 }
 
 /// Digests that must stay in `raster_tiles`: everything pinned by raster nodes plus

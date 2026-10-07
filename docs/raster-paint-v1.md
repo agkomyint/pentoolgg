@@ -317,6 +317,42 @@ document in one transaction; the global `--dry-run` previews them.
   composite in the first layer that held one. Hidden nodes and hidden layers are kept.
   Visible locked nodes or layers block it.
 
+### Brush presets and brush imports
+
+A preset is a named brush stored as readable data in the document's `brush_presets`:
+`{"engine": 1, "brush": {...}, "description": "..."}`. The `brush` object has exactly the
+properties `--brush` accepts, so a preset cannot hold a script or any property the
+engine does not know. A preset needs raster engine <= the one the build implements;
+newer presets are refused with a corrective message. Names match
+`^[A-Za-z0-9._-]{1,64}$`; a document holds at most 256.
+
+- `preset-add NAME --brush JSON [--description TEXT] [--replace]`, `preset-remove NAME`,
+  `presets` (compact list) and `preset-show NAME`.
+- `--preset NAME` on `stroke`, `clone-stroke`, `heal-stroke` and `select-quickmask`
+  (or `"preset"` inside `--brush`) starts from the preset; any property in `--brush`
+  overrides it. The journal records the fully resolved brush plus `preset`, so editing or
+  deleting a preset never reinterprets an old stroke, and replay does not read presets.
+- A textured preset names a `brush_tips` tip; its pixels are content-addressed in
+  `raster_tiles`, like any other tile, and travel with the document.
+- `preset-export NAME --out FILE` writes a portable JSON file
+  (`pentool_brush_preset: 1`, the brush, and the tip's pixels when it has one).
+  `preset-import FILE [--name N] [--replace]` verifies the tip pixels against their
+  digest and rejects any property it does not know.
+
+Importing third-party brushes is opt-in, one explicit command per format, and converts
+only what has an exact meaning here:
+
+- `preset-import-gbr FILE NAME` reads a GIMP `.gbr` (version 1 or 2, grayscale or RGBA,
+  up to 4096 px a side). The pixels become a tip named `NAME` (grayscale paints where
+  dark, as in GIMP; RGBA by its alpha; color is dropped because the color is chosen per
+  stroke), spacing comes from the header, and the preset is `textured`.
+- `preset-import-mypaint FILE NAME` reads a MyPaint `.myb` (`"version": 3`) and converts
+  `radius_logarithmic` (to a diameter `2 * e^v`, rounded to 0.01), `hardness`, `opaque`
+  (to `flow`), `dabs_per_basic_radius` (to spacing `1/(2d)`) and pressure on radius and
+  opacity. Every other setting that is switched on, with a non-zero base value or any
+  input curve, is listed under `unsupported` and not approximated; color-choosing
+  settings are listed under `ignored_color_settings`.
+
 ### Input normalization
 
 `stroke --samples` takes device events. Each event is `[x, y]`, `[x, y, pressure]` or
@@ -434,6 +470,11 @@ pentool raster doc.pen flip paint horizontal
 pentool raster doc.pen merge-visible paint
 pentool raster doc.pen stamp-visible --new-id stamp
 pentool raster doc.pen flatten --new-id flat
+pentool raster doc.pen preset-add soft-retouch --brush '{"kind":"soft-round","size":36,"flow":0.12}'
+pentool raster doc.pen stroke paint --preset soft-retouch --samples @stroke.json --color '#D2A184'
+pentool raster doc.pen preset-export soft-retouch --out soft-retouch.preset.json
+pentool raster doc.pen preset-import-gbr chalk.gbr chalk
+pentool raster doc.pen preset-import-mypaint pencil.myb pencil
 pentool raster doc.pen select-info paint
 pentool raster doc.pen select-clear paint
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
@@ -463,5 +504,5 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Patch healing, the stamp-visible clone source and composite flood scope, presets, editor
-canvas painting, fuzz/performance suites (roadmap items 6-7, 11-12, 14).
+Patch healing, the stamp-visible clone source and composite flood scope, editor canvas
+painting, fuzz/performance suites (roadmap items 6-7, 12, 14).

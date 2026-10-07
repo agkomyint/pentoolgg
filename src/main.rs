@@ -1752,6 +1752,40 @@ enum RasterAction {
     TipRemove { name: String },
     /// List named brush tips.
     Tips,
+    /// Create a brush preset from brush JSON.
+    PresetAdd {
+        name: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Delete a brush preset.
+    PresetRemove { name: String },
+    /// List brush presets.
+    Presets,
+    /// Show one brush preset.
+    PresetShow { name: String },
+    /// Write a portable preset file (with its tip pixels) to --out.
+    PresetExport {
+        name: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Import a pentool preset file.
+    PresetImport {
+        file: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Import a GIMP .gbr brush as a textured preset and tip (opt-in conversion).
+    PresetImportGbr { file: PathBuf, name: String },
+    /// Import a MyPaint .myb brush; unsupported settings are reported, not guessed.
+    PresetImportMypaint { file: PathBuf, name: String },
     /// Apply one deterministic brush stroke.
     Stroke {
         id: String,
@@ -1762,6 +1796,9 @@ enum RasterAction {
         /// Brush JSON (kind, size, hardness, spacing, opacity, flow, ...), or @file.json.
         #[arg(long, default_value = "{}")]
         brush: String,
+        /// Name of a document brush preset to start from; --brush overrides it.
+        #[arg(long)]
+        preset: Option<String>,
         #[arg(long, default_value = "#000000")]
         color: String,
         /// normal, erase, background-erase, smudge, blur, sharpen, dodge, burn,
@@ -1792,6 +1829,9 @@ enum RasterAction {
         samples: String,
         #[arg(long, default_value = "{}")]
         brush: String,
+        /// Name of a document brush preset to start from; --brush overrides it.
+        #[arg(long)]
+        preset: Option<String>,
         /// Keep one source-to-destination offset across strokes instead of
         /// restarting at the source point each stroke.
         #[arg(long)]
@@ -1813,6 +1853,9 @@ enum RasterAction {
         samples: String,
         #[arg(long, default_value = "{}")]
         brush: String,
+        /// Name of a document brush preset to start from; --brush overrides it.
+        #[arg(long)]
+        preset: Option<String>,
         #[arg(long)]
         aligned: bool,
         #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
@@ -1886,6 +1929,9 @@ enum RasterAction {
         samples: String,
         #[arg(long, default_value = "{}")]
         brush: String,
+        /// Name of a document brush preset to start from; --brush overrides it.
+        #[arg(long)]
+        preset: Option<String>,
         #[arg(long)]
         erase: bool,
         #[arg(long, default_value_t = 0)]
@@ -3418,6 +3464,95 @@ async fn run() -> Result<()> {
                 RasterAction::TipRemove { name } => {
                     ("raster-tip-remove", raster::tip_remove(&mut raw, &name)?)
                 }
+                RasterAction::PresetAdd {
+                    name,
+                    brush,
+                    description,
+                    replace,
+                } => {
+                    let brush: serde_json::Value = match brush.strip_prefix('@') {
+                        Some(path) => {
+                            if fs::metadata(path)?.len() > 16 << 20 {
+                                bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                            }
+                            serde_json::from_str(&fs::read_to_string(path)?)?
+                        }
+                        None => serde_json::from_str(&brush)?,
+                    };
+                    (
+                        "raster-preset-add",
+                        raster::preset_add(
+                            &mut raw,
+                            &name,
+                            &brush,
+                            description.as_deref(),
+                            replace,
+                        )?,
+                    )
+                }
+                RasterAction::PresetRemove { name } => (
+                    "raster-preset-remove",
+                    raster::preset_remove(&mut raw, &name)?,
+                ),
+                RasterAction::Presets => {
+                    println!("{}", serde_json::to_string(&raster::preset_list(&raw))?);
+                    return Ok(());
+                }
+                RasterAction::PresetShow { name } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&raster::preset_show(&raw, &name)?)?
+                    );
+                    return Ok(());
+                }
+                RasterAction::PresetExport { name, out } => {
+                    let file = raster::preset_export(&raw, &name)?;
+                    fs::write(&out, serde_json::to_string_pretty(&file)? + "\n")?;
+                    println!(
+                        "{}",
+                        serde_json::json!({"name": name, "path": out.to_string_lossy()})
+                    );
+                    return Ok(());
+                }
+                RasterAction::PresetImport {
+                    file,
+                    name,
+                    replace,
+                } => {
+                    if fs::metadata(&file)?.len() > 16 << 20 {
+                        bail!("[limit-exceeded] preset files are limited to 16 MiB")
+                    }
+                    let body: serde_json::Value = serde_json::from_str(&fs::read_to_string(&file)?)
+                        .map_err(|e| {
+                            anyhow::anyhow!("[invalid-input] preset file is not JSON: {e}")
+                        })?;
+                    (
+                        "raster-preset-import",
+                        raster::preset_import(&mut raw, &body, name.as_deref(), replace)?,
+                    )
+                }
+                RasterAction::PresetImportGbr { file, name } => {
+                    if fs::metadata(&file)?.len() > 16 << 20 {
+                        bail!("[limit-exceeded] .gbr files are limited to 16 MiB")
+                    }
+                    (
+                        "raster-preset-import-gbr",
+                        raster::preset_import_gbr(&mut raw, &fs::read(&file)?, &name)?,
+                    )
+                }
+                RasterAction::PresetImportMypaint { file, name } => {
+                    if fs::metadata(&file)?.len() > 16 << 20 {
+                        bail!("[limit-exceeded] .myb files are limited to 16 MiB")
+                    }
+                    (
+                        "raster-preset-import-mypaint",
+                        raster::preset_import_mypaint(
+                            &mut raw,
+                            &fs::read_to_string(&file)?,
+                            &name,
+                        )?,
+                    )
+                }
                 RasterAction::Tips => {
                     println!("{}", serde_json::to_string(&raster::tip_list(&raw))?);
                     return Ok(());
@@ -3530,6 +3665,7 @@ async fn run() -> Result<()> {
                     id,
                     samples,
                     brush,
+                    preset,
                     erase,
                     seed,
                 } => {
@@ -3546,13 +3682,18 @@ async fn run() -> Result<()> {
                         Ok(serde_json::from_str(&body)?)
                     };
                     let normalized = raster::normalize_input(&read(&samples)?)?;
+                    let brush = raster::Brush::parse(&raster::resolve_preset(
+                        &raw,
+                        &read(&brush)?,
+                        preset.as_deref(),
+                    )?)?;
                     (
                         "raster-select-quickmask",
                         raster::select_quickmask(
                             &mut raw,
                             page,
                             &id,
-                            raster::Brush::parse(&read(&brush)?)?,
+                            brush,
                             normalized.samples,
                             erase,
                             seed,
@@ -3647,6 +3788,7 @@ async fn run() -> Result<()> {
                     id,
                     samples,
                     brush,
+                    preset,
                     aligned,
                     angle,
                     scale,
@@ -3656,6 +3798,7 @@ async fn run() -> Result<()> {
                     id,
                     samples,
                     brush,
+                    preset,
                     aligned,
                     angle,
                     scale,
@@ -3674,12 +3817,17 @@ async fn run() -> Result<()> {
                         Ok(serde_json::from_str(&body)?)
                     };
                     let normalized = raster::normalize_input(&read(&samples)?)?;
+                    let brush = raster::Brush::parse(&raster::resolve_preset(
+                        &raw,
+                        &read(&brush)?,
+                        preset.as_deref(),
+                    )?)?;
                     let input_summary = normalized.summary();
                     let mut result = raster::clone_stroke(
                         &mut raw,
                         page,
                         &id,
-                        raster::Brush::parse(&read(&brush)?)?,
+                        brush,
                         normalized.samples,
                         &raster::CloneOptions {
                             aligned,
@@ -3707,6 +3855,7 @@ async fn run() -> Result<()> {
                     id,
                     samples,
                     brush,
+                    preset,
                     color,
                     blend,
                     seed,
@@ -3727,7 +3876,11 @@ async fn run() -> Result<()> {
                     let normalized = raster::normalize_input(&read(&samples)?)?;
                     let input_summary = normalized.summary();
                     let request = raster::StrokeRequest {
-                        brush: raster::Brush::parse(&read(&brush)?)?,
+                        brush: raster::Brush::parse(&raster::resolve_preset(
+                            &raw,
+                            &read(&brush)?,
+                            preset.as_deref(),
+                        )?)?,
                         samples: normalized.samples,
                         color: raster::parse_color(&color)?,
                         blend: raster::Blend::parse(&blend)?,
