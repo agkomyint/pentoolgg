@@ -1952,6 +1952,26 @@ enum RasterAction {
         #[arg(long, default_value_t = 1.0)]
         opacity: f64,
     },
+    /// Rotate a raster layer by a quarter turn clockwise (90, 180 or 270).
+    Rotate {
+        id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        degrees: i64,
+    },
+    /// Mirror a raster layer (horizontal or vertical).
+    Flip { id: String, axis: String },
+    /// Merge all visible raster siblings of a layer into the bottom-most one.
+    MergeVisible { id: String },
+    /// Bake everything visible on the page into a new top raster layer.
+    StampVisible {
+        #[arg(long)]
+        new_id: String,
+    },
+    /// Replace every visible node of the page with one raster of their composite.
+    Flatten {
+        #[arg(long)]
+        new_id: String,
+    },
     /// Remove the layer's selection.
     SelectClear { id: String },
     /// Summarize the layer's selection.
@@ -3342,6 +3362,26 @@ async fn run() -> Result<()> {
                 RasterAction::Duplicate { id, new_id } => (
                     "raster-duplicate",
                     raster::duplicate(&mut raw, page, &id, &new_id)?,
+                ),
+                RasterAction::Rotate { id, degrees } => (
+                    "raster-rotate",
+                    raster::orient(&mut raw, page, &id, raster::Orient::rotation(degrees)?)?,
+                ),
+                RasterAction::Flip { id, axis } => (
+                    "raster-flip",
+                    raster::orient(&mut raw, page, &id, raster::Orient::flip(&axis)?)?,
+                ),
+                RasterAction::MergeVisible { id } => (
+                    "raster-merge-visible",
+                    raster::merge_visible(&mut raw, page, &id)?,
+                ),
+                RasterAction::StampVisible { new_id } => (
+                    "raster-stamp-visible",
+                    raster::stamp_visible(&mut raw, &input, page, &new_id)?,
+                ),
+                RasterAction::Flatten { new_id } => (
+                    "raster-flatten",
+                    raster::flatten(&mut raw, &input, page, &new_id)?,
                 ),
                 RasterAction::MergeDown { id } => (
                     "raster-merge-down",

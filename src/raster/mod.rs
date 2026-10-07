@@ -27,6 +27,7 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
 }
 
 mod clone;
+mod compose;
 mod flood;
 mod heal;
 mod input;
@@ -42,6 +43,7 @@ pub use clone::{
     set_source as set_clone_source, stroke as clone_stroke, Options as CloneOptions,
     Request as CloneRequest, Spec as CloneSpec,
 };
+pub use compose::{flatten, merge_visible, orient, stamp_visible, Orient};
 pub use flood::{fill, wand as select_wand, Options as FloodOptions};
 pub use heal::spot as heal_spot;
 use input::lerp;

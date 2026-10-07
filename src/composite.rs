@@ -1674,6 +1674,26 @@ pub fn render(
     page_id: Option<&str>,
     scale: f32,
 ) -> Result<RgbaImage> {
+    render_with(raw, document, page_id, scale, true)
+}
+
+/// The visible content of a page over transparency, without the page background.
+pub fn render_content(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    scale: f32,
+) -> Result<RgbaImage> {
+    render_with(raw, document, page_id, scale, false)
+}
+
+fn render_with(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    scale: f32,
+    with_background: bool,
+) -> Result<RgbaImage> {
     crate::scene::validate(raw)?;
     if !is_document(raw) {
         bail!("compositing requires document version 6")
@@ -1715,9 +1735,13 @@ pub fn render(
     renderer.reserve()?;
     let background = json!({"kind":"rect","id":"composite-background","x":0,"y":0,"width":width,"height":height,
         "style":{"fill":{"fallback":page["canvas"]["background"]}}});
-    let fragment =
-        crate::image::fragment_svg(raw, page, document, &background, kurbo::Affine::IDENTITY)?;
-    let mut result = crate::render::scene_to_rgba_proxy(&fragment, scale)?;
+    let mut result = if with_background {
+        let fragment =
+            crate::image::fragment_svg(raw, page, document, &background, kurbo::Affine::IDENTITY)?;
+        crate::render::scene_to_rgba_proxy(&fragment, scale)?
+    } else {
+        RgbaImage::new(w, h)
+    };
     for layer in page["layers"].as_array().unwrap() {
         if layer.get("visible").and_then(Value::as_bool) == Some(false) {
             continue;

@@ -296,6 +296,27 @@ checkpoint (reasons `move`, `copy-move`, `transform`, `paste`, `cut`) and empty 
 journal. Compositing is straight-alpha "over", so alpha is never discarded. Selection
 planes over 32 megapixels are refused before allocation.
 
+### Orientation and page-wide composition
+
+Composition algorithm 1. All of these run on a clone, validate, and replace the
+document in one transaction; the global `--dry-run` previews them.
+
+- `rotate ID --degrees 90|180|270` (clockwise; `-90` is `270`) and
+  `flip ID horizontal|vertical` rewrite the layer's tiles losslessly. A quarter turn
+  swaps width and height; the layer keeps its top-left position. The active and saved
+  selections of the layer are reoriented with the pixels. Checkpoint reasons are
+  `rotate-90`, `rotate-180`, `rotate-270`, `flip-horizontal`, `flip-vertical`.
+- `merge-visible ID` merges every visible raster sibling of `ID` into the bottom-most
+  one using `merge-down` semantics (opacity, blend mode and space of each upper layer
+  are applied). Hidden siblings in between move above the merged layer. A visible
+  non-raster node between the rasters is refused rather than reordered.
+- `stamp-visible --new-id NEW` composites everything visible on the page, without the
+  page background, into a new raster layer trimmed to its painted bounds and placed on
+  top of the top layer. Nothing is hidden or deleted. An empty result is an error.
+- `flatten --new-id NEW` does the same, then removes every visible node and puts the
+  composite in the first layer that held one. Hidden nodes and hidden layers are kept.
+  Visible locked nodes or layers block it.
+
 ### Input normalization
 
 `stroke --samples` takes device events. Each event is `[x, y]`, `[x, y, pressure]` or
@@ -408,6 +429,11 @@ pentool raster doc.pen lift paint --new-id subject-copy --cut
 pentool raster doc.pen move-pixels paint --dx 40 --dy -10 --copy
 pentool raster doc.pen transform-pixels paint --scale 1.5 --rotate 12
 pentool raster doc.pen paste paint --source subject-copy --x 200 --y 100 --opacity 0.8
+pentool raster doc.pen rotate paint --degrees 90
+pentool raster doc.pen flip paint horizontal
+pentool raster doc.pen merge-visible paint
+pentool raster doc.pen stamp-visible --new-id stamp
+pentool raster doc.pen flatten --new-id flat
 pentool raster doc.pen select-info paint
 pentool raster doc.pen select-clear paint
 pentool raster doc.pen tip-add grain --image grain.png --source darkness
@@ -437,5 +463,5 @@ Schema: `raster-paint-v1.schema.json`.
 
 ## Not yet implemented in this milestone
 
-Patch healing, rotate/flip, merge visible, stamp visible, flatten, presets, editor canvas
-painting, fuzz/performance suites (roadmap items 6-7, 10-12, 14).
+Patch healing, the stamp-visible clone source and composite flood scope, presets, editor
+canvas painting, fuzz/performance suites (roadmap items 6-7, 11-12, 14).
