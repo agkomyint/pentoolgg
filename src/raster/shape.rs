@@ -414,8 +414,8 @@ pub fn marquee(
         let mut plane = vec![0u8; w as usize * h as usize];
         let x0 = rx.floor().max(0.0) as usize;
         let y0 = ry.floor().max(0.0) as usize;
-        let x1 = ((rx + rw).floor() as usize + 1).min(w as usize);
-        let y1 = ((ry + rh).floor() as usize + 1).min(h as usize);
+        let x1 = ((rx + rw).floor().min(f64::from(w)) as usize + 1).min(w as usize);
+        let y1 = ((ry + rh).floor().min(f64::from(h)) as usize + 1).min(h as usize);
         let (cx, cy) = (rx + rw / 2.0, ry + rh / 2.0);
         let (ax, ay) = (rw / 2.0, rh / 2.0);
         for y in y0..y1 {
@@ -472,7 +472,8 @@ pub fn lasso(
             bail!("[invalid-selection] the lasso lies outside the {w}x{h} layer")
         }
         let first = (top.floor().max(0.0) as usize) * 4;
-        let last = (((bottom.floor() as i64 + 1).min(i64::from(h)) as usize) * 4).min(hu * 4);
+        let last = (((bottom.floor().min(f64::from(h)) as i64 + 1).min(i64::from(h)) as usize) * 4)
+            .min(hu * 4);
         let mut crossings: Vec<f64> = Vec::new();
         for sub in first..last {
             let ys = (sub as f64 + 0.5) / 4.0;
@@ -491,13 +492,13 @@ pub fn lasso(
                 let end = (-(-(pair[1] * 4.0 - 0.5)).floor()).min((wu * 4) as f64);
                 let (start, end) = (start as usize, end.max(0.0) as usize);
                 for k in start..end {
-                    row[k / 4] += 1;
+                    row[k / 4] = row[k / 4].saturating_add(1);
                 }
             }
         }
         let plane: Vec<u8> = counts
             .iter()
-            .map(|c| ((u32::from(*c) * 255 + 8) / 16) as u8)
+            .map(|c| ((u32::from(*c).min(16) * 255 + 8) / 16) as u8)
             .collect();
         Ok(from_plane(w, h, &feathered(plane, w, h, feather)?))
     })
