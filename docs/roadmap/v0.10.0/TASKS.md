@@ -6,20 +6,20 @@
 >
 > | # | Item | State |
 > |---|------|-------|
-> | 1 | Spec, schema, fixtures | Implemented: `docs/raster-paint-v1.md` + schema, valid/missing-tile/corrupt-tile fixtures, replayable checkpoints with auto-rolling journal, `raster verify [--replay]`, `raster repair --strategy replay\|transparent`, node `engine` with view-only rule for newer engines. Awaiting hosted CI evidence before ticking. |
-> | 2 | Raster layers | Implemented: add, resize, crop, trim, clear, duplicate, merge-down, explicit rasterize; groups, masks, clipping, effects, components (tiles retained through snapshots and fallbacks), packages, tile-aware diff, undo, dry run, multi-page selection (`tests/raster_layers.rs`). Awaiting hosted CI evidence before ticking. |
-> | 3 | Brush engine | Implemented: hard-round, soft-round, pixel, calligraphic and textured stamp (content-addressed `brush_tips` stored as tiles), size, hardness, spacing, opacity, flow, angle, roundness, seeded scatter, EMA `smoothing`, `buildup` on/off; journals pin tip digests; cross-platform tile-hash golden (`tests/raster_brush.rs`). Awaiting hosted CI evidence before ticking. |
-> | 4 | Input normalization | Implemented: `src/raster/input.rs` normalizes events with position, pressure and optional tilt, azimuth, twist and velocity (all-or-none per stroke). Velocity is derived from `t`, sub-0.5 px events are folded, and the last event is always kept. Journals hold canonical samples without timestamps. Brush `dynamics` maps inputs to size, flow, roundness and angle through explicit piecewise-linear curves with stable fallbacks. Existing journals and hashes are unchanged (`tests/raster_brush.rs`). Awaiting hosted CI evidence before ticking. |
-> | 5 | Erase and local blending | Implemented: pixel eraser, clear-to-transparency (`raster clear` and the `erase` blend), background eraser, smudge, blur, sharpen, dodge, burn, sponge and color-replace as stroke blends with defined sampling radius, accumulation, alpha behavior, clamped edge mode, tolerance and tone range; misapplied parameters are errors; replayable from the journal (`tests/raster_brush.rs`). Selection and mask interaction waits for item 9. Awaiting hosted CI evidence before ticking. |
-> | 6 | Clone stamp | Implemented: aligned and non-aligned clone strokes from the target layer or another raster layer with rotation and scale; strokes pin the exact source tiles in the journal so later source edits cannot reinterpret them; replay, verify and dry-run covered (`tests/raster_clone.rs`). Content beneath the layer is sampled with `clone-source --layer below` (item 10); live preview is in the editor panel (item 12). Awaiting hosted CI evidence before ticking. |
-> | 7 | Heal | Implemented: `heal` blend (texture from the source, tone from the surroundings, bounded deterministic solver, algorithm recorded in the journal), `heal-stroke` and automatic-source `heal-spot`; replay, determinism, limits and dry-run covered (`tests/raster_heal.rs`). `heal-patch` repairs the active selection from a source offset (`tests/raster_heal.rs`). Awaiting hosted CI evidence before ticking. |
-> | 8 | Flood fill and contiguous selection | Implemented: `fill` and `select-wand` with tolerance, 4/8 connectivity, global mode, gap policy, transparency handling, anti-aliased edges, bounded allocation, and refine modes (replace/add/subtract/intersect); an active selection limits strokes, clone, heal and fill with the selection pinned in the journal for replay (`tests/raster_fill.rs`). Not yet: composite sampling scope (item 10), mask output (item 9). Awaiting hosted CI evidence before ticking. |
-> | 9 | Selections and transforms | Implemented: `select-marquee` (rect/ellipse), `select-lasso`, `select-quickmask`, `select-modify` (feather, expand, contract, smooth, border, grow, similar, invert), saved selections (`select-save/load/delete`), and for selected pixels `lift` (copy/cut to a new layer, alpha kept), `move-pixels`, `transform-pixels` and `paste`; selections follow moved and transformed pixels (`tests/raster_select.rs`). Awaiting hosted CI evidence before ticking. |
-> | 10 | Layer operations | Implemented: trim, canvas resize (crop past bounds), merge down, explicit rasterization, `rotate`/`flip` (lossless, selections follow), `merge-visible`, `stamp-visible`, `flatten` (`tests/raster_compose.rs`). `clone-source --layer below` (frozen hidden snapshot) and `--scope composite` for fill and select-wand (CLI). Awaiting hosted CI evidence before ticking. |
-> | 11 | Presets and assets | Implemented: document `brush_presets` (`preset-add/remove/show`, `presets`), `--preset` on stroke, clone, heal and quick-mask, portable `preset-export`/`preset-import` with content-addressed tips, opt-in `preset-import-gbr` and `preset-import-mypaint` that report unsupported settings (`tests/raster_presets.rs`). Awaiting hosted CI evidence before ticking. |
-> | 12 | Editor UI | Implemented: `POST /api/raster` and the Raster canvas panel (brush/eraser/clone/heal/quick mask/marquee/lasso/wand, cursor outline, live preview, stabilizer line, clone marker, zoom/rotate; `server::tests`). Rulers, guides (click a ruler), snapping to grid and guides, and a navigator are browser-side view aids (`web/raster-panel.js`; not covered by automated browser tests). Awaiting hosted CI evidence before ticking. |
-> | 13 | CLI and batch | Implemented: every raster operation has a CLI command, and `pentool raster DOC batch OPS.json` (shared dispatcher with `/api/raster`) runs up to 256 operations atomically with presets, selections and retouch actions, event/sample/file limits checked first, and summaries of changed bounds and tile hashes (`tests/raster_batch.rs`). Awaiting hosted CI evidence before ticking. |
-> | 14 | Performance, fuzz, goldens | Implemented locally: seeded fuzzers, seam/alpha/pressure/replay tests (`tests/raster_hardening.rs`) and ignored benchmarks (`tests/raster_perf.rs`, results in `docs/performance.md`). Known limit: per-stroke cost grows over a long session. Cross-platform pixel goldens still need hosted CI. Awaiting hosted CI evidence before ticking. |
+> | 1 | Spec, schema, fixtures | Implemented: `docs/raster-paint-v1.md` + schema, valid/missing-tile/corrupt-tile fixtures, replayable checkpoints with auto-rolling journal, `raster verify [--replay]`, `raster repair --strategy replay\|transparent`, node `engine` with view-only rule for newer engines. Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 2 | Raster layers | Implemented: add, resize, crop, trim, clear, duplicate, merge-down, explicit rasterize; groups, masks, clipping, effects, components (tiles retained through snapshots and fallbacks), packages, tile-aware diff, undo, dry run, multi-page selection (`tests/raster_layers.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 3 | Brush engine | Implemented: hard-round, soft-round, pixel, calligraphic and textured stamp (content-addressed `brush_tips` stored as tiles), size, hardness, spacing, opacity, flow, angle, roundness, seeded scatter, EMA `smoothing`, `buildup` on/off; journals pin tip digests; cross-platform tile-hash golden (`tests/raster_brush.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 4 | Input normalization | Implemented: `src/raster/input.rs` normalizes events with position, pressure and optional tilt, azimuth, twist and velocity (all-or-none per stroke). Velocity is derived from `t`, sub-0.5 px events are folded, and the last event is always kept. Journals hold canonical samples without timestamps. Brush `dynamics` maps inputs to size, flow, roundness and angle through explicit piecewise-linear curves with stable fallbacks. Existing journals and hashes are unchanged (`tests/raster_brush.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 5 | Erase and local blending | Implemented: pixel eraser, clear-to-transparency (`raster clear` and the `erase` blend), background eraser, smudge, blur, sharpen, dodge, burn, sponge and color-replace as stroke blends with defined sampling radius, accumulation, alpha behavior, clamped edge mode, tolerance and tone range; misapplied parameters are errors; replayable from the journal (`tests/raster_brush.rs`). Selection and mask interaction waits for item 9. Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 6 | Clone stamp | Implemented: aligned and non-aligned clone strokes from the target layer or another raster layer with rotation and scale; strokes pin the exact source tiles in the journal so later source edits cannot reinterpret them; replay, verify and dry-run covered (`tests/raster_clone.rs`). Content beneath the layer is sampled with `clone-source --layer below` (item 10); live preview is in the editor panel (item 12). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 7 | Heal | Implemented: `heal` blend (texture from the source, tone from the surroundings, bounded deterministic solver, algorithm recorded in the journal), `heal-stroke` and automatic-source `heal-spot`; replay, determinism, limits and dry-run covered (`tests/raster_heal.rs`). `heal-patch` repairs the active selection from a source offset (`tests/raster_heal.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 8 | Flood fill and contiguous selection | Implemented: `fill` and `select-wand` with tolerance, 4/8 connectivity, global mode, gap policy, transparency handling, anti-aliased edges, bounded allocation, and refine modes (replace/add/subtract/intersect); an active selection limits strokes, clone, heal and fill with the selection pinned in the journal for replay (`tests/raster_fill.rs`). Not yet: composite sampling scope (item 10), mask output (item 9). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 9 | Selections and transforms | Implemented: `select-marquee` (rect/ellipse), `select-lasso`, `select-quickmask`, `select-modify` (feather, expand, contract, smooth, border, grow, similar, invert), saved selections (`select-save/load/delete`), and for selected pixels `lift` (copy/cut to a new layer, alpha kept), `move-pixels`, `transform-pixels` and `paste`; selections follow moved and transformed pixels (`tests/raster_select.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 10 | Layer operations | Implemented: trim, canvas resize (crop past bounds), merge down, explicit rasterization, `rotate`/`flip` (lossless, selections follow), `merge-visible`, `stamp-visible`, `flatten` (`tests/raster_compose.rs`). `clone-source --layer below` (frozen hidden snapshot) and `--scope composite` for fill and select-wand (CLI). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 11 | Presets and assets | Implemented: document `brush_presets` (`preset-add/remove/show`, `presets`), `--preset` on stroke, clone, heal and quick-mask, portable `preset-export`/`preset-import` with content-addressed tips, opt-in `preset-import-gbr` and `preset-import-mypaint` that report unsupported settings (`tests/raster_presets.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 12 | Editor UI | Implemented: `POST /api/raster` and the Raster canvas panel (brush/eraser/clone/heal/quick mask/marquee/lasso/wand, cursor outline, live preview, stabilizer line, clone marker, zoom/rotate; `server::tests`). Rulers, guides (click a ruler), snapping to grid and guides, and a navigator are browser-side view aids (`web/raster-panel.js`; not covered by automated browser tests). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 13 | CLI and batch | Implemented: every raster operation has a CLI command, and `pentool raster DOC batch OPS.json` (shared dispatcher with `/api/raster`) runs up to 256 operations atomically with presets, selections and retouch actions, event/sample/file limits checked first, and summaries of changed bounds and tile hashes (`tests/raster_batch.rs`). Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
+> | 14 | Performance, fuzz, goldens | Implemented: seeded fuzzers, seam/alpha/pressure/replay tests (`tests/raster_hardening.rs`) and ignored benchmarks (`tests/raster_perf.rs`, results in `docs/performance.md`). Known limit: per-stroke cost grows over a long session. Cross-platform pixel goldens still need hosted CI. Hosted CI green (run 37737878203 on 793eebf: Linux, Windows, macOS ARM and Intel). |
 
 Complete the missing hands-on raster workflow after v0.7.0 image operations,
 v0.8.0 compositing, and v0.9.0 model-assisted editing. Add paintable raster layers,
@@ -67,76 +67,76 @@ on browser timing. Periodic content-addressed checkpoints bound replay time.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the raster-paint specification.** Define pixel formats, tile
+- [x] **1. Freeze the raster-paint specification.** Define pixel formats, tile
   dimensions, sparse storage, canonical stroke samples, interpolation, rounding,
   alpha math, checkpointing, journal compaction, corruption recovery, resource
   limits, and compatibility behavior. Publish JSON Schema plus normative tile,
   stroke, and invalid-document fixtures.
 
-- [ ] **2. Add raster-paint layers and migration.** Create, resize, crop, clear,
+- [x] **2. Add raster-paint layers and migration.** Create, resize, crop, clear,
   duplicate, merge, and explicitly rasterize layers through shared scene and
   transaction APIs. Integrate tree/search, bounds, groups, masks, clipping,
   effects, components, packages, diff, undo/redo, and multi-page selection.
 
-- [ ] **3. Implement the deterministic brush engine.** Start with hard round,
+- [x] **3. Implement the deterministic brush engine.** Start with hard round,
   soft round, pixel, calligraphic, and textured stamp brushes. Support size,
   hardness, spacing, opacity, flow, angle, roundness, scatter, smoothing, and
   buildup with pinned algorithms. Every stochastic property uses a stored seed.
 
-- [ ] **4. Normalize pen, mouse, and touch input.** Support position, pressure,
+- [x] **4. Normalize pen, mouse, and touch input.** Support position, pressure,
   tilt, azimuth, twist, and velocity only where the device reports them. Presets
   map inputs through explicit curves with stable fallbacks. Palm rejection and
   gesture handling remain UI concerns and cannot alter committed stroke math.
 
-- [ ] **5. Add erasing and local blending.** Provide pixel eraser, background
+- [x] **5. Add erasing and local blending.** Provide pixel eraser, background
   eraser, clear-to-transparency, smudge, blur, sharpen, dodge, burn, sponge, and
   color-replace tools. Define their sampling radius, accumulation, channel and
   alpha behavior, edge mode, and interaction with selections and masks.
 
-- [ ] **6. Add clone stamp.** Support aligned and non-aligned sampling, explicit
+- [x] **6. Add clone stamp.** Support aligned and non-aligned sampling, explicit
   source point, current/below/specified-layer sampling, transforms, and live
   preview. Stroke records pin the sampled composite or required source revisions
   so later layer changes cannot silently reinterpret an old clone operation.
 
-- [ ] **7. Add healing and patch tools.** Implement deterministic spot healing,
+- [x] **7. Add healing and patch tools.** Implement deterministic spot healing,
   healing brush, and selection-based patching in Rust with bounded algorithms.
   Separate texture transfer from tone/color matching, expose changed-region
   previews, and version the algorithm. AI cleanup remains an optional v0.9.0
   alternative, never the hidden implementation of a core retouch tool.
 
-- [ ] **8. Add flood fill and contiguous selection.** Implement tolerance,
+- [x] **8. Add flood fill and contiguous selection.** Implement tolerance,
   connectivity, anti-aliasing, sample scope, gap policy, and transparency handling.
   Bound traversal before allocation and provide progress/cancellation for large
   canvases. Results can fill pixels, create masks, or refine selections.
 
-- [ ] **9. Add pixel selections and transforms.** Provide marquee, lasso, magic
+- [x] **9. Add pixel selections and transforms.** Provide marquee, lasso, magic
   wand, quick-mask painting, feather, expand, contract, smooth, border, grow,
   similar, invert, and save/load. Selected pixels can move, transform, copy, cut,
   paste, float, or become a new raster layer without losing alpha.
 
-- [ ] **10. Add content-preserving layer operations.** Implement trim, canvas
+- [x] **10. Add content-preserving layer operations.** Implement trim, canvas
   resize, rotate/flip, merge visible, merge down, stamp visible, flatten, and
   explicit rasterization. Every destructive-looking action supports dry run,
   revision guards, one transaction, and complete undo until bounded history prunes
   it under documented policy.
 
-- [ ] **11. Add brush presets and assets.** Store presets as readable data with
+- [x] **11. Add brush presets and assets.** Store presets as readable data with
   versioned engine requirements and content-addressed texture tips. Importing
   third-party brushes is opt-in and converts supported properties explicitly;
   unknown dynamics are reported rather than guessed. Presets contain no scripts.
 
-- [ ] **12. Build editor-grade canvas interaction.** Add cursor outlines, sampled
+- [x] **12. Build editor-grade canvas interaction.** Add cursor outlines, sampled
   previews, stabilizer feedback, source markers, quick mask, selection edges,
   rulers, guides, snapping, navigator, zoom/rotate canvas, and tablet-friendly
   controls. Preview may be approximate while the committed Rust result remains
   authoritative and replaces it promptly.
 
-- [ ] **13. Add CLI and batch parity.** Allow deterministic strokes and retouch
+- [x] **13. Add CLI and batch parity.** Allow deterministic strokes and retouch
   operations from compact JSON sample streams, preset references, selections, and
   masks. Enforce event, point, tile, surface, and output limits before expensive
   work. Summaries report changed bounds and tile hashes without dumping pixels.
 
-- [ ] **14. Harden performance and correctness.** Benchmark stroke latency, dirty
+- [x] **14. Harden performance and correctness.** Benchmark stroke latency, dirty
   tile count, checkpoint cadence, replay, zoom, compositing, memory peaks, package
   size, and undo across large sparse and dense canvases. Fuzz journals, tiles,
   presets, sample streams, selection edges, and malformed brush assets. Run seam,
