@@ -192,6 +192,29 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **10. Add wide-gamut and HDR RGB delivery.** Define primaries, transfer
   functions, inspection, tone mapping, SDR conversion, metadata, and validation.
+  *Status: implemented for review.* This item has five parts:
+  - stage 11 in `src/photo/output.rs` (look table and tone curve, the shoulder
+    scaled to the output peak, perceptual or relative-colorimetric gamut
+    mapping, quantization, measurement, chunk generation and verification),
+    specified in "Wide-gamut and HDR delivery" in `docs/photography-v1.md`;
+  - the camera profile's `ProfileLookTable*` and `ProfileToneCurve` in
+    `src/photo/profile.rs`, carried by `pipeline::Developed::rendering`;
+  - generated ICC v4 display profiles in `src/photo/icc.rs`, and tagged PNG
+    writing and chunk reading in `src/photo/png.rs`;
+  - `pentool photo render` with `--intent`, `--hdr pq|hlg` and `--headroom`,
+    reporting `delivery`, and the new `pentool photo inspect`;
+  - `tests/v0110_delivery.rs`.
+
+  Decisions:
+  - SDR white is 203 cd/m²; HLG puts it at signal 0.75, which limits HLG
+    headroom to about 1.92 stops, and measures light at a 1000 cd/m² display;
+  - perceptual mapping touches only out-of-gamut pixels, so in-gamut values
+    round-trip exactly;
+  - HDR output carries `cICP`, `mDCV` and `cLLI` but no ICC profile; SDR carries
+    ICC and, where H.273 has codes, `cICP`;
+  - the editor's Display P3 preview and overlays move to item 15.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **11. Add variants, snapshots, and synchronized edits.** Virtual copies do
   not duplicate sources; synchronization supports selected settings and exceptions.
 - [ ] **12. Add local organization.** Provide ratings, picks, labels, keywords,

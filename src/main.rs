@@ -877,12 +877,22 @@ enum PhotoAction {
         variant: String,
         #[arg(long)]
         out: PathBuf,
-        /// Output color space: srgb, display-p3, adobe-rgb-1998, prophoto or rec2020.
-        #[arg(long, default_value = "srgb")]
-        space: String,
-        /// Bits per channel: 8 or 16.
-        #[arg(long, default_value_t = 8)]
-        depth: u8,
+        #[command(flatten)]
+        output: OutputArgs,
+    },
+    /// Develop a variant through output rendering and report its histogram,
+    /// gamut and luminance without writing a file.
+    Inspect {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        #[arg(long, default_value = "master")]
+        variant: String,
+        #[command(flatten)]
+        output: OutputArgs,
+        /// Histogram bins per channel (1 to 1024).
+        #[arg(long, default_value_t = 64)]
+        bins: usize,
     },
     /// Print a variant's resolved frame (sizes, crop, lens steps) without decoding.
     Info {
@@ -935,6 +945,38 @@ enum PhotoAction {
         #[command(flatten)]
         common: MergeArgs,
     },
+}
+
+#[derive(clap::Args)]
+struct OutputArgs {
+    /// Output color space: srgb, display-p3, adobe-rgb-1998, prophoto or rec2020,
+    /// optionally with :linear. Default: srgb, or rec2020 with --hdr.
+    #[arg(long)]
+    space: Option<String>,
+    /// Bits per channel: 8 or 16. Default: 8, or 16 with --hdr.
+    #[arg(long)]
+    depth: Option<u8>,
+    /// Gamut mapping: perceptual or relative-colorimetric.
+    #[arg(long, default_value = "perceptual")]
+    intent: String,
+    /// HDR encoding in rec2020: pq or hlg.
+    #[arg(long)]
+    hdr: Option<String>,
+    /// HDR headroom in stops above 203 cd/m² SDR white (0 to 4; HLG at most about 1.92). Default 1.5.
+    #[arg(long)]
+    headroom: Option<f64>,
+}
+
+impl OutputArgs {
+    fn resolve(&self) -> Result<pentool::photo::output::Output> {
+        pentool::photo::output::Output::new(
+            self.space.as_deref(),
+            self.depth,
+            &self.intent,
+            self.hdr.as_deref(),
+            self.headroom,
+        )
+    }
 }
 
 #[derive(clap::Args)]
@@ -2760,40 +2802,66 @@ async fn run() -> Result<()> {
                 id,
                 variant,
                 out,
-                space,
-                depth,
+                output,
             } => {
-                use pentool::photo::pixels::{self, Depth, Dither};
-                let bits = depth;
-                let depth = match bits {
-                    8 => Depth::Eight,
-                    16 => Depth::Sixteen,
-                    other => anyhow::bail!("[invalid-input] --depth {other} must be 8 or 16"),
-                };
-                if !pentool::photo::color::NAMED_SPACES.contains(&space.as_str()) {
-                    anyhow::bail!(
-                        "[invalid-input] --space {space:?} must be one of {}",
-                        pentool::photo::color::NAMED_SPACES.join(", ")
-                    )
-                }
-                let color_space = pentool::photo::color::ColorSpace::named(&space)?;
+                use pentool::photo::output;
+                let resolved = output.resolve()?;
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let developed = pentool::photo::catalog::render_photo(&raw, &input, &id, &variant)?;
-                let (raster, encoded) =
-                    pixels::from_working(&developed.image, &color_space, depth, Dither::None)?;
-                let png = pentool::photo::png::write(&raster)?;
+                let encoded = output::encode_png(
+                    &developed.image,
+                    &developed.rendering,
+                    true,
+                    &resolved,
+                    output::DEFAULT_BINS,
+                )?;
                 let temporary = out.with_extension("png.tmp");
-                fs::write(&temporary, &png)
+                fs::write(&temporary, &encoded.bytes)
                     .with_context(|| format!("write {}", temporary.display()))?;
                 fs::rename(&temporary, &out).with_context(|| format!("write {}", out.display()))?;
                 let mut report = developed.report;
                 report["photo"] = serde_json::json!(id);
                 report["variant"] = serde_json::json!(variant);
                 report["out"] = serde_json::json!(out.display().to_string());
-                report["space"] = serde_json::json!(space);
-                report["depth"] = serde_json::json!(bits);
-                report["clipped_pixels"] = serde_json::json!(encoded.clipped_pixels);
-                report["bytes"] = serde_json::json!(png.len());
+                report["space"] = serde_json::json!(resolved.space.id);
+                report["depth"] = serde_json::json!(resolved.depth.bits());
+                report["clipped_pixels"] = encoded.report["clipped_pixels"].clone();
+                report["bytes"] = serde_json::json!(encoded.bytes.len());
+                report["delivery"] = encoded.report;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Inspect {
+                input,
+                id,
+                variant,
+                output,
+                bins,
+            } => {
+                use pentool::photo::output;
+                let resolved = output.resolve()?;
+                if !(1..=output::MAX_BINS).contains(&bins) {
+                    anyhow::bail!(
+                        "[invalid-input] --bins {bins} must be 1–{}",
+                        output::MAX_BINS
+                    )
+                }
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let developed = pentool::photo::catalog::render_photo(&raw, &input, &id, &variant)?;
+                let measured = output::inspect(
+                    &developed.image,
+                    &developed.rendering,
+                    true,
+                    &resolved,
+                    bins,
+                )?;
+                let report = serde_json::json!({
+                    "photo": id,
+                    "variant": variant,
+                    "width": developed.image.width,
+                    "height": developed.image.height,
+                    "delivery": measured,
+                });
                 println!("{}", serde_json::to_string_pretty(&report)?);
                 Ok(())
             }

@@ -2,7 +2,8 @@
 //!
 //! Unlike `image::decode_source_pixels` (the v5 `srgb8` contract), this path
 //! keeps 16-bit samples. Gray and gray-alpha PNGs expand losslessly to RGB(A).
-//! Output PNGs are untagged; the caller records the color space separately.
+//! [`write_tagged`] adds color chunks (`cICP`, `mDCV`, `cLLI`, `iCCP`) after
+//! `IHDR`; [`chunks`] reads them back with their CRCs checked.
 use super::pixels::{check_surface, Raster, Samples};
 use crate::image::MAX_SOURCE_BYTES;
 use anyhow::{bail, Context, Result};
@@ -98,6 +99,92 @@ pub fn write(raster: &Raster) -> Result<Vec<u8>> {
     Ok(bytes.into_inner())
 }
 
+/// A PNG chunk: its type and data.
+pub type Chunk = ([u8; 4], Vec<u8>);
+
+/// The PNG file signature.
+const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+
+/// Most chunks [`chunks`] reads before refusing the file.
+const MAX_CHUNKS: usize = 100_000;
+
+/// CRC-32 (ISO 3309) as PNG uses it.
+pub fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+fn chunk_bytes((kind, data): &Chunk) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + 12);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    out.extend_from_slice(&crc32(&out[4..]).to_be_bytes());
+    out
+}
+
+/// Encode `raster` with `extra` chunks inserted directly after `IHDR`, in order.
+pub fn write_tagged(raster: &Raster, extra: &[Chunk]) -> Result<Vec<u8>> {
+    let png = write(raster)?;
+    // Signature (8) and IHDR (4 + 4 + 13 + 4).
+    const AFTER_IHDR: usize = 33;
+    if png.len() < AFTER_IHDR || &png[12..16] != b"IHDR" {
+        bail!("[malformed-resource] the PNG encoder did not start with IHDR")
+    }
+    let mut out = png[..AFTER_IHDR].to_vec();
+    for chunk in extra {
+        out.extend_from_slice(&chunk_bytes(chunk));
+    }
+    out.extend_from_slice(&png[AFTER_IHDR..]);
+    Ok(out)
+}
+
+/// Every chunk of a PNG except `IDAT`, in file order, with CRCs verified.
+pub fn chunks(bytes: &[u8]) -> Result<Vec<Chunk>> {
+    if !bytes.starts_with(&SIGNATURE) {
+        bail!("[malformed-resource] not a PNG")
+    }
+    let mut out = Vec::new();
+    let mut at = 8usize;
+    for _ in 0..MAX_CHUNKS {
+        let header = bytes
+            .get(at..at + 8)
+            .context("[malformed-resource] PNG ends inside a chunk header")?;
+        let length = u32::from_be_bytes(header[..4].try_into().unwrap()) as usize;
+        let kind: [u8; 4] = header[4..8].try_into().unwrap();
+        let end = at
+            .checked_add(12)
+            .and_then(|v| v.checked_add(length))
+            .filter(|end| *end <= bytes.len())
+            .context("[malformed-resource] PNG chunk runs past the end of the file")?;
+        let stored = u32::from_be_bytes(bytes[end - 4..end].try_into().unwrap());
+        if crc32(&bytes[at + 4..end - 4]) != stored {
+            bail!(
+                "[malformed-resource] PNG chunk {} has a bad CRC",
+                String::from_utf8_lossy(&kind)
+            )
+        }
+        if &kind != b"IDAT" {
+            out.push((kind, bytes[at + 8..end - 4].to_vec()));
+        }
+        at = end;
+        if &kind == b"IEND" {
+            return Ok(out);
+        }
+    }
+    bail!("[limit-exceeded] PNG has more than {MAX_CHUNKS} chunks")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +224,21 @@ mod tests {
     }
 
     #[test]
+    fn tagged_chunks_follow_ihdr_and_read_back() {
+        let raster = Raster::new(1, 1, false, Samples::Sixteen(vec![1, 2, 3])).unwrap();
+        let extra = [(*b"cICP", vec![9, 16, 0, 1]), (*b"cLLI", vec![0; 8])];
+        let bytes = write_tagged(&raster, &extra).unwrap();
+        assert_eq!(&bytes[37..41], b"cICP");
+        let read_back = chunks(&bytes).unwrap();
+        assert_eq!(read_back[0].0, *b"IHDR");
+        assert_eq!(&read_back[1..3], &extra);
+        assert_eq!(read(&bytes).unwrap().raster, raster);
+        let mut broken = bytes.clone();
+        broken[41] ^= 1;
+        assert!(chunks(&broken).unwrap_err().to_string().contains("bad CRC"));
+    }
+
+    #[test]
     fn hostile_input_is_refused() {
         assert!(read(b"")
             .unwrap_err()
@@ -154,20 +256,5 @@ mod tests {
         bytes[29..33].copy_from_slice(&crc.to_be_bytes());
         let error = read(&bytes).unwrap_err().to_string();
         assert!(error.starts_with("[limit-exceeded]"), "{error}");
-    }
-
-    fn crc32(bytes: &[u8]) -> u32 {
-        let mut crc = !0u32;
-        for byte in bytes {
-            crc ^= u32::from(*byte);
-            for _ in 0..8 {
-                crc = if crc & 1 == 1 {
-                    (crc >> 1) ^ 0xedb8_8320
-                } else {
-                    crc >> 1
-                };
-            }
-        }
-        !crc
     }
 }

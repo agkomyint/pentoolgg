@@ -235,8 +235,8 @@ Implemented in `src/photo/` (item 2).
   `transfer.decode(c / max)` from an `f64` table. The `f64` matrix to the working
   space is then applied, and only the result is rounded to `f32`.
 - **Encode.** Working `f32` values go through the `f64` matrix to linear output
-  RGB, `v`. `v` is clipped to [0, 1]: a relative colorimetric clip, with perceptual
-  gamut mapping arriving in item 10. NaN counts as 0. The code is the count of
+  RGB, `v`. `v` is clipped to [0, 1] (a relative colorimetric clip; `photo render` maps
+  the gamut first, see "Wide-gamut and HDR delivery"). NaN counts as 0. The code is the count of
   `c` in `1..=max` with `decode((c - t) / max) <= v`. That is round half up of
   `encode(v)` with offset `t = 0.5`, computed by binary search over `f64`
   thresholds with no per-pixel `pow`.
@@ -253,7 +253,7 @@ Implemented in `src/photo/` (item 2).
   alpha) at most 2 GiB.
 - **PNG.** 8- and 16-bit PNG are read and written through the existing codec.
   Gray and gray-alpha expand losslessly to RGB(A). Orientation is reported, not
-  applied. Output PNGs are untagged until item 10 adds embedded profiles.
+  applied. Delivered PNGs carry color chunks; see "Wide-gamut and HDR delivery".
 - **Measured precision.** The fixture is `photo-rgb16-p3.png`; tests are in
   `tests/v0110_photo_precision.rs` and `src/photo/pixels.rs`.
   - Bit-exact 16-bit round trips through the working space, for every code on
@@ -981,24 +981,89 @@ inputs. Algorithm version 1 is implemented in `src/photo/merge.rs`.
 
 ### Wide-gamut and HDR delivery
 
-- Output spaces come from the color space table. SDR rendering of scene-linear
-  data applies, in order: the profile look table and tone curve, if any; the
-  process-1 shoulder on the max(R,G,B) norm, `f(m) = m` for `m <= 0.8` and
-  `0.8 + 0.2 (m - 0.8) / (m - 0.6)` above (hue preserving, asymptote 1); and gamut
-  mapping (`relative-colorimetric` clipping, or the default `perceptual`, which
-  desaturates toward luminance along constant hue until the color is in gamut).
-- HDR delivery is `rec2020` with `pq` or `hlg`, a `headroom` of 0–4 stops above SDR
-  white (203 cd/m² reference white), written as 16-bit PNG with `cICP`, `mDCV` and
-  `cLLI` chunks. An SDR rendition comes from the same pipeline. Gain-map JPEG
-  (ISO 21496-1) is excluded from v0.11.0.
-- `photo inspect` reports the histogram in the output space, clipped and
-  out-of-gamut pixel counts, the maximum luminance, and the gamut used. Export
-  validates its metadata against its pixels, for example `cLLI` against the
-  measured maximum.
-- The editor previews in sRGB by default, or in Display P3 when the browser offers
-  a `display-p3` canvas. Preview images carry matching `iCCP`/`cICP`. The browser
-  and operating system own monitor calibration. HDR display preview is out of scope:
-  the editor shows the SDR rendition with clipping and gamut overlays.
+Stage 11 (`src/photo/output.rs`) turns the developed working image into output
+codes. In order, per pixel:
+
+1. **Look and tone.** Scene-referred sources apply the camera profile's look
+   table (`ProfileLookTableDims`/`Data`/`Encoding`, 50981/50982/51108, read and
+   validated like the hue/sat map) and then its `ProfileToneCurve` (50940).
+   The tone curve holds 2–4096 points from (0, 0) to (1, 1) with increasing x
+   and non-decreasing y in 0–1; a curve of only identity points counts as
+   absent. It is interpolated by a monotone cubic (Fritsch–Carlson tangents)
+   and extended linearly with its end slopes outside [0, 1]. It is applied
+   hue-preservingly like the DNG SDK's `RefBaselineRGBTone`: the curve maps
+   the largest and smallest channel, and the middle channel keeps its relative
+   position between them. `matrix-only` drops both. Derived merge DNGs carry
+   neither.
+2. **Gamut statistics.** For each named space, a pixel with working luminance
+   `Y > 0` counts as outside that gamut when any of its linear channels there
+   is below `-1e-4 · Y`.
+3. **Output matrix** to linear output RGB `v`, relative to SDR white.
+4. **Shoulder.** Scene-referred sources apply the process-1 shoulder on the
+   max(R,G,B) norm, scaled to the output peak `P` (1 for SDR,
+   `2^headroom` for HDR): with `r = m / P`, `f(m) = m` for `r <= 0.8`, otherwise
+   `P · (0.8 + 0.2 (r - 0.8) / (r - 0.6))`. Every channel is scaled by `f(m)/m`,
+   so channel ratios (hue) are kept, the slope is 1 at the knee, and the
+   asymptote is `P`.
+5. **Gamut mapping.** A pixel is out of gamut when any channel's signal
+   (`v` times the signal scale below) lies outside the range that quantizes
+   to a code (the clip report range). `relative-colorimetric` clips each
+   channel. `perceptual` (the default) moves the pixel toward the neutral of
+   the same output luminance `Y` (a straight line in chromaticity toward the
+   white, so the dominant wavelength is kept) just far enough that every
+   channel lies in `[0, P]`: `s = min(Y / (Y - c))` over channels `c < 0` and
+   `(P - Y) / (c - Y)` over channels `c > P`, then `v' = Y + s (v - Y)`. When
+   `Y <= 0` or `Y >= P`, only clipping can help and the pixel is clipped. Only
+   out-of-gamut pixels are touched, so in-gamut values round-trip exactly.
+6. **Quantization** with the output transfer, as in "Working representation".
+
+Display-referred sources skip steps 1 and 4.
+
+**SDR output** is any named space, optionally `:linear`, at 8 or 16 bits
+(default `srgb`, 8). The PNG carries an `iCCP` chunk holding a generated ICC
+v4.3 matrix/TRC display profile (`src/photo/icc.rs`: fixed date 2026-01-01,
+zero profile ID, D50 PCS, `desc`, `cprt`, `wtpt`, `chad`, `rXYZ`/`gXYZ`/`bXYZ`
+from the Bradford-adapted primaries, and one shared `para` curve), so the same
+space always produces the same bytes. The header rendering intent is 0 for
+`perceptual` and 1 for `relative-colorimetric`. Spaces with ITU-T H.273 codes
+also carry `cICP` (primaries, transfer, matrix 0, full range): `srgb` (1, 13),
+`display-p3` (12, 13), `rec2020` (9, 1), with transfer 8 for `:linear`.
+`adobe-rgb-1998` and `prophoto` have no `cICP`.
+
+**HDR output** (`--hdr pq|hlg`) is `rec2020` at 16 bits; another space or 8 bits
+is `[invalid-input]`. `--headroom` is 0–4 stops above SDR white (default 1.5);
+it is refused without `--hdr`. SDR white is 203 cd/m² (BT.2408):
+
+- `pq`: the linear signal is `v · 203 / 10000`; the mastering peak is
+  `203 · 2^headroom` cd/m².
+- `hlg`: the linear scene signal is `v · E(0.75)`, so SDR white lands at signal
+  0.75, and the headroom is at most `-log2 E(0.75)` ≈ 1.92 stops; more is
+  `[invalid-input]`. Light levels assume the nominal 1000 cd/m² display:
+  `nits = 1000 · Ys^0.2 · E` with `Ys = 0.2627 R + 0.6780 G + 0.0593 B`.
+
+HDR PNGs carry, in order after `IHDR`: `cICP` (9, 16 or 18, 0, 1); `mDCV` with the
+Rec. 2020 primaries and D65 white in 0.00002 units, a maximum luminance of
+`ceil(max(peak, MaxCLL) · 10000)` (peak 1000 cd/m² for HLG) and a minimum of 1
+(0.0001 cd/m²); and `cLLI` with the measured MaxCLL and MaxFALL. HDR output has
+no ICC profile. The SDR rendition is the same command without `--hdr`. Gain-map
+JPEG (ISO 21496-1) is excluded from v0.11.0.
+
+**Measurement and validation.** Statistics are computed from the output codes,
+not the floating-point image. Pixels whose alpha code is 0 are skipped and
+counted as `transparent_pixels`. The histogram has `bins` equal code ranges per
+channel (bin = `code · bins / (max + 1)`, 64 by default, 1–1024). The maximum
+luminance is relative to SDR white. For HDR, MaxCLL is the brightest pixel's
+largest channel in cd/m² and MaxFALL the frame average of that value
+(CTA-861.3). Before a file is accepted, the written PNG is decoded again: its
+codes must equal the rendered codes, and its `cICP`, `mDCV`, `cLLI` and `iCCP`
+chunks must equal those recomputed from the decoded codes, with
+`MaxFALL <= MaxCLL <= mDCV maximum`. A mismatch is `[malformed-resource]` and
+nothing is written.
+
+The editor's Display P3 preview with matching `iCCP`/`cICP`, and its clipping
+and gamut overlays, belong to the editor work (item 15). The browser and
+operating system own monitor calibration. HDR display preview is out of scope:
+the editor shows the SDR rendition.
 
 ## Catalog (`photography`)
 
@@ -1308,12 +1373,20 @@ reports the same fields, with `unsupported` listing what was not converted.
 pixels: `{decoded, oriented, output, orientation, crop: {constrained, rect},
 lens: [steps], geometry, invalid_pixels}`.
 
-`photo render DOC PHOTO [--variant ID] --out FILE.png [--space NAME] [--depth 8|16]`
-develops the variant through the stages implemented so far and writes a PNG. The
-space is one of the named RGB spaces (default `srgb`), and out-of-gamut values are
-clipped relative-colorimetrically. It reports the frame plus the white, `invalid_pixels`,
-`clipped_pixels` and `bytes`. Only raw sources render for now; a rendered source
-is `[unsupported-capability]`.
+`photo render DOC PHOTO [--variant ID] --out FILE.png [--space NAME] [--depth 8|16]
+[--intent perceptual|relative-colorimetric] [--hdr pq|hlg] [--headroom STOPS]`
+develops the variant through stage 11 and writes a verified, tagged PNG through
+a temporary file and rename. It reports the frame plus the white,
+`invalid_pixels`, `space`, `depth`, `clipped_pixels`, `bytes` and `delivery`:
+`{space, transfer, depth, intent, hdr: {transfer, headroom, reference_white_nits,
+peak_nits} | null, cicp, icc, pixels, transparent_pixels, out_of_gamut_pixels,
+mapped_pixels, clipped_pixels, outside_gamut: {space: count}, max_luminance,
+histogram: {bins, r, g, b}}`, plus `max_cll` and `max_fall` for HDR. Only raw
+sources render for now; a rendered source is `[unsupported-capability]`.
+
+`photo inspect DOC PHOTO [--variant ID] [the same output options] [--bins N]`
+runs the same development and stage 11 without writing a file and reports
+`{photo, variant, width, height, delivery}`.
 
 `raw develop` is a shorthand for setting values in `develop` groups. Every mutating
 command takes `--dry-run` and `--if-revision`, commits through the shared

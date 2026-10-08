@@ -143,6 +143,14 @@ pub struct Developed {
     pub image: Working,
     pub invalid_pixels: u64,
     pub report: Value,
+    /// The camera profile's stage-11 look table and tone curve.
+    pub rendering: profile::Rendering,
+}
+
+/// The stage-11 rendering of the variant's camera profile.
+pub fn rendering(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<profile::Rendering> {
+    let load = |digest: &str| profiles(digest).map(|(bytes, _)| bytes);
+    Ok(profile::select(develop["raw"].get("camera_profile"), dng, &load)?.rendering)
 }
 
 /// The context of stages 6–10 for a planned development.
@@ -164,6 +172,7 @@ pub fn develop(
     masks: Option<&local::Lookup>,
 ) -> Result<Developed> {
     let plan = plan(dng, develop, profiles)?;
+    let rendering = rendering(dng, develop, profiles)?;
     // Refuse an unresolved dehaze and load masks before any decoding work.
     adjust::airlight(develop)?;
     let mut local = local::Local::new(develop, masks)?;
@@ -191,6 +200,7 @@ pub fn develop(
         image,
         invalid_pixels,
         report,
+        rendering,
     })
 }
 

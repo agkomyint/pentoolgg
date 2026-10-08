@@ -294,6 +294,148 @@ impl HueSatMap {
     }
 }
 
+/// Most points a `ProfileToneCurve` may hold.
+pub const MAX_TONE_POINTS: usize = 4096;
+
+/// `ProfileToneCurve`: a monotone curve on linear ProPhoto through points from
+/// (0, 0) to (1, 1), interpolated by a monotone cubic (Fritsch–Carlson) and
+/// extended linearly with its end slopes outside [0, 1].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToneCurve {
+    pub points: Vec<(f64, f64)>,
+    /// Fritsch–Carlson tangents, one per point.
+    slopes: Vec<f64>,
+}
+
+impl ToneCurve {
+    /// Validate `values` (x, y pairs) and build the curve. The identity
+    /// (only the two end points) counts as absent.
+    pub fn new(values: &[f64]) -> Result<Option<Self>> {
+        if values.len() % 2 != 0 || values.len() < 4 || values.len() / 2 > MAX_TONE_POINTS {
+            bail!("[malformed-resource] ProfileToneCurve (50940) must hold 2–{MAX_TONE_POINTS} x, y pairs")
+        }
+        let points: Vec<(f64, f64)> = values.chunks_exact(2).map(|p| (p[0], p[1])).collect();
+        let first = points[0];
+        let last = points[points.len() - 1];
+        if first != (0.0, 0.0) || last != (1.0, 1.0) {
+            bail!("[malformed-resource] ProfileToneCurve (50940) must start at (0, 0) and end at (1, 1)")
+        }
+        if points
+            .windows(2)
+            .any(|w| w[1].0.is_nan() || w[1].0 <= w[0].0 || w[1].1 < w[0].1)
+            || points.iter().any(|p| !(0.0..=1.0).contains(&p.1))
+        {
+            bail!("[malformed-resource] ProfileToneCurve (50940) needs increasing x and non-decreasing y within 0–1")
+        }
+        if points.iter().all(|(x, y)| x == y) {
+            return Ok(None);
+        }
+        // Secant slopes, then Fritsch–Carlson tangents (harmonic-style limits
+        // keep every segment monotone).
+        let n = points.len();
+        let secant: Vec<f64> = points
+            .windows(2)
+            .map(|w| (w[1].1 - w[0].1) / (w[1].0 - w[0].0))
+            .collect();
+        let mut slopes = vec![0.0; n];
+        slopes[0] = secant[0];
+        slopes[n - 1] = secant[n - 2];
+        for i in 1..n - 1 {
+            slopes[i] = if secant[i - 1] * secant[i] <= 0.0 {
+                0.0
+            } else {
+                (secant[i - 1] + secant[i]) / 2.0
+            };
+        }
+        for (i, d) in secant.iter().enumerate() {
+            if *d == 0.0 {
+                slopes[i] = 0.0;
+                slopes[i + 1] = 0.0;
+                continue;
+            }
+            let (a, b) = (slopes[i] / d, slopes[i + 1] / d);
+            let length = a * a + b * b;
+            if length > 9.0 {
+                let t = 3.0 / length.sqrt();
+                slopes[i] = t * a * d;
+                slopes[i + 1] = t * b * d;
+            }
+        }
+        Ok(Some(Self { points, slopes }))
+    }
+
+    /// The curve at `x`.
+    pub fn eval(&self, x: f64) -> f64 {
+        let n = self.points.len();
+        if x <= 0.0 {
+            return x * self.slopes[0];
+        }
+        if x >= 1.0 {
+            return 1.0 + (x - 1.0) * self.slopes[n - 1];
+        }
+        let i = self.points.partition_point(|p| p.0 <= x).clamp(1, n - 1) - 1;
+        let ((x0, y0), (x1, y1)) = (self.points[i], self.points[i + 1]);
+        let h = x1 - x0;
+        let t = (x - x0) / h;
+        let (t2, t3) = (t * t, t * t * t);
+        (2.0 * t3 - 3.0 * t2 + 1.0) * y0
+            + (t3 - 2.0 * t2 + t) * h * self.slopes[i]
+            + (-2.0 * t3 + 3.0 * t2) * y1
+            + (t3 - t2) * h * self.slopes[i + 1]
+    }
+
+    /// Apply hue-preservingly as the DNG SDK's `RefBaselineRGBTone` does: the
+    /// curve maps the largest and smallest channel, and the middle channel keeps
+    /// its relative position between them.
+    pub fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let v = rgb.map(f64::from);
+        let (mut hi, mut lo) = (0, 0);
+        for i in 1..3 {
+            if v[i] > v[hi] {
+                hi = i;
+            }
+            if v[i] < v[lo] {
+                lo = i;
+            }
+        }
+        if v[hi] == v[lo] {
+            return [self.eval(v[0]) as f32; 3];
+        }
+        let mid = 3 - hi - lo;
+        let (top, bottom) = (self.eval(v[hi]), self.eval(v[lo]));
+        let mut out = [0.0; 3];
+        out[hi] = top;
+        out[lo] = bottom;
+        out[mid] = bottom + (top - bottom) * (v[mid] - v[lo]) / (v[hi] - v[lo]);
+        out.map(|c| c as f32)
+    }
+}
+
+/// The profile's stage-11 output rendering: its look table, then its tone
+/// curve, both on linear ProPhoto.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Rendering {
+    pub look: Option<HueSatMap>,
+    pub tone_curve: Option<ToneCurve>,
+}
+
+impl Rendering {
+    pub fn is_identity(&self) -> bool {
+        self.look.is_none() && self.tone_curve.is_none()
+    }
+
+    pub fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let rgb = match &self.look {
+            Some(map) => map.apply(rgb),
+            None => rgb,
+        };
+        match &self.tone_curve {
+            Some(curve) => curve.apply(rgb),
+            None => rgb,
+        }
+    }
+}
+
 fn hsv_to_rgb(mut h: f64, s: f64, v: f64) -> [f64; 3] {
     if s <= 0.0 {
         return [v; 3];
@@ -346,6 +488,10 @@ pub struct CameraProfile {
     /// `ProfileCalibrationSignature`.
     pub calibration_signature: Option<String>,
     pub calibrations: Vec<Calibration>,
+    /// `ProfileLookTableData`, applied in stage 11.
+    pub look: Option<HueSatMap>,
+    /// `ProfileToneCurve`, applied in stage 11.
+    pub tone_curve: Option<ToneCurve>,
 }
 
 fn matrix(values: &[f64], tag: u16) -> Result<Matrix> {
@@ -422,7 +568,73 @@ fn text(tiff: &Tiff, ifd: &Ifd, tag: u16) -> Result<Option<String>> {
         .map(|t| t.chars().take(256).collect()))
 }
 
+/// `ProfileLookTableDims` (50981), `ProfileLookTableData` (50982) and
+/// `ProfileLookTableEncoding` (51108), validated like a hue/sat map.
+fn read_look(tiff: &Tiff, ifd: &Ifd) -> Result<Option<HueSatMap>> {
+    let dims = match ifd.uints(tiff, 50981, 3)? {
+        None => {
+            if ifd.has(50982) {
+                bail!("[malformed-resource] ProfileLookTableData (50982) needs ProfileLookTableDims (50981)")
+            }
+            return Ok(None);
+        }
+        Some(d) if d.len() == 3 && d[0] >= 1 && d[1] >= 2 => {
+            let vals = d[2].max(1) as usize;
+            let entries = d[0] as usize * d[1] as usize * vals;
+            if entries > MAX_LUT_ENTRIES {
+                bail!("[limit-exceeded] ProfileLookTableDims {d:?} has {entries} entries; the limit is {MAX_LUT_ENTRIES}")
+            }
+            (d[0] as usize, d[1] as usize, vals)
+        }
+        Some(d) => bail!("[malformed-resource] ProfileLookTableDims {d:?} needs at least 1 hue and 2 saturation divisions"),
+    };
+    let srgb = match ifd.uint(tiff, 51108)? {
+        None | Some(0) => false,
+        Some(1) => true,
+        Some(e) => bail!("[unsupported-capability] ProfileLookTableEncoding {e}; expected 0 (linear) or 1 (sRGB)"),
+    };
+    let (hues, sats, vals) = dims;
+    let count = hues * sats * vals;
+    let values = ifd.numbers(tiff, 50982, count * 3)?.unwrap_or_default();
+    if values.len() != count * 3 {
+        bail!(
+            "[malformed-resource] ProfileLookTableData (50982) must hold {} values for its dims",
+            count * 3
+        )
+    }
+    let data = values
+        .chunks_exact(3)
+        .map(|e| HueSat {
+            hue: e[0] as f32,
+            saturation: e[1] as f32,
+            value: e[2] as f32,
+        })
+        .collect::<Vec<_>>();
+    if data
+        .iter()
+        .any(|e| e.hue.abs() > 360.0 || e.saturation < 0.0 || e.value < 0.0)
+    {
+        bail!("[malformed-resource] ProfileLookTableData holds a hue shift beyond ±360° or a negative scale")
+    }
+    let map = HueSatMap {
+        hues,
+        sats,
+        vals,
+        srgb,
+        data,
+    };
+    Ok((!map.is_identity()).then_some(map))
+}
+
 impl CameraProfile {
+    /// The stage-11 output rendering this profile carries.
+    pub fn rendering(&self) -> Rendering {
+        Rendering {
+            look: self.look.clone(),
+            tone_curve: self.tone_curve.clone(),
+        }
+    }
+
     /// Read the calibrations of a profile IFD. `dng` selects DNG-only tags
     /// (`CameraCalibrationN`).
     fn read(tiff: &Tiff, ifd: &Ifd, planes: usize, dng: bool) -> Result<Self> {
@@ -437,10 +649,17 @@ impl CameraProfile {
             embed_policy,
             calibration_signature: text(tiff, ifd, 50932)?,
             calibrations: Vec::new(),
+            look: None,
+            tone_curve: None,
         };
         if planes != 3 {
             return Ok(profile);
         }
+        profile.look = read_look(tiff, ifd)?;
+        profile.tone_curve = match ifd.numbers(tiff, 50940, 2 * MAX_TONE_POINTS)? {
+            Some(values) => ToneCurve::new(&values)?,
+            None => None,
+        };
         let dims = match ifd.uints(tiff, 50937, 3)? {
             None => None,
             Some(d) if d.len() == 3 && d[0] >= 1 && d[1] >= 2 => {
@@ -601,6 +820,8 @@ impl CameraProfile {
             c.forward = None;
             c.hue_sat = None;
         }
+        profile.look = None;
+        profile.tone_curve = None;
         Ok(profile)
     }
 
@@ -637,6 +858,8 @@ impl CameraProfile {
 pub struct ColorSpec {
     planes: usize,
     calibrations: Vec<Bound>,
+    /// The profile's stage-11 look table and tone curve.
+    pub rendering: Rendering,
 }
 
 #[derive(Debug, Clone)]
@@ -729,6 +952,7 @@ impl ColorSpec {
             return Ok(Self {
                 planes,
                 calibrations: Vec::new(),
+                rendering: Rendering::default(),
             });
         }
         let tiff = &dng.tiff;
@@ -786,6 +1010,7 @@ impl ColorSpec {
         Ok(Self {
             planes,
             calibrations,
+            rendering: profile.rendering(),
         })
     }
 
@@ -1184,6 +1409,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tone_curve_is_monotone_through_its_points_and_hue_preserving() {
+        let curve = ToneCurve::new(&[0.0, 0.0, 0.1, 0.05, 0.25, 0.3, 0.5, 0.7, 1.0, 1.0])
+            .unwrap()
+            .unwrap();
+        for (x, y) in &curve.points {
+            assert!((curve.eval(*x) - y).abs() < 1e-12);
+        }
+        let mut previous = curve.eval(-0.1);
+        for step in 0..=1200 {
+            let y = curve.eval(-0.1 + f64::from(step) * 0.001);
+            assert!(y >= previous - 1e-15, "monotone at {step}");
+            previous = y;
+        }
+        // Linear extension above 1 with the last secant slope.
+        let slope = (1.0 - 0.7) / 0.5;
+        assert!((curve.eval(1.5) - (1.0 + 0.5 * slope)).abs() < 1e-12);
+        // The middle channel keeps its relative position.
+        let out = curve.apply([0.6, 0.2, 0.4]);
+        let t = (out[2] - out[1]) / (out[0] - out[1]);
+        assert!((t - 0.5).abs() < 1e-6, "{out:?}");
+        assert_eq!(
+            curve.apply([0.3; 3]),
+            [curve.eval(f64::from(0.3f32)) as f32; 3]
+        );
+        assert_eq!(
+            ToneCurve::new(&[0.0, 0.0, 0.5, 0.5, 1.0, 1.0]).unwrap(),
+            None
+        );
+        for bad in [
+            vec![0.0, 0.0, 1.0],
+            vec![0.0, 0.1, 1.0, 1.0],
+            vec![0.0, 0.0, 0.5, 0.6, 0.4, 0.7, 1.0, 1.0],
+            vec![0.0, 0.0, 0.5, 0.6, 0.6, 0.5, 1.0, 1.0],
+            vec![0.0, 0.0, 0.5, f64::NAN, 1.0, 1.0],
+        ] {
+            assert!(ToneCurve::new(&bad).is_err(), "{bad:?}");
+        }
+        let rendering = Rendering {
+            look: None,
+            tone_curve: Some(curve.clone()),
+        };
+        assert!(!rendering.is_identity() && Rendering::default().is_identity());
+        assert_eq!(
+            rendering.apply([0.6, 0.2, 0.4]),
+            curve.apply([0.6, 0.2, 0.4])
+        );
+    }
+
+    #[test]
     fn robertson_matches_reference_whites() {
         let (t65, tint65) = xy_to_temperature(color::D65);
         assert!((t65 - 6504.0).abs() < 2.0, "{t65}");
@@ -1272,6 +1546,7 @@ mod tests {
             let spec = ColorSpec {
                 planes: 3,
                 calibrations: vec![bound(cm, fm, 0.0)],
+                rendering: Rendering::default(),
             };
             for xy in [D50, color::D65, temperature_to_xy(3200.0, 10.0)] {
                 let (white, transform) = spec.white(xy).unwrap();
@@ -1292,6 +1567,7 @@ mod tests {
         let spec = ColorSpec {
             planes: 3,
             calibrations: vec![bound(a, None, 6500.0), bound(b, None, 2850.0)],
+            rendering: Rendering::default(),
         };
         let (low, high, g) = spec.weights(temperature_to_xy(2850.0, 0.0));
         assert_eq!((low, high), (1, 0));

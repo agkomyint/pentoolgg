@@ -984,6 +984,8 @@ pub fn add_profile(raw: &mut Value, bytes: &[u8], force_model: bool) -> Result<V
         "force_model": record.get("force_model").cloned().unwrap_or(json!(false)),
         "calibrations": profile.calibrations.len(),
         "hue_sat_map": profile.calibrations.iter().any(|c| c.hue_sat.is_some()),
+        "look_table": profile.look.is_some(),
+        "tone_curve": profile.tone_curve.as_ref().map_or(0, |c| c.points.len()),
         "deduplicated": deduplicated,
         "upgraded": upgraded,
     }))

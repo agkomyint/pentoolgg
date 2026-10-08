@@ -4,7 +4,7 @@
 //! buffer holds linear working-space RGB (`prophoto-linear`) as `f32`, unclamped,
 //! plus straight linear alpha. Conversion never passes through 8 bits or sRGB
 //! unless the caller asks for that space and depth explicitly.
-use super::color::{apply, ColorSpace, Matrix};
+use super::color::{apply, ColorSpace, Matrix, Transfer};
 use anyhow::{bail, Result};
 
 /// Largest photo surface, in pixels (`docs/photography-v1.md`).
@@ -215,21 +215,73 @@ pub fn to_working(raster: &Raster, space: &ColorSpace) -> Result<Working> {
     Ok(working)
 }
 
-/// The working representation to stored samples in `space` at `depth`.
+/// Code thresholds of one transfer at one depth.
 ///
-/// Values are converted to linear output RGB in `f64`, clipped to [0, 1], and
-/// quantized by thresholds on linear light: the code is the number of `c` in
-/// `1..=max` with `decode((c - t) / max) <= v`. `t` is 0.5 (round half up in
-/// the encoded domain) or, for `ordered4`, `(bayer + 0.5) / 16`.
-pub fn from_working(
-    working: &Working,
-    space: &ColorSpace,
-    depth: Depth,
+/// The code of a linear value `v` (clipped to [0, 1], NaN as 0) is the count
+/// of `c` in `1..=max` with `decode((c - t) / max) <= v`: `t` is 0.5 (round
+/// half up in the encoded domain) or, for `ordered4`, `(bayer + 0.5) / 16`.
+pub struct Quantizer {
+    tables: Vec<Vec<f64>>,
+    /// Linear values in `[low, high]` round to a code without clipping.
+    pub low: f64,
+    pub high: f64,
+    pub depth: Depth,
     dither: Dither,
-) -> Result<(Raster, EncodeReport)> {
-    if dither == Dither::Ordered4 && depth != Depth::Eight {
-        bail!("[unsupported-capability] ordered4 dither applies to 8-bit output only; use dither none for 16-bit");
+}
+
+impl Quantizer {
+    pub fn new(transfer: Transfer, depth: Depth, dither: Dither) -> Result<Self> {
+        if dither == Dither::Ordered4 && depth != Depth::Eight {
+            bail!("[unsupported-capability] ordered4 dither applies to 8-bit output only; use dither none for 16-bit");
+        }
+        let max = depth.max();
+        let offsets: Vec<f64> = match dither {
+            Dither::None => vec![0.5],
+            Dither::Ordered4 => (0..16).map(|b| (f64::from(b) + 0.5) / 16.0).collect(),
+        };
+        // tables[k][c - 1] = decode((c - t_k) / max), increasing in c.
+        let tables = offsets
+            .iter()
+            .map(|t| {
+                (1..=max)
+                    .map(|code| transfer.decode((f64::from(code) - t) / f64::from(max)))
+                    .collect()
+            })
+            .collect();
+        Ok(Self {
+            tables,
+            low: transfer.decode(-0.5 / f64::from(max)),
+            high: transfer.decode((f64::from(max) + 0.5) / f64::from(max)),
+            depth,
+            dither,
+        })
     }
+
+    /// Whether `value` rounds to a code without clipping.
+    pub fn in_range(&self, value: f64) -> bool {
+        value >= self.low && value <= self.high
+    }
+
+    /// The code of `value` at pixel `(x, y)`.
+    pub fn code(&self, value: f64, x: usize, y: usize) -> u32 {
+        let table = match self.dither {
+            Dither::None => &self.tables[0],
+            Dither::Ordered4 => &self.tables[usize::from(BAYER4[y % 4][x % 4])],
+        };
+        let value = if value > 0.0 { value.min(1.0) } else { 0.0 };
+        table.partition_point(|threshold| *threshold <= value) as u32
+    }
+}
+
+/// Straight alpha to a code: `floor(clamp(a, 0, 1) * max + 0.5)`.
+pub fn alpha_code(alpha: f32, max: u32) -> u32 {
+    let value = f64::from(alpha);
+    let value = if value > 0.0 { value.min(1.0) } else { 0.0 };
+    ((value * f64::from(max) + 0.5).floor() as u32).min(max)
+}
+
+/// Check that a working buffer's planes match its size; returns the pixel count.
+pub fn check_buffer(working: &Working) -> Result<usize> {
     let pixels = check_working(working.width, working.height, working.alpha.is_some())? as usize;
     if working.rgb.len() != pixels * 3
         || working
@@ -243,84 +295,83 @@ pub fn from_working(
             working.height
         );
     }
-    let max = depth.max();
-    let offsets: Vec<f64> = match dither {
-        Dither::None => vec![0.5],
-        Dither::Ordered4 => (0..16).map(|b| (f64::from(b) + 0.5) / 16.0).collect(),
-    };
-    // thresholds[k][c - 1] = decode((c - t_k) / max), increasing in c.
-    let thresholds: Vec<Vec<f64>> = offsets
-        .iter()
-        .map(|t| {
-            (1..=max)
-                .map(|code| {
-                    space
-                        .transfer
-                        .decode((f64::from(code) - t) / f64::from(max))
-                })
-                .collect()
-        })
-        .collect();
-    let low = space.transfer.decode(-0.5 / f64::from(max));
-    let high = space
-        .transfer
-        .decode((f64::from(max) + 0.5) / f64::from(max));
+    Ok(pixels)
+}
+
+/// Collects output codes into a [`Raster`].
+pub struct Codes {
+    channels: usize,
+    eight: Vec<u8>,
+    sixteen: Vec<u16>,
+    depth: Depth,
+}
+
+impl Codes {
+    pub fn new(pixels: usize, alpha: bool, depth: Depth) -> Self {
+        let channels = if alpha { 4 } else { 3 };
+        let (eight, sixteen) = match depth {
+            Depth::Eight => (vec![0u8; pixels * channels], Vec::new()),
+            Depth::Sixteen => (Vec::new(), vec![0u16; pixels * channels]),
+        };
+        Self {
+            channels,
+            eight,
+            sixteen,
+            depth,
+        }
+    }
+
+    pub fn set(&mut self, pixel: usize, channel: usize, code: u32) {
+        let index = pixel * self.channels + channel;
+        match self.depth {
+            Depth::Eight => self.eight[index] = code as u8,
+            Depth::Sixteen => self.sixteen[index] = code as u16,
+        }
+    }
+
+    pub fn finish(self, width: u32, height: u32) -> Result<Raster> {
+        let samples = match self.depth {
+            Depth::Eight => Samples::Eight(self.eight),
+            Depth::Sixteen => Samples::Sixteen(self.sixteen),
+        };
+        Raster::new(width, height, self.channels == 4, samples)
+    }
+}
+
+/// The working representation to stored samples in `space` at `depth`.
+///
+/// Values are converted to linear output RGB in `f64`, clipped to [0, 1], and
+/// quantized by [`Quantizer`]. This is the relative colorimetric clip with no
+/// output rendering; `super::output` adds stage 11.
+pub fn from_working(
+    working: &Working,
+    space: &ColorSpace,
+    depth: Depth,
+    dither: Dither,
+) -> Result<(Raster, EncodeReport)> {
+    let quantizer = Quantizer::new(space.transfer, depth, dither)?;
+    let pixels = check_buffer(working)?;
     let matrix: Matrix = space.from_working();
-    let channels = if working.alpha.is_some() { 4 } else { 3 };
     let mut report = EncodeReport::default();
     let width = working.width as usize;
-    let quantize = |table: &[f64], value: f64| -> u32 {
-        let value = if value > 0.0 { value.min(1.0) } else { 0.0 };
-        table.partition_point(|threshold| *threshold <= value) as u32
-    };
-    let (mut eight, mut sixteen) = match depth {
-        Depth::Eight => (vec![0u8; pixels * channels], Vec::new()),
-        Depth::Sixteen => (Vec::new(), vec![0u16; pixels * channels]),
-    };
+    let mut codes = Codes::new(pixels, working.alpha.is_some(), depth);
     for (pixel, rgb) in working.rgb.chunks_exact(3).enumerate() {
         let out = apply(
             &matrix,
             [f64::from(rgb[0]), f64::from(rgb[1]), f64::from(rgb[2])],
         );
-        let table = match dither {
-            Dither::None => &thresholds[0],
-            Dither::Ordered4 => {
-                let (x, y) = (pixel % width, pixel / width);
-                &thresholds[usize::from(BAYER4[y % 4][x % 4])]
-            }
-        };
-        if out.iter().any(|value| !(*value >= low && *value <= high)) {
+        if out.iter().any(|value| !quantizer.in_range(*value)) {
             report.clipped_pixels += 1;
         }
-        let base = pixel * channels;
+        let (x, y) = (pixel % width, pixel / width);
         for (channel, value) in out.into_iter().enumerate() {
-            let code = quantize(table, value);
-            match depth {
-                Depth::Eight => eight[base + channel] = code as u8,
-                Depth::Sixteen => sixteen[base + channel] = code as u16,
-            }
+            codes.set(pixel, channel, quantizer.code(value, x, y));
         }
         if let Some(alpha) = &working.alpha {
-            let value = f64::from(alpha[pixel]);
-            let value = if value > 0.0 { value.min(1.0) } else { 0.0 };
-            let code = ((value * f64::from(max) + 0.5).floor() as u32).min(max);
-            match depth {
-                Depth::Eight => eight[base + 3] = code as u8,
-                Depth::Sixteen => sixteen[base + 3] = code as u16,
-            }
+            codes.set(pixel, 3, alpha_code(alpha[pixel], depth.max()));
         }
     }
-    let samples = match depth {
-        Depth::Eight => Samples::Eight(eight),
-        Depth::Sixteen => Samples::Sixteen(sixteen),
-    };
-    let raster = Raster::new(
-        working.width,
-        working.height,
-        working.alpha.is_some(),
-        samples,
-    )?;
-    Ok((raster, report))
+    Ok((codes.finish(working.width, working.height)?, report))
 }
 
 #[cfg(test)]
