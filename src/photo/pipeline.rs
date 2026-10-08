@@ -1,0 +1,179 @@
+//! The develop pipeline of a raw source through stage 5: decode (stage 1), the
+//! camera profile (stage 3), and lens and geometry (stages 4–5) as one warp.
+//! Later stages are added by later items of the photography milestone.
+use super::dng::Dng;
+use super::lens::LensProfile;
+use super::pixels::Working;
+use super::warp::{self, Correction, Crop, LensChain, Mapping};
+use super::{profile, raw};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
+
+/// Resolves a profile digest to its stored bytes and catalog record.
+pub type Profiles<'a> = &'a dyn Fn(&str) -> Result<(Vec<u8>, Value)>;
+
+/// The lens correction a develop object's `lens.profile` selects.
+pub fn lens_chain(
+    dng: &Dng,
+    develop: &Value,
+    width: usize,
+    height: usize,
+    profiles: Profiles,
+) -> Result<LensChain> {
+    let lens = &develop["lens"];
+    let correction = match lens.get("profile") {
+        None => Correction::None,
+        Some(Value::String(s)) if s == "none" => Correction::None,
+        Some(Value::String(s)) if s == "embedded-opcodes" => {
+            let (active, crop) = (&dng.active, &dng.crop);
+            Correction::Opcodes {
+                opcodes: &dng.opcodes,
+                stored: [
+                    -((active.left + crop.left) as f64),
+                    -((active.top + crop.top) as f64),
+                    dng.width as f64,
+                    dng.height as f64,
+                ],
+                active: [
+                    -(crop.left as f64),
+                    -(crop.top as f64),
+                    active.width() as f64,
+                    active.height() as f64,
+                ],
+            }
+        }
+        Some(Value::Object(o)) => {
+            let digest = o.get("profile").and_then(Value::as_str).unwrap_or_default();
+            let (bytes, record) = profiles(digest)?;
+            if record["kind"] != "lens" {
+                bail!("[invalid-develop] lens.profile {digest} is a {} profile; choose a lens profile", record["kind"])
+            }
+            let profile = LensProfile::parse(&bytes).with_context(|| format!("lens profile {digest}"))?;
+            let capture = dng.capture();
+            let focal = capture["focal_length"].as_f64();
+            let aperture = capture["aperture"].as_f64();
+            let (Some(focal), Some(aperture)) = (focal, aperture) else {
+                bail!("[invalid-develop] lens profile {digest} needs the source's focal length and aperture, and the DNG records {}; use lens.profile none and manual corrections", if focal.is_none() { "no focal length" } else { "no aperture" })
+            };
+            Correction::Profile(profile.at(focal, aperture))
+        }
+        Some(other) => bail!("[invalid-develop] lens.profile {other} must be none, embedded-opcodes or {{\"profile\": digest}}"),
+    };
+    Ok(LensChain::new(lens, width, height, correction))
+}
+
+/// The developed (default-cropped, unoriented) size of a DNG.
+pub fn decoded_size(dng: &Dng) -> (usize, usize) {
+    (dng.crop.width(), dng.crop.height())
+}
+
+/// The mapping, crop and report of a development, computed without decoding.
+pub struct Plan {
+    pub mapping: Mapping,
+    pub crop: Crop,
+    pub report: Value,
+}
+
+pub fn plan(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Plan> {
+    let (width, height) = decoded_size(dng);
+    let lens = lens_chain(dng, develop, width, height, profiles)?;
+    let mapping = Mapping::new(width, height, dng.orientation, &develop["geometry"], lens)?;
+    let (crop, crop_report) = warp::resolve_crop(&develop["crop"], &mapping)?;
+    let report = json!({
+        "decoded": [width, height],
+        "oriented": [mapping.frame.0, mapping.frame.1],
+        "output": [crop[2] - crop[0], crop[3] - crop[1]],
+        "orientation": dng.orientation,
+        "crop": crop_report,
+        "lens": mapping.lens.applied,
+        "geometry": develop.get("geometry").cloned().unwrap_or(json!({})),
+    });
+    Ok(Plan {
+        mapping,
+        crop,
+        report,
+    })
+}
+
+/// Stages 1 and 3: decoded camera RGB transformed to the working space, at the
+/// decoded size, with the resolved white.
+pub fn decode_working(
+    dng: &Dng,
+    develop: &Value,
+    profiles: Profiles,
+) -> Result<(Vec<f32>, profile::White)> {
+    let load = |digest: &str| profiles(digest).map(|(bytes, _)| bytes);
+    let spec = profile::select(develop["raw"].get("camera_profile"), dng, &load)?;
+    let (white, transform) = profile::resolve(&spec, dng, develop.get("white_balance"))?;
+    let decoded = raw::decode(dng, &profile::decode_options(develop, white.neutral))?;
+    let mut rgb = decoded.rgb;
+    for pixel in rgb.chunks_exact_mut(3) {
+        let out = transform.apply([pixel[0], pixel[1], pixel[2]]);
+        pixel.copy_from_slice(&out);
+    }
+    super::check_cancelled()?;
+    Ok((rgb, white))
+}
+
+/// A development through stage 5.
+pub struct Developed {
+    pub image: Working,
+    pub invalid_pixels: u64,
+    pub report: Value,
+}
+
+pub fn develop(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Developed> {
+    let plan = plan(dng, develop, profiles)?;
+    let (rgb, white) = decode_working(dng, develop, profiles)?;
+    let (image, invalid_pixels) = warp::render(&rgb, &plan.mapping, plan.crop)?;
+    let mut report = plan.report;
+    report["white"] = white.report();
+    report["invalid_pixels"] = json!(invalid_pixels);
+    Ok(Developed {
+        image,
+        invalid_pixels,
+        report,
+    })
+}
+
+/// Run an upright analysis and return the geometry keys it sets. `mode` is
+/// `level`, `vertical`, `full` or `guided`; `guides` are oriented-frame
+/// points for `guided`.
+pub fn upright(
+    dng: &Dng,
+    develop: &Value,
+    mode: &str,
+    guides: Option<&Value>,
+    profiles: Profiles,
+) -> Result<Value> {
+    let (width, height) = decoded_size(dng);
+    let frame = warp::oriented(dng.orientation, width, height);
+    let geometry = develop.get("geometry").cloned().unwrap_or(json!({}));
+    let segments = if mode == "guided" {
+        let guides = guides
+            .or_else(|| geometry.get("guides"))
+            .cloned()
+            .unwrap_or(json!([]));
+        let segments = warp::guide_segments(&guides, frame);
+        if segments.is_empty() {
+            bail!("[invalid-input] upright guided needs at least one --guide x1,y1,x2,y2")
+        }
+        segments
+    } else {
+        let lens = lens_chain(dng, develop, width, height, profiles)?;
+        let mapping = Mapping::new(width, height, dng.orientation, &json!({}), lens)?;
+        let (rgb, _) = decode_working(dng, develop, profiles)?;
+        let (image, _) = warp::render(&rgb, &mapping, [0, 0, frame.0, frame.1])?;
+        drop(rgb);
+        let (lum, aw, ah) = warp::analysis_luminance(&image, profile::ANALYSIS_EDGE);
+        let segments = warp::detect_lines(&lum, aw, ah, frame);
+        if segments.is_empty() {
+            bail!("[invalid-input] upright {mode} found no straight lines to correct; use upright guided with --guide segments")
+        }
+        segments
+    };
+    let keys = warp::solved_keys(mode, &segments);
+    let mut solved = warp::solve(&segments, &keys, &geometry, frame);
+    solved["segments"] = json!(segments.len());
+    Ok(solved)
+}

@@ -334,9 +334,9 @@ fn validate_catalog<'a>(
         }
         let bytes = validate_storage(profile.get("storage"), key, length, &what, &mut embedded)?;
         // A camera profile's recorded facts must be the facts its bytes produce.
-        if let (Some(bytes), Some("camera")) = (bytes, profile.get("kind").and_then(Value::as_str))
+        if let (Some(bytes), Some("camera")) = (&bytes, profile.get("kind").and_then(Value::as_str))
         {
-            let facts = super::profile::CameraProfile::from_dcp(&bytes)
+            let facts = super::profile::CameraProfile::from_dcp(bytes)
                 .with_context(|| what.clone())?
                 .record_facts();
             let facts = facts.as_object().unwrap();
@@ -346,6 +346,30 @@ fn validate_catalog<'a>(
                 || (profile.contains_key("embed_policy") && !facts.contains_key("embed_policy"))
             {
                 bail!("[malformed-resource] {what} recorded facts do not match its camera profile bytes")
+            }
+        }
+        if let Some(unsupported) = profile.get("unsupported") {
+            let valid = unsupported.as_array().is_some_and(|list| {
+                list.len() <= super::lens::MAX_UNSUPPORTED
+                    && list.iter().all(|item| {
+                        item.as_str()
+                            .is_some_and(|s| !s.is_empty() && s.chars().count() <= 256)
+                    })
+            });
+            if !valid {
+                bail!("[malformed-resource] {what} unsupported must hold at most 256 strings of 1–256 characters")
+            }
+        }
+        if profile.get("kind").and_then(Value::as_str) == Some("lens") {
+            one_of(profile, "imported_from", &["pentool-lens", "lcp"], &what)?;
+            if !profile.contains_key("imported_from") {
+                bail!("[malformed-resource] {what} must record imported_from pentool-lens or lcp")
+            }
+            if let Some(bytes) = bytes {
+                let lens = super::lens::LensProfile::parse(&bytes).with_context(|| what.clone())?;
+                if profile.get("name").and_then(Value::as_str) != Some(lens.name().as_str()) {
+                    bail!("[malformed-resource] {what} name does not match its lens profile bytes")
+                }
             }
         }
     }
@@ -968,17 +992,154 @@ pub enum WhiteBalance {
     Suggest,
 }
 
-/// `raw develop`: set a variant's camera profile and white balance. The result
-/// reports the resolved white (xy, temperature, tint and camera neutral).
+/// How `raw develop --lens-profile` chooses lens correction.
+pub fn lens_profile(value: &str) -> Result<Value> {
+    match value {
+        "none" | "embedded-opcodes" => Ok(json!(value)),
+        profile if profile.starts_with("sha256:") => {
+            digest(profile, "lens profile")?;
+            Ok(json!({"profile": profile}))
+        }
+        other => bail!("[invalid-develop] lens profile {other:?} must be none, embedded-opcodes or a profile digest"),
+    }
+}
+
+/// Changes requested by `raw develop`, applied in this order: `set` and
+/// `unset`, camera and lens profile, white balance, then the upright analysis
+/// (which sees every other change).
+#[derive(Debug, Clone, Default)]
+pub struct DevelopChanges {
+    /// Dotted develop paths such as `lens.distortion` and their JSON values.
+    pub set: Vec<(String, Value)>,
+    pub unset: Vec<String>,
+    pub camera_profile: Option<Value>,
+    pub lens_profile: Option<Value>,
+    pub white_balance: Option<WhiteBalance>,
+    /// `off`, `level`, `vertical`, `full` or `guided`.
+    pub upright: Option<String>,
+    /// Guided upright segments `x1, y1, x2, y2` in the oriented frame (0–1).
+    pub guides: Vec<[f64; 4]>,
+}
+
+impl DevelopChanges {
+    pub fn is_empty(&self) -> bool {
+        self.set.is_empty()
+            && self.unset.is_empty()
+            && self.camera_profile.is_none()
+            && self.lens_profile.is_none()
+            && self.white_balance.is_none()
+            && self.upright.is_none()
+            && self.guides.is_empty()
+    }
+}
+
+const MAX_PATH_DEPTH: usize = 4;
+
+fn develop_path(path: &str) -> Result<Vec<&str>> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let valid = parts.len() <= MAX_PATH_DEPTH
+        && parts.iter().all(|p| {
+            !p.is_empty() && p.len() <= 32 && p.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+        });
+    if !valid {
+        bail!("[invalid-input] develop path {path:?} must be 1–{MAX_PATH_DEPTH} dot-separated lowercase keys such as lens.distortion")
+    }
+    if parts[0] == "process" {
+        bail!("[invalid-input] develop path {path:?}: process is fixed by the engine")
+    }
+    Ok(parts)
+}
+
+fn set_path(develop: &mut Value, path: &str, value: Value) -> Result<()> {
+    let parts = develop_path(path)?;
+    let mut node = develop;
+    for part in &parts[..parts.len() - 1] {
+        if !node.get(*part).is_some_and(Value::is_object) {
+            node[*part] = json!({});
+        }
+        node = node.get_mut(*part).unwrap();
+    }
+    node[parts[parts.len() - 1]] = value;
+    Ok(())
+}
+
+fn unset_path(develop: &mut Value, path: &str) -> Result<()> {
+    let parts = develop_path(path)?;
+    fn remove(node: &mut Value, parts: &[&str]) -> bool {
+        let Some(object) = node.as_object_mut() else {
+            return false;
+        };
+        if parts.len() == 1 {
+            return object.remove(parts[0]).is_some();
+        }
+        let Some(child) = object.get_mut(parts[0]) else {
+            return false;
+        };
+        let removed = remove(child, &parts[1..]);
+        if removed && child.as_object().is_some_and(Map::is_empty) {
+            object.remove(parts[0]);
+        }
+        removed
+    }
+    if !remove(develop, &parts) {
+        bail!("[invalid-input] develop path {path} is not set; nothing to unset")
+    }
+    Ok(())
+}
+
+/// Apply an upright mode to `develop["geometry"]`: `off` clears upright, its
+/// provenance, guides, rotation and perspective; another mode stores the
+/// solved values and clears the keys it does not solve.
+fn apply_upright(develop: &mut Value, mode: &str, solved: &Value) {
+    if !develop.get("geometry").is_some_and(Value::is_object) {
+        develop["geometry"] = json!({});
+    }
+    let geometry = develop["geometry"].as_object_mut().unwrap();
+    for key in ["upright", "auto", "rotate", "vertical", "horizontal"] {
+        geometry.remove(key);
+    }
+    if mode != "guided" {
+        geometry.remove("guides");
+    }
+    if mode != "off" {
+        geometry.insert("upright".into(), json!(mode));
+        for key in ["rotate", "vertical", "horizontal"] {
+            if let Some(v) = solved.get(key) {
+                geometry.insert(key.into(), v.clone());
+            }
+        }
+        let algorithm = if mode == "guided" {
+            "upright-guided"
+        } else {
+            "upright-hough"
+        };
+        geometry.insert("auto".into(), json!({"algorithm": algorithm, "version": 1}));
+    }
+    if geometry.is_empty() {
+        develop.as_object_mut().unwrap().remove("geometry");
+    }
+}
+
+/// `raw develop`: change a variant's develop settings. The result reports the
+/// resolved white (xy, temperature, tint and camera neutral), the upright
+/// analysis when one ran, and the resolved frame (sizes, crop, lens steps).
 pub fn develop_raw(
     raw: &mut Value,
     document: &Path,
     photo_id: &str,
     variant_id: &str,
-    camera_profile: Option<Value>,
-    white_balance: Option<WhiteBalance>,
+    changes: DevelopChanges,
 ) -> Result<Value> {
     use super::profile;
+    let DevelopChanges {
+        set,
+        unset,
+        camera_profile,
+        lens_profile,
+        white_balance,
+        upright,
+        guides,
+    } = changes;
     crate::scene::validate(raw)?;
     let catalog = raw.get("photography").context(
         "[missing-resource] the document has no photography catalog; add a photo with `raw add` first",
@@ -1003,21 +1164,51 @@ pub fn develop_raw(
     if asset["kind"] == "rendered" {
         bail!("[invalid-develop] photo {photo_id} has a rendered source; `raw develop` applies to raw sources")
     }
+    if !guides.is_empty() && upright.as_deref() != Some("guided") {
+        bail!("[invalid-input] --guide segments need --upright guided")
+    }
+    if let Some(mode) = upright.as_deref() {
+        if !["off", "level", "vertical", "full", "guided"].contains(&mode) {
+            bail!("[invalid-input] upright {mode:?} must be off, level, vertical, full or guided")
+        }
+    }
     let bytes = stored_bytes(document, &asset["storage"], source)
         .with_context(|| format!("photo {photo_id} source"))?;
     let dng = Dng::inspect(&bytes)?;
     let mut develop = photo["variants"][variant_index]["develop"].clone();
+    for path in &unset {
+        unset_path(&mut develop, path)?;
+    }
+    for (path, value) in set {
+        set_path(&mut develop, &path, value)?;
+    }
     if let Some(camera_profile) = camera_profile {
         develop["raw"]["camera_profile"] = camera_profile;
     }
-    let profiles = &catalog["profiles"];
-    let load = |digest: &str| -> Result<Vec<u8>> {
-        let record = profiles.get(digest).with_context(|| {
-            format!("[missing-resource] camera profile {digest} is not in photography.profiles; add it with `photo profile add` first")
-        })?;
-        stored_bytes(document, &record["storage"], digest)
-    };
-    // Validate the requested profile reference before reading any profile bytes.
+    if let Some(lens_profile) = lens_profile {
+        if !develop.get("lens").is_some_and(Value::is_object) {
+            develop["lens"] = json!({});
+        }
+        develop["lens"]["profile"] = lens_profile;
+    }
+    if !guides.is_empty() {
+        if !develop.get("geometry").is_some_and(Value::is_object) {
+            develop["geometry"] = json!({});
+        }
+        develop["geometry"]["upright"] = json!("guided");
+        develop["geometry"]["guides"] = guides
+            .iter()
+            .map(|g| {
+                json!([
+                    [super::dng::number(g[0]), super::dng::number(g[1])],
+                    [super::dng::number(g[2]), super::dng::number(g[3])]
+                ])
+            })
+            .collect();
+    }
+    let loader = profile_loader(document, &catalog["profiles"]);
+    let load = |digest: &str| loader(digest).map(|(bytes, _)| bytes);
+    // Validate the requested settings before reading any profile bytes.
     let mut document_value = raw.clone();
     document_value["photography"]["photos"][photo_index]["variants"][variant_index]["develop"] =
         develop.clone();
@@ -1072,18 +1263,198 @@ pub fn develop_raw(
     if let Some(stored) = stored {
         develop["white_balance"] = stored;
     }
+    let mut analysis = Value::Null;
+    if let Some(mode) = upright.as_deref() {
+        let solved = if mode == "off" {
+            json!({})
+        } else {
+            super::pipeline::upright(
+                &dng,
+                &develop,
+                mode,
+                develop["geometry"].get("guides"),
+                &loader,
+            )?
+        };
+        apply_upright(&mut develop, mode, &solved);
+        analysis = solved;
+    }
     document_value["photography"]["photos"][photo_index]["variants"][variant_index]["develop"] =
         develop.clone();
     crate::scene::validate(&document_value)?;
     let (white, _) = profile::resolve(&spec, &dng, develop.get("white_balance"))?;
-    *raw = document_value;
-    Ok(json!({
+    let plan = super::pipeline::plan(&dng, &develop, &loader)?;
+    let mut result = json!({
         "photo": photo_id,
         "variant": variant_id,
         "camera_profile": develop["raw"].get("camera_profile").cloned().unwrap_or(json!("embedded")),
+        "lens_profile": develop["lens"].get("profile").cloned().unwrap_or(json!("none")),
         "white_balance": develop.get("white_balance").cloned().unwrap_or(json!({"mode": "as-shot"})),
         "monochrome": monochrome,
         "resolved": white.report(),
+        "frame": plan.report,
+    });
+    if !analysis.is_null() {
+        result["upright"] = analysis;
+    }
+    drop(loader);
+    *raw = document_value;
+    Ok(result)
+}
+
+/// Resolves a profile digest of `photography.profiles` to its verified bytes
+/// and record.
+fn profile_loader<'a>(
+    document: &'a Path,
+    profiles: &'a Value,
+) -> impl Fn(&str) -> Result<(Vec<u8>, Value)> + 'a {
+    move |digest: &str| {
+        let record = profiles.get(digest).with_context(|| {
+            format!("[missing-resource] profile {digest} is not in photography.profiles; add it with `photo profile add` first")
+        })?;
+        let bytes = stored_bytes(document, &record["storage"], digest)?;
+        Ok((bytes, record.clone()))
+    }
+}
+
+/// A photo variant and its decoded source, located for rendering or inspection.
+fn locate<'a>(
+    raw: &'a Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+) -> Result<(&'a Value, Vec<u8>, &'a Value)> {
+    crate::scene::validate(raw)?;
+    let catalog = raw.get("photography").context(
+        "[missing-resource] the document has no photography catalog; add a photo with `raw add` first",
+    )?;
+    let photo = catalog["photos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|photo| photo["id"] == photo_id)
+        .with_context(|| format!("[missing-resource] photo {photo_id} is not in the catalog"))?;
+    let variant = photo["variants"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|variant| variant["id"] == variant_id)
+        .with_context(|| {
+            format!("[missing-resource] variant {photo_id}/{variant_id} does not exist")
+        })?;
+    let source = photo["source"].as_str().unwrap_or_default();
+    let asset = &catalog["assets"][source];
+    if asset["kind"] == "rendered" {
+        bail!("[unsupported-capability] photo {photo_id} has a rendered source; photo development currently renders raw sources only")
+    }
+    let bytes = stored_bytes(document, &asset["storage"], source)
+        .with_context(|| format!("photo {photo_id} source"))?;
+    Ok((&variant["develop"], bytes, &catalog["profiles"]))
+}
+
+/// `photo render`: develop a variant into the working space.
+pub fn render_photo(
+    raw: &Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+) -> Result<super::pipeline::Developed> {
+    let (develop, bytes, profiles) = locate(raw, document, photo_id, variant_id)?;
+    let dng = Dng::inspect(&bytes)?;
+    let loader = profile_loader(document, profiles);
+    super::pipeline::develop(&dng, develop, &loader)
+}
+
+/// `photo info`: the resolved frame of a variant without decoding pixels,
+/// plus the number of output pixels whose source lies outside the image.
+pub fn photo_info(raw: &Value, document: &Path, photo_id: &str, variant_id: &str) -> Result<Value> {
+    let (develop, bytes, profiles) = locate(raw, document, photo_id, variant_id)?;
+    let dng = Dng::inspect(&bytes)?;
+    let loader = profile_loader(document, profiles);
+    let plan = super::pipeline::plan(&dng, develop, &loader)?;
+    let invalid = super::warp::count_invalid(&plan.mapping, plan.crop)?;
+    let mut report = plan.report;
+    report["photo"] = json!(photo_id);
+    report["variant"] = json!(variant_id);
+    report["invalid_pixels"] = json!(invalid);
+    Ok(report)
+}
+
+/// `photo profile add --lens`: verify and store a Pentool lens profile.
+pub fn add_lens_profile(raw: &mut Value, bytes: &[u8]) -> Result<Value> {
+    if bytes.len() as u64 > MAX_PROFILE_BYTES {
+        bail!("[limit-exceeded] lens profile is larger than 16 MiB")
+    }
+    let lens = super::lens::LensProfile::parse(bytes)?;
+    store_lens(raw, bytes, &lens, "pentool-lens", Vec::new())
+}
+
+/// `photo profile import-lcp`: convert the supported subset of an Adobe lens
+/// correction profile and store the canonical Pentool lens profile, listing
+/// every model that was not converted.
+pub fn import_lcp(raw: &mut Value, bytes: &[u8]) -> Result<Value> {
+    if bytes.len() as u64 > MAX_PROFILE_BYTES {
+        bail!("[limit-exceeded] lens correction profile is larger than 16 MiB")
+    }
+    let converted = super::lens::import_lcp(bytes)?;
+    let canonical = converted.profile.to_bytes();
+    store_lens(
+        raw,
+        &canonical,
+        &converted.profile,
+        "lcp",
+        converted.unsupported,
+    )
+}
+
+fn store_lens(
+    raw: &mut Value,
+    bytes: &[u8],
+    lens: &super::lens::LensProfile,
+    imported_from: &str,
+    unsupported: Vec<String>,
+) -> Result<Value> {
+    let digest = crate::resource::sha256(bytes);
+    let (mut document, upgraded) = with_catalog(raw)?;
+    let profiles = document["photography"]["profiles"]
+        .as_object_mut()
+        .context("[malformed-resource] photography.profiles must be an object")?;
+    let deduplicated = profiles.contains_key(&digest);
+    if let Some(record) = profiles.get(&digest) {
+        if record["kind"] != "lens" {
+            bail!(
+                "[invalid-input] these bytes are already stored as a {} profile",
+                record["kind"]
+            )
+        }
+    } else {
+        if profiles.len() >= MAX_PROFILES {
+            bail!("[limit-exceeded] photography already has {MAX_PROFILES} profiles")
+        }
+        let mut record = json!({
+            "kind": "lens",
+            "name": lens.name(),
+            "imported_from": imported_from,
+            "byte_length": bytes.len(),
+            "storage": crate::image::embedded_storage(bytes),
+        });
+        if !unsupported.is_empty() {
+            record["unsupported"] = json!(unsupported);
+        }
+        profiles.insert(digest.clone(), record);
+    }
+    let record = profiles[&digest].clone();
+    crate::scene::validate(&document)?;
+    *raw = document;
+    Ok(json!({
+        "profile": digest,
+        "kind": "lens",
+        "name": record["name"],
+        "imported_from": record["imported_from"],
+        "samples": lens.samples.len(),
+        "unsupported": record.get("unsupported").cloned().unwrap_or(json!([])),
+        "deduplicated": deduplicated,
+        "upgraded": upgraded,
     }))
 }
 

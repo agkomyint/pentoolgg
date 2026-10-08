@@ -117,6 +117,215 @@ pub fn validate(develop: &Map<String, Value>, source: &Source, what: &str) -> Re
     if let Some(white_balance) = develop.get("white_balance") {
         validate_white_balance(white_balance, source, &format!("{what} white_balance"))?;
     }
+    if let Some(lens) = develop.get("lens") {
+        validate_lens(lens, source, &format!("{what} lens"))?;
+    }
+    if let Some(geometry) = develop.get("geometry") {
+        validate_geometry(geometry, &format!("{what} geometry"))?;
+    }
+    if let Some(crop) = develop.get("crop") {
+        validate_crop(crop, &format!("{what} crop"))?;
+    }
+    Ok(())
+}
+
+fn boolean(object: &Map<String, Value>, key: &str, what: &str) -> Result<()> {
+    match object.get(key) {
+        None | Some(Value::Bool(_)) => Ok(()),
+        Some(value) => bail!("[invalid-develop] {what}.{key} must be true or false; got {value}"),
+    }
+}
+
+/// A two-number array with each value in `range`.
+fn pair(value: &Value, range: (f64, f64)) -> bool {
+    value.as_array().is_some_and(|v| {
+        v.len() == 2
+            && v.iter()
+                .all(|v| v.as_f64().is_some_and(|v| (range.0..=range.1).contains(&v)))
+    })
+}
+
+fn validate_lens(lens: &Value, source: &Source, what: &str) -> Result<()> {
+    let lens = group(lens, what)?;
+    allowed(
+        lens,
+        &[
+            "profile",
+            "distortion",
+            "vignetting",
+            "chromatic_aberration",
+            "defringe",
+        ],
+        what,
+    )?;
+    match lens.get("profile") {
+        None => {}
+        Some(Value::String(s)) if s == "none" => {}
+        Some(Value::String(s)) if s == "embedded-opcodes" => {
+            if !source.is_raw() {
+                bail!("[invalid-develop] {what}.profile embedded-opcodes applies only to raw sources; use none or a lens profile")
+            }
+        }
+        Some(Value::Object(o))
+            if o.len() == 1 && o.get("profile").and_then(Value::as_str).is_some_and(digest) =>
+        {
+            let key = o["profile"].as_str().unwrap();
+            let Some(profile) = source.profiles.get(key) else {
+                bail!("[missing-resource] {what}.profile references profile {key}, which is not in photography.profiles; add it with `photo profile add --lens` or `photo profile import-lcp`")
+            };
+            if profile.get("kind").and_then(Value::as_str) != Some("lens") {
+                bail!("[invalid-develop] {what}.profile {key} is not a lens profile")
+            }
+        }
+        Some(value) => bail!("[invalid-develop] {what}.profile must be \"none\", \"embedded-opcodes\" or {{\"profile\": digest}}; got {value}"),
+    }
+    number(lens, "distortion", (-100.0, 100.0), what)?;
+    if let Some(vignetting) = lens.get("vignetting") {
+        let where_ = format!("{what}.vignetting");
+        let vignetting = group(vignetting, &where_)?;
+        allowed(vignetting, &["amount", "midpoint"], &where_)?;
+        number(vignetting, "amount", (-100.0, 100.0), &where_)?;
+        number(vignetting, "midpoint", (0.0, 100.0), &where_)?;
+    }
+    if let Some(ca) = lens.get("chromatic_aberration") {
+        let where_ = format!("{what}.chromatic_aberration");
+        let ca = group(ca, &where_)?;
+        allowed(ca, &["remove", "red_cyan", "blue_yellow"], &where_)?;
+        boolean(ca, "remove", &where_)?;
+        number(ca, "red_cyan", (-100.0, 100.0), &where_)?;
+        number(ca, "blue_yellow", (-100.0, 100.0), &where_)?;
+    }
+    if let Some(defringe) = lens.get("defringe") {
+        let where_ = format!("{what}.defringe");
+        let defringe = group(defringe, &where_)?;
+        allowed(
+            defringe,
+            &["purple_amount", "purple_hue", "green_amount", "green_hue"],
+            &where_,
+        )?;
+        number(defringe, "purple_amount", (0.0, 20.0), &where_)?;
+        number(defringe, "green_amount", (0.0, 20.0), &where_)?;
+        for (key, range) in [("purple_hue", (30.0, 70.0)), ("green_hue", (40.0, 60.0))] {
+            if let Some(hue) = defringe.get(key) {
+                let ordered = hue
+                    .as_array()
+                    .is_some_and(|h| h.len() == 2 && h[0].as_f64() <= h[1].as_f64());
+                if !pair(hue, range) || !ordered {
+                    bail!(
+                        "[invalid-develop] {where_}.{key} must be [low, high] with {}–{} and low ≤ high; got {hue}",
+                        range.0,
+                        range.1
+                    )
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_geometry(geometry: &Value, what: &str) -> Result<()> {
+    let geometry = group(geometry, what)?;
+    allowed(
+        geometry,
+        &[
+            "upright",
+            "guides",
+            "vertical",
+            "horizontal",
+            "rotate",
+            "aspect",
+            "scale",
+            "offset",
+            "auto",
+        ],
+        what,
+    )?;
+    choice(
+        geometry,
+        "upright",
+        &["off", "level", "vertical", "full", "guided"],
+        what,
+    )?;
+    let upright = geometry
+        .get("upright")
+        .and_then(Value::as_str)
+        .unwrap_or("off");
+    if let Some(guides) = geometry.get("guides") {
+        if upright != "guided" {
+            bail!("[invalid-develop] {what}.guides applies only to upright guided")
+        }
+        let valid = guides.as_array().is_some_and(|guides| {
+            guides.len() <= 4
+                && guides.iter().all(|guide| {
+                    guide.as_array().is_some_and(|points| {
+                        points.len() == 2
+                            && points.iter().all(|p| pair(p, (0.0, 1.0)))
+                            && points[0] != points[1]
+                    })
+                })
+        });
+        if !valid {
+            bail!("[invalid-develop] {what}.guides must hold at most 4 segments of two distinct [x, y] points in 0–1")
+        }
+    }
+    if geometry.contains_key("auto") && upright == "off" {
+        bail!("[invalid-develop] {what}.auto records an upright analysis and needs upright level, vertical, full or guided")
+    }
+    validate_auto(geometry, what)?;
+    number(geometry, "vertical", (-100.0, 100.0), what)?;
+    number(geometry, "horizontal", (-100.0, 100.0), what)?;
+    number(geometry, "rotate", (-45.0, 45.0), what)?;
+    number(geometry, "aspect", (-100.0, 100.0), what)?;
+    number(geometry, "scale", (50.0, 150.0), what)?;
+    if let Some(offset) = geometry.get("offset") {
+        if !pair(offset, (-100.0, 100.0)) {
+            bail!("[invalid-develop] {what}.offset must be [x, y] with each in -100–100; got {offset}")
+        }
+    }
+    Ok(())
+}
+
+/// A crop aspect: `free`, `original` or `W:H` with 1–9999 on each side.
+pub fn crop_aspect(value: &str) -> Option<Option<(u32, u32)>> {
+    match value {
+        "free" | "original" => Some(None),
+        _ => {
+            let (w, h) = value.split_once(':')?;
+            let side = |s: &str| {
+                (!s.is_empty() && s.len() <= 4 && !s.starts_with('0'))
+                    .then(|| s.parse::<u32>().ok())
+                    .flatten()
+            };
+            Some(Some((side(w)?, side(h)?)))
+        }
+    }
+}
+
+fn validate_crop(crop: &Value, what: &str) -> Result<()> {
+    let crop = group(crop, what)?;
+    allowed(crop, &["rect", "aspect", "constrain"], what)?;
+    boolean(crop, "constrain", what)?;
+    if let Some(rect) = crop.get("rect") {
+        let valid = rect.as_array().is_some_and(|r| {
+            let v: Vec<f64> = r.iter().filter_map(Value::as_f64).collect();
+            r.len() == 4
+                && v.len() == 4
+                && (0.0..=1.0).contains(&v[0])
+                && (0.0..=1.0).contains(&v[1])
+                && v[2] > 0.0
+                && v[3] > 0.0
+                && v[0] + v[2] <= 1.0 + 1e-9
+                && v[1] + v[3] <= 1.0 + 1e-9
+        });
+        if !valid {
+            bail!("[invalid-develop] {what}.rect must be [x, y, w, h] in 0–1 with w, h > 0 and the rectangle inside the frame; got {rect}")
+        }
+    }
+    if let Some(aspect) = crop.get("aspect") {
+        if aspect.as_str().and_then(crop_aspect).is_none() {
+            bail!("[invalid-develop] {what}.aspect must be free, original or W:H (1–9999 each); got {aspect}")
+        }
+    }
     Ok(())
 }
 
@@ -313,5 +522,67 @@ mod tests {
                 "{develop}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn lens_geometry_and_crop_are_checked() {
+        let auto = json!({"algorithm": "upright-hough", "version": 1});
+        for develop in [
+            json!({"process": 1, "lens": {"profile": "embedded-opcodes", "distortion": -12,
+                   "vignetting": {"amount": 20, "midpoint": 50},
+                   "chromatic_aberration": {"remove": true}}}),
+            json!({"process": 1, "geometry": {"upright": "vertical", "auto": auto, "vertical": 4.5,
+                   "rotate": -1.25, "scale": 110, "offset": [5, -5]}}),
+            json!({"process": 1, "geometry": {"upright": "guided",
+                   "guides": [[[0.1, 0.0], [0.12, 1.0]]]}}),
+            json!({"process": 1, "crop": {"rect": [0.1, 0.1, 0.8, 0.9], "aspect": "3:2", "constrain": true}}),
+        ] {
+            assert!(check(develop.clone(), "raw").is_ok(), "{develop}");
+        }
+        for (develop, kind) in [
+            (
+                json!({"process": 1, "lens": {"profile": "embedded-opcodes"}}),
+                "rendered",
+            ),
+            (json!({"process": 1, "lens": {"profile": "adobe"}}), "raw"),
+            (json!({"process": 1, "lens": {"distortion": 101}}), "raw"),
+            (
+                json!({"process": 1, "lens": {"vignetting": {"amount": 5, "feather": 1}}}),
+                "raw",
+            ),
+            (
+                json!({"process": 1, "geometry": {"upright": "tilt"}}),
+                "raw",
+            ),
+            (json!({"process": 1, "geometry": {"rotate": 46}}), "raw"),
+            (json!({"process": 1, "geometry": {"scale": 40}}), "raw"),
+            (json!({"process": 1, "geometry": {"auto": auto}}), "raw"),
+            (
+                json!({"process": 1, "geometry": {"upright": "level", "guides": [[[0, 0], [1, 1]]]}}),
+                "raw",
+            ),
+            (
+                json!({"process": 1, "geometry": {"upright": "guided", "guides": [[[0.5, 0.5], [0.5, 0.5]]]}}),
+                "raw",
+            ),
+            (
+                json!({"process": 1, "geometry": {"upright": "vertical", "auto": {"algorithm": "upright-hough"}}}),
+                "raw",
+            ),
+            (
+                json!({"process": 1, "crop": {"rect": [0.5, 0, 0.6, 1]}}),
+                "raw",
+            ),
+            (json!({"process": 1, "crop": {"rect": [0, 0, 0, 1]}}), "raw"),
+            (json!({"process": 1, "crop": {"aspect": "16:0"}}), "raw"),
+            (json!({"process": 1, "crop": {"constrain": "yes"}}), "raw"),
+        ] {
+            let error = check(develop.clone(), kind).unwrap_err().to_string();
+            assert!(error.starts_with("[invalid-develop]"), "{develop}: {error}");
+        }
+        assert_eq!(crop_aspect("original"), Some(None));
+        assert_eq!(crop_aspect("3:2"), Some(Some((3, 2))));
+        assert_eq!(crop_aspect("03:2"), None);
+        assert_eq!(crop_aspect("10000:1"), None);
     }
 }

@@ -470,6 +470,117 @@ crop to the largest rectangle with the crop's aspect that contains no invalid
 (outside-source) pixels. Without it, invalid pixels are transparent and are reported
 by `photo info`.
 
+**Lens profile format.** A pentool lens profile is a JSON object with exactly
+`pentool_lens_profile` (1), `make` and `model` (1–128 characters; the profile's
+`name` is `"make model"`), `focal_range` and `aperture_range` ([min, max], min ≤
+max), and 1–1024 `samples`. A sample holds `focal` and `aperture` (inside the
+ranges; each pair at most once), optional `scale` (the distortion radius unit as a
+fraction of the long edge, 0–10; absent is the corner distance) and `center`
+([x, y] in long-edge units from the top-left; absent is the image center),
+`distortion` (`radial` k1–k3 in ±10, `tangential` t0–t1 in ±1),
+`vignette` (exactly one of `gain` k0–k4, the `FixVignetteRadial` polynomial, or
+`falloff` a1–a3, the LCP model whose gain is the inverse of
+`1 + a1 r² + a2 r⁴ + a3 r⁶`; each in ±100, with its own optional `scale` and
+`center`), and `chromatic_aberration` (`red`, `blue` radial scales relative to
+green, 0.9–1.1, default 1). Every sample must have the same shape. A profile is
+selected for a capture's EXIF focal length and FNumber (both required; otherwise
+`[invalid-develop]`): coefficients are interpolated linearly in focal length
+between the two bracketing focal lengths, then in 1/aperture, each clamped to the
+calibrated range. The catalog record is `kind: "lens"`, `name`,
+`imported_from` (`pentool-lens` or `lcp`), `byte_length`, `storage`, and for LCP
+the `unsupported` list (at most 256 strings).
+
+**LCP subset.** `photo profile import-lcp` reads the XML with a bounded parser: a
+`DOCTYPE` (and so any entity) is `[unsupported-capability]`; at most 200,000
+elements and a depth of 64. Each `stCamera` profile converts to one sample:
+`FocalLength`; `ApertureValue` (APEX, N = 2^(AV/2)) or `FNumber`; and when a
+focal/aperture pair repeats at several focus distances, the farthest is kept.
+`PerspectiveModel` converts `FocalLengthX` to `scale`, `ImageXCenter` and
+`ImageYCenter` to `center`, `RadialDistortParam1–3` and `TangentialDistortParam1–2`.
+Its `VignetteModel` converts `VignetteModelParam1–3` to `falloff`, and
+`ChromaticRedGreenModel` and `ChromaticBlueGreenModel` convert `ScaleFactor` to
+the red and blue scales. Every other model or parameter (a fisheye model, a
+nonzero chromatic distortion term, and so on) is named in `unsupported`; nothing is
+approximated. The stored bytes are the canonical pentool lens profile (sorted,
+pretty JSON with a final newline), so importing the same LCP twice deduplicates.
+
+**Frames.** The lens chain works in the decoded (default-cropped, unoriented)
+frame. Opcode list 1 positions are in stored-image pixels and lists 2 and 3 in
+active-area pixels; both are translated into the decoded frame. `WarpRectilinear`
+and `FixVignetteRadial` opcodes are applied here, not during decoding. Geometry,
+guides, crop and the white-balance sample point use the oriented frame after lens
+correction.
+
+**Lens chain.** In forward (optical) order the steps are: manual chromatic
+aberration, the profile or opcode steps, manual distortion, manual vignetting.
+Radii are measured from the center and divided by the distance to the farthest
+corner unless a profile gives a scale. The output is sampled through the inverse:
+the steps are walked in reverse, a warp evaluating the `WarpRectilinear` inverse
+map per channel plane and a vignette multiplying by its gain at the current
+position.
+
+- `chromatic_aberration.red_cyan` and `blue_yellow` (±100) scale the red and blue
+  planes radially by `1 + v/20000`. A profile's CA scales apply only with
+  `chromatic_aberration.remove: true`; otherwise every channel uses the green plane.
+- `distortion` d (±100; positive removes barrel) is a radial warp with k1 = −d/400.
+- `vignetting.amount` a (±100) and `midpoint` m (0–100, default 50) multiply by
+  `2^(a/100 · r^q)` with q = 1 + 4m/100.
+- A profile's vignette is applied before its warp, with its CA folded into the warp
+  planes.
+
+**Geometry.** Coordinates are centered on the oriented frame and divided by half
+its long edge. The forward transform is `Offset · Scale · Aspect · Rotate ·
+Perspective`:
+
+- Perspective is the identity with its third row `[−0.5·h/100, 0.5·v/100, 1]`, for
+  `horizontal` h and `vertical` v.
+- `rotate` is in degrees.
+- `aspect` a stretches x by 2^(a/200) and y by its inverse.
+- `scale` is in percent.
+- `offset` [x, y] moves by x/100 of the half width and y/100 of the half height.
+
+The inverse transform maps each output pixel center back. A homogeneous w at or
+below 1e-12 marks the pixel invalid. The lens chain inverse is then applied, then the
+orientation is undone. A pixel is valid when every channel's source position lies
+inside [0, W] × [0, H].
+
+**Crop.** `rect` is normalized to the post-geometry oriented frame and snapped to
+whole pixels by rounding; absent is the whole frame. The schema bounds each value
+to 0–1. Validation is stricter: w and h must be positive, and the rectangle must
+lie inside the frame. `aspect` is used only by `constrain`. With `constrain`, the
+crop is reduced to the largest rectangle of that aspect centered in `rect`
+(`free` keeps the rect's aspect, `original` the frame's). The reduction is a
+30-step binary search on the scale, with 256 validity samples per edge, snapped
+inward to whole pixels. A crop whose center has no source is `[invalid-develop]`.
+
+**Upright.** The analysis runs on the lens-corrected oriented image with identity
+geometry. The image is box-downsampled to at most 1024 px on the long edge, as the
+square root of luminance.
+
+1. Sobel gradients feed a Hough transform: angles within ±25° of vertical and of
+   horizontal in 0.25° steps, and pixels vote only when their gradient direction
+   agrees within ±10°.
+2. Non-maximum suppression keeps at most 16 peaks per family, and each peak
+   becomes a segment between the extreme projections of its voting pixels.
+3. The cost is the sum over segments of length · min(deviation°, 10)².
+   - `level` solves `rotate`.
+   - `vertical` solves `rotate` and `vertical`.
+   - `full` solves `rotate`, `vertical` and `horizontal`.
+   - `guided` uses 1–4 user segments instead of detected lines: `--guide
+     x1,y1,x2,y2` in the lens-corrected oriented frame (0–1). Segments steeper
+     than 45° are vertical. It solves `rotate`, plus `vertical` with two or more
+     vertical guides and `horizontal` with two or more horizontal guides.
+   In the cost, a perspective point whose w is at or below 1e-6 adds the maximum
+   deviation.
+4. Coordinate descent runs three cycles. Steps are 0.5° for rotation (±25) and 2
+   for perspective (±100), refined by /10 and /100.
+5. Results are rounded to 0.01° and 0.1. The stored values replace `rotate`,
+   `vertical` and `horizontal` (unsolved keys are removed), with
+   `auto: {"algorithm": "upright-hough"|"upright-guided", "version": 1}`.
+
+No lines is `[invalid-input]`. `--upright off` removes upright, `auto`, guides,
+rotation and perspective.
+
 ### Local adjustments
 
 ```json
@@ -821,8 +932,43 @@ deduplicated, upgraded}`.
 `raw develop DOC PHOTO [--variant ID] [--camera-profile auto|embedded|matrix-only|DIGEST]`
 takes at most one of `--as-shot`, `--temperature K [--tint T]`, `--neutral r,g,b`,
 `--sample x,y,radius` and `--suggest`. It stores the setting in the variant
-(default `master`) and reports `{photo, variant, camera_profile, white_balance,
-monochrome, resolved: {xy, temperature, tint, neutral}}`.
+(default `master`).
+
+It also takes:
+
+- `--lens-profile none|embedded-opcodes|DIGEST`;
+- `--set KEY=JSON` and `--unset KEY` (repeatable), for dotted develop keys of
+  1–4 lowercase parts such as `lens.distortion` or `crop.rect`. `process` is
+  fixed. Unsetting a key that is not set is `[invalid-input]`, and emptied
+  groups are removed;
+- `--upright off|level|vertical|full|guided`, with `--guide x1,y1,x2,y2`
+  (repeatable, at most 4; guided only).
+
+The changes are applied in this order: unset, set, camera profile, lens profile,
+guides, white balance, upright. The result is validated as a whole before the
+document is written. The upright analysis sees every other change.
+
+The report is `{photo, variant, camera_profile, lens_profile, white_balance,
+monochrome, resolved: {xy, temperature, tint, neutral}, frame, upright?}`:
+
+- `frame` is the `photo info` frame;
+- `upright` holds the solved keys and the segment count.
+
+`photo profile add DOC --lens FILE.json` stores a pentool lens profile. The result
+is `{profile, kind, name, imported_from, samples, unsupported, deduplicated,
+upgraded}`. `photo profile import-lcp DOC FILE.lcp` converts and stores an LCP and
+reports the same fields, with `unsupported` listing what was not converted.
+
+`photo info DOC PHOTO [--variant ID]` resolves a variant's frame without decoding
+pixels: `{decoded, oriented, output, orientation, crop: {constrained, rect},
+lens: [steps], geometry, invalid_pixels}`.
+
+`photo render DOC PHOTO [--variant ID] --out FILE.png [--space NAME] [--depth 8|16]`
+develops the variant through the stages implemented so far and writes a PNG. The
+space is one of the named RGB spaces (default `srgb`), and out-of-gamut values are
+clipped relative-colorimetrically. It reports the frame plus the white, `invalid_pixels`,
+`clipped_pixels` and `bytes`. Only raw sources render for now; a rendered source
+is `[unsupported-capability]`.
 
 `raw develop` is a shorthand for setting values in `develop` groups. Every mutating
 command takes `--dry-run` and `--if-revision`, commits through the shared

@@ -828,6 +828,21 @@ enum RawAction {
         /// Store a deterministic gray-world suggestion as temperature and tint.
         #[arg(long, group = "white_balance")]
         suggest: bool,
+        /// none, embedded-opcodes, or a lens profile digest.
+        #[arg(long)]
+        lens_profile: Option<String>,
+        /// Set a develop value: KEY=JSON with a dotted key, e.g. lens.distortion=12 (repeatable).
+        #[arg(long = "set", value_name = "KEY=JSON")]
+        set: Vec<String>,
+        /// Remove a develop value by dotted key (repeatable).
+        #[arg(long = "unset", value_name = "KEY")]
+        unset: Vec<String>,
+        /// Upright analysis: off, level, vertical, full, or guided.
+        #[arg(long)]
+        upright: Option<String>,
+        /// A guided-upright line x1,y1,x2,y2 (0-1, oriented frame; repeatable, at most 4).
+        #[arg(long = "guide", value_name = "X1,Y1,X2,Y2")]
+        guide: Vec<String>,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -837,23 +852,60 @@ enum RawAction {
 
 #[derive(Subcommand)]
 enum PhotoAction {
-    /// Manage verified camera profiles in photography.profiles.
+    /// Manage verified camera and lens profiles in photography.profiles.
     Profile {
         #[command(subcommand)]
         action: PhotoProfileAction,
+    },
+    /// Develop a photo variant and write it as a PNG.
+    Render {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        #[arg(long, default_value = "master")]
+        variant: String,
+        #[arg(long)]
+        out: PathBuf,
+        /// Output color space: srgb, display-p3, adobe-rgb-1998, prophoto or rec2020.
+        #[arg(long, default_value = "srgb")]
+        space: String,
+        /// Bits per channel: 8 or 16.
+        #[arg(long, default_value_t = 8)]
+        depth: u8,
+    },
+    /// Print a variant's resolved frame (sizes, crop, lens steps) without decoding.
+    Info {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        #[arg(long, default_value = "master")]
+        variant: String,
     },
 }
 
 #[derive(Subcommand)]
 enum PhotoProfileAction {
-    /// Verify and store a DNG camera profile (.dcp).
+    /// Verify and store a DNG camera profile (.dcp) or a Pentool lens profile (.json).
     Add {
         input: PathBuf,
+        /// A DNG camera profile (.dcp).
+        #[arg(long, required_unless_present = "lens", conflicts_with = "lens")]
+        file: Option<PathBuf>,
+        /// A Pentool lens profile (pentool_lens_profile JSON).
         #[arg(long)]
-        file: PathBuf,
+        lens: Option<PathBuf>,
         /// Allow the profile for sources whose UniqueCameraModel differs (recorded).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "lens")]
         force_model: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Convert the supported subset of an Adobe lens profile (.lcp) and store it.
+    ImportLcp {
+        input: PathBuf,
+        file: PathBuf,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -1648,6 +1700,20 @@ enum LockAction {
     },
 }
 
+/// Read a camera or lens profile file, checking its size before reading it.
+fn read_profile_file(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
+    let length = fs::metadata(path)
+        .with_context(|| format!("[missing-resource] {}", path.display()))?
+        .len();
+    if length > pentool::photo::catalog::MAX_PROFILE_BYTES {
+        anyhow::bail!(
+            "[limit-exceeded] profile {} is larger than 16 MiB",
+            path.display()
+        )
+    }
+    fs::read(path).with_context(|| format!("[missing-resource] {}", path.display()))
+}
+
 fn main() {
     if let Err(error) = cli_main() {
         eprintln!("Error: {error:#}");
@@ -2330,10 +2396,15 @@ async fn run() -> Result<()> {
                 neutral,
                 sample,
                 suggest,
+                lens_profile,
+                set,
+                unset,
+                upright,
+                guide,
                 dry_run,
                 if_revision,
             } => {
-                use pentool::photo::catalog::WhiteBalance;
+                use pentool::photo::catalog::{DevelopChanges, WhiteBalance};
                 let triple = |text: &str, flag: &str| -> anyhow::Result<[f64; 3]> {
                     let values = text
                         .split(',')
@@ -2369,18 +2440,58 @@ async fn run() -> Result<()> {
                     .as_deref()
                     .map(pentool::photo::catalog::camera_profile)
                     .transpose()?;
-                if camera_profile.is_none() && white_balance.is_none() {
-                    anyhow::bail!("[invalid-input] raw develop needs a setting: --camera-profile, --as-shot, --temperature, --neutral, --sample or --suggest")
+                let lens_profile = lens_profile
+                    .as_deref()
+                    .map(pentool::photo::catalog::lens_profile)
+                    .transpose()?;
+                let set = set
+                    .iter()
+                    .map(|entry| {
+                        let (key, value) = entry.split_once('=').with_context(|| {
+                            format!("[invalid-input] --set {entry:?} must be KEY=JSON")
+                        })?;
+                        let value: serde_json::Value =
+                            serde_json::from_str(value).with_context(|| {
+                                format!("[invalid-input] --set {key}: {value:?} is not JSON")
+                            })?;
+                        Ok((key.to_string(), value))
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                if guide.len() > 4 {
+                    anyhow::bail!("[invalid-input] at most 4 --guide segments")
+                }
+                let guides = guide
+                    .iter()
+                    .map(|text| {
+                        let values = text
+                            .split(',')
+                            .map(|v| v.trim().parse::<f64>())
+                            .collect::<Result<Vec<_>, _>>()
+                            .ok()
+                            .filter(|v| v.len() == 4 && v.iter().all(|v| (0.0..=1.0).contains(v)));
+                        match values {
+                            Some(v) => Ok([v[0], v[1], v[2], v[3]]),
+                            None => anyhow::bail!(
+                                "[invalid-input] --guide {text:?} takes x1,y1,x2,y2 between 0 and 1"
+                            ),
+                        }
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                let changes = DevelopChanges {
+                    set,
+                    unset,
+                    camera_profile,
+                    lens_profile,
+                    white_balance,
+                    upright,
+                    guides,
+                };
+                if changes.is_empty() {
+                    anyhow::bail!("[invalid-input] raw develop needs a setting: --set, --unset, --camera-profile, --lens-profile, --upright, --as-shot, --temperature, --neutral, --sample or --suggest")
                 }
                 let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
-                let result = pentool::photo::catalog::develop_raw(
-                    &mut raw,
-                    &input,
-                    &id,
-                    &variant,
-                    camera_profile,
-                    white_balance,
-                )?;
+                let result =
+                    pentool::photo::catalog::develop_raw(&mut raw, &input, &id, &variant, changes)?;
                 let change = transaction::commit_value(
                     &input,
                     "raw-develop",
@@ -2403,21 +2514,22 @@ async fn run() -> Result<()> {
                     PhotoProfileAction::Add {
                         input,
                         file,
+                        lens,
                         force_model,
                         dry_run,
                         if_revision,
                     },
             } => {
-                let length = fs::metadata(&file)
-                    .with_context(|| format!("[missing-resource] {}", file.display()))?
-                    .len();
-                if length > pentool::photo::catalog::MAX_PROFILE_BYTES {
-                    anyhow::bail!("[limit-exceeded] camera profile is larger than 16 MiB")
-                }
-                let bytes = fs::read(&file)
-                    .with_context(|| format!("[missing-resource] {}", file.display()))?;
+                let path = lens.as_ref().or(file.as_ref()).context(
+                    "[invalid-input] photo profile add needs --file FILE.dcp or --lens FILE.json",
+                )?;
+                let bytes = read_profile_file(path)?;
                 let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
-                let result = pentool::photo::catalog::add_profile(&mut raw, &bytes, force_model)?;
+                let result = if lens.is_some() {
+                    pentool::photo::catalog::add_lens_profile(&mut raw, &bytes)?
+                } else {
+                    pentool::photo::catalog::add_profile(&mut raw, &bytes, force_model)?
+                };
                 let change = transaction::commit_value(
                     &input,
                     "photo-profile-add",
@@ -2431,6 +2543,81 @@ async fn run() -> Result<()> {
                         &serde_json::json!({"change":change,"result":result})
                     )?
                 );
+                Ok(())
+            }
+            PhotoAction::Profile {
+                action:
+                    PhotoProfileAction::ImportLcp {
+                        input,
+                        file,
+                        dry_run,
+                        if_revision,
+                    },
+            } => {
+                let bytes = read_profile_file(&file)?;
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = pentool::photo::catalog::import_lcp(&mut raw, &bytes)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "photo-profile-import-lcp",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+            PhotoAction::Render {
+                input,
+                id,
+                variant,
+                out,
+                space,
+                depth,
+            } => {
+                use pentool::photo::pixels::{self, Depth, Dither};
+                let bits = depth;
+                let depth = match bits {
+                    8 => Depth::Eight,
+                    16 => Depth::Sixteen,
+                    other => anyhow::bail!("[invalid-input] --depth {other} must be 8 or 16"),
+                };
+                if !pentool::photo::color::NAMED_SPACES.contains(&space.as_str()) {
+                    anyhow::bail!(
+                        "[invalid-input] --space {space:?} must be one of {}",
+                        pentool::photo::color::NAMED_SPACES.join(", ")
+                    )
+                }
+                let color_space = pentool::photo::color::ColorSpace::named(&space)?;
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let developed = pentool::photo::catalog::render_photo(&raw, &input, &id, &variant)?;
+                let (raster, encoded) =
+                    pixels::from_working(&developed.image, &color_space, depth, Dither::None)?;
+                let png = pentool::photo::png::write(&raster)?;
+                let temporary = out.with_extension("png.tmp");
+                fs::write(&temporary, &png)
+                    .with_context(|| format!("write {}", temporary.display()))?;
+                fs::rename(&temporary, &out).with_context(|| format!("write {}", out.display()))?;
+                let mut report = developed.report;
+                report["photo"] = serde_json::json!(id);
+                report["variant"] = serde_json::json!(variant);
+                report["out"] = serde_json::json!(out.display().to_string());
+                report["space"] = serde_json::json!(space);
+                report["depth"] = serde_json::json!(bits);
+                report["clipped_pixels"] = serde_json::json!(encoded.clipped_pixels);
+                report["bytes"] = serde_json::json!(png.len());
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Info { input, id, variant } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let report = pentool::photo::catalog::photo_info(&raw, &input, &id, &variant)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
                 Ok(())
             }
         },

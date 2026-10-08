@@ -76,6 +76,25 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   exists (items 5–6). The checkbox stays open until review and hosted CI pass.
 - [ ] **5. Add lens and geometry correction.** Cover distortion, vignetting,
   chromatic aberration, perspective, leveling, rotation, and constrained crop.
+  *Status: implemented for review.* This item has five parts:
+  - lens profiles and the bounded LCP subset in `src/photo/lens.rs`;
+  - the lens chain, geometry, crop, single-pass warp and upright analysis in
+    `src/photo/warp.rs`;
+  - the stage 1–5 pipeline in `src/photo/pipeline.rs`, with `lens`, `geometry`
+    and `crop` validation in `src/photo/develop.rs`;
+  - `pentool photo profile add --lens`, `pentool photo profile import-lcp`,
+    `pentool raw develop` (`--lens-profile`, `--set`/`--unset`, `--upright`,
+    `--guide`), `pentool photo info` and `pentool photo render`;
+  - `tests/v0110_lens_geometry.rs`.
+
+  Decisions:
+  - `crop.aspect` shapes only a constrained crop;
+  - `crop.rect` validation is stricter than the schema (positive size, inside
+    the frame);
+  - guides are given in the lens-corrected oriented frame;
+  - `photo render` handles raw sources only until rendered sources can be added.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **6. Build the development stack.** Add exposure, highlights/shadows,
   whites/blacks, curves, clarity, texture, dehaze, vibrance, HSL, grading,
   monochrome, grain, vignette, calibration, and stable processing order.

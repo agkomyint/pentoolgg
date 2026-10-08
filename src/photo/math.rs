@@ -1,6 +1,6 @@
 //! Deterministic transcendental functions for photo engine 1.
 //!
-//! Only IEEE-754 `+ - * /`, comparisons, `floor` and bit manipulation are used, so
+//! Only IEEE-754 `+ - * /`, `sqrt`, comparisons, `floor` and bit manipulation are used, so
 //! every platform produces identical bits. Platform `libm` (`powf`, `ln`, `exp`)
 //! is never called on a rendering path. Accuracy is about 1 ulp of `f64`, far
 //! below one 16-bit code value.
@@ -86,6 +86,120 @@ pub fn pow(x: f64, y: f64) -> f64 {
     exp2(y * log2(x))
 }
 
+const PI: f64 = std::f64::consts::PI;
+const FRAC_PI_2: f64 = std::f64::consts::FRAC_PI_2;
+// pi/2 split so `k * PI_2_HIGH` is exact for |k| < 2^20 (Cody–Waite).
+const PI_2_HIGH: f64 = 1.570_796_326_734_125_6;
+const PI_2_LOW: f64 = 6.077_100_506_506_192e-11;
+
+/// `sin` and `cos` of `r` in [-pi/4, pi/4] by their Taylor series.
+fn sin_cos_reduced(r: f64) -> (f64, f64) {
+    let r2 = r * r;
+    let mut sin = 0.0;
+    let mut cos = 0.0;
+    let mut s_term = r;
+    let mut c_term = 1.0;
+    for n in 0..12 {
+        sin += s_term;
+        cos += c_term;
+        let k = f64::from(2 * n + 2);
+        c_term = -c_term * r2 / (k * (k - 1.0));
+        s_term = -s_term * r2 / (k * (k + 1.0));
+    }
+    (sin, cos)
+}
+
+/// `(sin x, cos x)` for radians with |x| up to about 1e6; NaN otherwise.
+pub fn sin_cos(x: f64) -> (f64, f64) {
+    if !x.is_finite() || x.abs() > 1.0e6 {
+        return (f64::NAN, f64::NAN);
+    }
+    let k = (x / FRAC_PI_2 + 0.5).floor();
+    let r = (x - k * PI_2_HIGH) - k * PI_2_LOW;
+    let (s, c) = sin_cos_reduced(r);
+    match (k as i64).rem_euclid(4) {
+        0 => (s, c),
+        1 => (c, -s),
+        2 => (-s, -c),
+        _ => (-c, s),
+    }
+}
+
+pub fn sin(x: f64) -> f64 {
+    sin_cos(x).0
+}
+
+pub fn cos(x: f64) -> f64 {
+    sin_cos(x).1
+}
+
+/// `atan(t)` for finite `t`, by two half-angle reductions and a series.
+pub fn atan(t: f64) -> f64 {
+    if t.is_nan() {
+        return f64::NAN;
+    }
+    if t.is_infinite() {
+        return FRAC_PI_2.copysign(t);
+    }
+    let (t, flip) = if t.abs() > 1.0 {
+        (1.0 / t, true)
+    } else {
+        (t, false)
+    };
+    // atan(t) = 2 atan(t / (1 + sqrt(1 + t^2))); twice leaves |z| <= 0.2.
+    let mut z = t;
+    for _ in 0..2 {
+        z /= 1.0 + (1.0 + z * z).sqrt();
+    }
+    let z2 = z * z;
+    let mut term = z;
+    let mut sum = 0.0;
+    for n in 0..20 {
+        sum += term / f64::from(2 * n + 1);
+        term = -term * z2;
+    }
+    let angle = 4.0 * sum;
+    if flip {
+        FRAC_PI_2.copysign(t) - angle
+    } else {
+        angle
+    }
+}
+
+/// `atan2(y, x)` in (-pi, pi]. `atan2(0, 0)` is 0.
+pub fn atan2(y: f64, x: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return if y > 0.0 {
+            FRAC_PI_2
+        } else if y < 0.0 {
+            -FRAC_PI_2
+        } else {
+            0.0
+        };
+    }
+    let base = atan(y / x);
+    if x > 0.0 {
+        base
+    } else if y >= 0.0 {
+        base + PI
+    } else {
+        base - PI
+    }
+}
+
+/// Degrees to radians.
+pub fn radians(degrees: f64) -> f64 {
+    degrees * (PI / 180.0)
+}
+
+/// Radians to degrees.
+pub fn degrees(radians: f64) -> f64 {
+    radians * (180.0 / PI)
+}
+
 /// Split a positive finite `x` into a mantissa in [1, 2) and an exponent.
 fn split(x: f64) -> (f64, i32) {
     let mut bits = x.to_bits();
@@ -154,6 +268,38 @@ mod tests {
         assert_eq!(exp2(2000.0), f64::INFINITY);
         assert_eq!(log2(0.0), f64::NEG_INFINITY);
         assert!(close(log2(f64::from_bits(1)), -1074.0, 1e-15));
+    }
+
+    #[test]
+    fn trigonometry_matches_reference_values_closely() {
+        let mut x = -20.0;
+        while x <= 20.0 {
+            let (s, c) = sin_cos(x);
+            assert!((s - x.sin()).abs() < 2e-15, "sin {x}");
+            assert!((c - x.cos()).abs() < 2e-15, "cos {x}");
+            x += 0.0137;
+        }
+        assert_eq!(sin_cos(0.0), (0.0, 1.0));
+        for &t in &[
+            -1e9, -30.0, -1.0, -0.4, -1e-9, 0.0, 0.2, 0.9, 1.0, 3.0, 1e12,
+        ] {
+            assert!((atan(t) - t.atan()).abs() < 2e-15, "atan {t}");
+        }
+        for &(y, x) in &[
+            (1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, -1.0),
+            (-1.0, 1.0),
+            (0.0, -2.0),
+            (3.0, 0.0),
+            (-3.0, 0.0),
+            (1e-8, 5.0),
+            (2.0, -1e-9),
+        ] {
+            assert!((atan2(y, x) - f64::atan2(y, x)).abs() < 4e-15, "{y} {x}");
+        }
+        assert_eq!(atan2(0.0, 0.0), 0.0);
+        assert!((degrees(radians(37.5)) - 37.5).abs() < 1e-13);
     }
 
     #[test]
