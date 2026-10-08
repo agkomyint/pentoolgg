@@ -46,7 +46,7 @@ pub fn load_tip(raw: &Value, digest: &str) -> Result<TipMask> {
         .and_then(|store| store.get(digest))
         .with_context(|| format!("[missing-resource] brush tip {digest} is not in raster_tiles"))?;
     let tile = decode_tile(entry, digest)?;
-    Ok(tile.chunks_exact(4).map(|pixel| pixel[3]).collect())
+    Ok(tile.chunks(4).map(|pixel| pixel[3]).collect())
 }
 
 /// Replace a `brush_tips` name in `brush.tip` with its digest and load the tip.
@@ -175,7 +175,7 @@ pub(super) fn tip_register(
     collect_garbage(&mut next);
     crate::scene::validate(&next)?;
     *raw = next;
-    let covered = tile.chunks_exact(4).filter(|p| p[3] != 0).count();
+    let covered = tile.chunks(4).filter(|p| p[3] != 0).count();
     Ok(json!({
         "name": name,
         "tip": digest,

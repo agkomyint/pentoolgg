@@ -38,7 +38,7 @@ impl Surface {
     /// Visit every non-transparent pixel in tile order.
     pub fn for_each_painted(&self, mut visit: impl FnMut(u32, u32, [u8; 4])) {
         for (key, tile) in &self.tiles {
-            for (index, pixel) in tile.chunks_exact(4).enumerate() {
+            for (index, pixel) in tile.chunks(4).enumerate() {
                 if pixel[3] == 0 {
                     continue;
                 }

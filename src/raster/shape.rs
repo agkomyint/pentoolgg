@@ -486,7 +486,7 @@ pub fn lasso(
             }
             crossings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let row = &mut counts[(sub / 4) * wu..(sub / 4 + 1) * wu];
-            for pair in crossings.chunks_exact(2) {
+            for pair in crossings.chunks(2).filter(|pair| pair.len() == 2) {
                 // Sub-sample k has its center at (k + 0.5) / 4.
                 let start = (-(-(pair[0] * 4.0 - 0.5)).floor()).max(0.0);
                 let end = (-(-(pair[1] * 4.0 - 0.5)).floor()).min((wu * 4) as f64);
