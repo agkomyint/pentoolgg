@@ -1,7 +1,7 @@
 //! Validation of a variant's `develop` settings (`[invalid-develop]`).
 //!
-//! Each roadmap item validates the groups it implements. Groups that later items
-//! own (`detail` and `local`) are accepted as opaque values until then.
+//! Each roadmap item validates the groups it implements; `local` is validated by
+//! `super::local`.
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 
@@ -13,6 +13,8 @@ pub struct Source<'a> {
     pub camera_model: Option<&'a str>,
     /// `photography.profiles`.
     pub profiles: &'a Map<String, Value>,
+    /// The document, when local masks must resolve against its resources.
+    pub document: Option<&'a Value>,
 }
 
 impl Source<'_> {
@@ -40,14 +42,14 @@ const GROUPS: [&str; 16] = [
     "local",
 ];
 
-fn group<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>> {
+pub(super) fn group<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>> {
     match value.as_object() {
         Some(object) => Ok(object),
         None => bail!("[invalid-develop] {what} must be an object"),
     }
 }
 
-fn allowed(object: &Map<String, Value>, keys: &[&str], what: &str) -> Result<()> {
+pub(super) fn allowed(object: &Map<String, Value>, keys: &[&str], what: &str) -> Result<()> {
     if let Some(key) = object.keys().find(|key| !keys.contains(&key.as_str())) {
         bail!(
             "[invalid-develop] {what} has unknown parameter {key:?}; expected one of {}",
@@ -57,7 +59,7 @@ fn allowed(object: &Map<String, Value>, keys: &[&str], what: &str) -> Result<()>
     Ok(())
 }
 
-fn number(
+pub(super) fn number(
     object: &Map<String, Value>,
     key: &str,
     (low, high): (f64, f64),
@@ -92,7 +94,7 @@ fn choice(object: &Map<String, Value>, key: &str, choices: &[&str], what: &str) 
     }
 }
 
-fn digest(value: &str) -> bool {
+pub(super) fn digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -126,7 +128,11 @@ pub fn validate(develop: &Map<String, Value>, source: &Source, what: &str) -> Re
     if let Some(crop) = develop.get("crop") {
         validate_crop(crop, &format!("{what} crop"))?;
     }
-    validate_development(develop, what)
+    validate_development(develop, what)?;
+    if let Some(local) = develop.get("local") {
+        super::local::validate(local, source.document, what)?;
+    }
+    Ok(())
 }
 
 const SIGNED: (f64, f64) = (-100.0, 100.0);
@@ -369,7 +375,7 @@ fn validate_curves(curves: &Value, what: &str) -> Result<()> {
     Ok(())
 }
 
-fn boolean(object: &Map<String, Value>, key: &str, what: &str) -> Result<()> {
+pub(super) fn boolean(object: &Map<String, Value>, key: &str, what: &str) -> Result<()> {
     match object.get(key) {
         None | Some(Value::Bool(_)) => Ok(()),
         Some(value) => bail!("[invalid-develop] {what}.{key} must be true or false; got {value}"),
@@ -720,6 +726,7 @@ mod tests {
             kind,
             camera_model: Some("Body"),
             profiles: &profiles,
+            document: None,
         };
         validate(develop.as_object().unwrap(), &source, "variant p/master")
     }

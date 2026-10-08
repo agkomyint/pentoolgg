@@ -8,6 +8,7 @@ pub mod develop;
 pub mod dng;
 pub mod lens;
 pub mod ljpeg;
+pub mod local;
 pub mod math;
 pub mod opcode;
 pub mod pipeline;

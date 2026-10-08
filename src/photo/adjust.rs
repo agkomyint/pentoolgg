@@ -30,6 +30,8 @@ pub struct Context {
     /// The image's top-left corner in that frame, so grain stays put when the
     /// crop changes.
     pub origin: (usize, usize),
+    /// The size of that frame, which local masks are normalized to.
+    pub frame: (usize, usize),
 }
 
 fn value(object: &Value, key: &str) -> f64 {
@@ -528,10 +530,21 @@ pub fn airlight(develop: &Value) -> Result<Option<[f64; 3]>> {
 
 fn presence(image: &mut Working, develop: &Value, context: &Context) -> Result<()> {
     let group = &develop["presence"];
-    if let Some(a) = airlight(develop)? {
-        dehaze(image, percent(group, "dehaze"), a, context)?;
+    let sliders = ["dehaze", "clarity", "texture"].map(|key| percent(group, key));
+    presence_with(image, sliders, airlight(develop)?, context)
+}
+
+/// Stage 7 with `[dehaze, clarity, texture]` as fractions (-1 to 1). Dehaze
+/// runs only with an airlight.
+pub(crate) fn presence_with(
+    image: &mut Working,
+    [dehaze_amount, clarity, texture]: [f64; 3],
+    airlight: Option<[f64; 3]>,
+    context: &Context,
+) -> Result<()> {
+    if let Some(a) = airlight.filter(|_| dehaze_amount != 0.0) {
+        dehaze(image, dehaze_amount, a, context)?;
     }
-    let (clarity, texture) = (percent(group, "clarity"), percent(group, "texture"));
     if clarity != 0.0 || texture != 0.0 {
         local_contrast(image, clarity, texture, context)?;
     }
@@ -1080,15 +1093,38 @@ fn grain(image: &mut Working, group: &Value, context: &Context) -> Result<()> {
 
 /// Stages 6–10 on the warped, cropped working image.
 pub fn apply(image: &mut Working, develop: &Value, context: &Context) -> Result<()> {
+    apply_with(image, develop, context, None)
+}
+
+/// Stages 6–10 with local adjustments inside their stages.
+pub fn apply_with(
+    image: &mut Working,
+    develop: &Value,
+    context: &Context,
+    mut local: Option<&mut super::local::Local>,
+) -> Result<()> {
     tone(image, develop, context)?;
+    if let Some(local) = local.as_deref_mut() {
+        local.prepare(image, context)?;
+        local.tone(image, context)?;
+    }
     presence(image, develop, context)?;
+    if let Some(local) = &local {
+        local.presence(image, context)?;
+    }
     if let Some(curves) = Curves::new(develop) {
         curves.apply(image)?;
     }
     if let Some(stage) = ColorStage::new(develop) {
         stage.apply(image)?;
     }
+    if let Some(local) = &local {
+        local.color(image)?;
+    }
     super::detail::sharpen(image, develop)?;
+    if let Some(local) = &local {
+        local.detail(image)?;
+    }
     let effects = &develop["effects"];
     if let Some(group) = effects.get("vignette") {
         vignette(image, group)?;
@@ -1229,6 +1265,7 @@ mod tests {
             baseline_exposure: 0.0,
             long_edge: 100.0,
             origin: (0, 0),
+            frame: (100, 100),
         }
     }
 

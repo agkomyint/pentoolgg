@@ -817,8 +817,8 @@ box Gaussian of the development stack.
   - `linear`: `start` and `end`; coverage ramps from 1 at `start` to 0 at `end`.
   - `radial`: `center`, `radius` [rx, ry], `angle`, `feather` 0–100, and `inside`
     (default true).
-  - `range-luminance`: `min`, `max`, `smoothness` (working-space luminance after
-    stage 6).
+  - `range-luminance`: `min`, `max`, `smoothness` (perceptual Oklab lightness
+    after stage 6).
   - `range-color`: `colors` (1–5 working-space samples), `amount` 0–100.
   - `depth`: `map` (the digest of a depth image), `min`, `max`, `smoothness`.
     Available only when the source pairs with a depth map imported explicitly.
@@ -835,6 +835,47 @@ box Gaussian of the development stack.
   `dehaze`, `hue` (-180–180), `saturation`, `sharpness`, `noise`, `moire`,
   `defringe` and `color` (`{hue, saturation}`). Each is added within its stage and
   weighted by coverage times `amount` (0–1).
+
+Implementation (process 1):
+
+- Coverage is computed once, after the global stage 6, at each pixel center in
+  frame coordinates (`(origin + x + 0.5) / frame`), so a crop only changes which
+  part of the frame is rendered. Components combine as add `t + c - tc`,
+  subtract `t(1 - c)` and intersect `tc`; `invert` uses `1 - c` first. The final
+  weight is coverage times `amount`. Disabled adjustments and an `amount` of 0
+  are skipped.
+- `linear`: `1 - smoothstep(t)`, with `t` the projection onto start→end. `start`
+  and `end` must differ.
+- `radial`: radii are fractions of the long edge (0 < r ≤ 4), rotated by `angle`;
+  coverage is `smoothstep((1 - d) / feather)` with `d` the normalized elliptical
+  distance and `feather` defaulting to 50. `inside: false` inverts it.
+- `range-luminance`: on Oklab L (perceptual, 0–1), with linear ramps of width
+  `smoothness` (default 0.1) outside `min`–`max`.
+- `range-color`: Oklab distance `d = sqrt(0.25 ΔL² + Δa² + Δb²)` to the nearest
+  sample; tolerance `T = 0.02 + 0.28 · amount / 100` (default amount 50); coverage
+  `smoothstep(2 (1 - d / T))`.
+- `depth` is refused with `[unsupported-capability]`: this build imports no depth
+  maps.
+- `brush`: bilinear sampling of the plane. Planes span at most 256 tiles and every
+  tile digest must be in `raster_tiles`. `photo mask paint` paints into an
+  existing brush component (`--component N`, whose size must match the current
+  frame) or appends a new one; samples are in brush-plane pixels and `--erase`
+  removes coverage. Tiles are retained by the raster garbage collector.
+- `mask`: a raster `mask_resources` entry, read as luminance times alpha and
+  sampled bilinearly over the frame. Vector masks are refused with
+  `[unsupported-capability]`.
+- Stage application: exposure, temperature and tint are per-pixel gains after the
+  global tone (temperature and tint are luminance-preserving `2^(±0.3 w v)` channel
+  gains); contrast, highlights, shadows, whites and blacks run the global tone curve
+  on a copy and blend by the weight; dehaze, clarity and texture run the stage-7
+  kernel at full strength on a copy and blend by `weight · |v| / 100` (a local
+  dehaze uses the stored `presence.dehaze_airlight`, which `raw develop` resolves
+  whenever a local dehaze exists); hue, saturation and `color` act in Oklab after
+  stage 9; sharpness, noise, moire and defringe run after capture sharpening
+  (negative sharpness is a σ 1.5 blur; negative noise, moire and defringe
+  extrapolate away from the reduced image).
+- The render report lists `local: [{id, coverage}]`, the mean weight of each
+  applied adjustment.
 
 ### HDR and panorama merges
 

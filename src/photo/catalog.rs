@@ -394,7 +394,7 @@ fn validate_catalog<'a>(
     }
     let mut ids: HashMap<&str, HashSet<&str>> = HashMap::with_capacity(photos.len());
     for photo in photos {
-        let (photo_id, variants) = validate_photo(photo, assets, &profiles)?;
+        let (photo_id, variants) = validate_photo(raw, photo, assets, &profiles)?;
         if ids.insert(photo_id, variants).is_some() {
             bail!("[malformed-resource] photo ID {photo_id} is used more than once")
         }
@@ -642,6 +642,7 @@ fn validate_asset(
 }
 
 fn validate_photo<'a>(
+    raw: &Value,
     photo: &'a Value,
     assets: &Map<String, Value>,
     profiles: &Map<String, Value>,
@@ -681,6 +682,7 @@ fn validate_photo<'a>(
         kind: asset["kind"].as_str().unwrap_or("rendered"),
         camera_model: asset["raw"]["unique_camera_model"].as_str(),
         profiles,
+        document: Some(raw),
     };
     text(record, "name", 256, &what)?;
     text(record, "title", 1024, &what)?;
@@ -1324,7 +1326,7 @@ pub fn develop_raw(
         .get("dehaze")
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
-    if dehaze != 0.0 {
+    if dehaze != 0.0 || super::local::uses_dehaze(&develop) {
         let stored = develop["presence"].get("dehaze_airlight").is_some();
         let changed = AIRLIGHT_INPUTS
             .iter()
@@ -1333,8 +1335,9 @@ pub fn develop_raw(
             document_value["photography"]["photos"][photo_index]["variants"][variant_index]
                 ["develop"] = develop.clone();
             if let Some(presence) = document_value["photography"]["photos"][photo_index]["variants"]
-                [variant_index]["develop"]["presence"]
-                .as_object_mut()
+                [variant_index]["develop"]
+                .get_mut("presence")
+                .and_then(Value::as_object_mut)
             {
                 presence.remove("dehaze_airlight");
             }
@@ -1433,7 +1436,8 @@ pub fn render_photo(
     let (develop, bytes, profiles) = locate(raw, document, photo_id, variant_id)?;
     let dng = Dng::inspect(&bytes)?;
     let loader = profile_loader(document, profiles);
-    super::pipeline::develop(&dng, develop, &loader)
+    let masks = super::local::Lookup { raw, document };
+    super::pipeline::develop(&dng, develop, &loader, Some(&masks))
 }
 
 /// `photo info`: the resolved frame of a variant without decoding pixels,
@@ -1449,6 +1453,141 @@ pub fn photo_info(raw: &Value, document: &Path, photo_id: &str, variant_id: &str
     report["variant"] = json!(variant_id);
     report["invalid_pixels"] = json!(invalid);
     Ok(report)
+}
+
+/// A brush stroke for `photo mask paint`. Samples are in brush-plane pixels.
+pub struct MaskStroke {
+    pub adjustment: String,
+    /// The brush component to paint into; `None` appends a new one.
+    pub component: Option<usize>,
+    pub request: crate::raster::StrokeRequest,
+}
+
+/// `photo mask paint`: paint a brush mask component of a local adjustment with
+/// the raster brush engine. The plane is the uncropped frame scaled to a long
+/// edge of at most 4096 pixels; its tiles live in `raster_tiles`.
+pub fn paint_mask(
+    raw: &mut Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+    stroke: MaskStroke,
+) -> Result<Value> {
+    use crate::raster;
+    let frame = {
+        let (develop, bytes, profiles) = locate(raw, document, photo_id, variant_id)?;
+        let dng = Dng::inspect(&bytes)?;
+        let loader = profile_loader(document, profiles);
+        super::pipeline::plan(&dng, develop, &loader)?.mapping.frame
+    };
+    let (width, height) = super::local::brush_size(frame);
+    let mut next = raw.clone();
+    let MaskStroke {
+        adjustment,
+        component,
+        mut request,
+    } = stroke;
+    let photo = next["photography"]["photos"]
+        .as_array_mut()
+        .and_then(|photos| photos.iter_mut().find(|p| p["id"] == photo_id))
+        .context("[missing-resource] photo is not in the catalog")?;
+    let develop = photo["variants"]
+        .as_array_mut()
+        .and_then(|variants| variants.iter_mut().find(|v| v["id"] == variant_id))
+        .map(|variant| &mut variant["develop"])
+        .context("[missing-resource] variant does not exist")?;
+    let entry = develop["local"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .position(|a| a["id"] == adjustment.as_str())
+        .with_context(|| {
+            format!("[missing-resource] variant {photo_id}/{variant_id} has no local adjustment {adjustment}; add it with `raw develop --set local=[...]` first")
+        })?;
+    let components_len = develop["local"][entry]["mask"]["components"]
+        .as_array()
+        .map_or(0, Vec::len);
+    let (index, existing) = match component {
+        Some(index) => {
+            let current = develop["local"][entry]["mask"]["components"]
+                .get(index)
+                .with_context(|| {
+                    format!(
+                        "[invalid-input] local adjustment {adjustment} has no component {index}"
+                    )
+                })?;
+            if current["kind"] != "brush" {
+                bail!("[invalid-input] component {index} of local adjustment {adjustment} is a {} component; paint into a brush component or omit --component", current["kind"])
+            }
+            if current["width"] != width || current["height"] != height {
+                bail!("[invalid-input] brush component {index} is {}x{} but the frame's brush plane is {width}x{height}; the frame changed, so paint a new component", current["width"], current["height"])
+            }
+            (index, Some(current.clone()))
+        }
+        None => {
+            if components_len >= super::local::MAX_COMPONENTS {
+                bail!(
+                    "[limit-exceeded] local adjustment {adjustment} already has {} mask components",
+                    super::local::MAX_COMPONENTS
+                )
+            }
+            (components_len, None)
+        }
+    };
+    let tiles = existing.as_ref().map_or(json!({}), |c| c["tiles"].clone());
+    let mut surface = raster::Surface::load_map(raw, width, height, &tiles)?;
+    let tip = raster::resolve_tip(raw, &mut request.brush)?;
+    let painted = raster::Stroke {
+        brush: request.brush.clone(),
+        samples: request.samples.clone(),
+        color: [0, 0, 0],
+        blend: request.blend,
+        seed: request.seed,
+        tip,
+        clone: None,
+    };
+    let result = raster::apply_stroke(&mut surface, &painted)?;
+    let mut holder = json!({});
+    surface.store(&mut next, &mut holder)?;
+    let develop = next["photography"]["photos"]
+        .as_array_mut()
+        .and_then(|photos| photos.iter_mut().find(|p| p["id"] == photo_id))
+        .and_then(|photo| {
+            photo["variants"]
+                .as_array_mut()?
+                .iter_mut()
+                .find(|v| v["id"] == variant_id)
+        })
+        .map(|variant| &mut variant["develop"])
+        .context("[missing-resource] variant does not exist")?;
+    let components = develop["local"][entry]["mask"]["components"]
+        .as_array_mut()
+        .context("[invalid-develop] local adjustment mask components must be an array")?;
+    let mut value = existing.unwrap_or_else(
+        || json!({"kind": "brush", "mode": "add", "width": width, "height": height}),
+    );
+    value["tiles"] = holder.get("tiles").cloned().unwrap_or(json!({}));
+    if index == components.len() {
+        components.push(value);
+    } else {
+        components[index] = value;
+    }
+    let released = raster::collect_garbage(&mut next);
+    crate::scene::validate(&next)?;
+    *raw = next;
+    Ok(json!({
+        "photo": photo_id,
+        "variant": variant_id,
+        "adjustment": adjustment,
+        "component": index,
+        "plane": [width, height],
+        "frame": [frame.0, frame.1],
+        "dabs": result.dabs,
+        "bounds": result.bounds,
+        "tiles_changed": result.tiles_changed,
+        "tiles": surface.tiles.len(),
+        "tiles_released": released,
+    }))
 }
 
 /// `photo profile add --lens`: verify and store a Pentool lens profile.

@@ -6,6 +6,7 @@ use super::adjust;
 use super::detail;
 use super::dng::Dng;
 use super::lens::LensProfile;
+use super::local;
 use super::pixels::Working;
 use super::warp::{self, Correction, Crop, LensChain, Mapping};
 use super::{profile, raw};
@@ -139,18 +140,30 @@ pub fn context(dng: &Dng, plan: &Plan) -> adjust::Context {
         baseline_exposure: dng.baseline_exposure.unwrap_or(0.0),
         long_edge: plan.mapping.frame.0.max(plan.mapping.frame.1) as f64,
         origin: (plan.crop[0], plan.crop[1]),
+        frame: plan.mapping.frame,
     }
 }
 
-pub fn develop(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Developed> {
+/// Develop a variant. `masks` reads brush tiles and mask resources; without
+/// it, a local adjustment that needs them is refused.
+pub fn develop(
+    dng: &Dng,
+    develop: &Value,
+    profiles: Profiles,
+    masks: Option<&local::Lookup>,
+) -> Result<Developed> {
     let plan = plan(dng, develop, profiles)?;
-    // Refuse an unresolved dehaze before any decoding work.
+    // Refuse an unresolved dehaze and load masks before any decoding work.
     adjust::airlight(develop)?;
+    let mut local = local::Local::new(develop, masks)?;
     let (rgb, white) = decode_working(dng, develop, profiles)?;
     let (mut image, invalid_pixels) = warp::render(&rgb, &plan.mapping, plan.crop)?;
     drop(rgb);
-    adjust::apply(&mut image, develop, &context(dng, &plan))?;
+    adjust::apply_with(&mut image, develop, &context(dng, &plan), local.as_mut())?;
     let mut report = plan.report;
+    if let Some(local) = &local {
+        report["local"] = local.report();
+    }
     report["white"] = white.report();
     report["invalid_pixels"] = json!(invalid_pixels);
     Ok(Developed {
@@ -199,6 +212,7 @@ pub fn resolve_airlight(dng: &Dng, develop: &Value, profiles: Profiles) -> Resul
         baseline_exposure: dng.baseline_exposure.unwrap_or(0.0),
         long_edge: proxy.width.max(proxy.height) as f64,
         origin: (0, 0),
+        frame: (proxy.width as usize, proxy.height as usize),
     };
     adjust::tone(&mut proxy, develop, &context)?;
     let airlight = adjust::estimate_airlight(&proxy)?;

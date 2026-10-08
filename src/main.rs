@@ -863,6 +863,11 @@ enum PhotoAction {
         #[command(subcommand)]
         action: PhotoProfileAction,
     },
+    /// Paint brush masks of local adjustments.
+    Mask {
+        #[command(subcommand)]
+        action: PhotoMaskAction,
+    },
     /// Develop a photo variant and write it as a PNG.
     Render {
         input: PathBuf,
@@ -886,6 +891,44 @@ enum PhotoAction {
         id: String,
         #[arg(long, default_value = "master")]
         variant: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhotoMaskAction {
+    /// Paint a brush mask of a local adjustment with the raster brush engine.
+    /// Samples are in brush-plane pixels: the uncropped frame scaled to a long
+    /// edge of at most 4096.
+    Paint {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        #[arg(long, default_value = "master")]
+        variant: String,
+        /// The local adjustment ID (create it with `raw develop --set local=[...]`).
+        #[arg(long)]
+        adjustment: String,
+        /// Index of the brush component to paint into; omit to add a new one.
+        #[arg(long)]
+        component: Option<usize>,
+        /// JSON array of device events, as for `raster stroke`, or @file.json.
+        #[arg(long)]
+        samples: String,
+        /// Brush JSON, or @file.json.
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        /// Name of a document brush preset to start from; --brush overrides it.
+        #[arg(long)]
+        preset: Option<String>,
+        /// Remove coverage instead of adding it.
+        #[arg(long)]
+        erase: bool,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
     },
 }
 
@@ -2633,6 +2676,82 @@ async fn run() -> Result<()> {
                 report["clipped_pixels"] = serde_json::json!(encoded.clipped_pixels);
                 report["bytes"] = serde_json::json!(png.len());
                 println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Mask {
+                action:
+                    PhotoMaskAction::Paint {
+                        input,
+                        id,
+                        variant,
+                        adjustment,
+                        component,
+                        samples,
+                        brush,
+                        preset,
+                        erase,
+                        seed,
+                        dry_run,
+                        if_revision,
+                    },
+            } => {
+                let read = |text: &str| -> Result<serde_json::Value> {
+                    let body = match text.strip_prefix('@') {
+                        Some(path) => {
+                            const MAX_JSON: u64 = 16 << 20;
+                            if fs::metadata(path)?.len() > MAX_JSON {
+                                bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                            }
+                            fs::read_to_string(path)?
+                        }
+                        None => text.to_owned(),
+                    };
+                    Ok(serde_json::from_str(&body)?)
+                };
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let normalized = raster::normalize_input(&read(&samples)?)?;
+                let input_summary = normalized.summary();
+                let request = raster::StrokeRequest {
+                    brush: raster::Brush::parse(&raster::resolve_preset(
+                        &raw,
+                        &read(&brush)?,
+                        preset.as_deref(),
+                    )?)?,
+                    samples: normalized.samples,
+                    color: [0, 0, 0],
+                    blend: if erase {
+                        raster::Blend::Erase
+                    } else {
+                        raster::Blend::Normal
+                    },
+                    seed,
+                    clone: None,
+                };
+                let mut result = pentool::photo::catalog::paint_mask(
+                    &mut raw,
+                    &input,
+                    &id,
+                    &variant,
+                    pentool::photo::catalog::MaskStroke {
+                        adjustment,
+                        component,
+                        request,
+                    },
+                )?;
+                result["input"] = input_summary;
+                let change = transaction::commit_value(
+                    &input,
+                    "photo-mask-paint",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
                 Ok(())
             }
             PhotoAction::Info { input, id, variant } => {

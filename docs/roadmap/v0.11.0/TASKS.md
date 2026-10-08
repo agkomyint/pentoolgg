@@ -143,6 +143,27 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **8. Add local adjustments.** Reuse gradient, radial, range, depth, and
   painted masks. AI-derived masks must first become materialized editable masks.
+  *Status: implemented for review.* This item has five parts:
+  - validation and rendering in `src/photo/local.rs`, specified in "Local
+    adjustments" in `docs/photography-v1.md`;
+  - stage hooks in `adjust::apply_with` (after tone, presence, color and
+    capture sharpening), with coverage computed in uncropped frame coordinates;
+  - `photo mask paint`, which paints brush components with the raster brush
+    engine into `raster_tiles`, with the tiles retained by garbage collection;
+  - `raw develop` resolving the dehaze airlight for a local dehaze;
+  - `tests/v0110_local.rs`.
+
+  Decisions:
+  - depth components are refused with `[unsupported-capability]`, because this
+    build pairs no depth maps with sources;
+  - `mask` components accept raster mask resources only, which is how AI-derived
+    masks enter; vector resources are refused;
+  - range-luminance uses Oklab lightness, and range-color uses an Oklab
+    distance with an `amount`-scaled tolerance;
+  - signed noise, moiré and defringe extrapolate away from the reduced image,
+    and negative sharpness is a blur.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **9. Add HDR and panorama merging.** Provide bounded alignment, deghosting,
   projection, seam blending, attribution, cancellation, and non-destructive output.
 - [ ] **10. Add wide-gamut and HDR RGB delivery.** Define primaries, transfer

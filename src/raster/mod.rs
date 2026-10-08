@@ -1298,13 +1298,19 @@ pub fn validate_document(raw: &Value) -> Result<()> {
 }
 
 /// Digests that must stay in `raster_tiles`: everything pinned by raster nodes plus
-/// document-level raster resources (named tips, saved selections, brush presets).
+/// document-level raster resources (named tips, saved selections, brush presets
+/// and photo brush masks).
 fn retained_digests(raw: &Value) -> HashSet<String> {
     let mut referenced = HashSet::new();
     for node in every_raster(raw) {
         pinned_digests(node, &mut referenced);
     }
-    for key in ["brush_tips", "raster_selections", "brush_presets"] {
+    for key in [
+        "brush_tips",
+        "raster_selections",
+        "brush_presets",
+        "photography",
+    ] {
         if let Some(value) = raw.get(key) {
             pinned_digests(value, &mut referenced);
         }
