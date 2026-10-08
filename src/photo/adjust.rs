@@ -50,15 +50,15 @@ pub fn luminance_weights() -> [f64; 3] {
     *WEIGHTS.get_or_init(|| color::ColorSpace::working().to_xyz()[1])
 }
 
-fn luminance(w: &[f64; 3], p: [f64; 3]) -> f64 {
+pub(crate) fn luminance(w: &[f64; 3], p: [f64; 3]) -> f64 {
     w[0] * p[0] + w[1] * p[1] + w[2] * p[2]
 }
 
-fn pixel(p: &[f32]) -> [f64; 3] {
+pub(crate) fn pixel(p: &[f32]) -> [f64; 3] {
     [f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]
 }
 
-fn store(p: &mut [f32], v: [f64; 3]) {
+pub(crate) fn store(p: &mut [f32], v: [f64; 3]) {
     p[0] = v[0] as f32;
     p[1] = v[1] as f32;
     p[2] = v[2] as f32;
@@ -76,7 +76,7 @@ fn bump(s: f64, center: f64, half_width: f64) -> f64 {
 }
 
 /// `3t² - 2t³` on `t` clamped to [0, 1].
-fn smoothstep(t: f64) -> f64 {
+pub(crate) fn smoothstep(t: f64) -> f64 {
     let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
     t * t * (3.0 - 2.0 * t)
 }
@@ -101,7 +101,11 @@ fn stops(y: f64) -> f64 {
 // every row is computed independently, so the result does not depend on the
 // thread count. Cancellation is checked on the calling thread after a pass.
 
-fn rows<T: Send>(data: &mut [T], width: usize, f: &(dyn Fn(usize, &mut [T]) + Sync)) -> Result<()> {
+pub(crate) fn rows<T: Send>(
+    data: &mut [T],
+    width: usize,
+    f: &(dyn Fn(usize, &mut [T]) + Sync),
+) -> Result<()> {
     if data.is_empty() || width == 0 {
         return Ok(());
     }
@@ -123,7 +127,10 @@ fn rows<T: Send>(data: &mut [T], width: usize, f: &(dyn Fn(usize, &mut [T]) + Sy
 }
 
 /// Apply `f(index, rgb, alpha)` to every pixel of `image`.
-fn pixels(image: &mut Working, f: &(dyn Fn(usize, &mut [f32], f32) + Sync)) -> Result<()> {
+pub(crate) fn pixels(
+    image: &mut Working,
+    f: &(dyn Fn(usize, &mut [f32], f32) + Sync),
+) -> Result<()> {
     let width = image.width as usize;
     let alpha = image.alpha.as_deref();
     rows(&mut image.rgb, width * 3, &|y, row| {
@@ -206,7 +213,7 @@ pub fn gaussian(plane: &mut Vec<f32>, width: usize, height: usize, sigma: f64) -
 
 /// A Gaussian blur that ignores invalid (alpha 0) pixels: the blur of
 /// `value · alpha` divided by the blur of `alpha`.
-fn gaussian_weighted(
+pub(crate) fn gaussian_weighted(
     plane: &mut Vec<f32>,
     alpha: Option<&[f32]>,
     width: usize,
@@ -1081,6 +1088,7 @@ pub fn apply(image: &mut Working, develop: &Value, context: &Context) -> Result<
     if let Some(stage) = ColorStage::new(develop) {
         stage.apply(image)?;
     }
+    super::detail::sharpen(image, develop)?;
     let effects = &develop["effects"];
     if let Some(group) = effects.get("vignette") {
         vignette(image, group)?;

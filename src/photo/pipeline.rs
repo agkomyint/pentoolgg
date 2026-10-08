@@ -3,6 +3,7 @@
 //! one warp, then tone, presence, curves, color and effects (stages 6–10).
 //! Later stages are added by later items of the photography milestone.
 use super::adjust;
+use super::detail;
 use super::dng::Dng;
 use super::lens::LensProfile;
 use super::pixels::Working;
@@ -97,7 +98,7 @@ pub fn plan(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Plan> {
     })
 }
 
-/// Stages 1 and 3: decoded camera RGB transformed to the working space, at the
+/// Stages 1–3: decoded camera RGB, early detail, transformed to the working space, at the
 /// decoded size, with the resolved white.
 pub fn decode_working(
     dng: &Dng,
@@ -108,8 +109,15 @@ pub fn decode_working(
     let spec = profile::select(develop["raw"].get("camera_profile"), dng, &load)?;
     let (white, mut transform) = profile::resolve(&spec, dng, develop.get("white_balance"))?;
     transform.calibrate(develop);
-    let decoded = raw::decode(dng, &profile::decode_options(develop, white.neutral))?;
+    let decoded = raw::decode_with(
+        dng,
+        &profile::decode_options(develop, white.neutral),
+        &detail::Defects::new(develop),
+    )?;
     let mut rgb = decoded.rgb;
+    if let Some(early) = detail::Early::new(develop) {
+        early.apply(&mut rgb, decoded.width, decoded.height, &transform.matrix)?;
+    }
     for pixel in rgb.chunks_exact_mut(3) {
         let out = transform.apply([pixel[0], pixel[1], pixel[2]]);
         pixel.copy_from_slice(&out);

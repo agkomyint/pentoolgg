@@ -740,6 +740,64 @@ the whole frame, box-averaged (valid pixels only) to a long edge of at most
 
   Rendering a nonzero `dehaze` without a stored airlight is `[invalid-develop]`.
 
+### Detail (stages 1, 2 and capture sharpening)
+
+Detail works at the sensor's pixel scale, so its radii are in pixels of the
+developed frame, not fractions of `L`. An absent control, or one at zero,
+skips its kernel and leaves the pixels bit for bit. Blurs are the three-pass
+box Gaussian of the development stack.
+
+- **Defective pixels** (`raw.defective_pixels`, stage 1, after opcode list 2
+  on the normalized active area):
+  - `list` coordinates are active-area pixels, before the default crop and
+    orientation. A point outside the active area fails the render with
+    `[invalid-develop]`.
+  - With `auto: true`, a sample is defective when it lies more than
+    `gap = (101 − threshold) / 200` (normalized raw units; `threshold`
+    defaults to 50) above the maximum or below the minimum of its neighbors,
+    or is not finite.
+  - Neighbors are the same-color samples of the 5x5 window of a CFA plane, or
+    the same channel's 3x3 window of a LinearRaw plane.
+  - Each defective sample becomes the median (mean of the two middle values
+    when even) of its non-defective neighbors, or of all neighbors when every
+    one is defective. Detection reads the original plane, so the result does
+    not depend on order.
+- **Stage 2** runs on balanced camera RGB at the decoded size, in Oklab of the
+  profile matrix's linear ProPhoto (including calibration), and converts back
+  through the inverse matrix. Steps run in this order:
+  1. Luminance noise (`detail.noise.luminance` `s`): the self-guided filter
+     (He et al.) of Oklab L with Gaussian windows of
+     `σ = 1 + 2 (1 − luminance_detail/100)` px (detail defaults to 50) and
+     `ε = (0.08 s/100)²`. Then `L = q + (luminance_contrast/200) (L − q)`.
+  2. Color noise (`color` `c`): a and b move toward their Gaussian blur with
+     `σ = (1 + 6c/100)(0.5 + color_smoothness/100)` (smoothness defaults to
+     50), by `min(1, 2c/100) / (1 + 0.5 color_detail · |L − blur(L)|)`
+     (color detail defaults to 50).
+  3. Moiré (`detail.moire` `m`): a and b move toward their blur with
+     `σ = 2 + 6m/100` by `m/100 · smoothstep(h / 0.02)`, where `h` is the sum
+     of their absolute high-pass values.
+  4. Defringe (`lens.defringe`), purple then green, with amount `k/20`:
+     - Hue sliders map to Oklab hue: purple `300° + 3(v − 50)` (30–70 →
+       240°–360°), green `140° + 3(v − 50)` (40–60 → 110°–170°). Defaults are
+       the full ranges.
+     - The hue weight is 1 inside the window and fades linearly to 0 over 10°
+       outside it, around the circle.
+     - The edge weight is `smoothstep(e / 0.02)`, where `e` is the blurred
+       absolute luminance high-pass, both with `σ = 1 + k/4`.
+     - a and b are scaled by `max(0, 1 − amount · hue · edge)`.
+- **Capture sharpening** (`detail.sharpening`, the end of stage 9, after
+  color and before effects) is an unsharp mask of `s = log2(max(Y, FLOOR))`,
+  with invalid pixels left out of the blurs:
+  - `d = s − blur(s)` with `σ = radius` px (default 1).
+  - Halos are damped: `d' = d / (1 + |d|/t)` with
+    `t = 0.05 + 0.95 detail/100` stops (detail defaults to 25).
+  - With `masking` `M > 0`, `d'` is multiplied by
+    `smoothstep((blur(|d|) − 0.25M/100) / (0.25M/100))`, which protects flat
+    areas.
+  - Each valid pixel with positive luminance has its RGB multiplied by
+    `2^(amount/100 · d')`. Hue is kept, and because the mask works on
+    log luminance, the result does not depend on exposure.
+
 ### Local adjustments
 
 ```json

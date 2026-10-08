@@ -1,9 +1,10 @@
 //! Stage 1 of process 1: decode an inspected DNG into camera RGB.
 //!
 //! Unpack, opcode list 1, linearize (table, black and white levels), opcode
-//! list 2, raw white-balance multipliers, highlight handling, demosaic, opcode
+//! list 2, defective pixels, raw white-balance multipliers, highlight handling, demosaic, opcode
 //! list 3 and the final crop. The result is linear camera RGB at the developed
 //! size, before orientation, camera profile and lens correction.
+use super::detail::{self, Defects};
 use super::dng::{row_bytes, Compression, Dng, Format, Layout};
 use super::opcode::{self, Plane, Stage};
 use super::{check_cancelled, ljpeg};
@@ -67,8 +68,13 @@ pub fn develop_bytes(dng: &Dng) -> u64 {
     stored + active * (dng.samples as u64 + 3 + 3 + 1) * 4 + segment
 }
 
-/// Decode stage 1.
+/// Decode stage 1 without defective-pixel correction.
 pub fn decode(dng: &Dng, options: &Decode) -> Result<CameraRgb> {
+    decode_with(dng, options, &Defects::default())
+}
+
+/// Decode stage 1, replacing `defects` after opcode list 2.
+pub fn decode_with(dng: &Dng, options: &Decode, defects: &Defects) -> Result<CameraRgb> {
     if let Some(op) = dng.unsupported_opcodes().first() {
         bail!(
             "[unsupported-capability] DNG opcode {} in OpcodeList{} is mandatory and engine 1 cannot apply it; re-export the DNG without it",
@@ -113,6 +119,11 @@ pub fn decode(dng: &Dng, options: &Decode) -> Result<CameraRgb> {
     let mut active = linearize(dng, &stored);
     drop(stored);
     opcode::apply(&ops(2), &mut active, Stage::Normalized)?;
+    let cfa = match dng.layout {
+        Layout::Cfa(cfa) => Some(cfa),
+        Layout::LinearRaw(_) => None,
+    };
+    detail::fix_defects(&mut active, cfa, defects)?;
     check_cancelled()?;
 
     let (rgb, clip) = match dng.layout {

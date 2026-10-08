@@ -271,6 +271,34 @@ fn validate_development(develop: &Map<String, Value>, what: &str) -> Result<()> 
             }
         }
     }
+    if let Some(detail) = develop.get("detail") {
+        let what = format!("{what} detail");
+        let detail = group(detail, &what)?;
+        allowed(detail, &["sharpening", "noise", "moire"], &what)?;
+        number(detail, "moire", PERCENT, &what)?;
+        if let Some(sharpening) = detail.get("sharpening") {
+            let where_ = format!("{what}.sharpening");
+            let sharpening = group(sharpening, &where_)?;
+            allowed(
+                sharpening,
+                &["amount", "radius", "detail", "masking"],
+                &where_,
+            )?;
+            number(sharpening, "amount", (0.0, 150.0), &where_)?;
+            number(sharpening, "radius", (0.5, 3.0), &where_)?;
+            number(sharpening, "detail", PERCENT, &where_)?;
+            number(sharpening, "masking", PERCENT, &where_)?;
+        }
+        if let Some(noise) = detail.get("noise") {
+            let where_ = format!("{what}.noise");
+            numbers(
+                group(noise, &where_)?,
+                &super::detail::NOISE,
+                PERCENT,
+                &where_,
+            )?;
+        }
+    }
     if let Some(calibration) = develop.get("calibration") {
         let what = format!("{what} calibration");
         let calibration = group(calibration, &what)?;

@@ -3,6 +3,7 @@
 pub mod adjust;
 pub mod catalog;
 pub mod color;
+pub mod detail;
 pub mod develop;
 pub mod dng;
 pub mod lens;

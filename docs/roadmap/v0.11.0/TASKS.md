@@ -122,6 +122,25 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **7. Add detail processing.** Implement luminance/color noise reduction,
   sharpening, moiré reduction, defective-pixel handling, and defringe.
+  *Status: implemented for review.* This item has four parts:
+  - the kernels in `src/photo/detail.rs`, specified in "Detail" in
+    `docs/photography-v1.md`;
+  - defective pixels in stage 1 (`raw::decode_with`), stage 2 in
+    `pipeline::decode_working`, and capture sharpening at the end of stage 9;
+  - validation of `detail` in `src/photo/develop.rs`;
+  - `tests/v0110_detail.rs`.
+
+  Decisions:
+  - detail radii are in developed pixels, because detail targets the sensor's
+    pixel scale;
+  - defective-pixel `list` coordinates are active-area pixels, and an
+    out-of-range point fails the render;
+  - stage 2 judges color in Oklab of the profile matrix's ProPhoto, and
+    defringe hue sliders map onto Oklab hue windows;
+  - capture sharpening works on log luminance, so it is independent of
+    exposure and keeps hue.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **8. Add local adjustments.** Reuse gradient, radial, range, depth, and
   painted masks. AI-derived masks must first become materialized editable masks.
 - [ ] **9. Add HDR and panorama merging.** Provide bounded alignment, deghosting,

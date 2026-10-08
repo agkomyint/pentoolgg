@@ -89,8 +89,9 @@ DNG. `pentool photo profile add` verifies and stores a DNG camera profile (`.dcp
 and `pentool raw develop` sets a variant's camera profile, white balance, lens
 correction, geometry, crop, upright and the development stack: tone (with auto
 tone), presence and dehaze, curves, HSL, color grading, monochrome, vignette,
-grain and calibration. `pentool photo render` develops a raw variant into a PNG.
-Detail, local adjustments and output rendering land with the rest of v0.11; see
+grain and calibration, plus detail: defective pixels, noise reduction, moiré,
+defringe and capture sharpening. `pentool photo render` develops a raw variant
+into a PNG. Local adjustments and output rendering land with the rest of v0.11; see
 [docs/photography-v1.md](docs/photography-v1.md).
 
 ```sh
@@ -106,6 +107,7 @@ pentool raw develop catalog.pen hero --set lens.distortion=12 --set crop.constra
 pentool raw develop catalog.pen hero --upright guided --guide 0.21,0.1,0.23,0.9
 pentool raw develop catalog.pen hero --auto-tone --set presence.dehaze=25
 pentool raw develop catalog.pen hero --exposure -0.3 --set 'curves.point.rgb=[[0,0],[0.4,0.45],[1,1]]'
+pentool raw develop catalog.pen hero --set 'detail.noise={"luminance":30,"color":25}' --set detail.sharpening.amount=60
 pentool photo info catalog.pen hero
 pentool photo render catalog.pen hero --out ./hero.png --space display-p3 --depth 16
 ```
