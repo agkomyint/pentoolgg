@@ -81,6 +81,15 @@ pentool ai generate poster.pen hero --prompt "a fox" --allow-model-call
 pentool ai run accept poster.pen RUN --candidate 1 --id hero
 ```
 
+## Raster paint (v0.10)
+
+![Dusk landscape painted with raster layers](examples/raster-paint-showcase.png)
+
+Deterministic, replayable brush painting lives in `.pen` v6 `raster` layers. The
+[showcase](examples/raster-paint-showcase.md) paints this scene from a script
+(`bash examples/raster-paint-showcase.sh`); see [docs/raster-paint-v1.md](docs/raster-paint-v1.md)
+for the full tool, selection, and batch reference.
+
 ## Raster images (v0.7)
 
 In the served editor, use **Images → Add image** to choose a local PNG, JPEG or
