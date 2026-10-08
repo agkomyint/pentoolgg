@@ -68,6 +68,13 @@
       "description": "Canon CR2 signature; the message must suggest converting to DNG"
     },
     {
+      "file": "photo-rgb16-p3.png",
+      "sha256": "75eaae006991be92ca508d91313af09bf8792be667255718c62d6a1e0ad7dafa",
+      "expect": "ok",
+      "item": 2,
+      "description": "64x8 untagged 16-bit RGB in Display P3: ramps of the primaries and secondaries (out of sRGB at full strength), a gray row using all 16 bits, and near-black codes 0..63"
+    },
+    {
       "file": "photo-v7.pen",
       "sha256": "d9365dd03f7ddca54af57617667991caa4f52b14c6b1967825888834c63f8754",
       "expect": "ok",

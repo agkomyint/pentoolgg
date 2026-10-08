@@ -25,6 +25,7 @@ pub mod mask;
 pub mod package;
 pub mod page;
 pub mod pdf;
+pub mod photo;
 pub mod preset;
 pub mod raster;
 pub mod render;

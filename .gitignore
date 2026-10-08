@@ -8,6 +8,7 @@
 *.png
 *.svg
 !docs/**/*.svg
+!docs/fixtures/photo-*.png
 !examples/*.png
 !examples/*.svg
 

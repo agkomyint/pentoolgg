@@ -33,6 +33,14 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **2. Add high-bit-depth RGB paths.** Support 16-bit storage and a documented
   floating-point working representation without accidental 8-bit/sRGB round trips.
+  *Status: implemented for review.* This item has four parts:
+  - `src/photo/` (`math`, `color`, `pixels`, `png`);
+  - the "Working representation" section of the specification;
+  - the `photo-rgb16-p3.png` fixture;
+  - `tests/v0110_photo_precision.rs`.
+
+  Nothing user-facing calls this path until item 3. The checkbox stays open
+  until review and hosted CI pass.
 - [ ] **3. Implement bounded RAW ingestion.** Validate and decode a tested subset
   of RAW containers, retain source bytes, and report unsupported cameras clearly.
   Decision (item 1): the tested subset is DNG 1.0–1.7, read by pentool's own
