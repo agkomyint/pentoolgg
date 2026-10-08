@@ -1,6 +1,8 @@
-//! The develop pipeline of a raw source through stage 5: decode (stage 1), the
-//! camera profile (stage 3), and lens and geometry (stages 4–5) as one warp.
+//! The develop pipeline of a raw source through stage 10: decode (stage 1), the
+//! camera profile and calibration (stage 3), lens and geometry (stages 4–5) as
+//! one warp, then tone, presence, curves, color and effects (stages 6–10).
 //! Later stages are added by later items of the photography milestone.
+use super::adjust;
 use super::dng::Dng;
 use super::lens::LensProfile;
 use super::pixels::Working;
@@ -104,7 +106,8 @@ pub fn decode_working(
 ) -> Result<(Vec<f32>, profile::White)> {
     let load = |digest: &str| profiles(digest).map(|(bytes, _)| bytes);
     let spec = profile::select(develop["raw"].get("camera_profile"), dng, &load)?;
-    let (white, transform) = profile::resolve(&spec, dng, develop.get("white_balance"))?;
+    let (white, mut transform) = profile::resolve(&spec, dng, develop.get("white_balance"))?;
+    transform.calibrate(develop);
     let decoded = raw::decode(dng, &profile::decode_options(develop, white.neutral))?;
     let mut rgb = decoded.rgb;
     for pixel in rgb.chunks_exact_mut(3) {
@@ -115,17 +118,30 @@ pub fn decode_working(
     Ok((rgb, white))
 }
 
-/// A development through stage 5.
+/// A development through stage 10.
 pub struct Developed {
     pub image: Working,
     pub invalid_pixels: u64,
     pub report: Value,
 }
 
+/// The context of stages 6–10 for a planned development.
+pub fn context(dng: &Dng, plan: &Plan) -> adjust::Context {
+    adjust::Context {
+        baseline_exposure: dng.baseline_exposure.unwrap_or(0.0),
+        long_edge: plan.mapping.frame.0.max(plan.mapping.frame.1) as f64,
+        origin: (plan.crop[0], plan.crop[1]),
+    }
+}
+
 pub fn develop(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Developed> {
     let plan = plan(dng, develop, profiles)?;
+    // Refuse an unresolved dehaze before any decoding work.
+    adjust::airlight(develop)?;
     let (rgb, white) = decode_working(dng, develop, profiles)?;
-    let (image, invalid_pixels) = warp::render(&rgb, &plan.mapping, plan.crop)?;
+    let (mut image, invalid_pixels) = warp::render(&rgb, &plan.mapping, plan.crop)?;
+    drop(rgb);
+    adjust::apply(&mut image, develop, &context(dng, &plan))?;
     let mut report = plan.report;
     report["white"] = white.report();
     report["invalid_pixels"] = json!(invalid_pixels);
@@ -134,6 +150,55 @@ pub fn develop(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Develop
         invalid_pixels,
         report,
     })
+}
+
+/// Stages 1–5 of the whole (uncropped) frame, box-averaged to the analysis
+/// proxy that auto tone and dehaze read.
+pub fn analysis_proxy(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Working> {
+    let mut plan = plan(dng, develop, profiles)?;
+    plan.crop = [0, 0, plan.mapping.frame.0, plan.mapping.frame.1];
+    let (rgb, _) = decode_working(dng, develop, profiles)?;
+    let (image, _) = warp::render(&rgb, &plan.mapping, plan.crop)?;
+    drop(rgb);
+    adjust::proxy(&image, adjust::ANALYSIS_EDGE)
+}
+
+/// Auto tone (`auto-tone` version 1): the `tone` group with `exposure`,
+/// `highlights` and `shadows` resolved and `auto` recording the algorithm.
+/// The other tone sliders are kept.
+pub fn auto_tone(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Value> {
+    let proxy = analysis_proxy(dng, develop, profiles)?;
+    let [exposure, highlights, shadows] =
+        adjust::auto_tone(&proxy, dng.baseline_exposure.unwrap_or(0.0))?;
+    let mut tone = develop.get("tone").cloned().unwrap_or(json!({}));
+    tone["exposure"] = number(exposure);
+    for (key, v) in [("highlights", highlights), ("shadows", shadows)] {
+        match tone.as_object_mut() {
+            Some(object) if v == 0.0 => {
+                object.remove(key);
+            }
+            _ => tone[key] = number(v),
+        }
+    }
+    tone["auto"] = json!({"algorithm": "auto-tone", "version": 1});
+    Ok(tone)
+}
+
+/// The dehaze airlight (algorithm version 1) of the tone-adjusted proxy.
+pub fn resolve_airlight(dng: &Dng, develop: &Value, profiles: Profiles) -> Result<Value> {
+    let mut proxy = analysis_proxy(dng, develop, profiles)?;
+    let context = adjust::Context {
+        baseline_exposure: dng.baseline_exposure.unwrap_or(0.0),
+        long_edge: proxy.width.max(proxy.height) as f64,
+        origin: (0, 0),
+    };
+    adjust::tone(&mut proxy, develop, &context)?;
+    let airlight = adjust::estimate_airlight(&proxy)?;
+    Ok(Value::Array(airlight.into_iter().map(number).collect()))
+}
+
+fn number(v: f64) -> Value {
+    super::dng::number(v)
 }
 
 /// Run an upright analysis and return the geometry keys it sets. `mode` is

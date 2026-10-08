@@ -87,9 +87,10 @@ pentool ai run accept poster.pen RUN --candidate 1 --id hero
 explicit import defaults. Other RAW formats are refused with advice to convert to
 DNG. `pentool photo profile add` verifies and stores a DNG camera profile (`.dcp`),
 and `pentool raw develop` sets a variant's camera profile, white balance, lens
-correction, geometry, crop and upright. `pentool photo render` develops a raw
-variant through lens and geometry correction into a PNG. The full development
-stack lands with the rest of v0.11; see
+correction, geometry, crop, upright and the development stack: tone (with auto
+tone), presence and dehaze, curves, HSL, color grading, monochrome, vignette,
+grain and calibration. `pentool photo render` develops a raw variant into a PNG.
+Detail, local adjustments and output rendering land with the rest of v0.11; see
 [docs/photography-v1.md](docs/photography-v1.md).
 
 ```sh
@@ -103,6 +104,8 @@ pentool raw develop catalog.pen hero --sample 0.42,0.31,0.01
 pentool raw develop catalog.pen hero --suggest --dry-run
 pentool raw develop catalog.pen hero --set lens.distortion=12 --set crop.constrain=true
 pentool raw develop catalog.pen hero --upright guided --guide 0.21,0.1,0.23,0.9
+pentool raw develop catalog.pen hero --auto-tone --set presence.dehaze=25
+pentool raw develop catalog.pen hero --exposure -0.3 --set 'curves.point.rgb=[[0,0],[0.4,0.45],[1,1]]'
 pentool photo info catalog.pen hero
 pentool photo render catalog.pen hero --out ./hero.png --space display-p3 --depth 16
 ```

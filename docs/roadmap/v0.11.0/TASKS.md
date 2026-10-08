@@ -98,6 +98,28 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 - [ ] **6. Build the development stack.** Add exposure, highlights/shadows,
   whites/blacks, curves, clarity, texture, dehaze, vibrance, HSL, grading,
   monochrome, grain, vignette, calibration, and stable processing order.
+  *Status: implemented for review.* This item has five parts:
+  - the stage 6–10 kernels and calibration in `src/photo/adjust.rs`, specified
+    in "Development stack" in `docs/photography-v1.md`;
+  - calibration composed into the stage-3 transform in `src/photo/profile.rs`,
+    with stages 6–10 plus the auto tone and airlight analyses in
+    `src/photo/pipeline.rs`;
+  - validation of `tone`, `presence`, `curves`, `hsl`, `grading`,
+    `monochrome`, `effects` and `calibration` in `src/photo/develop.rs`;
+  - `pentool raw develop --exposure` and `--auto-tone`, with automatic airlight
+    resolution in `src/photo/catalog.rs`;
+  - `tests/v0110_development.rs`.
+
+  Decisions:
+  - highlights and shadows are global, ratio-preserving tone operators;
+  - color works in Oklab built on the working space;
+  - monochrome replaces HSL, vibrance and saturation;
+  - stage 9 runs monochrome or HSL, then vibrance, saturation and grading;
+  - the dehaze airlight is resolved by `raw develop` and stored, so rendering
+    never re-analyzes;
+  - the stage-11 shoulder and gamut mapping stay with item 10.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **7. Add detail processing.** Implement luminance/color noise reduction,
   sharpening, moiré reduction, defective-pixel handling, and defringe.
 - [ ] **8. Add local adjustments.** Reuse gradient, radial, range, depth, and

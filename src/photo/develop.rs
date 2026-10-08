@@ -1,7 +1,7 @@
 //! Validation of a variant's `develop` settings (`[invalid-develop]`).
 //!
 //! Each roadmap item validates the groups it implements. Groups that later items
-//! own are accepted as opaque objects until then.
+//! own (`detail` and `local`) are accepted as opaque values until then.
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 
@@ -125,6 +125,218 @@ pub fn validate(develop: &Map<String, Value>, source: &Source, what: &str) -> Re
     }
     if let Some(crop) = develop.get("crop") {
         validate_crop(crop, &format!("{what} crop"))?;
+    }
+    validate_development(develop, what)
+}
+
+const SIGNED: (f64, f64) = (-100.0, 100.0);
+const PERCENT: (f64, f64) = (0.0, 100.0);
+
+/// Every key of `object` is one of `keys` and a number in `range`.
+fn numbers(
+    object: &Map<String, Value>,
+    keys: &[&str],
+    range: (f64, f64),
+    what: &str,
+) -> Result<()> {
+    allowed(object, keys, what)?;
+    for key in keys {
+        number(object, key, range, what)?;
+    }
+    Ok(())
+}
+
+fn bands(value: &Value, what: &str) -> Result<()> {
+    numbers(group(value, what)?, &super::adjust::BANDS, SIGNED, what)
+}
+
+/// The development stack groups (stages 6–10 and calibration).
+fn validate_development(develop: &Map<String, Value>, what: &str) -> Result<()> {
+    if let Some(tone) = develop.get("tone") {
+        let what = format!("{what} tone");
+        let tone = group(tone, &what)?;
+        allowed(
+            tone,
+            &[
+                "exposure",
+                "contrast",
+                "highlights",
+                "shadows",
+                "whites",
+                "blacks",
+                "auto",
+            ],
+            &what,
+        )?;
+        number(tone, "exposure", (-5.0, 5.0), &what)?;
+        for key in ["contrast", "highlights", "shadows", "whites", "blacks"] {
+            number(tone, key, SIGNED, &what)?;
+        }
+        validate_auto(tone, &what)?;
+    }
+    if let Some(presence) = develop.get("presence") {
+        let what = format!("{what} presence");
+        let presence = group(presence, &what)?;
+        let sliders = ["texture", "clarity", "dehaze", "vibrance", "saturation"];
+        allowed(
+            presence,
+            &[&sliders[..], &["dehaze_airlight"]].concat(),
+            &what,
+        )?;
+        for key in sliders {
+            number(presence, key, SIGNED, &what)?;
+        }
+        if let Some(airlight) = presence.get("dehaze_airlight") {
+            let valid = airlight.as_array().is_some_and(|a| {
+                a.len() == 3
+                    && a.iter()
+                        .all(|v| v.as_f64().is_some_and(|v| (0.0..=1.0e6).contains(&v)))
+            });
+            if !valid {
+                bail!("[invalid-develop] {what}.dehaze_airlight must hold three non-negative numbers; got {airlight}")
+            }
+        }
+    }
+    if let Some(curves) = develop.get("curves") {
+        validate_curves(curves, &format!("{what} curves"))?;
+    }
+    if let Some(hsl) = develop.get("hsl") {
+        let what = format!("{what} hsl");
+        let hsl = group(hsl, &what)?;
+        allowed(hsl, &["hue", "saturation", "luminance"], &what)?;
+        for (key, value) in hsl {
+            bands(value, &format!("{what}.{key}"))?;
+        }
+    }
+    if let Some(grading) = develop.get("grading") {
+        let what = format!("{what} grading");
+        let grading = group(grading, &what)?;
+        let wheels = ["shadows", "midtones", "highlights", "global"];
+        allowed(
+            grading,
+            &[&wheels[..], &["blending", "balance"]].concat(),
+            &what,
+        )?;
+        number(grading, "blending", PERCENT, &what)?;
+        number(grading, "balance", SIGNED, &what)?;
+        for key in wheels {
+            if let Some(wheel) = grading.get(key) {
+                let where_ = format!("{what}.{key}");
+                let wheel = group(wheel, &where_)?;
+                allowed(wheel, &["hue", "saturation", "luminance"], &where_)?;
+                number(wheel, "hue", (0.0, 360.0), &where_)?;
+                number(wheel, "saturation", PERCENT, &where_)?;
+                number(wheel, "luminance", SIGNED, &where_)?;
+            }
+        }
+    }
+    if let Some(monochrome) = develop.get("monochrome") {
+        let what = format!("{what} monochrome");
+        let monochrome = group(monochrome, &what)?;
+        allowed(monochrome, &["enabled", "mix"], &what)?;
+        boolean(monochrome, "enabled", &what)?;
+        if let Some(mix) = monochrome.get("mix") {
+            bands(mix, &format!("{what}.mix"))?;
+        }
+    }
+    if let Some(effects) = develop.get("effects") {
+        let what = format!("{what} effects");
+        let effects = group(effects, &what)?;
+        allowed(effects, &["vignette", "grain"], &what)?;
+        if let Some(vignette) = effects.get("vignette") {
+            let where_ = format!("{what}.vignette");
+            let vignette = group(vignette, &where_)?;
+            allowed(
+                vignette,
+                &["amount", "midpoint", "roundness", "feather", "highlights"],
+                &where_,
+            )?;
+            number(vignette, "amount", SIGNED, &where_)?;
+            number(vignette, "roundness", SIGNED, &where_)?;
+            for key in ["midpoint", "feather", "highlights"] {
+                number(vignette, key, PERCENT, &where_)?;
+            }
+        }
+        if let Some(grain) = effects.get("grain") {
+            let where_ = format!("{what}.grain");
+            let grain = group(grain, &where_)?;
+            allowed(grain, &["amount", "size", "roughness", "seed"], &where_)?;
+            for key in ["amount", "size", "roughness"] {
+                number(grain, key, PERCENT, &where_)?;
+            }
+            match grain.get("seed") {
+                Some(seed) if seed.as_u64().is_some_and(|s| s <= u64::from(u32::MAX)) => {}
+                Some(seed) => bail!("[invalid-develop] {where_}.seed must be an integer in 0–4294967295; got {seed}"),
+                None => bail!("[invalid-develop] {where_}.seed is required so the grain is reproducible"),
+            }
+        }
+    }
+    if let Some(calibration) = develop.get("calibration") {
+        let what = format!("{what} calibration");
+        let calibration = group(calibration, &what)?;
+        allowed(
+            calibration,
+            &["shadows_tint", "red", "green", "blue"],
+            &what,
+        )?;
+        number(calibration, "shadows_tint", SIGNED, &what)?;
+        for key in ["red", "green", "blue"] {
+            if let Some(primary) = calibration.get(key) {
+                let where_ = format!("{what}.{key}");
+                numbers(
+                    group(primary, &where_)?,
+                    &["hue", "saturation"],
+                    SIGNED,
+                    &where_,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_curves(curves: &Value, what: &str) -> Result<()> {
+    let curves = group(curves, what)?;
+    allowed(curves, &["parametric", "point"], what)?;
+    if let Some(parametric) = curves.get("parametric") {
+        let where_ = format!("{what}.parametric");
+        let parametric = group(parametric, &where_)?;
+        let sliders = ["highlights", "lights", "darks", "shadows"];
+        allowed(parametric, &[&sliders[..], &["splits"]].concat(), &where_)?;
+        for key in sliders {
+            number(parametric, key, SIGNED, &where_)?;
+        }
+        if let Some(splits) = parametric.get("splits") {
+            let v: Vec<f64> = splits
+                .as_array()
+                .map(|s| s.iter().filter_map(Value::as_f64).collect())
+                .unwrap_or_default();
+            let valid = splits.as_array().is_some_and(|s| s.len() == 3)
+                && v.len() == 3
+                && v.iter().all(|s| (0.05..=0.95).contains(s))
+                && v[0] < v[1]
+                && v[1] < v[2];
+            if !valid {
+                bail!("[invalid-develop] {where_}.splits must be three increasing numbers in 0.05–0.95; got {splits}")
+            }
+        }
+    }
+    if let Some(point) = curves.get("point") {
+        let where_ = format!("{what}.point");
+        let point = group(point, &where_)?;
+        allowed(point, &["rgb", "red", "green", "blue"], &where_)?;
+        for (key, points) in point {
+            let valid = points.as_array().is_some_and(|points| {
+                (2..=16).contains(&points.len())
+                    && points.iter().all(|p| pair(p, (0.0, 1.0)))
+                    && points
+                        .windows(2)
+                        .all(|w| w[0][0].as_f64() < w[1][0].as_f64())
+            });
+            if !valid {
+                bail!("[invalid-develop] {where_}.{key} must hold 2–16 [input, output] points in 0–1 with strictly increasing inputs; got {points}")
+            }
+        }
     }
     Ok(())
 }
@@ -584,5 +796,51 @@ mod tests {
         assert_eq!(crop_aspect("3:2"), Some(Some((3, 2))));
         assert_eq!(crop_aspect("03:2"), None);
         assert_eq!(crop_aspect("10000:1"), None);
+    }
+
+    #[test]
+    fn development_groups_are_checked() {
+        let develop = json!({"process": 1,
+            "tone": {"exposure": -1.5, "contrast": 20, "highlights": -60, "shadows": 40, "whites": 5, "blacks": -5,
+                     "auto": {"algorithm": "auto-tone", "version": 1}},
+            "presence": {"texture": 10, "clarity": 20, "dehaze": 30, "vibrance": 15, "saturation": -5,
+                         "dehaze_airlight": [0.8, 0.85, 0.9]},
+            "curves": {"parametric": {"shadows": -10, "highlights": 10, "splits": [0.2, 0.5, 0.8]},
+                       "point": {"rgb": [[0, 0], [0.5, 0.55], [1, 1]], "blue": [[0, 0.05], [1, 1]]}},
+            "hsl": {"hue": {"orange": -10}, "saturation": {"blue": 30}, "luminance": {"aqua": -20}},
+            "grading": {"shadows": {"hue": 220, "saturation": 20}, "highlights": {"hue": 40, "saturation": 15, "luminance": 5},
+                        "blending": 60, "balance": -10},
+            "monochrome": {"enabled": false, "mix": {"red": 20}},
+            "effects": {"vignette": {"amount": -30, "midpoint": 40, "roundness": 10, "feather": 60, "highlights": 20},
+                        "grain": {"amount": 25, "size": 30, "roughness": 50, "seed": 4294967295u64}},
+            "calibration": {"shadows_tint": 5, "red": {"hue": 10, "saturation": -5}}});
+        check(develop, "raw").unwrap();
+        for develop in [
+            json!({"tone": {"exposure": 5.5}}),
+            json!({"tone": {"clarity": 5}}),
+            json!({"tone": {"auto": {"algorithm": "auto-tone"}}}),
+            json!({"presence": {"dehaze": 101}}),
+            json!({"presence": {"dehaze_airlight": [1, 1]}}),
+            json!({"presence": {"dehaze_airlight": [1, -1, 1]}}),
+            json!({"curves": {"parametric": {"splits": [0.5, 0.4, 0.8]}}}),
+            json!({"curves": {"parametric": {"splits": [0.01, 0.4, 0.8]}}}),
+            json!({"curves": {"point": {"rgb": [[0, 0]]}}}),
+            json!({"curves": {"point": {"rgb": [[0.5, 0], [0.5, 1]]}}}),
+            json!({"curves": {"point": {"luma": [[0, 0], [1, 1]]}}}),
+            json!({"hsl": {"hue": {"teal": 5}}}),
+            json!({"hsl": {"vibrance": {}}}),
+            json!({"grading": {"shadows": {"hue": 361}}}),
+            json!({"grading": {"midtones": {"saturation": -5}}}),
+            json!({"monochrome": {"enabled": "yes"}}),
+            json!({"effects": {"grain": {"amount": 20}}}),
+            json!({"effects": {"grain": {"amount": 20, "seed": 4294967296u64}}}),
+            json!({"effects": {"vignette": {"feather": -1}}}),
+            json!({"effects": {"sharpen": {}}}),
+            json!({"calibration": {"red": {"hue": 101}}}),
+            json!({"calibration": {"cyan": {}}}),
+        ] {
+            let error = check(develop.clone(), "raw").unwrap_err().to_string();
+            assert!(error.starts_with("[invalid-develop]"), "{develop}: {error}");
+        }
     }
 }

@@ -799,7 +799,7 @@ enum RawAction {
     },
     /// Print a photo's recorded source facts, storage, and variants.
     Info { input: PathBuf, id: String },
-    /// Set a variant's camera profile and white balance.
+    /// Change a variant's develop settings: profiles, white balance, geometry, tone and the rest.
     Develop {
         input: PathBuf,
         /// Photo ID.
@@ -843,6 +843,12 @@ enum RawAction {
         /// A guided-upright line x1,y1,x2,y2 (0-1, oriented frame; repeatable, at most 4).
         #[arg(long = "guide", value_name = "X1,Y1,X2,Y2")]
         guide: Vec<String>,
+        /// Exposure in EV (-5..5); sets tone.exposure.
+        #[arg(long, allow_hyphen_values = true)]
+        exposure: Option<f64>,
+        /// Resolve tone.exposure, highlights and shadows with auto tone.
+        #[arg(long)]
+        auto_tone: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -2401,10 +2407,15 @@ async fn run() -> Result<()> {
                 unset,
                 upright,
                 guide,
+                exposure,
+                auto_tone,
                 dry_run,
                 if_revision,
             } => {
                 use pentool::photo::catalog::{DevelopChanges, WhiteBalance};
+                if exposure.is_some() && auto_tone {
+                    anyhow::bail!("[invalid-input] --exposure and --auto-tone both set tone.exposure; choose one")
+                }
                 let triple = |text: &str, flag: &str| -> anyhow::Result<[f64; 3]> {
                     let values = text
                         .split(',')
@@ -2444,7 +2455,7 @@ async fn run() -> Result<()> {
                     .as_deref()
                     .map(pentool::photo::catalog::lens_profile)
                     .transpose()?;
-                let set = set
+                let mut set = set
                     .iter()
                     .map(|entry| {
                         let (key, value) = entry.split_once('=').with_context(|| {
@@ -2457,6 +2468,15 @@ async fn run() -> Result<()> {
                         Ok((key.to_string(), value))
                     })
                     .collect::<anyhow::Result<Vec<_>>>()?;
+                if let Some(exposure) = exposure {
+                    if !exposure.is_finite() {
+                        anyhow::bail!("[invalid-input] --exposure takes a number of EV")
+                    }
+                    set.push((
+                        "tone.exposure".into(),
+                        pentool::photo::dng::number(exposure),
+                    ));
+                }
                 if guide.len() > 4 {
                     anyhow::bail!("[invalid-input] at most 4 --guide segments")
                 }
@@ -2485,9 +2505,10 @@ async fn run() -> Result<()> {
                     white_balance,
                     upright,
                     guides,
+                    auto_tone,
                 };
                 if changes.is_empty() {
-                    anyhow::bail!("[invalid-input] raw develop needs a setting: --set, --unset, --camera-profile, --lens-profile, --upright, --as-shot, --temperature, --neutral, --sample or --suggest")
+                    anyhow::bail!("[invalid-input] raw develop needs a setting: --set, --unset, --exposure, --auto-tone, --camera-profile, --lens-profile, --upright, --as-shot, --temperature, --neutral, --sample or --suggest")
                 }
                 let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let result =

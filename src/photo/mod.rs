@@ -1,5 +1,6 @@
 //! Photo engine 1: high-bit-depth RGB storage and the floating-point working
 //! representation of `docs/photography-v1.md`, plus the bounded DNG reader.
+pub mod adjust;
 pub mod catalog;
 pub mod color;
 pub mod develop;

@@ -1019,11 +1019,25 @@ pub struct DevelopChanges {
     pub upright: Option<String>,
     /// Guided upright segments `x1, y1, x2, y2` in the oriented frame (0–1).
     pub guides: Vec<[f64; 4]>,
+    /// Resolve `tone.exposure`, `highlights` and `shadows` with auto tone.
+    pub auto_tone: bool,
 }
+
+/// The groups the dehaze airlight is measured through (stages 1–6). A change
+/// to any of them re-resolves a stored airlight.
+const AIRLIGHT_INPUTS: [&str; 6] = [
+    "raw",
+    "white_balance",
+    "calibration",
+    "lens",
+    "geometry",
+    "tone",
+];
 
 impl DevelopChanges {
     pub fn is_empty(&self) -> bool {
-        self.set.is_empty()
+        !self.auto_tone
+            && self.set.is_empty()
             && self.unset.is_empty()
             && self.camera_profile.is_none()
             && self.lens_profile.is_none()
@@ -1139,6 +1153,7 @@ pub fn develop_raw(
         white_balance,
         upright,
         guides,
+        auto_tone,
     } = changes;
     crate::scene::validate(raw)?;
     let catalog = raw.get("photography").context(
@@ -1176,6 +1191,18 @@ pub fn develop_raw(
         .with_context(|| format!("photo {photo_id} source"))?;
     let dng = Dng::inspect(&bytes)?;
     let mut develop = photo["variants"][variant_index]["develop"].clone();
+    let before = develop.clone();
+    let touches = |group: &str| {
+        let under = |path: &String| path == group || path.starts_with(&format!("{group}."));
+        unset.iter().any(under) || set.iter().any(|(path, _)| under(path))
+    };
+    // A hand-edited tone value is no longer the auto tone result.
+    let tone_edited = touches("tone")
+        && !unset
+            .iter()
+            .chain(set.iter().map(|(p, _)| p))
+            .all(|p| p == "tone.auto");
+    let airlight_unset = unset.iter().any(|p| p == "presence.dehaze_airlight");
     for path in &unset {
         unset_path(&mut develop, path)?;
     }
@@ -1279,6 +1306,44 @@ pub fn develop_raw(
         apply_upright(&mut develop, mode, &solved);
         analysis = solved;
     }
+    if tone_edited && !auto_tone {
+        if let Some(tone) = develop.get_mut("tone").and_then(Value::as_object_mut) {
+            tone.remove("auto");
+        }
+    }
+    let mut resolved_tone = Value::Null;
+    if auto_tone {
+        document_value["photography"]["photos"][photo_index]["variants"][variant_index]
+            ["develop"] = develop.clone();
+        crate::scene::validate(&document_value)?;
+        develop["tone"] = super::pipeline::auto_tone(&dng, &develop, &loader)?;
+        resolved_tone = develop["tone"].clone();
+    }
+    let mut resolved_airlight = Value::Null;
+    let dehaze = develop["presence"]
+        .get("dehaze")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if dehaze != 0.0 {
+        let stored = develop["presence"].get("dehaze_airlight").is_some();
+        let changed = AIRLIGHT_INPUTS
+            .iter()
+            .any(|group| before.get(*group) != develop.get(*group));
+        if !stored || changed || airlight_unset {
+            document_value["photography"]["photos"][photo_index]["variants"][variant_index]
+                ["develop"] = develop.clone();
+            if let Some(presence) = document_value["photography"]["photos"][photo_index]["variants"]
+                [variant_index]["develop"]["presence"]
+                .as_object_mut()
+            {
+                presence.remove("dehaze_airlight");
+            }
+            crate::scene::validate(&document_value)?;
+            let airlight = super::pipeline::resolve_airlight(&dng, &develop, &loader)?;
+            develop["presence"]["dehaze_airlight"] = airlight.clone();
+            resolved_airlight = airlight;
+        }
+    }
     document_value["photography"]["photos"][photo_index]["variants"][variant_index]["develop"] =
         develop.clone();
     crate::scene::validate(&document_value)?;
@@ -1296,6 +1361,12 @@ pub fn develop_raw(
     });
     if !analysis.is_null() {
         result["upright"] = analysis;
+    }
+    if !resolved_tone.is_null() {
+        result["tone"] = resolved_tone;
+    }
+    if !resolved_airlight.is_null() {
+        result["dehaze_airlight"] = resolved_airlight;
     }
     drop(loader);
     *raw = document_value;

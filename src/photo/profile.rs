@@ -681,11 +681,27 @@ pub struct Transform {
     /// Balanced camera RGB (decoded with `neutral`) to linear ProPhoto.
     pub matrix: Matrix,
     pub hue_sat: Option<HueSatMap>,
+    /// The calibration shadows tint (`calibration.shadows_tint / 100`), applied
+    /// after the matrix; see [`super::adjust::shadows_tint`].
+    pub shadows_tint: f64,
 }
 
 impl Transform {
+    /// Compose the develop's `calibration` between the matrix and the
+    /// hue/saturation map.
+    pub fn calibrate(&mut self, develop: &serde_json::Value) {
+        if let Some(calibration) = super::adjust::calibration(develop) {
+            self.matrix = color::multiply(&calibration.matrix, &self.matrix);
+            self.shadows_tint = calibration.shadows_tint;
+        }
+    }
+
     pub fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let out = color::apply(&self.matrix, rgb.map(f64::from)).map(|v| v as f32);
+        let mut linear = color::apply(&self.matrix, rgb.map(f64::from));
+        if self.shadows_tint != 0.0 {
+            linear = super::adjust::shadows_tint(linear, self.shadows_tint);
+        }
+        let out = linear.map(|v| v as f32);
         match &self.hue_sat {
             Some(map) => map.apply(out),
             None => out,
@@ -876,6 +892,7 @@ impl ColorSpec {
             let transform = Transform {
                 matrix: color::identity(),
                 hue_sat: None,
+                shadows_tint: 0.0,
             };
             return Ok((white, transform));
         }
@@ -914,7 +931,14 @@ impl ColorSpec {
             temperature,
             tint,
         };
-        Ok((white, Transform { matrix, hue_sat }))
+        Ok((
+            white,
+            Transform {
+                matrix,
+                hue_sat,
+                shadows_tint: 0.0,
+            },
+        ))
     }
 
     /// The as-shot white: `AsShotNeutral`, else `AsShotWhiteXY`, else D50.

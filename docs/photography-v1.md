@@ -294,7 +294,7 @@ they list.
 | 6 | Tone: exposure (plus `BaselineExposure`), contrast, highlights, shadows, whites, blacks | `tone` |
 | 7 | Presence: dehaze, clarity, texture | `presence` |
 | 8 | Curves: parametric, then point (master, then R, G, B) | `curves` |
-| 9 | Color: HSL, color grading, vibrance, saturation, monochrome mix | `hsl`, `grading`, `presence`, `monochrome` |
+| 9 | Color: monochrome mix or HSL, then vibrance, saturation, color grading | `hsl`, `grading`, `presence`, `monochrome` |
 | 10 | Effects: post-crop vignette, then grain (seeded) | `effects` |
 | 11 | Output rendering: profile look table and tone curve, SDR shoulder, gamut mapping to the output space | `output` (from the node or recipe) |
 | 12 | Output: resize, output sharpening, transfer function, quantization | recipe |
@@ -580,6 +580,165 @@ square root of luminance.
 
 No lines is `[invalid-input]`. `--upright off` removes upright, `auto`, guides,
 rotation and perspective.
+
+### Development stack (stages 6–10 and calibration)
+
+These kernels are process 1 (`src/photo/adjust.rs`). They use only `+ - * /`,
+`sqrt`, and the in-tree `log2`, `exp2`, `pow`, `sin_cos` and `atan2`.
+
+An absent group, or one whose values are all at identity, skips its kernel, so
+the pixels pass through bit for bit. Sliders are written `v` below and
+normalized to `v / 100`. Every row is computed independently, so the thread
+count never changes a result.
+
+Notation:
+
+- `Y` is working luminance, the Y row of linear ProPhoto to XYZ D50.
+- `s = log2(max(Y, 0.18 · 2⁻²⁰) / 0.18)` is stops from middle gray.
+- `bump(s, c, w) = (1 − t²)²` for `t = (s − c) / w` with `|t| < 1`, and 0
+  otherwise.
+- `S(t)` is smoothstep `3t² − 2t³` with `t` clamped to 0–1.
+- `L` is the long edge, in pixels, of the developed, uncropped frame.
+
+**Blurs.** A Gaussian of sigma σ is three box passes per axis, using the
+Kutskir box sizes for σ. Each pass keeps an `f64` running sum with
+clamp-to-edge borders, and a σ below 0.5 px is skipped. When invalid pixels
+exist, the blur is weighted: the blur of `value · alpha` divided by the blur
+of `alpha`. The minimum filter is a van Herk/Gil–Werman square that ignores
+samples outside the image.
+
+**Calibration (stage 3).** For each primary `c` with hue `h` and saturation
+`σ`:
+
+1. Take the primary's offset from gray, `e_c − (⅓, ⅓, ⅓)`.
+2. Rotate it about the gray axis by `20° · h`.
+3. Scale it by `1 + 0.5σ`, then add it back to gray. The result is column `c`.
+
+The rows are then normalized to sum to 1 so the working white stays neutral.
+The matrix is composed after the camera matrix and before the profile's
+hue/sat map. `shadows_tint` multiplies green by `2^(−0.25 · v · w)` after the
+matrix. Here `w = (1 − Y / 0.05)²` below `Y = 0.05`, and `w = 1` at or below
+0.
+
+**Tone (stage 6).** The gain is `g = 2^(exposure + BaselineExposure)`, and `s`
+is measured after the gain. The curve is:
+
+```text
+T(s) = s · (1 + 0.6 · contrast)
+     + shadows · bump(s, −3, 3)
+     + highlights · bump(s, 1.2, 2.2)
+     + 0.6 · whites · bump(s, 2.5, 1.5)
+     + 0.6 · blacks · bump(s, −6.5, 3.5)
+```
+
+Each pixel's RGB is multiplied by `g · 2^(T(s) − s)`. This preserves the
+channel ratios, so tone never shifts hue. A pixel whose `Y` is not positive or
+not finite gets `g` alone. Highlights and shadows are global, not local, in
+process 1.
+
+**Presence (stage 7)** applies dehaze, then clarity, then texture.
+
+- **Dehaze** needs the resolved `presence.dehaze_airlight`, `A`:
+  - For `d > 0`:
+    1. The dark channel is `min_c max(I_c, 0) / A_c`.
+    2. Min-filter it with radius `r = max(1, round(0.006 L))`.
+    3. Blur it with σ = r.
+    4. Then `t = max(1 − 0.95 d · dark, 0.1)` and `J = (I − A) / t + A`.
+  - For `d < 0`, `t = 1 + 0.6d` and `J = I · t + A(1 − t)`.
+- **Clarity** replaces `s` by `s + 0.6c (s − base) · bump(s, −1, 7)`, where
+  `base` is `s` blurred with σ = `0.015 L`.
+- **Texture** replaces `s` by `s + 0.8t (s − blur(s))`, with σ =
+  `max(0.8, 0.002 L)`.
+
+The pixel is multiplied by `2^(Δs)` when `Y > 0`.
+
+**Curves (stage 8).** Each channel's composed curve is sampled at 4097 points
+of the ROMM-encoded (ProPhoto) value: `F_c = point_c ∘ point_rgb ∘ parametric`.
+Samples are linearly interpolated.
+
+- The **parametric** curve is
+  `x + (1 − (1 − 2x)⁸) · Σ 0.15 a_k · bump(x, center_k, width_k)` over the
+  shadows, darks, lights and highlights regions. The regions are bounded by
+  0, the three `splits` (default 0.25, 0.5, 0.75) and 1. The result is clamped
+  to 0–1 and then made non-decreasing.
+- **Point** curves are Fritsch–Carlson monotone cubics, flat outside their end
+  points and clamped to 0–1.
+- Linear values above 1 are scaled by `F(1)`, and values below 0 are offset
+  from `F(0)`.
+
+**Color (stage 9)** works in Oklab on the working space. The conversion is
+Bradford D50→D65, then the Oklab M1 with its rows scaled so the D65 white is
+exactly (1, 1, 1), then a cube root and M2.
+
+Hue bands have centers red 20°, orange 55°, yellow 100°, green 140°, aqua 195°,
+blue 255°, purple 295° and magenta 335°. A hue between two adjacent centers
+weights them `1 − S(t)` and `S(t)`. The chroma weight is `q = C² / (C² + 0.0004)`,
+so near-neutrals ignore luminance shifts.
+
+1. **Monochrome** (when `enabled`): `L ← L · 2^(mix · q / 3)`, and `a = b = 0`.
+   HSL, vibrance and saturation are skipped.
+2. **HSL**, otherwise: hue rotates by `30° · hue`, `C ← C · max(0, 1 + saturation)`
+   and `L ← L · 2^(luminance · q / 3)`.
+3. **Vibrance:** `C ← C · (1 + v (1 − min(1, C / 0.3)))`. For `v > 0` the
+   change is halved on the orange band to protect skin.
+4. **Saturation:** `C ← C · (1 + s)`.
+5. **Grading** comes last. With `x = clamp(L, 0, 1)`, `m = 0.5 − 0.25 · balance`
+   and `w = 0.1 + 0.4 · blending`, the weights are:
+   - shadows `1 − S((x − m + 0.25) / w + 0.5)`;
+   - highlights `S((x − m − 0.25) / w + 0.5)`;
+   - midtones the remainder, at least 0;
+   - global 1.
+
+   Each wheel adds `0.06 · saturation · (cos hue, sin hue)` to `(a, b)` and
+   `0.1 · luminance` to `L`.
+
+**Effects (stage 10)** run on the cropped output.
+
+- The **vignette** works on `u, v`, the pixel's offsets from the center
+  normalized to the half sizes.
+  - With `roundness ρ > 0`, `u, v` are scaled toward a circle on the long edge.
+  - With `ρ < 0`, the distance is a superellipse with exponent `2 − 6ρ`.
+  - The gain is `2^(2a · S((d − d0) / f))`, with `d0 = 0.2 + 0.8 · midpoint`
+    and `f = 0.05 + 0.95 · feather` (both default 50).
+  - A darkening vignette fades on bright pixels by `highlights · S(Y − 0.5)`.
+- **Grain** is value-lattice noise in uncropped-frame coordinates, so it does
+  not move with the crop.
+  - The cell is `max(1, (0.0005 + 0.002 · size) · L)` px, with smoothstep
+    bilinear interpolation.
+  - The lattice is blended with per-pixel noise by `roughness`.
+  - The noise is the sum of four 16-bit uniforms from a splitmix64 hash of
+    `(seed, x, y)`, centered and scaled to unit variance.
+  - The pixel is multiplied by `max(0, 1 + 0.3 · amount · n · 4e(1 − e))`,
+    where `e = Y / (Y + 0.18)`.
+  - Size defaults to 25 and roughness to 50.
+
+**Analysis.** Auto tone and the dehaze airlight read a proxy of stages 1–5 of
+the whole frame, box-averaged (valid pixels only) to a long edge of at most
+1024. `raw develop` stores the results, and rendering never re-analyzes.
+
+- **Auto tone** (`raw develop --auto-tone`, `auto: {"algorithm": "auto-tone",
+  "version": 1}`):
+  - `exposure = clamp(−mean(s), ±5)`, rounded to 0.01, where `s` is measured
+    with `BaselineExposure`.
+  - If the 99th-percentile luminance `p` after that exposure exceeds 1,
+    `highlights = −min(100, 40 log2 p)`.
+  - `shadows = clamp(20 (−s₁ − 5), 0, 100)` from the first percentile `s₁`.
+  - Both are rounded to integers, and zero values are omitted. Other tone
+    values are kept.
+  - Hand-editing a `tone` value removes `tone.auto`.
+- **Airlight** (algorithm version 1) is resolved by `raw develop` whenever
+  `presence.dehaze` is not 0 and no airlight is stored. It is resolved again
+  when `raw`, `white_balance`, `calibration`, `lens`, `geometry` or `tone`
+  changed in the same command, or when `--unset presence.dehaze_airlight` is
+  given.
+  1. Apply stage 6 to the proxy.
+  2. Min-filter the dark channel with radius `max(1, round(0.006 · proxy
+     edge))`.
+  3. Take the brightest 0.1% (at least one; ties by index) and average their
+     colors.
+  4. Each component is at least 1e-6 and rounded to 1e-6.
+
+  Rendering a nonzero `dehaze` without a stored airlight is `[invalid-develop]`.
 
 ### Local adjustments
 
@@ -942,17 +1101,34 @@ It also takes:
   fixed. Unsetting a key that is not set is `[invalid-input]`, and emptied
   groups are removed;
 - `--upright off|level|vertical|full|guided`, with `--guide x1,y1,x2,y2`
-  (repeatable, at most 4; guided only).
+  (repeatable, at most 4; guided only);
+- `--exposure EV`, a shorthand for `--set tone.exposure=EV`;
+- `--auto-tone`, which resolves the tone values. It cannot be combined with
+  `--exposure` (`[invalid-input]`).
 
-The changes are applied in this order: unset, set, camera profile, lens profile,
-guides, white balance, upright. The result is validated as a whole before the
-document is written. The upright analysis sees every other change.
+The changes are applied in this order:
+
+1. unset;
+2. set;
+3. camera profile;
+4. lens profile;
+5. guides;
+6. white balance;
+7. upright;
+8. auto tone;
+9. dehaze airlight.
+
+The result is validated as a whole before the document is written. Each
+analysis sees every change before it.
 
 The report is `{photo, variant, camera_profile, lens_profile, white_balance,
-monochrome, resolved: {xy, temperature, tint, neutral}, frame, upright?}`:
+monochrome, resolved: {xy, temperature, tint, neutral}, frame, upright?, tone?,
+dehaze_airlight?}`:
 
 - `frame` is the `photo info` frame;
-- `upright` holds the solved keys and the segment count.
+- `upright` holds the solved keys and the segment count;
+- `tone` and `dehaze_airlight` appear when auto tone ran or the airlight was
+  resolved.
 
 `photo profile add DOC --lens FILE.json` stores a pentool lens profile. The result
 is `{profile, kind, name, imported_from, samples, unsupported, deduplicated,
