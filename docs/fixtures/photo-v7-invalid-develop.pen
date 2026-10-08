@@ -1,0 +1,413 @@
+{
+  "format": "pentool",
+  "version": 7,
+  "name": "Variant with out-of-range exposure",
+  "compositing": {
+    "engine": 1,
+    "color_space": "srgb8"
+  },
+  "image_assets": {},
+  "styles": {},
+  "photography": {
+    "engine": 1,
+    "working_space": "prophoto-linear",
+    "assets": {
+      "sha256:2d0adb68a1676d0347a4a7346e892fabfeadb4c6ec74c2ab1709c0aaa254079b": {
+        "media_type": "image/x-adobe-dng",
+        "kind": "raw",
+        "byte_length": 1458,
+        "pixel_width": 12,
+        "pixel_height": 12,
+        "orientation": 1,
+        "bit_depth": 16,
+        "input_profile": "camera",
+        "storage": {
+          "kind": "embedded",
+          "encoding": "base64",
+          "data": "SUkqAHgDAAAAAdMBpgJ5A0wEHwXyBcUGmAdrCD4JEQrkCrcLigxdDWEBNAIHA9oDrQSABVMGJgf5B8wInwlyCkULGAzrDL4NwgGVAmgDOwQOBeEFtAaHB1oILQkACtMKpgt5DEwNHw4jAvYCyQOcBG8FQgYVB+gHuwiOCWEKNAsHDNoMrQ2ADoQCVwMqBP0E0AWjBnYHSQgcCe8JwgqVC2gMOw0ODuEO5QK4A4sEXgUxBgQH1weqCH0JUAojC/YLyQycDW8OMgFGAxkE7AS/BZIGZQc4CAsJ3gmxCoQLVwwqDf0N0A6TAacDegRNBSAG8wbGB5kIbAk/ChIL5Qu4DIsNXg4hAfQBCATbBK4FgQZUBycI+gjNCaAKcwtGDBkN7A2/DoIBVQJpBDwFDwbiBrUHiAhbCS4KAQvUC6cMeg1NDhAB4wG2AsoEnQVwBkMHFgjpCLwJjwpiCzUMCA3bDa4OcQFEAhcDKwX+BdEGpAd3CEoJHQrwCsMLlgxpDTwODw/SAaUCeAOMBV8GMgcFCNgIqwl+ClELJAz3DMoNnQ5gATMCBgPZA+0FwAaTB2YIOQkMCt8KsguFDFgNKw7+DsEBlAJnAzoETgYhB/QHxwiaCW0KQAsTDOYMuQ2MDk8BIgL1AsgDmwSvBoIHVQgoCfsJzgqhC3QMRw0aDu0OsAGDAlYDKQT8BAsAmoIFAAEAAACSAgAAnYIFAAEAAACaAgAAJ4gDAAEAAACQAQAAA5ACABQAAACiAgAAEZACAAcAAAC2AgAACZIDAAEAAAAAAAAACpIFAAEAAAC+AgAAMKQCABAAAADGAgAAMaQCAA4AAADWAgAANKQCABQAAADkAgAANaQCAA4AAAD4AgAAAAAAAAEAAAB9AAAAHAAAAAoAAAAyMDI2OjA1OjE3IDE5OjQyOjA4ACswMjowMAAAIwAAAAEAAABTeW50aGV0aWMgT3duZXIAU04tMDAwMC1TWU5USABTeW50aGV0aWMgMzVtbSBGMi44AExFTlMtU04tU1lOVEgABQAAAAEABAAAAAIDAAABAAIAAgAAAE4AAAACAAUAAwAAAEgDAAADAAIAAgAAAEUAAAAEAAUAAwAAAGADAAAAAAAAOwAAAAEAAAA2AAAAAQAAAAAAAAABAAAACgAAAAEAAAAsAAAAAQAAAAAAAAABAAAAHwD+AAQAAQAAAAAAAAAAAQQAAQAAABAAAAABAQQAAQAAABAAAAACAQMAAQAAABAAAAADAQMAAQAAAAEAAAAGAQMAAQAAACOAAAAPAQIACAAAAPIEAAAQAQIAGwAAAPoEAAARAQQAAQAAAAgAAAASAQMAAQAAAAEAAAAVAQMAAQAAAAEAAAAWAQQAAQAAABAAAAAXAQQAAQAAAAACAAAcAQMAAQAAAAEAAACNggMAAgAAAAIAAgCOggEABAAAAAABAQJphwQAAQAAAAgCAAAliAQAAQAAAAYDAAASxgEABAAAAAEGAAATxgEABAAAAAEBAAAUxgIAIwAAABYFAAAWxgEAAwAAAAABAgAXxgMAAQAAAAEAAAAaxgQAAQAAAAABAAAdxgQAAQAAAP8PAAAfxgQAAgAAADoFAAAgxgQAAgAAAEIFAAAhxgoACQAAAEoFAAAoxgUAAwAAAJIFAAAqxgoAAQAAAKoFAABaxgMAAQAAABUAAAAAAAAAUGVudG9vbABTeW50aGV0aWMgQ29uZm9ybWFuY2UgQm9keQAAUGVudG9vbCBTeW50aGV0aWMgQ29uZm9ybWFuY2UgQm9keQAAAgAAAAIAAAAMAAAADAAAAFgbAAAQJwAAJPr//xAnAAAM/v//ECcAAGDw//8QJwAA4C4AABAnAADQBwAAECcAAAz+//8QJwAA3AUAABAnAABwFwAAECcAAAEAAAACAAAAAQAAAAEAAAADAAAABAAAAAAAAABkAAAA"
+        },
+        "capture": {
+          "make": "Pentool",
+          "model": "Synthetic Conformance Body",
+          "lens": "Synthetic 35mm F2.8",
+          "focal_length": 35,
+          "aperture": 2.8,
+          "exposure_time": [
+            1,
+            125
+          ],
+          "iso": 400,
+          "flash": false,
+          "captured": "2026-05-17T19:42:08+02:00"
+        },
+        "raw": {
+          "dng_version": "1.6.0.0",
+          "unique_camera_model": "Pentool Synthetic Conformance Body",
+          "as_shot_neutral": [
+            0.5,
+            1,
+            0.75
+          ],
+          "baseline_exposure": 0,
+          "opcodes": [],
+          "layout": "cfa",
+          "cfa_pattern": "RGGB"
+        }
+      },
+      "sha256:aa58b312fe6dad85c541b4e30144cfa4e4b9747656fed800f509c73870d5f146": {
+        "media_type": "image/x-adobe-dng",
+        "kind": "raw",
+        "byte_length": 856,
+        "pixel_width": 8,
+        "pixel_height": 8,
+        "orientation": 1,
+        "bit_depth": 16,
+        "input_profile": "camera",
+        "storage": {
+          "kind": "embedded",
+          "encoding": "base64",
+          "data": "SUkqAIgBAAAAAbEFYgrTAoQHNQymBFcJCA55BioLAwFMCP0M1gIfCtAOqQTyC8sBfAbFDZ4DTwhLAvwGrQseBM8IgA3xBaIKUw/EB3UMTgKXCUgOIQRqC0MB9AU9DRYDxwcQD+kEmgmWA0cI+AxpBRoKyw48B+0LxgEPCcANmQPiCpMPbAW1DI4CPweIDmEEEgmDATQG5QrhBJIJQw60BmULPgGHCDgNEQNaCgsP5AQtDAYCtwYADtkDigjTD6wFXQrOAn8HMAwsBt0Kjg//B7AMiQLSCYMOXASlC34BLwZ4DVEDAghLDyQF1QlGAvcGqAsZBMoIew13BygMAQJKCfsN1AMdC84PpwXwDMkCegfDDpwETQm+AW8GIAuRA0II8wxkBRUKxg7CCHMNTAOVCkYPHwVoDEEC8gY7DhQExQg2AecFmAoJA7oHawzcBI0JPg6vBmALOQENCr4OlwTgC7kBagazDYwDPQiGD18FEAqBAjIH4wtUBAUJtg0nBtgKiQ/6B6sMhAIXAP4ABAABAAAAAAAAAAABBAABAAAACAAAAAEBBAABAAAACAAAAAIBAwADAAAAogIAAAMBAwABAAAAAQAAAAYBAwABAAAATIgAAA8BAgAIAAAAqAIAABABAgAbAAAAsAIAABEBBAABAAAACAAAABIBAwABAAAAAQAAABUBAwABAAAAAwAAABYBBAABAAAACAAAABcBBAABAAAAgAEAABwBAwABAAAAAQAAABLGAQAEAAAAAQYAABPGAQAEAAAAAQEAABTGAgAjAAAAzAIAABrGBAABAAAAAAEAAB3GBAABAAAA/w8AACHGCgAJAAAA8AIAACjGBQADAAAAOAMAACrGCgABAAAAUAMAAFrGAwABAAAAFQAAAAAAAAAQABAAEABQZW50b29sAFN5bnRoZXRpYyBDb25mb3JtYW5jZSBCb2R5AABQZW50b29sIFN5bnRoZXRpYyBDb25mb3JtYW5jZSBCb2R5AAAQJwAAECcAAAAAAAAQJwAAAAAAABAnAAAAAAAAECcAABAnAAAQJwAAAAAAABAnAAAAAAAAECcAAAAAAAAQJwAAECcAABAnAAABAAAAAgAAAAEAAAABAAAAAwAAAAQAAAAAAAAAZAAAAA=="
+        },
+        "capture": {
+          "make": "Pentool",
+          "model": "Synthetic Conformance Body"
+        },
+        "raw": {
+          "dng_version": "1.6.0.0",
+          "unique_camera_model": "Pentool Synthetic Conformance Body",
+          "as_shot_neutral": [
+            0.5,
+            1,
+            0.75
+          ],
+          "baseline_exposure": 0,
+          "opcodes": [],
+          "layout": "linear-raw",
+          "cfa_pattern": null,
+          "samples": 3
+        }
+      }
+    },
+    "profiles": {},
+    "photos": [
+      {
+        "id": "hero",
+        "source": "sha256:2d0adb68a1676d0347a4a7346e892fabfeadb4c6ec74c2ab1709c0aaa254079b",
+        "name": "capture",
+        "rating": 4,
+        "pick": "pick",
+        "label": "green",
+        "keywords": [
+          "harbor",
+          "dusk"
+        ],
+        "creator": "Pentool Fixtures",
+        "copyright": "CC0",
+        "location": {
+          "city": "Synthetic City",
+          "country": "Nowhere"
+        },
+        "variants": [
+          {
+            "id": "master",
+            "name": "Master",
+            "develop": {
+              "process": 1,
+              "raw": {
+                "demosaic": "mhc",
+                "highlights": "blend",
+                "camera_profile": "embedded"
+              },
+              "white_balance": {
+                "mode": "as-shot"
+              },
+              "lens": {
+                "profile": "embedded-opcodes"
+              },
+              "detail": {
+                "sharpening": {
+                  "amount": 40,
+                  "radius": 1,
+                  "detail": 25
+                },
+                "noise": {
+                  "color": 25
+                }
+              }
+            }
+          },
+          {
+            "id": "warm-editorial",
+            "name": "Warm editorial",
+            "develop": {
+              "process": 1,
+              "raw": {
+                "demosaic": "mhc",
+                "highlights": "blend",
+                "camera_profile": "embedded"
+              },
+              "white_balance": {
+                "mode": "temperature",
+                "temperature": 6200,
+                "tint": 8
+              },
+              "lens": {
+                "profile": "embedded-opcodes"
+              },
+              "detail": {
+                "sharpening": {
+                  "amount": 40,
+                  "radius": 1,
+                  "detail": 25
+                },
+                "noise": {
+                  "color": 25
+                }
+              },
+              "tone": {
+                "exposure": 9,
+                "contrast": 12,
+                "highlights": -40,
+                "shadows": 25
+              },
+              "curves": {
+                "point": {
+                  "rgb": [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      0.25,
+                      0.22
+                    ],
+                    [
+                      0.75,
+                      0.8
+                    ],
+                    [
+                      1,
+                      1
+                    ]
+                  ]
+                }
+              },
+              "grading": {
+                "highlights": {
+                  "hue": 45,
+                  "saturation": 12,
+                  "luminance": 0
+                },
+                "blending": 50,
+                "balance": 0
+              },
+              "crop": {
+                "rect": [
+                  0.05,
+                  0.05,
+                  0.9,
+                  0.9
+                ],
+                "aspect": "original",
+                "constrain": true
+              },
+              "effects": {
+                "grain": {
+                  "amount": 10,
+                  "size": 25,
+                  "roughness": 50,
+                  "seed": 20260517
+                }
+              },
+              "local": [
+                {
+                  "id": "sky",
+                  "name": "Sky",
+                  "enabled": true,
+                  "amount": 1,
+                  "mask": {
+                    "components": [
+                      {
+                        "kind": "linear",
+                        "mode": "add",
+                        "start": [
+                          0.5,
+                          0.0
+                        ],
+                        "end": [
+                          0.5,
+                          0.45
+                        ]
+                      },
+                      {
+                        "kind": "range-luminance",
+                        "mode": "intersect",
+                        "min": 0.55,
+                        "max": 1,
+                        "smoothness": 0.2
+                      }
+                    ]
+                  },
+                  "params": {
+                    "exposure": -0.4,
+                    "dehaze": 15,
+                    "temperature": -8
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "snapshots": [
+          {
+            "id": "before-grade",
+            "name": "Before grade",
+            "variant": "master",
+            "develop": {
+              "process": 1,
+              "raw": {
+                "demosaic": "mhc",
+                "highlights": "blend",
+                "camera_profile": "embedded"
+              },
+              "white_balance": {
+                "mode": "as-shot"
+              },
+              "lens": {
+                "profile": "embedded-opcodes"
+              },
+              "detail": {
+                "sharpening": {
+                  "amount": 40,
+                  "radius": 1,
+                  "detail": 25
+                },
+                "noise": {
+                  "color": 25
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "detail",
+        "source": "sha256:aa58b312fe6dad85c541b4e30144cfa4e4b9747656fed800f509c73870d5f146",
+        "name": "linear",
+        "rating": 2,
+        "variants": [
+          {
+            "id": "master",
+            "name": "Master",
+            "develop": {
+              "process": 1,
+              "raw": {
+                "demosaic": "mhc",
+                "highlights": "blend",
+                "camera_profile": "embedded"
+              },
+              "white_balance": {
+                "mode": "as-shot"
+              },
+              "lens": {
+                "profile": "embedded-opcodes"
+              },
+              "detail": {
+                "sharpening": {
+                  "amount": 40,
+                  "radius": 1,
+                  "detail": 25
+                },
+                "noise": {
+                  "color": 25
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "stacks": {
+      "harbor-burst": {
+        "photos": [
+          "hero",
+          "detail"
+        ]
+      }
+    },
+    "collections": {
+      "picks": {
+        "kind": "smart",
+        "query": "pick:pick"
+      },
+      "portfolio": {
+        "kind": "manual",
+        "photos": [
+          "hero"
+        ]
+      }
+    },
+    "recipes": {
+      "client-proof": {
+        "format": "jpeg",
+        "quality": 85,
+        "chroma": "420",
+        "bit_depth": 8,
+        "color_space": "srgb",
+        "intent": "perceptual",
+        "resize": {
+          "mode": "long-edge",
+          "value": 2048,
+          "enlarge": false
+        },
+        "ppi": 72,
+        "sharpen": {
+          "target": "screen",
+          "amount": "standard"
+        },
+        "naming": "{photo}-{variant}",
+        "metadata": {
+          "policy": "copyright"
+        }
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "cover",
+      "name": "Cover",
+      "canvas": {
+        "width": 12,
+        "height": 12,
+        "background": "#ffffff"
+      },
+      "layers": [
+        {
+          "id": "photos",
+          "name": "Photos",
+          "visible": true,
+          "locked": false,
+          "nodes": [
+            {
+              "kind": "photo",
+              "id": "hero-on-cover",
+              "photo": "hero",
+              "variant": "warm-editorial",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 12,
+              "fit": "cover",
+              "position": [
+                0.5,
+                0.5
+              ],
+              "opacity": 1,
+              "blend_mode": "normal"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "format": "pentool-photo-conformance",
+  "version": 1,
+  "specification": "docs/photography-v1.md",
+  "schema": "docs/pen-format-v7.schema.json",
+  "note": "Files are pinned byte-for-byte (see .gitattributes). 'item' is the v0.11.0 roadmap item that first implements the expected behavior.",
+  "fixtures": [
+    {
+      "file": "photo-dng-rggb16.dng",
+      "sha256": "2d0adb68a1676d0347a4a7346e892fabfeadb4c6ec74c2ab1709c0aaa254079b",
+      "expect": "ok",
+      "item": 3,
+      "description": "16x16 RGGB CFA, 12-bit values in 16-bit uncompressed strips, black 256, white 4095, default crop 12x12 at 2,2, ColorMatrix1 for D65, AsShotNeutral 0.5,1,0.75; synthetic EXIF, GPS, serial and owner fields for privacy tests"
+    },
+    {
+      "file": "photo-dng-linear16.dng",
+      "sha256": "aa58b312fe6dad85c541b4e30144cfa4e4b9747656fed800f509c73870d5f146",
+      "expect": "ok",
+      "item": 3,
+      "description": "8x8 three-sample LinearRaw, 16-bit, uncompressed, identity ColorMatrix1"
+    },
+    {
+      "file": "photo-dng-ifd-loop.dng",
+      "sha256": "611307d8dccb8b9007a1616de8b5e4fd18b833a9616b9413044859f85d7dc77b",
+      "expect": "error",
+      "code": "malformed-resource",
+      "item": 3,
+      "description": "the IFD0 next-IFD offset points back to IFD0"
+    },
+    {
+      "file": "photo-dng-strip-out-of-bounds.dng",
+      "sha256": "70aa3d360c8b3efd4f5c3a28ef0d493901b8c096b6c2261dc2e4a78fea199527",
+      "expect": "error",
+      "code": "malformed-resource",
+      "item": 3,
+      "description": "StripOffsets lies beyond the end of the file"
+    },
+    {
+      "file": "photo-dng-oversize.dng",
+      "sha256": "30ccd9696a8726546e96d408740398404107cda11982bb9295e19c737fbd779d",
+      "expect": "error",
+      "code": "limit-exceeded",
+      "item": 3,
+      "description": "declares 40000x40000; refused before strip bounds are checked or memory is allocated"
+    },
+    {
+      "file": "photo-dng-jpegxl.dng",
+      "sha256": "9fd712036f8deac2ed83f8861c2e056efbf696c7d873c4c9f51b5361f995d83b",
+      "expect": "error",
+      "code": "unsupported-capability",
+      "item": 3,
+      "description": "Compression 52546 (JPEG XL)"
+    },
+    {
+      "file": "photo-dng-xtrans.dng",
+      "sha256": "83bf24951f64ffaf9a414646b7a56b6592d0b1c985aa2c0a3c054a7fb7879d08",
+      "expect": "error",
+      "code": "unsupported-capability",
+      "item": 3,
+      "description": "6x6 CFARepeatPatternDim (X-Trans style)"
+    },
+    {
+      "file": "photo-raw-cr2-header.cr2",
+      "sha256": "a8e21b5847c3cc63d8f9c271d3e1f704112958de2fa6a4097c628f80f53f4427",
+      "expect": "error",
+      "code": "unsupported-capability",
+      "item": 3,
+      "description": "Canon CR2 signature; the message must suggest converting to DNG"
+    },
+    {
+      "file": "photo-v7.pen",
+      "sha256": "d9365dd03f7ddca54af57617667991caa4f52b14c6b1967825888834c63f8754",
+      "expect": "ok",
+      "item": 3,
+      "description": "valid v7 catalog: two embedded DNG photos, variants, a snapshot, a local mask, a stack, collections, a recipe and a photo node"
+    },
+    {
+      "file": "photo-v7-invalid-variant.pen",
+      "sha256": "ddc6c08dcd8b31439e92d9371aaec07f3d3857313a8610abe82ecac2b60106f5",
+      "expect": "error",
+      "code": "missing-resource",
+      "item": 3,
+      "description": "schema-valid, but the photo node references a variant that does not exist"
+    },
+    {
+      "file": "photo-v7-invalid-develop.pen",
+      "sha256": "814164525f3e250217252664185e95c2ada8610b70d2810f1c8fc355d8b8b39e",
+      "expect": "error",
+      "code": "invalid-develop",
+      "item": 6,
+      "description": "warm-editorial tone.exposure is 9 EV (range -5..5); also rejected by the schema"
+    }
+  ]
+}

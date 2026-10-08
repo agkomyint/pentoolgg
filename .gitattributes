@@ -2,3 +2,5 @@
 * text=auto
 *.sh text eol=lf
 examples/raster-paint-showcase.pen -text
+# Photography conformance fixtures are pinned by SHA-256 in photo-conformance.json.
+docs/fixtures/photo-* -text

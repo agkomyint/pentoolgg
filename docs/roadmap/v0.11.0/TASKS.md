@@ -24,10 +24,20 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 - [ ] **1. Freeze the photography specification.** Define RAW support, decode
   limits, demosaic order, working RGB spaces, precision, metadata, development
   stages, variants, caches, schemas, migrations, and conformance fixtures.
+  *Status: drafted for review.* This item has four parts:
+  - [`docs/photography-v1.md`](../../photography-v1.md), the specification;
+  - [`docs/pen-format-v7.schema.json`](../../pen-format-v7.schema.json), the schema;
+  - `docs/fixtures/photo-*` with the `photo-conformance.json` manifest;
+  - `tests/v0110_photo_spec.rs`.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **2. Add high-bit-depth RGB paths.** Support 16-bit storage and a documented
   floating-point working representation without accidental 8-bit/sRGB round trips.
 - [ ] **3. Implement bounded RAW ingestion.** Validate and decode a tested subset
   of RAW containers, retain source bytes, and report unsupported cameras clearly.
+  Decision (item 1): the tested subset is DNG 1.0–1.7, read by pentool's own
+  bounded decoder with no new dependency. Other RAW containers are recognized by
+  signature and refused, and the error says to convert them to DNG.
 - [ ] **4. Add camera profiles and white balance.** Support embedded and verified
   profiles plus as-shot, temperature/tint, sampled-neutral, and suggested balance.
 - [ ] **5. Add lens and geometry correction.** Cover distortion, vignetting,
@@ -59,13 +69,15 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 ## CLI direction
 
 ```sh
-pentool raw add catalog.pen hero --file ./capture.raw --camera-profile auto
+pentool raw add catalog.pen hero --file ./capture.dng --camera-profile auto
 pentool raw develop catalog.pen hero --exposure 0.7 --temperature 5400 --dry-run
 pentool photo variant add catalog.pen hero warm-editorial
-pentool photo settings sync catalog.pen hero --to selected.json --except crop
+pentool photo settings sync catalog.pen hero --to @selected.json --except crop
 pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr
-pentool photo export catalog.pen --selection picks --recipe web-gallery
+pentool photo export catalog.pen --selection picks --recipe web-gallery --out ./delivery
 ```
+
+The complete command surface is in `docs/photography-v1.md`.
 
 ## Acceptance targets
 

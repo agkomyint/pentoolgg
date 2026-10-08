@@ -1,0 +1,536 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/pen-v7.json",
+  "title": "Pentool document v7 (photography development contract, photo engine 1)",
+  "description": "A v6 document plus an optional photography catalog and the photo node kind. See docs/photography-v1.md.",
+  "type": "object",
+  "required": ["format", "version", "name", "pages", "image_assets", "compositing"],
+  "properties": {
+    "format": {"const": "pentool"},
+    "version": {"const": 7},
+    "name": {"type": "string"},
+    "fonts": {"type": "array"},
+    "styles": {"type": "object"},
+    "components": {"type": "array"},
+    "masks": {"$ref": "pen-format-v6.schema.json#/properties/masks"},
+    "mask_resources": {"$ref": "pen-format-v6.schema.json#/properties/mask_resources"},
+    "image_assets": {"$ref": "pen-format-v5.schema.json#/properties/image_assets"},
+    "compositing": {"$ref": "pen-format-v6.schema.json#/properties/compositing"},
+    "photography": {"$ref": "#/$defs/photography"},
+    "pages": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/page"}}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "digest": {"$ref": "pen-format-v5.schema.json#/$defs/digest"},
+    "storage": {"oneOf": [
+      {"$ref": "pen-format-v5.schema.json#/$defs/embeddedStorage"},
+      {"$ref": "pen-format-v5.schema.json#/$defs/externalStorage"}
+    ]},
+    "unit": {"type": "number", "minimum": 0, "maximum": 1},
+    "point": {"type": "array", "prefixItems": [{"$ref": "#/$defs/unit"}, {"$ref": "#/$defs/unit"}], "items": false, "minItems": 2},
+    "signed100": {"type": "number", "minimum": -100, "maximum": 100},
+    "percent": {"type": "number", "minimum": 0, "maximum": 100},
+    "auto": {
+      "type": "object", "required": ["algorithm", "version"],
+      "properties": {"algorithm": {"type": "string", "minLength": 1, "maxLength": 64}, "version": {"type": "integer", "minimum": 1}},
+      "additionalProperties": false
+    },
+    "rgbSpace": {"enum": ["srgb", "display-p3", "adobe-rgb-1998", "prophoto", "rec2020"]},
+    "outputSpace": {"type": "string", "pattern": "^(srgb|display-p3|adobe-rgb-1998|prophoto|rec2020)(:linear)?$"},
+    "bands": {
+      "type": "object",
+      "propertyNames": {"enum": ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"]},
+      "additionalProperties": {"$ref": "#/$defs/signed100"}
+    },
+    "metadataCategory": {"enum": ["copyright", "creator", "description", "keywords", "location", "camera", "timestamps", "gps", "serials", "identity", "software"]},
+
+    "photography": {
+      "type": "object", "required": ["engine", "working_space", "assets", "photos"],
+      "properties": {
+        "engine": {"const": 1},
+        "working_space": {"const": "prophoto-linear"},
+        "assets": {"type": "object", "maxProperties": 10000, "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"}, "additionalProperties": {"$ref": "#/$defs/photoAsset"}},
+        "profiles": {"type": "object", "maxProperties": 256, "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"}, "additionalProperties": {"$ref": "#/$defs/profile"}},
+        "photos": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/photo"}},
+        "stacks": {"type": "object", "maxProperties": 1024, "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {
+          "type": "object", "required": ["photos"],
+          "properties": {"photos": {"type": "array", "minItems": 2, "maxItems": 10000, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}},
+          "additionalProperties": false
+        }},
+        "collections": {"type": "object", "maxProperties": 256, "propertyNames": {"$ref": "#/$defs/id"}, "additionalProperties": {"$ref": "#/$defs/collection"}},
+        "recipes": {"type": "object", "maxProperties": 64, "propertyNames": {"allOf": [{"$ref": "#/$defs/id"}, {"not": {"enum": ["web-gallery", "social", "archive-master", "photo-lab"]}}]}, "additionalProperties": {"$ref": "#/$defs/recipe"}}
+      },
+      "additionalProperties": false
+    },
+
+    "photoAsset": {
+      "type": "object",
+      "required": ["media_type", "kind", "byte_length", "pixel_width", "pixel_height", "orientation", "bit_depth", "input_profile", "storage"],
+      "properties": {
+        "media_type": {"enum": ["image/x-adobe-dng", "image/tiff", "image/png", "image/jpeg", "image/webp"]},
+        "kind": {"enum": ["raw", "rendered", "derived"]},
+        "byte_length": {"type": "integer", "minimum": 1, "maximum": 536870912},
+        "pixel_width": {"type": "integer", "minimum": 1, "maximum": 32768},
+        "pixel_height": {"type": "integer", "minimum": 1, "maximum": 32768},
+        "orientation": {"type": "integer", "minimum": 1, "maximum": 8},
+        "bit_depth": {"enum": [8, 10, 12, 14, 16, 24, 32]},
+        "input_profile": {"oneOf": [
+          {"const": "camera"},
+          {"$ref": "#/$defs/rgbSpace"},
+          {"type": "object", "required": ["icc"], "properties": {"icc": {"$ref": "#/$defs/digest"}}, "additionalProperties": false}
+        ]},
+        "storage": {"$ref": "#/$defs/storage"},
+        "capture": {"$ref": "#/$defs/capture"},
+        "raw": {"$ref": "#/$defs/rawFacts"},
+        "derived": {"$ref": "#/$defs/derived"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "raw"}}}, "then": {"required": ["raw"], "properties": {"media_type": {"const": "image/x-adobe-dng"}, "input_profile": {"const": "camera"}}}},
+        {"if": {"properties": {"kind": {"const": "derived"}}}, "then": {"required": ["raw", "derived"], "properties": {"media_type": {"const": "image/x-adobe-dng"}, "input_profile": {"const": "camera"}}}},
+        {"if": {"properties": {"kind": {"const": "rendered"}}}, "then": {"not": {"anyOf": [{"required": ["raw"]}, {"required": ["derived"]}]}, "properties": {"input_profile": {"not": {"const": "camera"}}}}}
+      ],
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "make": {"type": "string", "maxLength": 128}, "model": {"type": "string", "maxLength": 128}, "lens": {"type": "string", "maxLength": 128},
+        "focal_length": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
+        "aperture": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+        "exposure_time": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 1}, {"type": "integer", "minimum": 1}], "items": false, "minItems": 2},
+        "iso": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "flash": {"type": "boolean"},
+        "captured": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?([+-]\\d{2}:\\d{2})?$"}
+      },
+      "additionalProperties": false
+    },
+    "rawFacts": {
+      "type": "object", "required": ["dng_version", "layout", "cfa_pattern", "unique_camera_model"],
+      "properties": {
+        "dng_version": {"type": "string", "pattern": "^1\\.[0-7]\\.[0-9]\\.[0-9]$"},
+        "layout": {"enum": ["cfa", "linear-raw"]},
+        "cfa_pattern": {"enum": ["RGGB", "BGGR", "GRBG", "GBRG", null]},
+        "samples": {"enum": [1, 3]},
+        "unique_camera_model": {"type": "string", "maxLength": 256},
+        "as_shot_neutral": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "baseline_exposure": {"type": "number", "minimum": -10, "maximum": 10},
+        "opcodes": {"type": "array", "maxItems": 768, "items": {
+          "type": "object", "required": ["list", "id", "applied"],
+          "properties": {"list": {"enum": [1, 2, 3]}, "id": {"type": "integer", "minimum": 1}, "applied": {"type": "boolean"}, "optional": {"type": "boolean"}},
+          "additionalProperties": false
+        }}
+      },
+      "additionalProperties": false
+    },
+    "derived": {
+      "type": "object", "required": ["operation", "algorithm", "inputs", "settings", "alignment"],
+      "properties": {
+        "operation": {"enum": ["merge-hdr", "merge-pano"]},
+        "algorithm": {"type": "integer", "minimum": 1},
+        "inputs": {"type": "array", "minItems": 2, "maxItems": 64, "items": {"$ref": "#/$defs/digest"}},
+        "settings": {"type": "object"},
+        "alignment": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object", "required": ["kind", "name", "byte_length", "storage"],
+      "properties": {
+        "kind": {"enum": ["camera", "lens", "icc"]},
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "byte_length": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "storage": {"$ref": "#/$defs/storage"},
+        "unique_camera_model": {"type": "string", "maxLength": 256},
+        "embed_policy": {"type": "integer", "minimum": 0, "maximum": 3},
+        "force_model": {"type": "boolean"},
+        "imported_from": {"enum": ["dcp", "pentool-lens", "lcp", "icc"]},
+        "unsupported": {"type": "array", "maxItems": 256, "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+
+    "photo": {
+      "type": "object", "required": ["id", "source", "variants"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "source": {"$ref": "#/$defs/digest"},
+        "name": {"type": "string", "maxLength": 256},
+        "rating": {"type": "integer", "minimum": 0, "maximum": 5},
+        "pick": {"enum": ["none", "pick", "reject"]},
+        "label": {"enum": ["none", "red", "yellow", "green", "blue", "purple"]},
+        "keywords": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+        "title": {"type": "string", "maxLength": 1024},
+        "caption": {"type": "string", "maxLength": 8192},
+        "creator": {"type": "string", "maxLength": 256},
+        "copyright": {"type": "string", "maxLength": 1024},
+        "location": {
+          "type": "object",
+          "properties": {"sublocation": {"type": "string", "maxLength": 256}, "city": {"type": "string", "maxLength": 256}, "state": {"type": "string", "maxLength": 256}, "country": {"type": "string", "maxLength": 256}},
+          "additionalProperties": false
+        },
+        "variants": {
+          "type": "array", "minItems": 1, "maxItems": 64,
+          "prefixItems": [{"allOf": [{"$ref": "#/$defs/variant"}, {"properties": {"id": {"const": "master"}}}]}],
+          "items": {"$ref": "#/$defs/variant"}
+        },
+        "snapshots": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/snapshot"}}
+      },
+      "additionalProperties": false
+    },
+    "variant": {
+      "type": "object", "required": ["id", "develop"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "maxLength": 256}, "develop": {"$ref": "#/$defs/develop"}},
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object", "required": ["id", "variant", "develop"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string", "maxLength": 256}, "variant": {"$ref": "#/$defs/id"}, "develop": {"$ref": "#/$defs/develop"}},
+      "additionalProperties": false
+    },
+
+    "develop": {
+      "type": "object", "required": ["process"],
+      "properties": {
+        "process": {"type": "integer", "minimum": 1},
+        "raw": {
+          "type": "object",
+          "properties": {
+            "demosaic": {"enum": ["bilinear", "mhc"]},
+            "highlights": {"enum": ["clip", "blend"]},
+            "camera_profile": {"oneOf": [
+              {"enum": ["embedded", "matrix-only"]},
+              {"type": "object", "required": ["profile"], "properties": {"profile": {"$ref": "#/$defs/digest"}}, "additionalProperties": false}
+            ]},
+            "defective_pixels": {
+              "type": "object",
+              "properties": {
+                "auto": {"type": "boolean"},
+                "threshold": {"type": "number", "minimum": 1, "maximum": 100},
+                "list": {"type": "array", "maxItems": 4096, "items": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 0}, {"type": "integer", "minimum": 0}], "items": false, "minItems": 2}}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "white_balance": {"oneOf": [
+          {"type": "object", "required": ["mode"], "properties": {"mode": {"const": "as-shot"}}, "additionalProperties": false},
+          {"type": "object", "required": ["mode", "temperature", "tint"], "properties": {"mode": {"const": "temperature"}, "temperature": {"type": "number", "minimum": 2000, "maximum": 50000}, "tint": {"type": "number", "minimum": -150, "maximum": 150}, "auto": {"$ref": "#/$defs/auto"}}, "additionalProperties": false},
+          {"type": "object", "required": ["mode", "temperature", "tint"], "properties": {"mode": {"const": "relative"}, "temperature": {"$ref": "#/$defs/signed100"}, "tint": {"$ref": "#/$defs/signed100"}, "auto": {"$ref": "#/$defs/auto"}}, "additionalProperties": false},
+          {"type": "object", "required": ["mode", "neutral"], "properties": {
+            "mode": {"const": "neutral"},
+            "neutral": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "exclusiveMinimum": 0}},
+            "sampled": {"type": "object", "required": ["x", "y", "radius"], "properties": {"x": {"$ref": "#/$defs/unit"}, "y": {"$ref": "#/$defs/unit"}, "radius": {"$ref": "#/$defs/unit"}}, "additionalProperties": false},
+            "auto": {"$ref": "#/$defs/auto"}
+          }, "additionalProperties": false}
+        ]},
+        "tone": {
+          "type": "object",
+          "properties": {
+            "exposure": {"type": "number", "minimum": -5, "maximum": 5},
+            "contrast": {"$ref": "#/$defs/signed100"}, "highlights": {"$ref": "#/$defs/signed100"}, "shadows": {"$ref": "#/$defs/signed100"},
+            "whites": {"$ref": "#/$defs/signed100"}, "blacks": {"$ref": "#/$defs/signed100"},
+            "auto": {"$ref": "#/$defs/auto"}
+          },
+          "additionalProperties": false
+        },
+        "presence": {
+          "type": "object",
+          "properties": {
+            "texture": {"$ref": "#/$defs/signed100"}, "clarity": {"$ref": "#/$defs/signed100"}, "dehaze": {"$ref": "#/$defs/signed100"},
+            "vibrance": {"$ref": "#/$defs/signed100"}, "saturation": {"$ref": "#/$defs/signed100"},
+            "dehaze_airlight": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "minimum": 0}}
+          },
+          "additionalProperties": false
+        },
+        "curves": {
+          "type": "object",
+          "properties": {
+            "parametric": {
+              "type": "object",
+              "properties": {
+                "highlights": {"$ref": "#/$defs/signed100"}, "lights": {"$ref": "#/$defs/signed100"}, "darks": {"$ref": "#/$defs/signed100"}, "shadows": {"$ref": "#/$defs/signed100"},
+                "splits": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number", "minimum": 0.05, "maximum": 0.95}}
+              },
+              "additionalProperties": false
+            },
+            "point": {
+              "type": "object",
+              "propertyNames": {"enum": ["rgb", "red", "green", "blue"]},
+              "additionalProperties": {"type": "array", "minItems": 2, "maxItems": 16, "items": {"$ref": "#/$defs/point"}}
+            }
+          },
+          "additionalProperties": false
+        },
+        "hsl": {
+          "type": "object",
+          "properties": {"hue": {"$ref": "#/$defs/bands"}, "saturation": {"$ref": "#/$defs/bands"}, "luminance": {"$ref": "#/$defs/bands"}},
+          "additionalProperties": false
+        },
+        "grading": {
+          "type": "object",
+          "properties": {
+            "shadows": {"$ref": "#/$defs/gradeWheel"}, "midtones": {"$ref": "#/$defs/gradeWheel"}, "highlights": {"$ref": "#/$defs/gradeWheel"}, "global": {"$ref": "#/$defs/gradeWheel"},
+            "blending": {"$ref": "#/$defs/percent"}, "balance": {"$ref": "#/$defs/signed100"}
+          },
+          "additionalProperties": false
+        },
+        "monochrome": {
+          "type": "object",
+          "properties": {"enabled": {"type": "boolean"}, "mix": {"$ref": "#/$defs/bands"}},
+          "additionalProperties": false
+        },
+        "detail": {
+          "type": "object",
+          "properties": {
+            "sharpening": {"type": "object", "properties": {
+              "amount": {"type": "number", "minimum": 0, "maximum": 150}, "radius": {"type": "number", "minimum": 0.5, "maximum": 3},
+              "detail": {"$ref": "#/$defs/percent"}, "masking": {"$ref": "#/$defs/percent"}
+            }, "additionalProperties": false},
+            "noise": {"type": "object", "properties": {
+              "luminance": {"$ref": "#/$defs/percent"}, "luminance_detail": {"$ref": "#/$defs/percent"}, "luminance_contrast": {"$ref": "#/$defs/percent"},
+              "color": {"$ref": "#/$defs/percent"}, "color_detail": {"$ref": "#/$defs/percent"}, "color_smoothness": {"$ref": "#/$defs/percent"}
+            }, "additionalProperties": false},
+            "moire": {"$ref": "#/$defs/percent"}
+          },
+          "additionalProperties": false
+        },
+        "lens": {
+          "type": "object",
+          "properties": {
+            "profile": {"oneOf": [
+              {"enum": ["none", "embedded-opcodes"]},
+              {"type": "object", "required": ["profile"], "properties": {"profile": {"$ref": "#/$defs/digest"}}, "additionalProperties": false}
+            ]},
+            "distortion": {"$ref": "#/$defs/signed100"},
+            "vignetting": {"type": "object", "properties": {"amount": {"$ref": "#/$defs/signed100"}, "midpoint": {"$ref": "#/$defs/percent"}}, "additionalProperties": false},
+            "chromatic_aberration": {"type": "object", "properties": {"remove": {"type": "boolean"}, "red_cyan": {"$ref": "#/$defs/signed100"}, "blue_yellow": {"$ref": "#/$defs/signed100"}}, "additionalProperties": false},
+            "defringe": {"type": "object", "properties": {
+              "purple_amount": {"type": "number", "minimum": 0, "maximum": 20},
+              "purple_hue": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 30, "maximum": 70}},
+              "green_amount": {"type": "number", "minimum": 0, "maximum": 20},
+              "green_hue": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 40, "maximum": 60}}
+            }, "additionalProperties": false}
+          },
+          "additionalProperties": false
+        },
+        "geometry": {
+          "type": "object",
+          "properties": {
+            "upright": {"enum": ["off", "level", "vertical", "full", "guided"]},
+            "guides": {"type": "array", "maxItems": 4, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/point"}}},
+            "vertical": {"$ref": "#/$defs/signed100"}, "horizontal": {"$ref": "#/$defs/signed100"},
+            "rotate": {"type": "number", "minimum": -45, "maximum": 45},
+            "aspect": {"$ref": "#/$defs/signed100"},
+            "scale": {"type": "number", "minimum": 50, "maximum": 150},
+            "offset": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/signed100"}},
+            "auto": {"$ref": "#/$defs/auto"}
+          },
+          "additionalProperties": false
+        },
+        "crop": {
+          "type": "object",
+          "properties": {
+            "rect": {"type": "array", "prefixItems": [{"$ref": "#/$defs/unit"}, {"$ref": "#/$defs/unit"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}], "items": false, "minItems": 4},
+            "aspect": {"type": "string", "pattern": "^(free|original|[1-9][0-9]{0,3}:[1-9][0-9]{0,3})$"},
+            "constrain": {"type": "boolean"}
+          },
+          "additionalProperties": false
+        },
+        "effects": {
+          "type": "object",
+          "properties": {
+            "vignette": {"type": "object", "properties": {
+              "amount": {"$ref": "#/$defs/signed100"}, "midpoint": {"$ref": "#/$defs/percent"}, "roundness": {"$ref": "#/$defs/signed100"},
+              "feather": {"$ref": "#/$defs/percent"}, "highlights": {"$ref": "#/$defs/percent"}
+            }, "additionalProperties": false},
+            "grain": {"type": "object", "required": ["seed"], "properties": {
+              "amount": {"$ref": "#/$defs/percent"}, "size": {"$ref": "#/$defs/percent"}, "roughness": {"$ref": "#/$defs/percent"},
+              "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+            }, "additionalProperties": false}
+          },
+          "additionalProperties": false
+        },
+        "calibration": {
+          "type": "object",
+          "properties": {
+            "shadows_tint": {"$ref": "#/$defs/signed100"},
+            "red": {"$ref": "#/$defs/calibrationPrimary"}, "green": {"$ref": "#/$defs/calibrationPrimary"}, "blue": {"$ref": "#/$defs/calibrationPrimary"}
+          },
+          "additionalProperties": false
+        },
+        "local": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/localAdjustment"}}
+      },
+      "additionalProperties": false
+    },
+    "gradeWheel": {
+      "type": "object",
+      "properties": {"hue": {"type": "number", "minimum": 0, "maximum": 360}, "saturation": {"$ref": "#/$defs/percent"}, "luminance": {"$ref": "#/$defs/signed100"}},
+      "additionalProperties": false
+    },
+    "calibrationPrimary": {
+      "type": "object",
+      "properties": {"hue": {"$ref": "#/$defs/signed100"}, "saturation": {"$ref": "#/$defs/signed100"}},
+      "additionalProperties": false
+    },
+
+    "localAdjustment": {
+      "type": "object", "required": ["id", "mask", "params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "name": {"type": "string", "maxLength": 256},
+        "enabled": {"type": "boolean"},
+        "amount": {"$ref": "#/$defs/unit"},
+        "mask": {
+          "type": "object", "required": ["components"],
+          "properties": {
+            "components": {
+              "type": "array", "minItems": 1, "maxItems": 16,
+              "prefixItems": [{"allOf": [{"$ref": "#/$defs/maskComponent"}, {"properties": {"mode": {"const": "add"}}}]}],
+              "items": {"$ref": "#/$defs/maskComponent"}
+            }
+          },
+          "additionalProperties": false
+        },
+        "params": {
+          "type": "object", "minProperties": 1,
+          "properties": {
+            "exposure": {"type": "number", "minimum": -5, "maximum": 5},
+            "contrast": {"$ref": "#/$defs/signed100"}, "highlights": {"$ref": "#/$defs/signed100"}, "shadows": {"$ref": "#/$defs/signed100"},
+            "whites": {"$ref": "#/$defs/signed100"}, "blacks": {"$ref": "#/$defs/signed100"},
+            "temperature": {"$ref": "#/$defs/signed100"}, "tint": {"$ref": "#/$defs/signed100"},
+            "texture": {"$ref": "#/$defs/signed100"}, "clarity": {"$ref": "#/$defs/signed100"}, "dehaze": {"$ref": "#/$defs/signed100"},
+            "hue": {"type": "number", "minimum": -180, "maximum": 180},
+            "saturation": {"$ref": "#/$defs/signed100"}, "sharpness": {"$ref": "#/$defs/signed100"},
+            "noise": {"$ref": "#/$defs/signed100"}, "moire": {"$ref": "#/$defs/signed100"}, "defringe": {"$ref": "#/$defs/signed100"},
+            "color": {"type": "object", "required": ["hue", "saturation"], "properties": {"hue": {"type": "number", "minimum": 0, "maximum": 360}, "saturation": {"$ref": "#/$defs/percent"}}, "additionalProperties": false}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "maskComponent": {
+      "type": "object", "required": ["kind", "mode"],
+      "properties": {
+        "mode": {"enum": ["add", "subtract", "intersect"]},
+        "invert": {"type": "boolean"}
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "linear"}, "mode": true, "invert": true, "start": {"$ref": "#/$defs/point"}, "end": {"$ref": "#/$defs/point"}}, "required": ["start", "end"], "additionalProperties": false},
+        {"properties": {"kind": {"const": "radial"}, "mode": true, "invert": true, "center": {"$ref": "#/$defs/point"},
+          "radius": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 4}},
+          "angle": {"type": "number", "minimum": -360, "maximum": 360}, "feather": {"$ref": "#/$defs/percent"}, "inside": {"type": "boolean"}},
+          "required": ["center", "radius"], "additionalProperties": false},
+        {"properties": {"kind": {"const": "range-luminance"}, "mode": true, "invert": true, "min": {"$ref": "#/$defs/unit"}, "max": {"$ref": "#/$defs/unit"}, "smoothness": {"$ref": "#/$defs/unit"}}, "required": ["min", "max"], "additionalProperties": false},
+        {"properties": {"kind": {"const": "range-color"}, "mode": true, "invert": true,
+          "colors": {"type": "array", "minItems": 1, "maxItems": 5, "items": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}},
+          "amount": {"$ref": "#/$defs/percent"}},
+          "required": ["colors"], "additionalProperties": false},
+        {"properties": {"kind": {"const": "depth"}, "mode": true, "invert": true, "map": {"$ref": "#/$defs/digest"}, "min": {"$ref": "#/$defs/unit"}, "max": {"$ref": "#/$defs/unit"}, "smoothness": {"$ref": "#/$defs/unit"}}, "required": ["map", "min", "max"], "additionalProperties": false},
+        {"properties": {"kind": {"const": "brush"}, "mode": true, "invert": true,
+          "width": {"type": "integer", "minimum": 1, "maximum": 4096}, "height": {"type": "integer", "minimum": 1, "maximum": 4096},
+          "tiles": {"type": "object", "maxProperties": 256, "propertyNames": {"pattern": "^[0-9]+,[0-9]+$"}, "additionalProperties": {"$ref": "#/$defs/digest"}}},
+          "required": ["width", "height", "tiles"], "additionalProperties": false},
+        {"properties": {"kind": {"const": "mask"}, "mode": true, "invert": true, "resource": {"$ref": "#/$defs/digest"}, "provenance": {"type": "object"}}, "required": ["resource"], "additionalProperties": false}
+      ]
+    },
+
+    "collection": {"oneOf": [
+      {"type": "object", "required": ["kind", "photos"], "properties": {"kind": {"const": "manual"}, "name": {"type": "string", "maxLength": 256}, "photos": {"type": "array", "maxItems": 10000, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}, "additionalProperties": false},
+      {"type": "object", "required": ["kind", "query"], "properties": {"kind": {"const": "smart"}, "name": {"type": "string", "maxLength": 256}, "query": {"type": "string", "minLength": 1, "maxLength": 4096}}, "additionalProperties": false}
+    ]},
+
+    "recipe": {
+      "type": "object", "required": ["format", "color_space"],
+      "properties": {
+        "format": {"enum": ["jpeg", "png", "tiff"]},
+        "quality": {"type": "integer", "minimum": 1, "maximum": 100},
+        "chroma": {"enum": ["420", "444"]},
+        "bit_depth": {"enum": [8, 16]},
+        "compression": {"enum": ["none", "deflate"]},
+        "hdr": {"type": "object", "required": ["transfer", "headroom"], "properties": {"transfer": {"enum": ["pq", "hlg"]}, "headroom": {"type": "number", "minimum": 0, "maximum": 4}}, "additionalProperties": false},
+        "color_space": {"$ref": "#/$defs/outputSpace"},
+        "intent": {"enum": ["perceptual", "relative-colorimetric"]},
+        "dither": {"enum": ["none", "ordered4"]},
+        "resize": {"$ref": "#/$defs/resize"},
+        "ppi": {"type": "number", "minimum": 1, "maximum": 4800},
+        "sharpen": {"type": "object", "required": ["target", "amount"], "properties": {"target": {"enum": ["screen", "matte", "glossy"]}, "amount": {"enum": ["low", "standard", "high"]}}, "additionalProperties": false},
+        "naming": {"type": "string", "minLength": 1, "maxLength": 256},
+        "metadata": {"$ref": "#/$defs/metadataPolicy"}
+      },
+      "allOf": [
+        {"if": {"properties": {"format": {"const": "jpeg"}}}, "then": {"not": {"anyOf": [{"required": ["compression"]}, {"required": ["hdr"]}]}, "properties": {"bit_depth": {"const": 8}}}},
+        {"if": {"properties": {"format": {"const": "png"}}}, "then": {"not": {"anyOf": [{"required": ["quality"]}, {"required": ["chroma"]}, {"required": ["compression"]}]}}},
+        {"if": {"properties": {"format": {"const": "tiff"}}}, "then": {"not": {"anyOf": [{"required": ["quality"]}, {"required": ["chroma"]}, {"required": ["hdr"]}]}}},
+        {"if": {"required": ["hdr"]}, "then": {"properties": {"bit_depth": {"const": 16}, "color_space": {"const": "rec2020"}}}}
+      ],
+      "additionalProperties": false
+    },
+    "resize": {"oneOf": [
+      {"type": "object", "required": ["mode"], "properties": {"mode": {"const": "none"}}, "additionalProperties": false},
+      {"type": "object", "required": ["mode", "value"], "properties": {"mode": {"enum": ["long-edge", "short-edge", "width", "height"]}, "value": {"type": "integer", "minimum": 1, "maximum": 32768}, "enlarge": {"type": "boolean"}}, "additionalProperties": false},
+      {"type": "object", "required": ["mode", "value"], "properties": {"mode": {"const": "megapixels"}, "value": {"type": "number", "exclusiveMinimum": 0, "maximum": 120}, "enlarge": {"type": "boolean"}}, "additionalProperties": false},
+      {"type": "object", "required": ["mode", "value"], "properties": {"mode": {"const": "percent"}, "value": {"type": "number", "exclusiveMinimum": 0, "maximum": 400}, "enlarge": {"type": "boolean"}}, "additionalProperties": false},
+      {"type": "object", "required": ["mode"], "properties": {
+        "mode": {"const": "print"},
+        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}, "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+        "unit": {"enum": ["in", "cm"]}, "ppi": {"type": "number", "minimum": 1, "maximum": 4800},
+        "fit": {"enum": ["error", "crop", "pad"]}, "enlarge": {"type": "boolean"}
+      }, "additionalProperties": false}
+    ]},
+    "metadataPolicy": {
+      "type": "object", "required": ["policy"],
+      "properties": {
+        "policy": {"enum": ["none", "copyright", "public", "all-including-private"]},
+        "include": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/metadataCategory"}},
+        "exclude": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/metadataCategory"}}
+      },
+      "additionalProperties": false
+    },
+
+    "photoNode": {"allOf": [
+      {"$ref": "pen-format-v6.schema.json#/$defs/base"},
+      {
+        "required": ["photo", "variant", "x", "y", "width", "height", "fit", "position"],
+        "properties": {
+          "kind": {"const": "photo"},
+          "photo": {"$ref": "#/$defs/id"},
+          "variant": {"$ref": "#/$defs/id"},
+          "x": {"type": "number"}, "y": {"type": "number"},
+          "width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "exclusiveMinimum": 0},
+          "fit": {"$ref": "pen-format-v5.schema.json#/$defs/imageNode/allOf/1/properties/fit"},
+          "position": {"$ref": "pen-format-v5.schema.json#/$defs/imageNode/allOf/1/properties/position"},
+          "crop": false
+        }
+      }
+    ]},
+    "group": {"allOf": [
+      {"$ref": "pen-format-v6.schema.json#/$defs/base"},
+      {"required": ["children"], "properties": {"kind": {"const": "group"}, "children": {"type": "array", "items": {"$ref": "#/$defs/node"}}}}
+    ]},
+    "node": {
+      "description": "A v7 node: a v6 node, a group whose children may include photo nodes, or a photo node.",
+      "anyOf": [
+        {"$ref": "#/$defs/group"},
+        {"$ref": "pen-format-v6.schema.json#/$defs/node"},
+        {"$ref": "#/$defs/photoNode"}
+      ]
+    },
+    "layer": {
+      "type": "object", "required": ["id", "name", "nodes"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "name": {"type": "string"}, "visible": {"type": "boolean"}, "locked": {"type": "boolean"}, "nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}}},
+      "additionalProperties": true
+    },
+    "page": {
+      "type": "object", "required": ["id", "name", "canvas", "layers"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "name": {"type": "string"},
+        "canvas": {"$ref": "pen-format-v5.schema.json#/$defs/page/properties/canvas"},
+        "layers": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/layer"}}
+      },
+      "additionalProperties": true
+    }
+  }
+}
