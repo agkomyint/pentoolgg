@@ -65,6 +65,13 @@ jobs:
           bytes=$(wc -c < target/${{ matrix.target }}/release/${{ matrix.binary }})
           hash=$(sha256sum target/${{ matrix.target }}/release/${{ matrix.binary }} | cut -d' ' -f1)
           printf '{"target":"%s","binary_bytes":%s,"binary_sha256":"%s","formats":[1,2,3,4],"benchmark":"50 layers / 5000 objects under 60000 ms"}\n' '${{ matrix.target }}' "$bytes" "$hash" > pentool-${{ github.ref_name }}-${{ matrix.target }}-baseline.json
+      - name: Smoke test raster paint
+        shell: bash
+        run: |
+          cp docs/fixtures/v4-scene.pen raster-smoke.pen
+          cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen add p --width 100 --height 60
+          cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen stroke p --samples '[[30,30],[60,40]]' --color '#FF0000'
+          cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen verify p --replay
       - name: Smoke test pages and import
         shell: bash
         run: |
