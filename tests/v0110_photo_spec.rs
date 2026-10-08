@@ -1,5 +1,5 @@
 //! Photography specification (v0.11.0 item 1): schema, fixtures and the
-//! pre-implementation compatibility contract in `docs/photography-v1.md`.
+//! version 7 compatibility contract in `docs/photography-v1.md`.
 use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -121,8 +121,11 @@ fn v7_fixture_assets_are_content_addressed_and_within_limits() {
     }
 }
 
+/// The roadmap item that implements the documented v7 behavior so far.
+const IMPLEMENTED_ITEM: u64 = 3;
+
 #[test]
-fn current_build_refuses_v7_documents_without_mutation() {
+fn v7_fixtures_validate_as_documented_and_never_downgrade_photo_content() {
     let root = std::env::temp_dir().join(format!(
         "pentool-photo-spec-{}-{}",
         std::process::id(),
@@ -132,36 +135,43 @@ fn current_build_refuses_v7_documents_without_mutation() {
             .as_nanos()
     ));
     std::fs::create_dir_all(&root).unwrap();
+    let mut checked = 0;
     for entry in manifest()["fixtures"].as_array().unwrap() {
         let name = entry["file"].as_str().unwrap();
         if !name.ends_with(".pen") {
             continue;
         }
         let raw = read_json(&fixture(name));
-        let error = pentool::transaction::validate_value(&raw)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("[unsupported-capability]") && error.contains("version 7"),
-            "{name}: {error}"
-        );
+        let result = pentool::transaction::validate_value(&raw);
+        // Develop ranges (`invalid-develop`) arrive with a later roadmap item.
+        if entry["item"].as_u64().unwrap() <= IMPLEMENTED_ITEM {
+            match entry["expect"].as_str().unwrap() {
+                "ok" => result.unwrap_or_else(|error| panic!("{name}: {error}")),
+                _ => {
+                    let error = result.expect_err(name).to_string();
+                    let code = format!("[{}]", entry["code"].as_str().unwrap());
+                    assert!(error.starts_with(&code), "{name}: {error}");
+                }
+            }
+            checked += 1;
+        }
         let path = root.join(name);
         std::fs::copy(fixture(name), &path).unwrap();
         let before = std::fs::read(&path).unwrap();
-        for args in [
-            vec!["info"],
-            vec!["migrate", "--target", "6"],
-            vec!["migrate", "--target", "4"],
-        ] {
+        for target in ["6", "5", "4", "3"] {
             let output = Command::new(env!("CARGO_BIN_EXE_pentool"))
-                .args(&args)
+                .args(["migrate", "--target", target])
                 .arg(&path)
                 .output()
                 .unwrap();
-            assert!(!output.status.success(), "{name}: {args:?} succeeded");
-            assert_eq!(std::fs::read(&path).unwrap(), before, "{name}: {args:?}");
+            assert!(
+                !output.status.success(),
+                "{name}: --target {target} succeeded"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before, "{name}: {target}");
         }
         assert!(!root.join(".pentool").exists(), "{name}: history written");
     }
+    assert_eq!(checked, 2);
     std::fs::remove_dir_all(root).unwrap();
 }

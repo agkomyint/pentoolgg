@@ -6,13 +6,16 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
-pub const LATEST_VERSION: u64 = crate::composite::VERSION;
+pub const LATEST_VERSION: u64 = crate::photo::VERSION;
 pub const MAX_DEPTH: usize = 64;
 
 pub fn is_scene_document(raw: &Value) -> bool {
     matches!(
         raw.get("version").and_then(Value::as_u64),
-        Some(VERSION) | Some(crate::image::VERSION) | Some(crate::composite::VERSION)
+        Some(VERSION)
+            | Some(crate::image::VERSION)
+            | Some(crate::composite::VERSION)
+            | Some(crate::photo::VERSION)
     )
 }
 
@@ -702,7 +705,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                     });
                 Rect::new(x, y - size, x + width, y - size + height)
             }
-            "image" | "raster" => Rect::new(
+            "image" | "raster" | "photo" => Rect::new(
                 node["x"].as_f64().context("image x missing")?,
                 node["y"].as_f64().context("image y missing")?,
                 node["x"].as_f64().unwrap()
@@ -2694,11 +2697,12 @@ pub fn validate(raw: &Value) -> Result<()> {
     if raw.get("format").and_then(Value::as_str) != Some("pentool")
         || !matches!(
             version,
-            VERSION | crate::image::VERSION | crate::composite::VERSION
+            VERSION | crate::image::VERSION | crate::composite::VERSION | crate::photo::VERSION
         )
     {
         bail!("not a supported Pentool scene document")
     }
+    let compositing = version >= crate::composite::VERSION;
     let image_assets = if version >= crate::image::VERSION {
         Some(crate::image::validate_assets(raw)?)
     } else {
@@ -2752,13 +2756,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 .and_then(Value::as_array)
                 .context("v4 layer has no nodes")?
             {
-                validate_node(
-                    node,
-                    0,
-                    &mut ids,
-                    image_assets.as_ref(),
-                    version == crate::composite::VERSION,
-                )?;
+                validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)?;
             }
         }
         fn check_instances(node: &Value, components: &HashSet<&str>) -> Result<()> {
@@ -2784,17 +2782,23 @@ pub fn validate(raw: &Value) -> Result<()> {
             }
         }
         if version >= crate::image::VERSION {
-            crate::image::validate_masks_for_version(page, version == crate::composite::VERSION)?;
+            crate::image::validate_masks_for_version(page, compositing)?;
         }
     }
-    if version == crate::composite::VERSION {
+    if compositing {
         crate::composite::validate(raw)?;
     }
+    // Photo catalog structure and photo node references (v7), or their absence.
+    crate::photo::catalog::validate(raw, version)?;
     Ok(())
 }
 
 pub fn flatten_to_v3(raw: &Value) -> Result<Value> {
     validate(raw)?;
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
+        // Refuse photo content exactly as `--target 6` does; never drop the catalog.
+        crate::photo::catalog::downgrade(raw.clone())?;
+    }
     let mut output = raw.clone();
     let styles = output.get("styles").cloned().unwrap_or_else(|| json!({}));
     resolve_style_fallbacks(&mut output, &styles)?;
@@ -2929,6 +2933,13 @@ fn flatten_node(node: &Value, parent: Affine, out: &mut Vec<Flat>) -> Result<()>
             value.insert("transform".into(), json!(world.as_coeffs()));
             out.push(Flat::Text(Value::Object(value)));
         }
+        "photo" => bail!(
+            "[unsupported-capability] v3 flattening cannot represent photo node {}",
+            object
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ),
         "raster" => bail!(
             "[unsupported-capability] v3 flattening cannot represent raster node {}",
             object
@@ -3160,6 +3171,7 @@ pub(crate) fn validate_node(
             }
             "adjustment" if compositing => crate::composite::validate_node(node)?,
             "raster" if compositing => crate::raster::validate_node(node)?,
+            "photo" if compositing => crate::photo::catalog::validate_node(o)?,
             "image" => crate::image::validate_node_for_version(
                 o,
                 image_assets.context(
@@ -3543,6 +3555,13 @@ fn collect_v4_matches(
             }
             if let Some(asset) = node.get("asset").and_then(Value::as_str) {
                 object["asset"] = json!(asset);
+            }
+            if node.get("kind").and_then(Value::as_str) == Some("photo") {
+                for key in ["photo", "variant"] {
+                    if let Some(value) = node.get(key).and_then(Value::as_str) {
+                        object[key] = json!(value);
+                    }
+                }
             }
             if let Some(style) = node.get("style").and_then(Value::as_object) {
                 let refs = style

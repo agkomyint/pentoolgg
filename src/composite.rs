@@ -234,11 +234,18 @@ pub const ADJUSTMENTS: [&str; 13] = [
     "threshold",
 ];
 
+/// Version 6 and version 7 (v6 plus photography) both carry compositing.
 pub fn is_document(raw: &Value) -> bool {
-    raw.get("version").and_then(Value::as_u64) == Some(VERSION)
+    matches!(
+        raw.get("version").and_then(Value::as_u64),
+        Some(VERSION | crate::photo::VERSION)
+    )
 }
 
 pub fn migrate(raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
+        return crate::photo::catalog::downgrade(raw);
+    }
     if is_document(&raw) {
         crate::scene::validate(&raw)?;
         return Ok(raw);
@@ -252,6 +259,9 @@ pub fn migrate(raw: Value) -> Result<Value> {
 
 /// Downgrade only an unextended v6 scene. Never demote required compositing data.
 pub fn downgrade(mut raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
+        raw = crate::photo::catalog::downgrade(raw)?;
+    }
     crate::scene::validate(&raw)?;
     fn check(value: &Value) -> Result<()> {
         match value {

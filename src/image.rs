@@ -683,6 +683,10 @@ fn write_node(
         "text" => write_text(svg, object, root)?,
         "image" => write_image(svg, object, raw, root, clip_index)?,
         "raster" => write_raster(svg, node, raw)?,
+        "photo" => bail!(
+            "[unsupported-capability] photo node {} cannot be rendered yet: this build has no develop pipeline",
+            object.get("id").and_then(Value::as_str).unwrap_or("unknown")
+        ),
         kind => bail!("[unsupported-capability] cannot render node kind {kind}"),
     }
     svg.push_str("</g>");

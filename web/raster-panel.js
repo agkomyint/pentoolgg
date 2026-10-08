@@ -14,7 +14,7 @@
     state.doc = detail.document;
     state.page = detail.page || detail.document?.pages?.[0]?.id;
     state.layers = [];
-    if (state.doc?.version === 6) {
+    if (state.doc?.version >= 6) {
       for (const p of state.doc.pages) if (p.id === state.page) for (const l of p.layers) collect(l.nodes, state.layers);
     }
     const previous = $('rasterLayer').value;

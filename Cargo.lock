@@ -1059,6 +1059,7 @@ dependencies = [
  "directories",
  "ed25519-dalek",
  "encoding_rs",
+ "flate2",
  "hex",
  "image",
  "kurbo",

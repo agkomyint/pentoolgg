@@ -81,6 +81,18 @@ pentool ai generate poster.pen hero --prompt "a fox" --allow-model-call
 pentool ai run accept poster.pen RUN --candidate 1 --id hero
 ```
 
+## RAW photographs (in development)
+
+`pentool raw add` imports a DNG into the `.pen` v7 photography catalog and records
+explicit import defaults. Other RAW formats are refused with advice to convert to
+DNG. Developing and rendering photos lands with the rest of v0.11; see
+[docs/photography-v1.md](docs/photography-v1.md).
+
+```sh
+pentool raw add catalog.pen hero --file ./capture.dng --external --dry-run
+pentool raw info catalog.pen hero
+```
+
 ## Raster paint (v0.10)
 
 ![Dusk landscape painted with raster layers](examples/raster-paint-showcase.png)

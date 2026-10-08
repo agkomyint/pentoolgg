@@ -195,7 +195,12 @@ fn find_layer<'a>(document: &'a Value, page_id: &str, layer_id: &str) -> Option<
 fn reject_new_violations(before: &[u8], after: &Value) -> Result<()> {
     if !matches!(
         after.get("version").and_then(Value::as_u64),
-        Some(crate::scene::VERSION | crate::image::VERSION | crate::composite::VERSION)
+        Some(
+            crate::scene::VERSION
+                | crate::image::VERSION
+                | crate::composite::VERSION
+                | crate::photo::VERSION
+        )
     ) {
         return Ok(());
     }
@@ -215,7 +220,7 @@ fn reject_new_violations(before: &[u8], after: &Value) -> Result<()> {
 
 pub fn validate_value(value: &Value) -> Result<()> {
     match value.get("version").and_then(Value::as_u64) {
-        Some(crate::scene::VERSION | crate::image::VERSION | crate::composite::VERSION) => crate::scene::validate(value),
+        Some(crate::scene::VERSION | crate::image::VERSION | crate::composite::VERSION | crate::photo::VERSION) => crate::scene::validate(value),
         Some(1..=3) => {
             let doc: crate::document::Document =
                 serde_json::from_value(value.clone()).context("invalid legacy document")?;

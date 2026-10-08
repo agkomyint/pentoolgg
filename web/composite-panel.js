@@ -30,7 +30,7 @@
   async function load() {
     const data = await responseJSON(await fetch('/api/document'));
     state.document = data.document; state.revision = data.revision;
-    if (data.document.version !== 6) { state.nodes = []; $('compositeNode').replaceChildren(); throw new Error('Compositing requires a shared v6 document. Run migrate --target 6 first.'); }
+    if (data.document.version < 6) { state.nodes = []; $('compositeNode').replaceChildren(); throw new Error('Compositing requires a shared v6 document. Run migrate --target 6 first.'); }
     const previous = page();
     $('compositePage').replaceChildren(...data.document.pages.map(p => new Option(p.name || p.id, p.id)));
     if (data.document.pages.some(p => p.id === previous)) $('compositePage').value = previous;
@@ -53,7 +53,7 @@
     $('compositeStacks').textContent = JSON.stringify({ adjustment: node.adjustment, params: node.params, scope: node.scope, fill: node.fill, effects: node.effects || [], transforms: node.transforms || [], mask: node.mask, clipping: node.clipping }, null, 2);
   }
   async function commit(operations) {
-    if (!state.document || state.document.version !== 6) throw new Error('Load a shared v6 document first.');
+    if (!state.document || state.document.version < 6) throw new Error('Load a shared v6 document first.');
     await responseJSON(await fetch('/api/scene', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ page: page(), revision: state.revision, operations }) }));
     await load(); document.dispatchEvent(new Event('pentool-composite-changed')); await preview(false); notify('Changes saved. Undo is available in document history.');
   }

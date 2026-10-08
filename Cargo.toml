@@ -29,6 +29,8 @@ image = { version = "=0.25.5", default-features = false, features = ["png", "jpe
 directories = "6"
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# DNG deflate (compression 8); already in the tree through `zip`.
+flate2 = "1"
 semver = { version = "1", features = ["serde"] }
 reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls"] }
 url = "=2.4.1"

@@ -698,6 +698,8 @@ or a package.
 - Tree and search report `kind: "photo"` with `photo`, `variant`, bounds and layer
   state, and never settings. A reference to a missing photo or variant is
   `[missing-resource]`.
+- Until a build includes the development pipeline, rendering a page that holds a
+  photo node fails with `[unsupported-capability]` instead of drawing a placeholder.
 
 ## Determinism
 
@@ -727,6 +729,15 @@ pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor-pano --pro
 pentool photo export catalog.pen --selection picks --recipe web-gallery --out ./delivery
 pentool photo place catalog.pen hero --variant warm-editorial --layer layer-1 --width 1200 --height 800
 ```
+
+`raw add` embeds the source by default (`--embed`); `--external` stores a path
+relative to the document, and the file must stay inside the document's folder.
+`--camera-profile` takes `auto`, `embedded`, `matrix-only` or the `sha256:` digest
+of a profile already in `photography.profiles`. A document older than v7 is upgraded
+explicitly, and identical bytes are stored once. The result is
+`{photo, asset, deduplicated, upgraded, variant, unsupported_opcodes}`. `raw info`
+prints the photo, its storage, the recorded source facts, the variants and the
+snapshot count.
 
 `raw develop` is a shorthand for setting values in `develop` groups. Every mutating
 command takes `--dry-run` and `--if-revision`, commits through the shared

@@ -46,6 +46,17 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   Decision (item 1): the tested subset is DNG 1.0–1.7, read by pentool's own
   bounded decoder with no new dependency. Other RAW containers are recognized by
   signature and refused, and the error says to convert them to DNG.
+  *Status: implemented for review.* This item has four parts:
+  - the bounded reader in `src/photo/` (`tiff`, `ljpeg`, `dng`, `opcode`, `raw`);
+  - the v7 catalog and photo-node validation in `src/photo/catalog.rs`;
+  - `pentool raw add` and `pentool raw info`, with explicit v7 migration that
+    never downgrades photo content;
+  - `tests/v0110_raw_ingest.rs` and the item-3 fixtures in
+    `tests/v0110_photo_spec.rs`.
+
+  Photo nodes validate and appear in tree output, but rendering them is refused
+  with `[unsupported-capability]` until the development pipeline (items 4–6)
+  exists. The checkbox stays open until review and hosted CI pass.
 - [ ] **4. Add camera profiles and white balance.** Support embedded and verified
   profiles plus as-shot, temperature/tint, sampled-neutral, and suggested balance.
 - [ ] **5. Add lens and geometry correction.** Cover distortion, vignetting,

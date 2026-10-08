@@ -772,11 +772,46 @@ enum ImageAction {
 }
 
 #[derive(Subcommand)]
+enum RawAction {
+    /// Import a DNG source as a catalog photo with an explicit master variant.
+    Add {
+        input: PathBuf,
+        /// Photo ID: 1-64 letters, digits, '.', '_' or '-', starting with a letter or digit.
+        id: String,
+        #[arg(long)]
+        file: PathBuf,
+        /// Embed the source bytes (the default; sources up to 128 MiB).
+        #[arg(long, conflicts_with = "external")]
+        embed: bool,
+        /// Reference the source by a document-relative path instead of embedding it.
+        #[arg(long)]
+        external: bool,
+        /// auto (the profile embedded in the DNG), embedded, matrix-only, or a profile digest.
+        #[arg(long, default_value = "auto")]
+        camera_profile: String,
+        /// Display name; defaults to the file stem.
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Print a photo's recorded source facts, storage, and variants.
+    Info { input: PathBuf, id: String },
+}
+
+#[derive(Subcommand)]
 enum Command {
     /// Import, place, inspect, and edit raster images.
     Image {
         #[command(subcommand)]
         action: ImageAction,
+    },
+    /// Import and inspect DNG raw photos in the v7 photography catalog.
+    Raw {
+        #[command(subcommand)]
+        action: RawAction,
     },
     /// Create, inspect, or preview reusable assets.
     Asset {
@@ -1054,7 +1089,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate between compatible v3, v4, v5, and v6 document formats.
+    /// Explicitly migrate between compatible v3, v4, v5, v6, and v7 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -2139,6 +2174,87 @@ async fn run() -> Result<()> {
         host: "127.0.0.1".into(),
         port: 4711,
     }) {
+        Command::Raw { action } => match action {
+            RawAction::Add {
+                input,
+                id,
+                file,
+                embed: _,
+                external,
+                camera_profile,
+                name,
+                dry_run,
+                if_revision,
+            } => {
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let source_path = if external {
+                    let relative = pentool::resource::safe_relative_path(&file)?;
+                    let root = pentool::resource::document_root(&input).canonicalize()?;
+                    let source = root.join(&relative).canonicalize().with_context(|| {
+                        format!("[missing-resource] {}", root.join(&relative).display())
+                    })?;
+                    if !source.starts_with(&root) {
+                        anyhow::bail!(
+                            "[unsafe-path] external raw source resolves outside the document root"
+                        )
+                    }
+                    source
+                } else {
+                    file.clone()
+                };
+                let length = fs::metadata(&source_path)
+                    .with_context(|| format!("[missing-resource] {}", source_path.display()))?
+                    .len();
+                if length > pentool::photo::catalog::MAX_PHOTO_SOURCE_BYTES {
+                    anyhow::bail!("[limit-exceeded] raw source is larger than 512 MiB")
+                }
+                if !external && length > image::MAX_SOURCE_BYTES {
+                    anyhow::bail!("[limit-exceeded] raw source is larger than the 128 MiB embedding limit; pass --external with a document-relative path")
+                }
+                let bytes = fs::read(&source_path)
+                    .with_context(|| format!("[missing-resource] {}", source_path.display()))?;
+                let storage = if external {
+                    image::external_storage(&pentool::resource::safe_relative_path(&file)?)?
+                } else {
+                    image::embedded_storage(&bytes)
+                };
+                let name = name.unwrap_or_else(|| {
+                    file.file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| id.clone())
+                });
+                let result = pentool::photo::catalog::add_raw(
+                    &mut raw,
+                    &id,
+                    &name,
+                    &bytes,
+                    storage,
+                    pentool::photo::catalog::camera_profile(&camera_profile)?,
+                )?;
+                let change = transaction::commit_value(
+                    &input,
+                    "raw-add",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+            RawAction::Info { input, id } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&pentool::photo::catalog::info(&raw, &id)?)?
+                );
+                Ok(())
+            }
+        },
         Command::Image { action } => match action {
             ImageAction::Op { action } => {
                 let (input, name, dry_run, if_revision) = match &action {
@@ -4338,8 +4454,8 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
         } => {
-            if !matches!(target, 3..=6) {
-                anyhow::bail!("migration target must be 3, 4, 5, or 6")
+            if !matches!(target, 3..=7) {
+                anyhow::bail!("migration target must be 3, 4, 5, 6, or 7")
             }
             let before =
                 fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
@@ -4347,6 +4463,7 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
+                7 => pentool::photo::catalog::migrate(raw)?,
                 6 => composite::migrate(raw)?,
                 5 => scene::migrate_to_v5(raw)?,
                 4 => scene::migrate_to_v4(raw)?,

@@ -204,7 +204,7 @@ fn migration_locks_invalid_scopes_and_limits_fail_atomically() {
             .to_string()
             .contains("[limit-exceeded]")
     );
-    raw["version"] = json!(7);
+    raw["version"] = json!(8);
     assert!(transaction::validate_value(&raw).is_err());
 }
 

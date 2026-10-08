@@ -31,7 +31,7 @@
     state.images = [];
     $('imageEditing').hidden = true;
     loadImportTargets();
-    if (![5,6].includes(state.doc.version)) { $('imageSelect').replaceChildren(); return notify('Add an image above. Allow the v5 upgrade to enable raster images.'); }
+    if (![5,6,7].includes(state.doc.version)) { $('imageSelect').replaceChildren(); return notify('Add an image above. Allow the v5 upgrade to enable raster images.'); }
     for (const page of state.doc.pages) for (const layer of page.layers) collect(layer.nodes, state.images, page.id);
     $('imageEditing').hidden = !state.images.length;
     const select = $('imageSelect');
