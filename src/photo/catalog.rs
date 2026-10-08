@@ -7,7 +7,7 @@ use anyhow::{bail, Context, Result};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const ENGINE: u64 = 1;
 pub const WORKING_SPACE: &str = "prophoto-linear";
@@ -588,6 +588,38 @@ fn validate_asset(
             if (kind == Some("derived")) != record.contains_key("derived") {
                 bail!("[malformed-resource] {what}: only derived sources carry derived")
             }
+            if let Some(derived) = record.get("derived") {
+                let what = format!("{what} derived");
+                let derived = object(derived, &what)?;
+                keys(
+                    derived,
+                    &["operation", "algorithm", "inputs", "settings", "alignment"],
+                    &what,
+                )?;
+                if !matches!(
+                    derived.get("operation").and_then(Value::as_str),
+                    Some("merge-hdr" | "merge-pano")
+                ) {
+                    bail!("[malformed-resource] {what} operation must be merge-hdr or merge-pano")
+                }
+                integer(derived, "algorithm", (1, u64::from(u32::MAX)), &what)?;
+                let inputs = derived
+                    .get("inputs")
+                    .and_then(Value::as_array)
+                    .filter(|inputs| (2..=64).contains(&inputs.len()))
+                    .with_context(|| {
+                        format!("[malformed-resource] {what} inputs must list 2 to 64 sources")
+                    })?;
+                for input in inputs {
+                    digest(input.as_str().unwrap_or_default(), &format!("{what} input"))?;
+                }
+                for key in ["settings", "alignment"] {
+                    object(
+                        derived.get(key).unwrap_or(&Value::Null),
+                        &format!("{what} {key}"),
+                    )?;
+                }
+            }
         }
         (Some("rendered"), Some("image/tiff" | "image/png" | "image/jpeg" | "image/webp")) => {
             if record.contains_key("raw") || record.contains_key("derived") {
@@ -624,16 +656,18 @@ fn validate_asset(
         _ => bail!("[malformed-resource] {what} input_profile must be camera, an RGB space name or {{\"icc\": digest}}"),
     }
     let bytes = validate_storage(record.get("storage"), key, length, &what, embedded)?;
-    // A raw source's recorded facts must be the facts its bytes produce.
-    if let (Some(bytes), Some("raw")) = (bytes, kind) {
+    // A raw or derived source's recorded facts must be the facts its bytes
+    // produce; a derived source also records `derived` and its own kind.
+    if let (Some(bytes), Some(kind @ ("raw" | "derived"))) = (bytes, kind) {
         let facts = Dng::inspect(&bytes)
             .with_context(|| what.clone())?
             .asset_facts();
         let facts = facts.as_object().unwrap();
-        if facts.len() + 1 != record.len()
+        let extra = if kind == "derived" { 2 } else { 1 };
+        if facts.len() + extra != record.len()
             || facts
                 .iter()
-                .any(|(key, value)| record.get(key) != Some(value))
+                .any(|(key, value)| key != "kind" && record.get(key) != Some(value))
         {
             bail!("[malformed-resource] {what} recorded facts do not match its DNG bytes")
         }
@@ -1666,6 +1700,240 @@ fn store_lens(
         "deduplicated": deduplicated,
         "upgraded": upgraded,
     }))
+}
+
+/// Which merge `photo merge-hdr` or `photo merge-pano` runs.
+pub enum MergeKind {
+    Hdr(super::merge::HdrOptions),
+    Pano(super::merge::PanoOptions),
+}
+
+/// A merge request: the new photo, its inputs (photo IDs, in order) and options.
+pub struct MergeRequest<'a> {
+    pub photo_id: &'a str,
+    pub name: &'a str,
+    pub inputs: &'a [String],
+    pub kind: MergeKind,
+    /// `--settings first`: start the master from the first input's look.
+    pub settings_first: bool,
+    /// A normalized document-relative path for `--external`; `None` embeds.
+    pub external: Option<PathBuf>,
+}
+
+/// The develop sections a merge reads from each input: stages 1–3.
+const MERGE_INPUT_KEYS: &[&str] = &["process", "raw", "white_balance", "detail", "calibration"];
+/// The sections `--settings first` copies from the first input's master. Raw,
+/// white balance, calibration and stage-2 detail were applied to the inputs;
+/// lens corrections need capture facts a derived DNG does not carry; geometry
+/// and local masks are framed on one input. Panoramas also drop the crop.
+const MERGE_FIRST_KEYS: &[&str] = &[
+    "tone",
+    "presence",
+    "curves",
+    "hsl",
+    "grading",
+    "monochrome",
+    "effects",
+];
+
+/// An external output: its document-relative path and bytes.
+pub type ExternalFile = (PathBuf, Vec<u8>);
+
+/// `photo merge-hdr` and `photo merge-pano`: merge photos into a new photo
+/// whose source is a derived DNG. Returns the result and, for `--external`,
+/// the file to write with the document commit.
+pub fn merge(
+    raw: &mut Value,
+    document: &Path,
+    request: MergeRequest,
+) -> Result<(Value, Option<ExternalFile>)> {
+    use super::merge as m;
+    let MergeRequest {
+        photo_id,
+        name,
+        inputs,
+        kind,
+        settings_first,
+        external,
+    } = request;
+    if !is_id(photo_id) {
+        bail!("[malformed-resource] photo ID {photo_id:?} must match ^[A-Za-z0-9][A-Za-z0-9._-]{{0,63}}$")
+    }
+    let (operation, scale, limit) = match &kind {
+        MergeKind::Hdr(o) => ("merge-hdr", o.scale, m::MAX_HDR_INPUTS),
+        MergeKind::Pano(o) => ("merge-pano", o.scale, m::MAX_PANO_INPUTS),
+    };
+    if !(scale.is_finite() && scale > 0.0 && scale <= 1.0) {
+        bail!("[invalid-input] --scale must be greater than 0 and at most 1")
+    }
+    if !(2..=limit).contains(&inputs.len()) {
+        bail!(
+            "[invalid-input] {operation} takes 2 to {limit} photos, not {}",
+            inputs.len()
+        )
+    }
+    let (mut next, upgraded) = with_catalog(raw)?;
+    let catalog = &next["photography"];
+    let photos = catalog["photos"].as_array().cloned().unwrap_or_default();
+    if photos.iter().any(|photo| photo["id"] == photo_id) {
+        bail!("[invalid-input] photo ID {photo_id} is already used; choose a unique ID")
+    }
+    let mut sources = Vec::with_capacity(inputs.len());
+    let mut total_pixels = 0u64;
+    for (index, input) in inputs.iter().enumerate() {
+        if inputs[..index].contains(input) {
+            bail!("[invalid-input] photo {input} is given twice; each merge input must be a different photo")
+        }
+        let photo = photos
+            .iter()
+            .find(|photo| photo["id"] == input.as_str())
+            .with_context(|| format!("[missing-resource] photo {input} is not in the catalog"))?;
+        let digest = photo["source"].as_str().unwrap_or_default().to_owned();
+        let asset = &catalog["assets"][&digest];
+        if asset["kind"] == "rendered" {
+            bail!("[unsupported-capability] photo {input} has a rendered source; merges read raw and derived sources only")
+        }
+        total_pixels += asset["pixel_width"].as_u64().unwrap_or(0)
+            * asset["pixel_height"].as_u64().unwrap_or(0);
+        let master = photo["variants"]
+            .as_array()
+            .and_then(|variants| variants.iter().find(|v| v["id"] == "master"))
+            .or_else(|| photo["variants"].get(0))
+            .with_context(|| format!("[malformed-resource] photo {input} has no variants"))?;
+        let mut develop = json!({});
+        for key in MERGE_INPUT_KEYS {
+            if let Some(value) = master["develop"].get(*key) {
+                develop[*key] = value.clone();
+            }
+        }
+        sources.push((
+            digest,
+            asset["storage"].clone(),
+            develop,
+            master["develop"].clone(),
+        ));
+    }
+    if total_pixels > m::MAX_INPUT_PIXELS {
+        bail!(
+            "[limit-exceeded] the merge inputs hold {total_pixels} pixels; the limit is {}",
+            m::MAX_INPUT_PIXELS
+        )
+    }
+    if let MergeKind::Hdr(_) = &kind {
+        // Brackets share the first input's size, so the output size is known.
+        let asset = &catalog["assets"][&sources[0].0];
+        let (w, h) = m::scaled(
+            asset["pixel_width"].as_u64().unwrap_or(0) as usize,
+            asset["pixel_height"].as_u64().unwrap_or(0) as usize,
+            scale,
+        );
+        m::check_output(w as u64, h as u64, scale)?;
+    }
+    let loader = profile_loader(document, &catalog["profiles"]);
+    let merge_inputs: Vec<m::Input> = sources
+        .iter()
+        .map(|(digest, storage, develop, _)| m::Input {
+            load: Box::new(move || stored_bytes(document, storage, digest)),
+            develop: develop.clone(),
+        })
+        .collect();
+    let merged = match &kind {
+        MergeKind::Hdr(options) => m::hdr(&merge_inputs, &loader, options)?,
+        MergeKind::Pano(options) => m::pano(&merge_inputs, &loader, options)?,
+    };
+    drop(merge_inputs);
+    drop(loader);
+    let bytes = super::dngout::LinearDng {
+        width: merged.width,
+        height: merged.height,
+        rgb: &merged.rgb,
+        alpha: merged.alpha.as_deref(),
+        model: &format!("pentool {operation}"),
+    }
+    .write()?;
+    if bytes.len() as u64 > MAX_PHOTO_SOURCE_BYTES {
+        bail!("[limit-exceeded] the merged DNG is larger than 512 MiB; pass a smaller --scale")
+    }
+    if external.is_none() && bytes.len() as u64 > crate::image::MAX_SOURCE_BYTES {
+        bail!("[limit-exceeded] the merged DNG is {} bytes, above the 128 MiB embedding limit; pass --external with a document-relative path", bytes.len())
+    }
+    let digest = crate::resource::sha256(&bytes);
+    let dng = Dng::inspect(&bytes)?;
+    let mut record = dng.asset_facts();
+    record["kind"] = json!("derived");
+    record["derived"] = json!({
+        "operation": operation,
+        "algorithm": m::ALGORITHM,
+        "inputs": sources.iter().map(|s| s.0.clone()).collect::<Vec<_>>(),
+        "settings": merged.settings,
+        "alignment": merged.alignment,
+    });
+    record["storage"] = match &external {
+        Some(path) => crate::image::external_storage(path)?,
+        None => crate::image::embedded_storage(&bytes),
+    };
+    let mut develop = raw_import_defaults(json!("embedded"));
+    develop["detail"] = json!({"sharpening": develop["detail"]["sharpening"]});
+    let mut copied = Vec::new();
+    if settings_first {
+        let first = &sources[0].3;
+        let mut keys = MERGE_FIRST_KEYS.to_vec();
+        if matches!(kind, MergeKind::Hdr(_)) {
+            keys.push("crop");
+        }
+        for key in keys {
+            if let Some(value) = first.get(key) {
+                develop[key] = value.clone();
+                copied.push(key);
+            }
+        }
+        if let Some(sharpening) = first["detail"].get("sharpening") {
+            develop["detail"]["sharpening"] = sharpening.clone();
+            copied.push("detail.sharpening");
+        }
+    }
+    let catalog = &mut next["photography"];
+    let assets = catalog["assets"]
+        .as_object_mut()
+        .context("[malformed-resource] photography assets must be an object")?;
+    let deduplicated = assets.contains_key(&digest);
+    let resource = match external {
+        Some(path) if !deduplicated => Some((path, bytes.clone())),
+        _ => None,
+    };
+    if !deduplicated {
+        assets.insert(digest.clone(), record.clone());
+    }
+    catalog["photos"]
+        .as_array_mut()
+        .context("[malformed-resource] photography photos must be an array")?
+        .push(json!({
+            "id": photo_id,
+            "source": digest,
+            "name": name,
+            "variants": [{"id": "master", "name": "Master", "develop": develop}]
+        }));
+    crate::scene::validate(&next)?;
+    *raw = next;
+    Ok((
+        json!({
+            "photo": photo_id,
+            "asset": digest,
+            "operation": operation,
+            "inputs": inputs,
+            "size": [merged.width, merged.height],
+            "transparent": merged.alpha.is_some(),
+            "bytes": bytes.len(),
+            "storage": record["storage"]["kind"],
+            "settings": record["derived"]["settings"],
+            "alignment": record["derived"]["alignment"],
+            "settings_copied": copied,
+            "deduplicated": deduplicated,
+            "upgraded": upgraded,
+            "variant": "master",
+        }),
+        resource,
+    ))
 }
 
 /// Add a DNG source as photo `id`, upgrading the document to version 7 when needed.

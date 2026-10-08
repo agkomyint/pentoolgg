@@ -57,6 +57,9 @@ pub struct CameraRgb {
     pub width: usize,
     pub height: usize,
     pub rgb: Vec<f32>,
+    /// The pre-balance level `min(n, 1)` of each pixel's largest raw value,
+    /// which merges read as a clip map.
+    pub level: Vec<f32>,
 }
 
 /// Peak bytes `decode` holds at once: the stored plane, the active plane, the
@@ -168,10 +171,16 @@ pub fn decode_with(dng: &Dng, options: &Decode, defects: &Defects) -> Result<Cam
         let row = (y * rgb.width + crop.left) * 3;
         out.extend_from_slice(&rgb.data[row..row + crop.width() * 3]);
     }
+    let mut level = Vec::with_capacity(crop.width() * crop.height());
+    for y in crop.top..crop.bottom {
+        let row = y * rgb.width + crop.left;
+        level.extend_from_slice(&clip[row..row + crop.width()]);
+    }
     Ok(CameraRgb {
         width: crop.width(),
         height: crop.height(),
         rgb: out,
+        level,
     })
 }
 

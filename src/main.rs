@@ -892,6 +892,66 @@ enum PhotoAction {
         #[arg(long, default_value = "master")]
         variant: String,
     },
+    /// Merge exposure brackets into a new photo with a derived scene-linear DNG source.
+    MergeHdr {
+        input: PathBuf,
+        /// Photo IDs of the brackets (2 to 9).
+        #[arg(required = true, num_args = 2..)]
+        photos: Vec<String>,
+        /// ID of the new photo.
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Ghost rejection: off, low, medium or high.
+        #[arg(long, default_value = "off")]
+        deghost: String,
+        /// 1-based input that anchors alignment and exposure; default: the middle exposure.
+        #[arg(long)]
+        reference: Option<usize>,
+        #[command(flatten)]
+        common: MergeArgs,
+    },
+    /// Stitch overlapping photos, given left to right, into a new photo with a derived DNG source.
+    MergePano {
+        input: PathBuf,
+        /// Photo IDs of the frames (2 to 64), left to right.
+        #[arg(required = true, num_args = 2..)]
+        photos: Vec<String>,
+        /// ID of the new photo.
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// spherical, cylindrical or perspective.
+        #[arg(long, default_value = "cylindrical")]
+        projection: String,
+        /// Seed of the deterministic RANSAC sampler.
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Focal length in output pixels; default: EXIF assuming a 36 mm long edge.
+        #[arg(long)]
+        focal: Option<f64>,
+        #[command(flatten)]
+        common: MergeArgs,
+    },
+}
+
+#[derive(clap::Args)]
+struct MergeArgs {
+    /// Scale applied to every input before merging (0 < scale <= 1).
+    #[arg(long, default_value_t = 1.0)]
+    scale: f64,
+    /// Master settings: import (defaults) or first (the first input's look).
+    #[arg(long, default_value = "import")]
+    settings: String,
+    /// Write the derived DNG to this document-relative path instead of embedding it.
+    #[arg(long)]
+    external: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -1761,6 +1821,65 @@ fn read_profile_file(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
         )
     }
     fs::read(path).with_context(|| format!("[missing-resource] {}", path.display()))
+}
+
+/// `photo merge-hdr` and `photo merge-pano`: merge, then commit the document
+/// and any external DNG together.
+fn run_photo_merge(
+    input: PathBuf,
+    photos: &[String],
+    id: &str,
+    name: Option<String>,
+    kind: pentool::photo::catalog::MergeKind,
+    common: MergeArgs,
+    operation: &str,
+) -> Result<()> {
+    let settings_first = match common.settings.as_str() {
+        "import" => false,
+        "first" => true,
+        other => anyhow::bail!("[invalid-input] --settings {other:?} must be import or first"),
+    };
+    let external = match &common.external {
+        Some(path) => {
+            let relative = pentool::resource::safe_relative_path(path)?;
+            let target = pentool::resource::document_root(&input).join(&relative);
+            if target.exists() {
+                anyhow::bail!(
+                    "[invalid-input] {} already exists; choose a new --external path",
+                    target.display()
+                )
+            }
+            Some(relative)
+        }
+        None => None,
+    };
+    let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+    let name = name.unwrap_or_else(|| id.to_owned());
+    let (result, resource) = pentool::photo::catalog::merge(
+        &mut raw,
+        &input,
+        pentool::photo::catalog::MergeRequest {
+            photo_id: id,
+            name: &name,
+            inputs: photos,
+            kind,
+            settings_first,
+            external,
+        },
+    )?;
+    let change = transaction::commit_bundle(
+        &input,
+        operation,
+        common.dry_run,
+        common.if_revision.as_deref(),
+        &raw,
+        resource.as_slice(),
+    )?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({"change":change,"result":result}))?
+    );
+    Ok(())
 }
 
 fn main() {
@@ -2759,6 +2878,45 @@ async fn run() -> Result<()> {
                 let report = pentool::photo::catalog::photo_info(&raw, &input, &id, &variant)?;
                 println!("{}", serde_json::to_string_pretty(&report)?);
                 Ok(())
+            }
+            PhotoAction::MergeHdr {
+                input,
+                photos,
+                id,
+                name,
+                deghost,
+                reference,
+                common,
+            } => {
+                use pentool::photo::merge;
+                if reference == Some(0) {
+                    anyhow::bail!("[invalid-input] --reference is 1-based")
+                }
+                let kind = pentool::photo::catalog::MergeKind::Hdr(merge::HdrOptions {
+                    reference: reference.map(|r| r - 1),
+                    deghost: merge::Deghost::parse(&deghost)?,
+                    scale: common.scale,
+                });
+                run_photo_merge(input, &photos, &id, name, kind, common, "photo-merge-hdr")
+            }
+            PhotoAction::MergePano {
+                input,
+                photos,
+                id,
+                name,
+                projection,
+                seed,
+                focal,
+                common,
+            } => {
+                use pentool::photo::merge;
+                let kind = pentool::photo::catalog::MergeKind::Pano(merge::PanoOptions {
+                    projection: merge::Projection::parse(&projection)?,
+                    seed,
+                    focal,
+                    scale: common.scale,
+                });
+                run_photo_merge(input, &photos, &id, name, kind, common, "photo-merge-pano")
             }
         },
         Command::Image { action } => match action {

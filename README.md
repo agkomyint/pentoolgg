@@ -92,7 +92,9 @@ tone), presence and dehaze, curves, HSL, color grading, monochrome, vignette,
 grain and calibration, plus detail: defective pixels, noise reduction, moiré,
 defringe and capture sharpening, plus local adjustments (gradient, radial, range
 and painted masks; `pentool photo mask paint`). `pentool photo render` develops a
-raw variant into a PNG. Merges and output delivery land with the rest of v0.11; see
+raw variant into a PNG. `pentool photo merge-hdr` and `merge-pano` merge brackets
+and panoramas into a new photo with a derived scene-linear DNG source. Output
+delivery lands with the rest of v0.11; see
 [docs/photography-v1.md](docs/photography-v1.md).
 
 ```sh
@@ -113,6 +115,8 @@ pentool raw develop catalog.pen hero --set 'local=[{"id":"sky","mask":{"componen
 pentool photo mask paint catalog.pen hero --adjustment sky --samples '[[10,5,1],[30,5,1]]' --brush '{"size":8}'
 pentool photo info catalog.pen hero
 pentool photo render catalog.pen hero --out ./hero.png --space display-p3 --depth 16
+pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr --deghost medium
+pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor --projection cylindrical --external merged/harbor.dng
 ```
 
 ## Raster paint (v0.10)

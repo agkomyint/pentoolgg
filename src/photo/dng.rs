@@ -275,7 +275,11 @@ impl<'a> Dng<'a> {
         if bits_all.len() != samples || bits_all.iter().any(|b| *b != bits) {
             bail!("[unsupported-capability] BitsPerSample {bits_all:?} must hold one equal value per sample");
         }
-        let format = match ifd.uint(&tiff, 339)?.unwrap_or(1) {
+        let formats = ifd.uints(&tiff, 339, 4)?.unwrap_or_else(|| vec![1]);
+        if formats.iter().any(|f| *f != formats[0]) {
+            bail!("[unsupported-capability] SampleFormat {formats:?} must hold one equal value per sample");
+        }
+        let format = match formats[0] {
             1 => Format::Uint,
             3 => Format::Float,
             other => bail!("[unsupported-capability] SampleFormat {other} in the raw IFD"),

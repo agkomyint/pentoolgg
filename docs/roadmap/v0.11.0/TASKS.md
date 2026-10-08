@@ -166,6 +166,30 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **9. Add HDR and panorama merging.** Provide bounded alignment, deghosting,
   projection, seam blending, attribution, cancellation, and non-destructive output.
+  *Status: implemented for review.* This item has five parts:
+  - the merges in `src/photo/merge.rs`, specified in "HDR and panorama merges"
+    in `docs/photography-v1.md`;
+  - the derived DNG writer and transparency reader in `src/photo/dngout.rs`,
+    with the pre-balance clip map from `raw::decode_with` and transparency
+    warped into alpha by `pipeline::develop`;
+  - `catalog::merge`, which records `derived` attribution and verifies derived
+    facts against their bytes;
+  - `pentool photo merge-hdr` and `photo merge-pano` (`--scale`, `--settings`,
+    `--external`, `--dry-run`), committing an external DNG and the document
+    together;
+  - `tests/v0110_merge.rs`.
+
+  Decisions:
+  - inputs read stages 1–3 from their master variant;
+  - the output limit is also capped by the develop budget (about 41
+    megapixels);
+  - `--settings first` copies look settings only (not raw, white balance,
+    calibration, stage-2 detail, lens, geometry or local; panoramas also skip
+    crop);
+  - panoramas do not compensate exposure between frames;
+  - the EXIF focal length assumes a 36 mm long edge.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **10. Add wide-gamut and HDR RGB delivery.** Define primaries, transfer
   functions, inspection, tone mapping, SDR conversion, metadata, and validation.
 - [ ] **11. Add variants, snapshots, and synchronized edits.** Virtual copies do

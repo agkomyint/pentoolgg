@@ -880,34 +880,104 @@ Implementation (process 1):
 ### HDR and panorama merges
 
 `photo merge-hdr` (2–9 inputs) and `photo merge-pano` (2–64 inputs, at most 1.2
-gigapixels of input in total) build a new derived source. They never modify the
-inputs.
+gigapixels of input in total, counted from the recorded asset sizes before any
+decode) build a new photo whose source is a derived DNG. They never modify the
+inputs. Algorithm version 1 is implemented in `src/photo/merge.rs`.
 
-- Inputs are developed through stages 1–3 only (their `raw` and `white_balance`
-  settings), so they are scene-linear in the working space.
-- HDR: translation-only alignment with median-threshold bitmaps (integer,
-  deterministic); exposure normalization from EXIF exposure time, aperture and ISO,
-  verified against a measured ratio; a hat-weighted merge that rejects clipped and
-  noise-floor values; `deghost` `off`\|`low`\|`medium`\|`high` against a chosen
-  reference input.
-- Panorama: `projection` `spherical`\|`cylindrical`\|`perspective`; Harris
-  features, patch normalized cross-correlation, and RANSAC with a splitmix64 seed
-  stored in the provenance; a bounded iteration count; and multiband (5-level)
-  seam blending. Outside pixels are transparent. The panorama does not "boundary
-  warp" to fill the frame.
-- Output: a DNG written by pentool, LinearRaw with 3 samples in `f16`, deflate with
-  predictor 34894, `ColorMatrix1` describing the working primaries and a neutral
-  `AsShotNeutral` of 1,1,1. It is read back by the same decoder, so it develops
-  like any raw. The output is limited to 120 megapixels. A larger result is refused
-  before any work, and the error suggests `--scale`.
-- Attribution: the asset's `derived` holds `operation`, `algorithm` version,
-  `inputs` (digests, in order), `settings`, and the resolved alignment (per-input
-  transforms, reference index, seed). A new photo entry, with a master variant at
-  import defaults, points to the derived asset. `--settings first` copies the
-  first input's master develop settings except `raw` and `geometry`.
-- Cancellation or failure leaves no derived asset, no photo entry, no cache
-  entry and no external file. External output is written to a temporary file in the
-  document folder and renamed only when the transaction commits.
+- Inputs are raw or derived sources; rendered sources, and derived sources with
+  transparency (panoramas), are refused. Each input is developed through stages
+  1–3 only, from its master variant's `process`, `raw`, `white_balance`, `detail`
+  (defective pixels and stage-2 detail) and `calibration`, so it is scene-linear
+  working RGB. It is then turned upright by its orientation and, with `--scale`
+  (0 < scale ≤ 1, default 1), box-averaged to the rounded scaled size. Each
+  input is decoded twice (measure, then merge), so only one full-resolution
+  input is in memory beside the measurements.
+- HDR, all inputs must share one developed size.
+  - Reference: `--reference N` (1-based), else the middle input
+    (`(n-1)/2` after sorting by EXIF exposure when every input has one, else by
+    median luminance).
+  - Alignment: integer translation by median-threshold bitmaps over up to six
+    half-size levels (side ≥ 16), with an exclusion band of 4% of the median, a
+    3x3 search per level in a fixed order with (0,0) first, and an error of
+    disagreeing bits over the overlap. `shift` `[sx, sy]` means input pixel
+    `p + shift` sees reference pixel `p`.
+  - Exposure: the factor relative to the reference is EXIF `t·ISO/N²` when it
+    agrees within 0.5 EV with the measured median ratio of luminance over pixels
+    whose pre-balance level is 0.01–0.9 and unclipped in both (at least 64
+    samples); otherwise the measured ratio (`exposure_source` `measured`). With
+    no measurement the EXIF value is used (`exif-unverified`); with neither the
+    merge is refused.
+  - Clipping: a pixel is clipped when the pre-balance raw level of it or a 3x3
+    neighbour is at least 0.97.
+  - Weights: `1 − (2l − 1)^12` of the pre-balance level `l`, zero when clipped,
+    below 0.002 or outside the frame after the shift.
+  - `deghost` `off` (default) \| `low` \| `medium` \| `high` rejects pixels of a
+    non-reference input whose normalized luminance differs from the
+    reference's by more than 1, 0.6 or 0.35 stops, dilated 3x3. The rejected
+    count is recorded as `ghost_pixels`.
+  - Where no input has weight, the darkest input (reference level ≥ 0.5) or
+    the brightest (otherwise) that covers the pixel is used.
+  - The result is the weighted mean of `rgb / factor`, in the reference's scale
+    and multiplied by `2^BaselineExposure` of the reference.
+- Panorama: inputs are given left to right; the middle input `(n-1)/2` is the
+  reference.
+  - `projection` `cylindrical` (default) \| `spherical` \| `perspective`. The
+    focal length in output pixels is `--focal`, else EXIF focal length / 36 mm ×
+    the long edge (a full-frame assumption, recorded as `focal_source`), else
+    the long edge.
+  - Features: Harris corners (central gradients, 5x5 window, k = 0.04, 4-pixel
+    non-maximum suppression, at most 500) on the natural log of luminance of a
+    proxy whose long edge is at most 800, described by normalized 9x9 patches.
+    Matches are mutual best normalized cross-correlations of at least 0.8 that
+    pass the ratio test `1 − s1 ≤ 0.6 (1 − s2)`.
+  - Adjacent pairs are fitted by RANSAC with a splitmix64 generator seeded by
+    `--seed` (default 0, shared by all pairs in order) and a 2 proxy-pixel
+    threshold: a translation of projected coordinates for cylindrical and
+    spherical (1000 iterations, refined by the inlier mean, at least 6 inliers),
+    a homography of centered coordinates for perspective (1000 iterations of 4
+    points, refined by least squares, at least 8 inliers). Too few inliers are
+    refused with the pair named. Placements are chained and re-based on the
+    reference. There is no exposure compensation between frames.
+  - The canvas spans the projected borders (33 samples per edge); its size is
+    checked against the output limit before rendering. Each canvas pixel is
+    labeled with the input whose own nearest edge is farthest (ties to the
+    lower index); unlabeled pixels are transparent.
+  - Seams are blended with five-level Laplacian pyramids (normalized 5-tap
+    filters, invalid source pixels filled by push-pull) weighted by the label
+    masks' Gaussian pyramids, one input at a time in a box with a 64-pixel
+    margin. Bilinear sampling. No boundary warp fills the frame.
+- Output: a DNG written by pentool (`src/photo/dngout.rs`): LinearRaw with 3
+  samples in `f16`, deflate with predictor 34894, `ColorMatrix1` describing the
+  working primaries and a neutral `AsShotNeutral` of 1,1,1. Values are scaled
+  by `2^-k` for the smallest integer `k` (at most 10) that keeps every sample at
+  or below 0.9, and `k` is stored as `BaselineExposure`. Transparency is an
+  8-bit transparency mask (`NewSubfileType` 4) in a SubIFD, which development
+  warps with the image into alpha. The output is limited to 120 megapixels,
+  32768 per side, and what a derived DNG can develop within the 2 GiB develop
+  budget (about 41 megapixels). A larger HDR is refused before decoding and a
+  larger panorama after alignment, before rendering; both errors suggest a
+  `--scale`. An embedded output is limited to 128 MiB; `--external PATH`
+  stores it at a new document-relative path.
+- Attribution: the asset's `derived` holds `operation`, `algorithm` (1),
+  `inputs` (digests, in order), `settings` (the requested options) and
+  `alignment` (HDR: reference and per-input `shift`, `exposure`,
+  `exposure_source`, `ghost_pixels`; panorama: projection, reference, seed,
+  focal, canvas, per-input `translate` or row-major `homography`, and per-pair
+  match counts). Its other facts are verified against its bytes like a raw
+  source's. The same inputs and options produce the same bytes, so a repeat
+  merge reuses the asset.
+- The new photo's master variant has import defaults without stage-2 noise
+  reduction, which the inputs already received. `--settings first` (default
+  `import`) also copies the first input's master `tone`, `presence`, `curves`,
+  `hsl`, `grading`, `monochrome`, `effects` and `detail.sharpening`, and for HDR
+  its `crop`. It never copies `raw`, `white_balance`, `calibration` or stage-2
+  detail (already applied to the inputs), `lens` (a derived DNG has no capture
+  facts), `geometry` or `local` (framed on one input), or a panorama's `crop`.
+- Cancellation or failure leaves no derived asset, no photo entry and no
+  external file: the merge runs in memory, and the document and external DNG
+  are committed together, the DNG first through a temporary file and rename,
+  and removed again if the document commit fails. An existing `--external`
+  file is refused.
 
 ### Wide-gamut and HDR delivery
 
@@ -1165,8 +1235,8 @@ pentool photo local add catalog.pen hero/master sky --linear 0.5,0,0.5,0.45 --ex
 pentool photo settings sync catalog.pen hero --to @selected.json --except crop
 pentool photo rate catalog.pen hero --rating 4 --pick pick --label green
 pentool photo search catalog.pen "rating>=3 pick:pick" --limit 50
-pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr
-pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor-pano --projection cylindrical
+pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr [--deghost medium] [--reference 2] [--scale 0.5] [--settings first] [--external merged/hero-hdr.dng]
+pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor-pano --projection cylindrical [--seed 7] [--focal 2400]
 pentool photo export catalog.pen --selection picks --recipe web-gallery --out ./delivery
 pentool photo place catalog.pen hero --variant warm-editorial --layer layer-1 --width 1200 --height 800
 ```

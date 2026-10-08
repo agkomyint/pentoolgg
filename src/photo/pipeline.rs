@@ -5,6 +5,7 @@
 use super::adjust;
 use super::detail;
 use super::dng::Dng;
+use super::dngout;
 use super::lens::LensProfile;
 use super::local;
 use super::pixels::Working;
@@ -106,6 +107,16 @@ pub fn decode_working(
     develop: &Value,
     profiles: Profiles,
 ) -> Result<(Vec<f32>, profile::White)> {
+    decode_levels(dng, develop, profiles).map(|(rgb, _, white)| (rgb, white))
+}
+
+/// `decode_working` plus the clip map: each pixel's pre-balance raw level
+/// (`raw::CameraRgb::level`), which merges read.
+pub fn decode_levels(
+    dng: &Dng,
+    develop: &Value,
+    profiles: Profiles,
+) -> Result<(Vec<f32>, Vec<f32>, profile::White)> {
     let load = |digest: &str| profiles(digest).map(|(bytes, _)| bytes);
     let spec = profile::select(develop["raw"].get("camera_profile"), dng, &load)?;
     let (white, mut transform) = profile::resolve(&spec, dng, develop.get("white_balance"))?;
@@ -124,7 +135,7 @@ pub fn decode_working(
         pixel.copy_from_slice(&out);
     }
     super::check_cancelled()?;
-    Ok((rgb, white))
+    Ok((rgb, decoded.level, white))
 }
 
 /// A development through stage 10.
@@ -159,6 +170,16 @@ pub fn develop(
     let (rgb, white) = decode_working(dng, develop, profiles)?;
     let (mut image, invalid_pixels) = warp::render(&rgb, &plan.mapping, plan.crop)?;
     drop(rgb);
+    // A merge output's transparency mask follows the same warp.
+    if let Some(mask) = dngout::transparency(dng)? {
+        let mask: Vec<f32> = mask.iter().flat_map(|a| [*a; 3]).collect();
+        let (warped, _) = warp::render(&mask, &plan.mapping, plan.crop)?;
+        let coverage = warped.rgb.chunks_exact(3).map(|p| p[0].clamp(0.0, 1.0));
+        image.alpha = Some(match image.alpha.take() {
+            Some(alpha) => alpha.iter().zip(coverage).map(|(a, c)| a * c).collect(),
+            None => coverage.collect(),
+        });
+    }
     adjust::apply_with(&mut image, develop, &context(dng, &plan), local.as_mut())?;
     let mut report = plan.report;
     if let Some(local) = &local {
