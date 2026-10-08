@@ -1,8 +1,10 @@
 # v0.10.0 — Rust-native pixel editing and retouching
 
-> **Status (dev, unreleased, local commits, not yet pushed or CI-verified):**
-> 0 of 14 items are ticked; items 1-14 are implemented. Boxes stay unticked until every
-> item has implementation, tests, docs and hosted Linux/Windows/macOS CI evidence.
+> **Status (released as v0.10.0 on 2026-10-08):** 14 of 14 items are ticked and
+> implemented, with hosted Linux, Windows, macOS ARM and macOS Intel CI green (run
+> 37737878203 on 793eebf). Audit follow-ups are fixed in v0.10.2
+> (`docs/release-v0.10.2.md`), including the browser Layers panel failure on v6 raster
+> documents (PEN-010-001).
 >
 > | # | Item | State |
 > |---|------|-------|

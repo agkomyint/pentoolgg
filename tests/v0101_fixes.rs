@@ -1,4 +1,4 @@
-//! v0.10.1 regression tests for the v0.9.0 audit (PEN-090-001..018).
+//! v0.10.2 regression tests for the v0.9.0 audit (PEN-090-001..018).
 use base64::Engine;
 use serde_json::{json, Value};
 use std::io::{Read, Write};

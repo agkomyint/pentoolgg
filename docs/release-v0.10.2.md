@@ -1,8 +1,15 @@
-# Pentool v0.10.1
+# Pentool v0.10.2
 
-Bug-fix release for the v0.9.0 audit (PEN-090-001..018). No new features and no `.pen`
-format change. Behaviour that was previously unsafe now fails with a structured error and
+Bug-fix release for the v0.9.0 audit (PEN-090-001..018) and the v0.10.0 audit
+(PEN-010-001..002). It also carries the fixes prepared as 0.10.1, which was never
+published. No new features and no `.pen` format change. Behaviour that was previously unsafe now fails with a structured error and
 leaves the document byte-for-byte unchanged.
+
+## Browser editor and docs
+- The Layers panel no longer throws on v6 scene layers (no `paths`/`texts` arrays), so raster
+  documents load and the Raster Canvas panel lists their layers (PEN-010-001; regression
+  test `tests/web/layers-v6.test.mjs`, run in CI).
+- The v0.10.0 roadmap status now records the shipped release (PEN-010-002).
 
 ## Document safety
 - `pentool new` refuses to replace an existing file; `--overwrite` records the previous
@@ -29,4 +36,4 @@ leaves the document byte-for-byte unchanged.
   and `--default-model provider/model` is accepted (013).
 
 Runs created by v0.10.0 and earlier in the shared `.pentool/ai-runs/` folder are not
-listed by v0.10.1; regenerate if you still need them.
+listed by v0.10.2; regenerate if you still need them.

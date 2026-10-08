@@ -141,7 +141,7 @@
       row.append(eye,name,lock);
       const list=document.createElement('div');list.className='layer-objects';
       objects.forEach(o=>{
-        const kind=o.kind||((layer.paths||[]).includes(o)?'path':'text'),stack=kind==='path'?layer.paths:kind==='text'?layer.texts:[],index=stack.indexOf(o);
+        const kind=o.kind||((layer.paths||[]).includes(o)?'path':'text'),stack=(kind==='path'?layer.paths:kind==='text'?layer.texts:null)||[],index=stack.indexOf(o);
         const item=document.createElement('div');item.className=`object-row${selected===o.id&&layerId===layer.id?' active':''}`;
         const choose=document.createElement('button');choose.className='object-name';choose.innerHTML=`<span class="object-kind">${kind}</span>${escapeXml(o.id)}`;choose.title=o.content||o.id;choose.onclick=()=>{layerId=layer.id;selected=o.id;editGeometry=null;syncInspector();render()};
         const rename=document.createElement('button');rename.textContent='✎';rename.title='Rename';rename.onclick=()=>{const next=prompt('New object ID',o.id);if(next&&next!==o.id)editObjects([{type:'rename',id:o.id,layer:layer.id,new_id:next}],next)};

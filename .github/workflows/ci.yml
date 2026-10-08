@@ -31,6 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: node tests/web/image-panel.test.mjs
+      - run: node tests/web/layers-v6.test.mjs
   policy:
     runs-on: ubuntu-latest
     steps:
