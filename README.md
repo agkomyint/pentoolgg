@@ -85,12 +85,18 @@ pentool ai run accept poster.pen RUN --candidate 1 --id hero
 
 `pentool raw add` imports a DNG into the `.pen` v7 photography catalog and records
 explicit import defaults. Other RAW formats are refused with advice to convert to
-DNG. Developing and rendering photos lands with the rest of v0.11; see
+DNG. `pentool photo profile add` verifies and stores a DNG camera profile (`.dcp`),
+and `pentool raw develop` sets a variant's camera profile and white balance.
+Rendering photos lands with the rest of v0.11; see
 [docs/photography-v1.md](docs/photography-v1.md).
 
 ```sh
 pentool raw add catalog.pen hero --file ./capture.dng --external --dry-run
 pentool raw info catalog.pen hero
+pentool photo profile add catalog.pen --file ./studio.dcp
+pentool raw develop catalog.pen hero --temperature 5400 --tint 6
+pentool raw develop catalog.pen hero --sample 0.42,0.31,0.01
+pentool raw develop catalog.pen hero --suggest --dry-run
 ```
 
 ## Raster paint (v0.10)

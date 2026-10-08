@@ -329,7 +329,25 @@ fn validate_catalog<'a>(
             bail!("[malformed-resource] {what} name must be 1–256 characters")
         }
         let length = integer(profile, "byte_length", (1, MAX_PROFILE_BYTES), &what)?;
-        validate_storage(profile.get("storage"), key, length, &what, &mut embedded)?;
+        if profile.contains_key("force_model") && !profile["force_model"].is_boolean() {
+            bail!("[malformed-resource] {what} force_model must be true or false")
+        }
+        let bytes = validate_storage(profile.get("storage"), key, length, &what, &mut embedded)?;
+        // A camera profile's recorded facts must be the facts its bytes produce.
+        if let (Some(bytes), Some("camera")) = (bytes, profile.get("kind").and_then(Value::as_str))
+        {
+            let facts = super::profile::CameraProfile::from_dcp(&bytes)
+                .with_context(|| what.clone())?
+                .record_facts();
+            let facts = facts.as_object().unwrap();
+            if facts
+                .iter()
+                .any(|(key, value)| profile.get(key) != Some(value))
+                || (profile.contains_key("embed_policy") && !facts.contains_key("embed_policy"))
+            {
+                bail!("[malformed-resource] {what} recorded facts do not match its camera profile bytes")
+            }
+        }
     }
     let assets = object(
         catalog
@@ -352,7 +370,7 @@ fn validate_catalog<'a>(
     }
     let mut ids: HashMap<&str, HashSet<&str>> = HashMap::with_capacity(photos.len());
     for photo in photos {
-        let (photo_id, variants) = validate_photo(photo, assets)?;
+        let (photo_id, variants) = validate_photo(photo, assets, &profiles)?;
         if ids.insert(photo_id, variants).is_some() {
             bail!("[malformed-resource] photo ID {photo_id} is used more than once")
         }
@@ -602,6 +620,7 @@ fn validate_asset(
 fn validate_photo<'a>(
     photo: &'a Value,
     assets: &Map<String, Value>,
+    profiles: &Map<String, Value>,
 ) -> Result<(&'a str, HashSet<&'a str>)> {
     let record = object(photo, "photo")?;
     let photo_id = id(record.get("id"), "photo ID")?;
@@ -631,9 +650,14 @@ fn validate_photo<'a>(
         .and_then(Value::as_str)
         .with_context(|| format!("[malformed-resource] {what} source must be a digest"))?;
     digest(source, &format!("{what} source"))?;
-    if !assets.contains_key(source) {
+    let Some(asset) = assets.get(source) else {
         bail!("[missing-resource] {what} references missing asset {source}")
-    }
+    };
+    let source = super::develop::Source {
+        kind: asset["kind"].as_str().unwrap_or("rendered"),
+        camera_model: asset["raw"]["unique_camera_model"].as_str(),
+        profiles,
+    };
     text(record, "name", 256, &what)?;
     text(record, "title", 1024, &what)?;
     text(record, "caption", 8192, &what)?;
@@ -692,7 +716,7 @@ fn validate_photo<'a>(
         }
         keys(variant, &["id", "name", "develop"], &where_)?;
         text(variant, "name", 256, &where_)?;
-        validate_develop(variant.get("develop"), &where_)?;
+        validate_develop(variant.get("develop"), &source, &where_)?;
     }
     if let Some(snapshots) = record.get("snapshots") {
         let snapshots = snapshots
@@ -715,20 +739,23 @@ fn validate_photo<'a>(
             if !ids.contains(variant) {
                 bail!("[missing-resource] {where_} references missing variant {photo_id}/{variant}")
             }
-            validate_develop(snapshot.get("develop"), &where_)?;
+            validate_develop(snapshot.get("develop"), &source, &where_)?;
         }
     }
     Ok((photo_id, ids))
 }
 
-/// The develop envelope. Group and value ranges are validated by the develop
-/// pipeline (`[invalid-develop]`).
-fn validate_develop(develop: Option<&Value>, what: &str) -> Result<()> {
+/// The develop envelope and the groups implemented so far (`[invalid-develop]`).
+fn validate_develop(
+    develop: Option<&Value>,
+    source: &super::develop::Source,
+    what: &str,
+) -> Result<()> {
     let develop = develop
         .and_then(Value::as_object)
         .with_context(|| format!("[invalid-develop] {what} develop must be an object"))?;
     match develop.get("process").and_then(Value::as_u64) {
-        Some(1) => Ok(()),
+        Some(1) => super::develop::validate(develop, source, what),
         Some(process) if process > 1 => bail!("[unsupported-capability] {what} uses develop process {process}; this build implements process 1"),
         _ => bail!("[invalid-develop] {what} develop process must be a positive integer"),
     }
@@ -819,23 +846,9 @@ pub fn raw_import_defaults(camera_profile: Value) -> Value {
     })
 }
 
-/// Add a DNG source as photo `id`, upgrading the document to version 7 when needed.
-pub fn add_raw(
-    raw: &mut Value,
-    photo_id: &str,
-    name: &str,
-    bytes: &[u8],
-    storage: Value,
-    camera_profile: Value,
-) -> Result<Value> {
-    if !is_id(photo_id) {
-        bail!("[malformed-resource] photo ID {photo_id:?} must match ^[A-Za-z0-9][A-Za-z0-9._-]{{0,63}}$")
-    }
-    if bytes.len() as u64 > MAX_PHOTO_SOURCE_BYTES {
-        bail!("[limit-exceeded] photo source exceeds the 512 MiB limit")
-    }
-    let dng = Dng::inspect(bytes)?;
-    let digest = crate::resource::sha256(bytes);
+/// The document at version 7 with a photography catalog (created empty when
+/// absent), and whether it was upgraded.
+fn with_catalog(raw: &Value) -> Result<(Value, bool)> {
     let version = raw.get("version").and_then(Value::as_u64);
     let mut document = if version == Some(VERSION) {
         crate::scene::validate(raw)?;
@@ -856,6 +869,243 @@ pub fn add_raw(
                 "photos": []
             })
         });
+    catalog
+        .as_object_mut()
+        .context("[malformed-resource] photography must be an object")?
+        .entry("profiles")
+        .or_insert_with(|| json!({}));
+    Ok((document, version != Some(VERSION)))
+}
+
+/// `photo profile add`: verify and store a DNG camera profile (`.dcp`) in
+/// `photography.profiles`. `force_model` records that the profile may be used
+/// for sources whose `UniqueCameraModel` differs.
+pub fn add_profile(raw: &mut Value, bytes: &[u8], force_model: bool) -> Result<Value> {
+    if bytes.len() as u64 > MAX_PROFILE_BYTES {
+        bail!("[limit-exceeded] camera profile is larger than 16 MiB")
+    }
+    let profile = super::profile::CameraProfile::from_dcp(bytes)?;
+    let digest = crate::resource::sha256(bytes);
+    let (mut document, upgraded) = with_catalog(raw)?;
+    let profiles = document["photography"]["profiles"]
+        .as_object_mut()
+        .context("[malformed-resource] photography.profiles must be an object")?;
+    let deduplicated = profiles.contains_key(&digest);
+    if let Some(record) = profiles.get_mut(&digest) {
+        if record["kind"] != "camera" {
+            bail!(
+                "[invalid-input] these bytes are already stored as a {} profile",
+                record["kind"]
+            )
+        }
+        if force_model {
+            record["force_model"] = json!(true);
+        }
+    } else {
+        if profiles.len() >= MAX_PROFILES {
+            bail!("[limit-exceeded] photography already has {MAX_PROFILES} profiles")
+        }
+        let mut record = profile.record_facts();
+        record["byte_length"] = json!(bytes.len());
+        record["storage"] = crate::image::embedded_storage(bytes);
+        if force_model {
+            record["force_model"] = json!(true);
+        }
+        profiles.insert(digest.clone(), record);
+    }
+    let record = profiles[&digest].clone();
+    crate::scene::validate(&document)?;
+    *raw = document;
+    Ok(json!({
+        "profile": digest,
+        "name": record["name"],
+        "unique_camera_model": record["unique_camera_model"],
+        "embed_policy": record.get("embed_policy"),
+        "force_model": record.get("force_model").cloned().unwrap_or(json!(false)),
+        "calibrations": profile.calibrations.len(),
+        "hue_sat_map": profile.calibrations.iter().any(|c| c.hue_sat.is_some()),
+        "deduplicated": deduplicated,
+        "upgraded": upgraded,
+    }))
+}
+
+/// The bytes behind a validated storage record: embedded data, or an external
+/// document-relative file verified against `digest` (offline).
+pub fn stored_bytes(document: &Path, storage: &Value, digest: &str) -> Result<Vec<u8>> {
+    match storage["kind"].as_str() {
+        Some("embedded") => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(storage["data"].as_str().unwrap_or_default())
+                .context("[malformed-resource] embedded data has invalid base64")?;
+            crate::resource::verify(&bytes, digest)?;
+            Ok(bytes)
+        }
+        Some("external") => crate::resource::read_external_offline(
+            document,
+            Path::new(storage["path"].as_str().unwrap_or_default()),
+            digest,
+        ),
+        _ => bail!("[unsupported-capability] storage kind must be embedded or external"),
+    }
+}
+
+/// White balance requested by `raw develop`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WhiteBalance {
+    AsShot,
+    Temperature {
+        temperature: f64,
+        tint: f64,
+    },
+    Neutral([f64; 3]),
+    /// Sample a disk: centre x, y in the oriented frame and radius, all 0–1.
+    Sample {
+        x: f64,
+        y: f64,
+        radius: f64,
+    },
+    /// Gray-world suggestion.
+    Suggest,
+}
+
+/// `raw develop`: set a variant's camera profile and white balance. The result
+/// reports the resolved white (xy, temperature, tint and camera neutral).
+pub fn develop_raw(
+    raw: &mut Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+    camera_profile: Option<Value>,
+    white_balance: Option<WhiteBalance>,
+) -> Result<Value> {
+    use super::profile;
+    crate::scene::validate(raw)?;
+    let catalog = raw.get("photography").context(
+        "[missing-resource] the document has no photography catalog; add a photo with `raw add` first",
+    )?;
+    let photo_index = catalog["photos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .position(|photo| photo["id"] == photo_id)
+        .with_context(|| format!("[missing-resource] photo {photo_id} is not in the catalog"))?;
+    let photo = &catalog["photos"][photo_index];
+    let variant_index = photo["variants"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .position(|variant| variant["id"] == variant_id)
+        .with_context(|| {
+            format!("[missing-resource] variant {photo_id}/{variant_id} does not exist")
+        })?;
+    let source = photo["source"].as_str().unwrap_or_default();
+    let asset = &catalog["assets"][source];
+    if asset["kind"] == "rendered" {
+        bail!("[invalid-develop] photo {photo_id} has a rendered source; `raw develop` applies to raw sources")
+    }
+    let bytes = stored_bytes(document, &asset["storage"], source)
+        .with_context(|| format!("photo {photo_id} source"))?;
+    let dng = Dng::inspect(&bytes)?;
+    let mut develop = photo["variants"][variant_index]["develop"].clone();
+    if let Some(camera_profile) = camera_profile {
+        develop["raw"]["camera_profile"] = camera_profile;
+    }
+    let profiles = &catalog["profiles"];
+    let load = |digest: &str| -> Result<Vec<u8>> {
+        let record = profiles.get(digest).with_context(|| {
+            format!("[missing-resource] camera profile {digest} is not in photography.profiles; add it with `photo profile add` first")
+        })?;
+        stored_bytes(document, &record["storage"], digest)
+    };
+    // Validate the requested profile reference before reading any profile bytes.
+    let mut document_value = raw.clone();
+    document_value["photography"]["photos"][photo_index]["variants"][variant_index]["develop"] =
+        develop.clone();
+    crate::scene::validate(&document_value)?;
+    let spec = profile::select(develop["raw"].get("camera_profile"), &dng, &load)?;
+    let monochrome = spec.is_monochrome();
+    let measured = matches!(
+        white_balance,
+        Some(WhiteBalance::Sample { .. } | WhiteBalance::Suggest | WhiteBalance::Neutral(_))
+    );
+    if monochrome && measured {
+        bail!("[invalid-develop] photo {photo_id} is a monochrome DNG and has no white balance to sample or suggest; use --as-shot")
+    }
+    let neutral_value = |n: [f64; 3]| -> Value {
+        Value::Array(
+            n.iter()
+                .map(|v| super::dng::number(((v * 1.0e6).round() / 1.0e6).max(1.0e-6)))
+                .collect(),
+        )
+    };
+    let stored = match white_balance {
+        None => None,
+        Some(WhiteBalance::AsShot) => Some(json!({"mode": "as-shot"})),
+        Some(WhiteBalance::Temperature { temperature, tint }) => Some(json!({
+            "mode": "temperature",
+            "temperature": super::dng::number(temperature),
+            "tint": super::dng::number(tint),
+        })),
+        Some(WhiteBalance::Neutral(n)) => {
+            if n.iter().any(|v| !(*v > 0.0 && *v <= 1.0e6)) {
+                bail!("[invalid-develop] variant {photo_id}/{variant_id} white_balance.neutral {n:?} must hold three positive numbers up to 1e6")
+            }
+            Some(json!({"mode": "neutral", "neutral": neutral_value(n)}))
+        }
+        Some(WhiteBalance::Sample { x, y, radius }) => {
+            let n = profile::sample(&dng, &develop, x, y, radius)?;
+            Some(json!({
+                "mode": "neutral",
+                "neutral": neutral_value(n),
+                "sampled": {
+                    "x": super::dng::number(x),
+                    "y": super::dng::number(y),
+                    "radius": super::dng::number(radius),
+                },
+            }))
+        }
+        Some(WhiteBalance::Suggest) => {
+            let n = profile::suggest_neutral(&dng, &develop)?;
+            Some(profile::suggested(&spec, n)?)
+        }
+    };
+    if let Some(stored) = stored {
+        develop["white_balance"] = stored;
+    }
+    document_value["photography"]["photos"][photo_index]["variants"][variant_index]["develop"] =
+        develop.clone();
+    crate::scene::validate(&document_value)?;
+    let (white, _) = profile::resolve(&spec, &dng, develop.get("white_balance"))?;
+    *raw = document_value;
+    Ok(json!({
+        "photo": photo_id,
+        "variant": variant_id,
+        "camera_profile": develop["raw"].get("camera_profile").cloned().unwrap_or(json!("embedded")),
+        "white_balance": develop.get("white_balance").cloned().unwrap_or(json!({"mode": "as-shot"})),
+        "monochrome": monochrome,
+        "resolved": white.report(),
+    }))
+}
+
+/// Add a DNG source as photo `id`, upgrading the document to version 7 when needed.
+pub fn add_raw(
+    raw: &mut Value,
+    photo_id: &str,
+    name: &str,
+    bytes: &[u8],
+    storage: Value,
+    camera_profile: Value,
+) -> Result<Value> {
+    if !is_id(photo_id) {
+        bail!("[malformed-resource] photo ID {photo_id:?} must match ^[A-Za-z0-9][A-Za-z0-9._-]{{0,63}}$")
+    }
+    if bytes.len() as u64 > MAX_PHOTO_SOURCE_BYTES {
+        bail!("[limit-exceeded] photo source exceeds the 512 MiB limit")
+    }
+    let dng = Dng::inspect(bytes)?;
+    let digest = crate::resource::sha256(bytes);
+    let (mut document, upgraded) = with_catalog(raw)?;
+    let catalog = &mut document["photography"];
     if let Some(profile) = camera_profile.get("profile").and_then(Value::as_str) {
         if catalog["profiles"].get(profile).is_none() {
             bail!("[missing-resource] camera profile {profile} is not in photography.profiles; add it with `photo profile add` first")
@@ -901,7 +1151,7 @@ pub fn add_raw(
         "photo": photo_id,
         "asset": digest,
         "deduplicated": deduplicated,
-        "upgraded": version != Some(VERSION),
+        "upgraded": upgraded,
         "variant": "master",
         "unsupported_opcodes": unsupported,
     }))

@@ -799,6 +799,66 @@ enum RawAction {
     },
     /// Print a photo's recorded source facts, storage, and variants.
     Info { input: PathBuf, id: String },
+    /// Set a variant's camera profile and white balance.
+    Develop {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        /// Variant ID.
+        #[arg(long, default_value = "master")]
+        variant: String,
+        /// auto (the profile embedded in the DNG), embedded, matrix-only, or a profile digest.
+        #[arg(long)]
+        camera_profile: Option<String>,
+        /// Use the as-shot white (AsShotNeutral or AsShotWhiteXY).
+        #[arg(long, group = "white_balance")]
+        as_shot: bool,
+        /// Correlated color temperature in kelvin (2000-50000); pair with --tint.
+        #[arg(long, group = "white_balance")]
+        temperature: Option<f64>,
+        /// Tint (-150..150, positive is magenta); used with --temperature.
+        #[arg(long, requires = "temperature", allow_hyphen_values = true)]
+        tint: Option<f64>,
+        /// Camera-RGB neutral as r,g,b.
+        #[arg(long, group = "white_balance")]
+        neutral: Option<String>,
+        /// Sample a neutral at x,y,radius (0-1, oriented frame; radius of the long edge).
+        #[arg(long, group = "white_balance")]
+        sample: Option<String>,
+        /// Store a deterministic gray-world suggestion as temperature and tint.
+        #[arg(long, group = "white_balance")]
+        suggest: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhotoAction {
+    /// Manage verified camera profiles in photography.profiles.
+    Profile {
+        #[command(subcommand)]
+        action: PhotoProfileAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhotoProfileAction {
+    /// Verify and store a DNG camera profile (.dcp).
+    Add {
+        input: PathBuf,
+        #[arg(long)]
+        file: PathBuf,
+        /// Allow the profile for sources whose UniqueCameraModel differs (recorded).
+        #[arg(long)]
+        force_model: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -812,6 +872,11 @@ enum Command {
     Raw {
         #[command(subcommand)]
         action: RawAction,
+    },
+    /// Photography catalog operations: camera profiles.
+    Photo {
+        #[command(subcommand)]
+        action: PhotoAction,
     },
     /// Create, inspect, or preview reusable assets.
     Asset {
@@ -2251,6 +2316,120 @@ async fn run() -> Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&pentool::photo::catalog::info(&raw, &id)?)?
+                );
+                Ok(())
+            }
+            RawAction::Develop {
+                input,
+                id,
+                variant,
+                camera_profile,
+                as_shot,
+                temperature,
+                tint,
+                neutral,
+                sample,
+                suggest,
+                dry_run,
+                if_revision,
+            } => {
+                use pentool::photo::catalog::WhiteBalance;
+                let triple = |text: &str, flag: &str| -> anyhow::Result<[f64; 3]> {
+                    let values = text
+                        .split(',')
+                        .map(|v| v.trim().parse::<f64>())
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()
+                        .filter(|v| v.len() == 3 && v.iter().all(|v| v.is_finite()));
+                    match values {
+                        Some(v) => Ok([v[0], v[1], v[2]]),
+                        None => anyhow::bail!(
+                            "[invalid-input] {flag} takes three comma-separated numbers"
+                        ),
+                    }
+                };
+                let white_balance = if as_shot {
+                    Some(WhiteBalance::AsShot)
+                } else if let Some(temperature) = temperature {
+                    Some(WhiteBalance::Temperature {
+                        temperature,
+                        tint: tint.unwrap_or(0.0),
+                    })
+                } else if let Some(neutral) = neutral {
+                    Some(WhiteBalance::Neutral(triple(&neutral, "--neutral")?))
+                } else if let Some(sample) = sample {
+                    let [x, y, radius] = triple(&sample, "--sample")?;
+                    Some(WhiteBalance::Sample { x, y, radius })
+                } else if suggest {
+                    Some(WhiteBalance::Suggest)
+                } else {
+                    None
+                };
+                let camera_profile = camera_profile
+                    .as_deref()
+                    .map(pentool::photo::catalog::camera_profile)
+                    .transpose()?;
+                if camera_profile.is_none() && white_balance.is_none() {
+                    anyhow::bail!("[invalid-input] raw develop needs a setting: --camera-profile, --as-shot, --temperature, --neutral, --sample or --suggest")
+                }
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = pentool::photo::catalog::develop_raw(
+                    &mut raw,
+                    &input,
+                    &id,
+                    &variant,
+                    camera_profile,
+                    white_balance,
+                )?;
+                let change = transaction::commit_value(
+                    &input,
+                    "raw-develop",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
+                Ok(())
+            }
+        },
+        Command::Photo { action } => match action {
+            PhotoAction::Profile {
+                action:
+                    PhotoProfileAction::Add {
+                        input,
+                        file,
+                        force_model,
+                        dry_run,
+                        if_revision,
+                    },
+            } => {
+                let length = fs::metadata(&file)
+                    .with_context(|| format!("[missing-resource] {}", file.display()))?
+                    .len();
+                if length > pentool::photo::catalog::MAX_PROFILE_BYTES {
+                    anyhow::bail!("[limit-exceeded] camera profile is larger than 16 MiB")
+                }
+                let bytes = fs::read(&file)
+                    .with_context(|| format!("[missing-resource] {}", file.display()))?;
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = pentool::photo::catalog::add_profile(&mut raw, &bytes, force_model)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "photo-profile-add",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
                 );
                 Ok(())
             }

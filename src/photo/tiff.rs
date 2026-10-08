@@ -67,6 +67,11 @@ pub fn is_tiff(bytes: &[u8]) -> bool {
     bytes.len() >= 8 && (bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*"))
 }
 
+/// True for a DNG camera profile header (`IIRC` or `MMCR`).
+pub fn is_profile(bytes: &[u8]) -> bool {
+    bytes.len() >= 8 && (bytes.starts_with(b"IIRC") || bytes.starts_with(b"MMCR"))
+}
+
 impl<'a> Tiff<'a> {
     /// Parse the IFD structure, enforcing the IFD, entry and bounds limits.
     pub fn parse(bytes: &'a [u8]) -> Result<Self> {
@@ -76,6 +81,19 @@ impl<'a> Tiff<'a> {
             }
             bail!("[malformed-resource] not a TIFF file: the header is not II*\\0 or MM\\0*");
         }
+        Self::parse_body(bytes)
+    }
+
+    /// Parse a DNG camera profile (`.dcp`): a TIFF structure whose header magic is
+    /// `IIRC` or `MMCR` instead of 42.
+    pub fn parse_profile(bytes: &'a [u8]) -> Result<Self> {
+        if !is_profile(bytes) {
+            bail!("[malformed-resource] not a DNG camera profile: the header is not IIRC or MMCR");
+        }
+        Self::parse_body(bytes)
+    }
+
+    fn parse_body(bytes: &'a [u8]) -> Result<Self> {
         let mut tiff = Self {
             bytes,
             big_endian: bytes[0] == b'M',

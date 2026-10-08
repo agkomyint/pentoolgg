@@ -368,11 +368,83 @@ imports, but they never change the meaning of settings that are already stored.
   digest that matches, and has a `UniqueCameraModel` that matches the source. A
   mismatch is refused unless `--force-model` is given, and that choice is recorded.
 - White balance modes: `as-shot` (`AsShotNeutral` or `AsShotWhiteXY`); temperature
-  and tint (xy through Robertson; tint uses the DNG SDK convention of ±1 tint unit =
-  ±0.0003 in uv); a sampled `neutral` (the command samples a radius in camera RGB and
-  stores the neutral); and `suggested` (auto: deterministic gray-world with
-  clipped-pixel rejection on the analysis proxy, stored as temperature and tint with
+  and tint (xy through Robertson; one tint unit is 1/3000 in uv, the DNG SDK's
+  scale); a sampled `neutral` (the command samples a radius in camera RGB and
+  stores the neutral); and a suggestion (deterministic gray-world with clipped-pixel
+  rejection on the analysis proxy, stored as temperature and tint with
   `auto: {"algorithm": "gray-world", "version": 1}`).
+
+**Profile reading.** A profile carries 1–3 calibrations (`ColorMatrixN`, required for
+N = 1; `CalibrationIlluminantN`; optional `ForwardMatrixN` and
+`ProfileHueSatMapDataN` with `ProfileHueSatMapDims` and `ProfileHueSatMapEncoding`
+0 or 1). Forward matrices must be present for all calibrations or for none. A
+matrix whose determinant is below 1e-9, or whose values exceed 1e4 in magnitude,
+is `[malformed-resource]`. Color matrices are normalized so that the D50 white maps
+to a camera neutral with a maximum of 1 (`NormalizeColorMatrix`). Forward matrices
+are normalized so that a unit camera neutral maps to D50 XYZ
+(`NormalizeForwardMatrix`). A hue/sat map holds at most 1,048,576 entries. An
+identity map counts as absent; when only some calibrations have a map, the others
+get an identity map of the same dimensions. Maps that differ in dimensions are
+`[malformed-resource]`. `matrix-only` uses the embedded profile without forward
+matrices or hue/sat maps. A `.dcp` must carry `UniqueCameraModel`, and is at most
+16 MiB.
+
+**Illuminant temperatures.** EXIF light sources map to kelvin as follows: 17 and 3
+→ 2850; 24 → 3200; 23 → 5000; 20, 1, 9, 4 and 18 → 5500; 21, 19 and 10 → 6500; 22
+and 11 → 7500; 12 → 6400; 13 → 5050; 14 and 2 → 4150; 15 → 3525; 16 → 2925. Any
+other code is unknown.
+
+**Binding a profile to a source.** `AnalogBalance` (AB) and `CameraCalibrationN`
+(CC) come from the DNG. CC applies to the embedded and matrix-only profiles. It
+applies to an imported profile only when the DNG's `CameraCalibrationSignature`
+equals the profile's `ProfileCalibrationSignature`; otherwise CC is the identity.
+Each calibration contributes `AB·CC·CM`.
+
+**Interpolation (`FindXYZtoCamera`).** For a white xy, the temperature is found by
+Robertson's method. Calibration 1 is used alone when the profile has fewer than two
+calibrations, when any temperature is unknown, or when two temperatures are equal.
+Otherwise calibrations are sorted by temperature and the bracketing pair (T1 < T2)
+is blended. The weight of the lower-temperature calibration is
+`g = (1/T − 1/T2) / (1/T1 − 1/T2)`, clamped to 0–1. Color matrices, camera
+calibrations, forward matrices and hue/sat map entries are blended linearly with
+`g`.
+
+**Neutral to white (`NeutralToXY`).** Start from D50. Each pass takes
+`xyz = inverse(AB·CC·CM(last)) · neutral` and its chromaticity. Stop when x and y
+both move less than 1e-6. The last of 30 passes averages the previous and the new
+xy.
+
+**White to transform (`SetWhiteXY`).** The camera white is `CM(xy) · XYZ(xy)`,
+normalized to a maximum of 1 and clamped to 0.001–1. With forward matrices,
+camera-to-PCS is `FM · inverse(diag(inverse(AB·CC) · white)) · inverse(AB·CC)`.
+Without them it is the inverse of `CM · Bradford(D50 → xy)`, scaled so that D50 maps
+to a camera maximum of 1. Stage 1 balances camera RGB with the multipliers
+`max(white) / white`. Stage 3 then applies
+`inverse(ProPhoto→XYZ) · CameraToPCS · diag(white)`, which maps a balanced
+(1, 1, 1) exactly to the working white (1, 1, 1).
+
+**Hue/sat map.** The map is applied in linear ProPhoto after the matrix, in DNG HSV
+(hue 0–6). Lookup is trilinear, or bilinear in hue and saturation when the map has
+one value division. With encoding 1, only the lookup coordinate uses the sRGB
+transfer of `min(v, 1)`. The result is `h += shift · 6/360`,
+`s = min(s · scale, 1)`, and `v = v · scale` (not clamped). Pixels with a negative
+channel or `v ≤ 0` pass through unchanged.
+
+**Measured white balance.** `--sample x,y,radius` takes a centre in the oriented
+frame (0–1) and a radius as a fraction of the long edge (at least 0.5 px). It
+decodes camera RGB with a unity neutral and clipped highlights, averages the disk
+while excluding pixels with any channel ≥ 0.98, and stores the average normalized to
+a maximum of 1, rounded to 6 decimals. `--suggest` decodes the same way. On a grid
+of blocks with a step of `ceil(long edge / 1024)`, it rejects blocks with any
+channel ≥ 0.98 and blocks whose mean maximum is below 0.002, averages the remaining
+block means in f64, and stores the resulting white as kelvin and tint. These are
+clamped to 2000–50000 K and ±150, rounded to integers, and stored with `auto`
+provenance. A monochrome DNG (LinearRaw with one sample) uses the identity
+transform; sampling, suggesting and a `neutral` are `[invalid-develop]` for it.
+
+**Rendered sources.** `relative` white balance is a working-space Bradford
+adaptation from the white at `200 − temperature` mired with `tint`, to the white at
+200 mired (5000 K) with tint 0. Zero is exactly the identity.
 
 ### Lens and geometry correction
 
@@ -738,6 +810,19 @@ explicitly, and identical bytes are stored once. The result is
 `{photo, asset, deduplicated, upgraded, variant, unsupported_opcodes}`. `raw info`
 prints the photo, its storage, the recorded source facts, the variants and the
 snapshot count.
+
+`photo profile add DOC --file PROFILE.dcp [--force-model]` verifies a DNG camera
+profile and stores it, embedded, in `photography.profiles` (identical bytes are
+stored once; `--force-model` on a stored profile records the override). It
+upgrades a document older than v7. The result is `{profile, name,
+unique_camera_model, embed_policy, force_model, calibrations, hue_sat_map,
+deduplicated, upgraded}`.
+
+`raw develop DOC PHOTO [--variant ID] [--camera-profile auto|embedded|matrix-only|DIGEST]`
+takes at most one of `--as-shot`, `--temperature K [--tint T]`, `--neutral r,g,b`,
+`--sample x,y,radius` and `--suggest`. It stores the setting in the variant
+(default `master`) and reports `{photo, variant, camera_profile, white_balance,
+monochrome, resolved: {xy, temperature, tint, neutral}}`.
 
 `raw develop` is a shorthand for setting values in `develop` groups. Every mutating
 command takes `--dry-run` and `--if-revision`, commits through the shared

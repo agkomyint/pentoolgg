@@ -59,6 +59,21 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   exists. The checkbox stays open until review and hosted CI pass.
 - [ ] **4. Add camera profiles and white balance.** Support embedded and verified
   profiles plus as-shot, temperature/tint, sampled-neutral, and suggested balance.
+  *Status: implemented for review.* This item has four parts:
+  - the DNG SDK color kernels in `src/photo/profile.rs`: profile reading,
+    interpolation, `NeutralToXY`, `SetWhiteXY`, hue/sat maps, Robertson
+    temperature and tint, sampling and the gray-world suggestion;
+  - `raw` and `white_balance` develop validation in `src/photo/develop.rs`, which
+    the catalog applies to every variant and snapshot;
+  - `pentool photo profile add` (`.dcp`, `--force-model`) and `pentool raw develop`
+    (`--camera-profile`, `--as-shot`, `--temperature`/`--tint`, `--neutral`,
+    `--sample`, `--suggest`);
+  - `tests/v0110_camera_profiles.rs`.
+
+  Decision: one tint unit is 1/3000 in uv, the DNG SDK's scale; the earlier
+  "±0.0003" wording was corrected in `docs/photography-v1.md`. The kernels are
+  documented there. The stage-3 transform is applied to pixels once rendering
+  exists (items 5–6). The checkbox stays open until review and hosted CI pass.
 - [ ] **5. Add lens and geometry correction.** Cover distortion, vignetting,
   chromatic aberration, perspective, leveling, rotation, and constrained crop.
 - [ ] **6. Build the development stack.** Add exposure, highlights/shadows,
