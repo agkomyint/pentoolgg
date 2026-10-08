@@ -1048,6 +1048,9 @@ enum Command {
         width: u32,
         #[arg(long, default_value_t = 800)]
         height: u32,
+        /// Replace an existing document; the previous bytes stay recoverable with `undo`
+        #[arg(long)]
+        overwrite: bool,
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
@@ -1202,7 +1205,7 @@ enum Command {
         #[command(subcommand)]
         action: editing::PathAction,
     },
-    /// Render a .pen document to PNG or SVG (selected by extension).
+    /// Render a .pen document to PNG, SVG or PDF (selected by extension).
     Export {
         input: PathBuf,
         output: PathBuf,
@@ -2103,9 +2106,20 @@ fn error_suggestions(error: &anyhow::Error) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Parse the command line; `PENTOOL_AI=off` also hides the `ai` command from help.
+fn parse_cli() -> Result<Cli, clap::Error> {
+    use clap::{CommandFactory, FromArgMatches};
+    let mut command = Cli::command();
+    if ai::disabled() {
+        command = command.mut_subcommand("ai", |sub| sub.hide(true));
+    }
+    let matches = command.try_get_matches()?;
+    Cli::from_arg_matches(&matches)
+}
+
 #[tokio::main]
 async fn run() -> Result<()> {
-    let cli = match Cli::try_parse() {
+    let cli = match parse_cli() {
         Ok(cli) => cli,
         Err(error)
             if matches!(
@@ -4292,11 +4306,23 @@ async fn run() -> Result<()> {
             output,
             width,
             height,
+            overwrite,
         } => {
+            if !(1..=16384).contains(&width) || !(1..=16384).contains(&height) {
+                anyhow::bail!("[invalid-input] canvas dimensions must be between 1 and 16384, got {width}x{height}; nothing was written")
+            }
             let doc = scene::new_document(width, height);
             scene::validate(&doc)?;
-            fs::write(&output, serde_json::to_vec_pretty(&doc)?)
-                .with_context(|| format!("could not write {}", output.display()))?;
+            if output.exists() {
+                if !overwrite {
+                    anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite (the previous document stays recoverable with `pentool undo`)", output.display())
+                }
+                transaction::commit_value(&output, "new", false, None, &doc)
+                    .with_context(|| format!("could not replace {}; the existing file is not a valid Pentool document, so move or delete it explicitly", output.display()))?;
+            } else {
+                editing::atomic_write(&output, &serde_json::to_vec_pretty(&doc)?)
+                    .with_context(|| format!("could not write {}", output.display()))?;
+            }
             println!("Created {}", output.display());
             Ok(())
         }
@@ -5756,7 +5782,7 @@ fn write_image_export(
         {
             Some("png") => composite::png(raw, input, page, scale)?,
             Some("svg") => composite::svg(raw, input, page, scale)?.into_bytes(),
-            _ => anyhow::bail!("output must end in .png or .svg"),
+            _ => anyhow::bail!("output must end in .png, .svg or .pdf"),
         };
         return editing::atomic_write(output, &bytes);
     }
@@ -5778,7 +5804,7 @@ fn write_image_export(
     {
         Some("svg") => scene.svg.into_bytes(),
         Some("png") => render::scene_to_png(&scene, scale)?,
-        _ => anyhow::bail!("output must end in .png or .svg"),
+        _ => anyhow::bail!("output must end in .png, .svg or .pdf"),
     };
     editing::atomic_write(output, &bytes)
 }

@@ -4,7 +4,7 @@
 
 [Vector logo](examples/pentoolgg-logo.svg) · [Transparent icon](examples/pentoolgg-icon.png) · [Editable logo](examples/pentoolgg-logo.pen)
 
-Pentool is an open-source, agent-friendly vector editor distributed as **one Rust binary**. It serves a browser canvas, stores editable layered artwork in a readable `.pen` JSON format, exposes rendering APIs, and exports PNG or SVG.
+Pentool is an open-source, agent-friendly vector editor distributed as **one Rust binary**. It serves a browser canvas, stores editable layered artwork in a readable `.pen` JSON format, exposes rendering APIs, and exports PNG, SVG, or PDF.
 
 AI agents can draw through CLI commands; humans can edit the same artwork visually.
 
@@ -59,7 +59,7 @@ stroke controls introduced in v0.2.0 remain fully supported.
 
 ```sh
 pentool serve --host 127.0.0.1 --port 4711
-pentool new logo.pen --width 1200 --height 800
+pentool new logo.pen --width 1200 --height 800   # refuses an existing file; add --overwrite (undo-able)
 pentool info logo.pen
 pentool export logo.pen logo.png --scale 2
 pentool export logo.pen logo.svg

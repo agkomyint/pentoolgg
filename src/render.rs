@@ -484,7 +484,7 @@ pub fn write_export_options(
             to_svg(doc)?
         })
         .into_bytes(),
-        _ => bail!("output must end in .png or .svg"),
+        _ => bail!("output must end in .png, .svg or .pdf"),
     };
     atomic_write(output, &bytes)?;
     Ok(())

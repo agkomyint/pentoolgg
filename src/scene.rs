@@ -2602,6 +2602,90 @@ pub fn apply_layer_geometry(
     Ok(json!({"ok":true,"nodes_changed":changed}))
 }
 
+/// Whether `text` is the documented color grammar: `none`, `#RGB`, `#RGBA`, `#RRGGBB`
+/// or `#RRGGBBAA`.
+pub fn is_valid_color(text: &str) -> bool {
+    text == "none"
+        || text.strip_prefix('#').is_some_and(|hex| {
+            [3, 4, 6, 8].contains(&hex.len()) && hex.bytes().all(|c| c.is_ascii_hexdigit())
+        })
+}
+
+/// Content problems a mutation must not introduce: canvas sizes the renderer
+/// rejects, colors outside the grammar and blank identifiers. Documents that
+/// already contain them stay editable; the transaction layer only refuses *new*
+/// violations (see `transaction::reject_new_violations`).
+pub fn content_violations(raw: &Value) -> Vec<String> {
+    fn nodes(layer_path: &str, list: &[Value], out: &mut Vec<String>) {
+        for node in list {
+            let id = node.get("id").and_then(Value::as_str).unwrap_or_default();
+            if id.trim().is_empty() && !id.is_empty() {
+                out.push(format!(
+                    "[invalid-input] {layer_path}: object ID cannot be blank"
+                ));
+            }
+            for slot in ["fill", "stroke"] {
+                if let Some(color) = node
+                    .pointer(&format!("/style/{slot}/fallback"))
+                    .and_then(Value::as_str)
+                {
+                    if !is_valid_color(color) {
+                        out.push(format!(
+                            "[invalid-input] {layer_path}: object {id} has invalid {slot} color {color:?}; use none, #RGB, #RGBA, #RRGGBB or #RRGGBBAA"
+                        ));
+                    }
+                }
+            }
+            if let Some(children) = node.get("children").and_then(Value::as_array) {
+                nodes(layer_path, children, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for page in raw
+        .get("pages")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice)
+    {
+        let page_id = page.get("id").and_then(Value::as_str).unwrap_or_default();
+        let canvas = &page["canvas"];
+        for side in ["width", "height"] {
+            if !canvas
+                .get(side)
+                .and_then(Value::as_u64)
+                .is_some_and(|v| (1..=16384).contains(&v))
+            {
+                out.push(format!(
+                    "[invalid-input] page {page_id}: canvas {side} must be an integer between 1 and 16384"
+                ));
+            }
+        }
+        if let Some(background) = canvas.get("background").and_then(Value::as_str) {
+            if !is_valid_color(background) {
+                out.push(format!(
+                    "[invalid-input] page {page_id}: canvas background {background:?} is not a color; use none, #RGB, #RGBA, #RRGGBB or #RRGGBBAA"
+                ));
+            }
+        }
+        for layer in page
+            .get("layers")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice)
+        {
+            let layer_id = layer.get("id").and_then(Value::as_str).unwrap_or_default();
+            if layer_id.trim().is_empty() && !layer_id.is_empty() {
+                out.push(format!(
+                    "[invalid-input] page {page_id}: layer ID cannot be blank"
+                ));
+            }
+            if let Some(list) = layer.get("nodes").and_then(Value::as_array) {
+                nodes(&format!("page {page_id}, layer {layer_id}"), list, &mut out);
+            }
+        }
+    }
+    out
+}
+
 pub fn validate(raw: &Value) -> Result<()> {
     let version = raw
         .get("version")

@@ -137,13 +137,18 @@ fn config_path() -> Result<PathBuf> {
         .join("ai.json"))
 }
 
-fn ensure_enabled() -> Result<()> {
-    if env_value("PENTOOL_AI").is_some_and(|v| {
+/// True when `PENTOOL_AI` switches the ai commands off.
+pub fn disabled() -> bool {
+    env_value("PENTOOL_AI").is_some_and(|v| {
         matches!(
             v.to_ascii_lowercase().as_str(),
             "off" | "0" | "false" | "disabled"
         )
-    }) {
+    })
+}
+
+fn ensure_enabled() -> Result<()> {
+    if disabled() {
         return Err(err(
             "policy-denied",
             "AI features are disabled by PENTOOL_AI=off.",
@@ -328,11 +333,53 @@ fn is_loopback(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
 }
 
+/// An endpoint with userinfo, query and fragment removed, safe to print.
+fn redact_endpoint(endpoint: &str) -> String {
+    match url::Url::parse(endpoint) {
+        Ok(mut url) => {
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            url.set_query(None);
+            url.set_fragment(None);
+            url.to_string()
+        }
+        Err(_) => endpoint
+            .split(['?', '#'])
+            .next()
+            .unwrap_or_default()
+            .to_owned(),
+    }
+}
+
+/// Query parameter names that carry credentials (case, `-` and `_` ignored).
+fn is_secret_param(name: &str) -> bool {
+    let norm: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    [
+        "key",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "auth",
+        "signature",
+        "sig",
+        "credential",
+        "bearer",
+    ]
+    .iter()
+    .any(|word| norm.contains(word))
+}
+
 fn check_endpoint(endpoint: &str) -> Result<url::Url> {
+    let shown = redact_endpoint(endpoint);
     let url = url::Url::parse(endpoint).map_err(|error| {
         err(
             "invalid-endpoint",
-            format!("endpoint {endpoint:?} is not a URL ({error})."),
+            format!("endpoint {shown:?} is not a URL ({error})."),
             "Use an absolute https:// endpoint such as https://api.example.com/v1.",
         )
     })?;
@@ -341,9 +388,7 @@ fn check_endpoint(endpoint: &str) -> Result<url::Url> {
     if !secure || host.is_empty() {
         return Err(err(
             "policy-denied",
-            format!(
-                "endpoint {endpoint} must use https (plain http is allowed only for loopback)."
-            ),
+            format!("endpoint {shown} must use https (plain http is allowed only for loopback)."),
             "Use an https:// endpoint, or a loopback address for a local server.",
         ));
     }
@@ -352,6 +397,22 @@ fn check_endpoint(endpoint: &str) -> Result<url::Url> {
             "policy-denied",
             "endpoint URLs must not embed credentials.",
             "Remove the user:password@ part and use --credential-env or --credential-file.",
+        ));
+    }
+    if url.fragment().is_some() {
+        return Err(err(
+            "policy-denied",
+            format!("endpoint {shown} must not contain a #fragment."),
+            "Remove the fragment; credentials belong in --credential-env or --credential-file.",
+        ));
+    }
+    if let Some((name, _)) = url.query_pairs().find(|(name, _)| is_secret_param(name)) {
+        return Err(err(
+            "policy-denied",
+            format!(
+                "endpoint {shown} carries a credential-like query parameter ({name}); its value was not stored or printed."
+            ),
+            "Remove the query secret and use --credential-env or --credential-file.",
         ));
     }
     if let Some(list) = env_value("PENTOOL_AI_ALLOW_HOSTS") {
@@ -372,17 +433,31 @@ fn check_endpoint(endpoint: &str) -> Result<url::Url> {
     Ok(url)
 }
 
-fn max_calls() -> usize {
-    env_value("PENTOOL_AI_MAX_CALLS")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(MAX_CANDIDATES)
-        .min(MAX_CANDIDATES)
+/// Read a numeric safety limit. A present but malformed or out-of-range value
+/// fails closed instead of silently falling back to the permissive default.
+fn env_limit(name: &str, default: u64, min: u64, max: u64) -> Result<u64> {
+    let Some(text) = env_value(name) else {
+        return Ok(default);
+    };
+    match text.trim().parse::<u64>() {
+        Ok(value) if (min..=max).contains(&value) => Ok(value),
+        _ => Err(err(
+            "invalid-option",
+            format!("{name} must be an integer from {min} to {max}, got {text:?}."),
+            format!("Set {name} to a whole number from {min} to {max}, or unset it for the default ({default})."),
+        )),
+    }
 }
 
-fn max_pixels() -> u64 {
-    env_value("PENTOOL_AI_MAX_PIXELS")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_MAX_PIXELS)
+fn max_calls() -> Result<usize> {
+    Ok(
+        env_limit("PENTOOL_AI_MAX_CALLS", MAX_CANDIDATES as u64, 0, 1_000_000)?
+            .min(MAX_CANDIDATES as u64) as usize,
+    )
+}
+
+fn max_pixels() -> Result<u64> {
+    env_limit("PENTOOL_AI_MAX_PIXELS", DEFAULT_MAX_PIXELS, 1, u64::MAX)
 }
 
 // ---------------------------------------------------------------------------
@@ -414,8 +489,14 @@ fn read_credential(credential: &Credential) -> Result<String> {
                 )
             })?;
             if metadata.len() > 4096 {
-                bail!("[limit-exceeded] credential file {path} is larger than 4 KiB")
+                return Err(err(
+                    "limit-exceeded",
+                    format!("credential file {path} is larger than 4 KiB."),
+                    "Keep only the API key in the file (no extra text), or use --credential-env.",
+                ));
             }
+            #[cfg(not(unix))]
+            check_private_location(path)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -438,6 +519,43 @@ fn read_credential(credential: &Credential) -> Result<String> {
             Ok(value)
         }
     }
+}
+
+/// Without POSIX mode bits there is no cheap per-file permission check, so
+/// require the file to live under the user's profile and outside the working
+/// project, where it could be committed, synced or shared.
+#[cfg(not(unix))]
+fn check_private_location(path: &str) -> Result<()> {
+    let real = fs::canonicalize(path).map_err(|_| {
+        err(
+            "missing-credential",
+            format!("credential file {path} cannot be read."),
+            "Create the file (key only) or change --credential-file.",
+        )
+    })?;
+    let strip = |p: PathBuf| PathBuf::from(p.to_string_lossy().trim_start_matches(r"\?\"));
+    let real = strip(real);
+    if let Ok(cwd) = std::env::current_dir().and_then(fs::canonicalize) {
+        if real.starts_with(strip(cwd)) {
+            return Err(err(
+                "unsafe-credential-file",
+                format!("credential file {path} is inside the current project directory."),
+                "Move the key file into your user profile (outside any project), or use --credential-env.",
+            ));
+        }
+    }
+    let home = env_value("USERPROFILE").or_else(|| env_value("HOME"));
+    let inside_home = home
+        .and_then(|h| fs::canonicalize(h).ok())
+        .is_some_and(|h| real.starts_with(strip(h)));
+    if !inside_home {
+        return Err(err(
+            "unsafe-credential-file",
+            format!("credential file {path} is outside your user profile."),
+            "Store the key file under your user profile directory (private to your account), or use --credential-env.",
+        ));
+    }
+    Ok(())
 }
 
 fn credential_report(credential: &Credential) -> Value {
@@ -532,7 +650,16 @@ fn resolve(
                 profile.adapter
             ),
             if supporting.is_empty() {
-                format!("Connect a provider that supports {capability}, e.g. `ai connect --name gemini ...`.")
+                let known: Vec<&str> = CATALOG
+                    .iter()
+                    .filter(|e| capabilities(e.adapter).contains(&capability))
+                    .map(|e| e.name)
+                    .collect();
+                if known.is_empty() {
+                    format!("No adapter in this build supports {capability}; use a different operation.")
+                } else {
+                    format!("Connect a provider that supports {capability}, e.g. `ai connect --name {} ...`.", known[0])
+                }
             } else {
                 format!("Use --provider with one of: {}.", supporting.join(", "))
             },
@@ -576,12 +703,13 @@ fn redact(text: &str, secrets: &[String]) -> String {
     out
 }
 
-fn timeout() -> std::time::Duration {
-    std::time::Duration::from_secs(
-        env_value("PENTOOL_AI_TIMEOUT_SECS")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(180),
-    )
+fn timeout() -> Result<std::time::Duration> {
+    Ok(std::time::Duration::from_secs(env_limit(
+        "PENTOOL_AI_TIMEOUT_SECS",
+        180,
+        1,
+        3600,
+    )?))
 }
 
 /// One bounded request on a plain worker thread (reqwest's blocking client owns a
@@ -594,9 +722,10 @@ fn http(
     body: Option<Vec<u8>>,
     secrets: Vec<String>,
 ) -> Result<Http> {
+    let limit = timeout()?;
     std::thread::spawn(move || -> Result<Http> {
         let client = reqwest::blocking::Client::builder()
-            .timeout(timeout())
+            .timeout(limit)
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
         let mut request = if method == "POST" {
@@ -900,7 +1029,7 @@ fn validate_output(bytes: Vec<u8>) -> Result<Validated> {
             "Retry, or choose a different model.",
         )
     })?;
-    if u64::from(info.pixel_width) * u64::from(info.pixel_height) > max_pixels() {
+    if u64::from(info.pixel_width) * u64::from(info.pixel_height) > max_pixels()? {
         return Err(err(
             "limit-exceeded",
             format!(
@@ -984,10 +1113,23 @@ fn encode_png(image: &::image::RgbaImage) -> Result<Vec<u8>> {
 // Run store
 // ---------------------------------------------------------------------------
 
+/// Runs are scoped to the originating document: documents sharing a directory
+/// never see, accept, discard or prune each other's candidates.
 fn runs_dir(document: &Path) -> PathBuf {
+    let name = document
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let digest = crate::resource::sha256(name.as_bytes());
+    let scope: String = digest
+        .trim_start_matches("sha256:")
+        .chars()
+        .take(12)
+        .collect();
     crate::resource::document_root(document)
         .join(".pentool")
         .join("ai-runs")
+        .join(scope)
 }
 
 fn valid_run_id(id: &str) -> bool {
@@ -1113,6 +1255,59 @@ fn find_node<'a>(raw: &'a Value, page: Option<&str>, id: &str) -> Option<(String
         }
     }
     None
+}
+
+fn ensure_layer_open(raw: &Value, page: Option<&str>, layer: &str) -> Result<()> {
+    let locked = raw["pages"].as_array().is_some_and(|pages| {
+        pages
+            .iter()
+            .filter(|p| page.is_none_or(|wanted| p["id"] == wanted))
+            .flat_map(|p| p["layers"].as_array().into_iter().flatten())
+            .any(|l| l["id"] == layer && l["locked"].as_bool().unwrap_or(false))
+    });
+    if locked {
+        return Err(err(
+            "locked-layer",
+            format!("layer {layer} is locked; nothing was written."),
+            "Unlock the layer with `pentool layer DOCUMENT set LAYER --locked false`, then retry.",
+        ));
+    }
+    Ok(())
+}
+
+/// Reject a change to a node whose layer, own flag or any ancestor is locked.
+fn ensure_target_unlocked(raw: &Value, page: Option<&str>, id: &str) -> Result<()> {
+    fn walk(nodes: &[Value], id: &str, locked: bool) -> Option<bool> {
+        for node in nodes {
+            let here = locked || node["locked"].as_bool().unwrap_or(false);
+            if node["id"] == id {
+                return Some(here);
+            }
+            if let Some(found) = node["children"].as_array().and_then(|c| walk(c, id, here)) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    let (layer, _) = find_node(raw, page, id).context("target vanished")?;
+    ensure_layer_open(raw, page, &layer)?;
+    let node_locked = raw["pages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| page.is_none_or(|wanted| p["id"] == wanted))
+        .flat_map(|p| p["layers"].as_array().into_iter().flatten())
+        .filter_map(|l| l["nodes"].as_array().and_then(|n| walk(n, id, false)))
+        .next()
+        .unwrap_or(false);
+    if node_locked {
+        return Err(err(
+            "locked-node",
+            format!("{id} (or a group containing it) is locked; nothing was written."),
+            "Unlock the node, then retry.",
+        ));
+    }
+    Ok(())
 }
 
 fn find_node_mut<'a>(raw: &'a mut Value, page: Option<&str>, id: &str) -> Option<&'a mut Value> {
@@ -1476,6 +1671,9 @@ pub enum RunAction {
         /// Swap the pixels of an existing image node, keeping its placement and effects.
         #[arg(long, conflicts_with_all = ["id", "layer", "x", "y", "width", "height"])]
         replace: Option<String>,
+        /// Replace even though the target image changed since the run was made.
+        #[arg(long, requires = "replace")]
+        allow_stale_source: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(long = "if-revision")]
@@ -1639,23 +1837,41 @@ fn connect(args: &ConnectArgs) -> Result<Value> {
             ))
         }
     };
-    if let Some(model) = &args.default_model {
-        if !valid_model_id(model) {
-            return Err(err(
-                "invalid-model",
-                format!("model id {model:?} contains unsupported characters."),
-                "Model ids may use letters, digits, '.', '-', '_' and ':'.",
-            ));
+    let default_model = match &args.default_model {
+        None => None,
+        Some(model) => {
+            let bare = match model.split_once('/') {
+                Some((prefix, rest)) if prefix == args.name => rest,
+                Some((prefix, _)) => {
+                    return Err(err(
+                        "invalid-model",
+                        format!(
+                        "model {model:?} names provider {prefix:?} but this connection is {:?}.",
+                        args.name
+                    ),
+                        format!(
+                            "Use --default-model {}/<model> or a bare model id.",
+                            args.name
+                        ),
+                    ))
+                }
+                None => model.as_str(),
+            };
+            if !valid_model_id(bare) {
+                return Err(err(
+                    "invalid-model",
+                    format!("model id {bare:?} contains unsupported characters."),
+                    "Model ids may use letters, digits, '.', '-', '_' and ':' (optionally prefixed provider/).",
+                ));
+            }
+            Some(bare.to_owned())
         }
-    }
+    };
     let profile = Profile {
         adapter,
         endpoint,
         credential,
-        default_model: args
-            .default_model
-            .clone()
-            .or_else(|| entry.map(|e| e.default_model.to_owned())),
+        default_model: default_model.or_else(|| entry.map(|e| e.default_model.to_owned())),
     };
     let mut config = load_file_config()?;
     let before = config.clone();
@@ -1847,6 +2063,19 @@ fn doctor(args: &DoctorArgs) -> Result<Value> {
     let config = effective_config(ephemeral_mode)?;
     let mut providers = Vec::new();
     let mut all_ready = !config.providers.is_empty();
+    let mut limit_problems = Vec::new();
+    for check in [
+        max_calls().map(|_| ()),
+        max_pixels().map(|_| ()),
+        timeout().map(|_| ()),
+    ] {
+        if let Err(error) = check {
+            if let Some(ai) = error.downcast_ref::<AiError>() {
+                limit_problems.push(json!({"code":ai.code,"message":ai.message,"fix":ai.fix}));
+            }
+        }
+    }
+    all_ready &= limit_problems.is_empty();
     for (name, profile) in &config.providers {
         if args
             .provider
@@ -1905,9 +2134,10 @@ fn doctor(args: &DoctorArgs) -> Result<Value> {
         "providers": providers,
         "defaults": config.defaults,
         "limits": {
-            "max_calls": max_calls(),
-            "max_pixels": max_pixels(),
+            "max_calls": max_calls().ok(),
+            "max_pixels": max_pixels().ok(),
             "allow_hosts": env_value("PENTOOL_AI_ALLOW_HOSTS"),
+            "problems": limit_problems,
         },
         "note": "Model calls additionally require --allow-model-call.",
     }))
@@ -1936,10 +2166,11 @@ fn validate_candidates(count: usize) -> Result<()> {
             "Pass a smaller --candidates value.",
         ));
     }
-    if count > max_calls() {
+    let allowed = max_calls()?;
+    if count > allowed {
         return Err(err(
             "policy-denied",
-            format!("{count} calls exceed PENTOOL_AI_MAX_CALLS={}.", max_calls()),
+            format!("{count} calls exceed PENTOOL_AI_MAX_CALLS={allowed}."),
             "Lower --candidates or raise PENTOOL_AI_MAX_CALLS.",
         ));
     }
@@ -1982,8 +2213,12 @@ fn disclosure(plan: &Plan<'_>) -> Value {
 }
 
 fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Result<Value> {
+    // Fail closed on malformed limits before any disclosure or network work.
+    max_pixels()?;
+    timeout()?;
     let disclosed = disclosure(plan);
     if dry_run {
+        check_endpoint(&plan.resolved.profile.endpoint)?;
         return Ok(json!({"dry_run":true,"disclosure":disclosed,"contacted_provider":false}));
     }
     if !allow {
@@ -2005,6 +2240,7 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
         .collect();
     let mut accepted: Vec<Validated> = Vec::new();
     let mut usage = Vec::new();
+    let mut coverage: Vec<f64> = Vec::new();
     for _ in 0..plan.candidates {
         let request = Request {
             prompt: &plan.prompt,
@@ -2017,14 +2253,36 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
         if let Some(key_color) = plan.key {
             let (_, pixels) = crate::image::decode_source_pixels(&validated.bytes)?;
             let keyed = key_out(&pixels, key_color, 60.0, 90.0);
+            let total = keyed.pixels().len().max(1) as f64;
+            let clear = keyed.pixels().filter(|p| p[3] < 255).count() as f64 / total;
+            if clear < 0.001 {
+                return Err(err(
+                    "keyout-failed",
+                    format!(
+                        "background removal left the image opaque (transparent coverage {:.2}%); the model did not paint the requested key background.",
+                        clear * 100.0
+                    ),
+                    "Re-run (the call was billed), try another model, or remove the background manually.",
+                ));
+            }
+            coverage.push((clear * 10000.0).round() / 10000.0);
             validated = validate_output(encode_png(&keyed)?)?;
         }
+        usage.push(output.usage);
         if accepted.iter().any(|c| c.sha256 == validated.sha256) {
             continue;
         }
-        usage.push(output.usage);
         accepted.push(validated);
     }
+    let duplicates = plan.candidates - accepted.len();
+    let warnings: Vec<String> = if duplicates > 0 {
+        vec![format!(
+            "{duplicates} of {} requested candidates were identical duplicates and were dropped; usage for all {} calls is recorded.",
+            plan.candidates, plan.candidates
+        )]
+    } else {
+        Vec::new()
+    };
     let mut record = json!({
         "name": plan.name,
         "kind": plan.kind,
@@ -2036,6 +2294,10 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
         "size": plan.size,
         "sources": disclosed["sources"],
         "usage": usage,
+        "requested": plan.candidates,
+        "unique": accepted.len(),
+        "warnings": warnings,
+        "keyout_transparent_coverage": coverage,
     });
     let id = store_run(document, &mut record, &accepted)?;
     Ok(json!({
@@ -2045,6 +2307,10 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
         "provider": plan.resolved.provider,
         "model": plan.resolved.model,
         "candidates": record["candidates"],
+        "requested": plan.candidates,
+        "unique": accepted.len(),
+        "warnings": record["warnings"],
+        "keyout_transparent_coverage": record["keyout_transparent_coverage"],
         "usage": record["usage"],
         "store": runs_dir(document).join(&id),
         "document_changed": false,
@@ -2090,7 +2356,7 @@ fn generate(args: &GenerateArgs) -> Result<Value> {
                         "Pass --size WIDTHxHEIGHT.",
                     )
                 })?;
-            if w * h > max_pixels() {
+            if w * h > max_pixels()? {
                 return Err(err(
                     "limit-exceeded",
                     "--size exceeds PENTOOL_AI_MAX_PIXELS.",
@@ -2265,6 +2531,7 @@ fn run_action(action: &RunAction, page: Option<&str>) -> Result<Value> {
             width,
             height,
             replace,
+            allow_stale_source,
             dry_run,
             if_revision,
         } => accept(
@@ -2275,6 +2542,7 @@ fn run_action(action: &RunAction, page: Option<&str>) -> Result<Value> {
             layer.as_deref(),
             [*x, *y, *width, *height],
             replace.as_deref(),
+            *allow_stale_source,
             *dry_run,
             if_revision.as_deref(),
             page,
@@ -2291,6 +2559,7 @@ fn accept(
     layer: Option<&str>,
     frame: [Option<f64>; 4],
     replace: Option<&str>,
+    allow_stale_source: bool,
     dry_run: bool,
     if_revision: Option<&str>,
     page: Option<&str>,
@@ -2353,6 +2622,24 @@ fn accept(
             ));
         }
         let old_digest = old["asset"].as_str().unwrap_or_default().to_owned();
+        ensure_target_unlocked(&raw, page, target)?;
+        if !allow_stale_source {
+            if let Some(source) = record["sources"]
+                .as_array()
+                .and_then(|s| s.iter().find(|s| s["node"] == target))
+            {
+                let recorded = source["sha256"].as_str().unwrap_or_default();
+                if !recorded.is_empty() && recorded != old_digest && old_digest != info.digest {
+                    return Err(err(
+                        "stale-source",
+                        format!(
+                            "{target} changed since run {run} was made (run source {recorded}, current {old_digest}); replacing would silently discard the newer image."
+                        ),
+                        "Re-run the edit from the current image, or pass --allow-stale-source to overwrite deliberately.",
+                    ));
+                }
+            }
+        }
         let assets = raw["image_assets"]
             .as_object_mut()
             .context("image_assets missing")?;
@@ -2403,6 +2690,7 @@ fn accept(
             Some(layer) => layer.to_owned(),
             None => first_layer(&raw, page)?,
         };
+        ensure_layer_open(&raw, page, &target_layer)?;
         crate::image::add(
             &mut raw,
             page,

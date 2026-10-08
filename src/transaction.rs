@@ -35,6 +35,7 @@ pub fn commit_bundle(
 ) -> Result<ChangeSummary> {
     validate_value(value)?;
     let before = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    reject_new_violations(&before, value)?;
     let current = revision(&before);
     if expected.is_some_and(|wanted| wanted != current) {
         bail!("revision mismatch: expected {expected:?}, current {current}")
@@ -110,6 +111,7 @@ pub fn commit_bytes(
     let value: Value = serde_json::from_slice(after).context("invalid serialized document")?;
     validate_value(&value)?;
     let before = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    reject_new_violations(&before, &value)?;
     if !operation.starts_with("instance-") {
         let before_value: Value =
             serde_json::from_slice(&before).context("invalid existing document")?;
@@ -186,6 +188,29 @@ fn find_layer<'a>(document: &'a Value, page_id: &str, layer_id: &str) -> Option<
         .as_array()?
         .iter()
         .find(|layer| layer.get("id").and_then(Value::as_str) == Some(layer_id))
+}
+
+/// Refuse a mutation that adds a content problem (see `scene::content_violations`)
+/// the document did not already have; existing problems stay editable.
+fn reject_new_violations(before: &[u8], after: &Value) -> Result<()> {
+    if !matches!(
+        after.get("version").and_then(Value::as_u64),
+        Some(crate::scene::VERSION | crate::image::VERSION | crate::composite::VERSION)
+    ) {
+        return Ok(());
+    }
+    let existing: std::collections::HashSet<String> = serde_json::from_slice::<Value>(before)
+        .map(|v| crate::scene::content_violations(&v))
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    match crate::scene::content_violations(after)
+        .into_iter()
+        .find(|problem| !existing.contains(problem))
+    {
+        Some(problem) => bail!("{problem}; nothing was written"),
+        None => Ok(()),
+    }
 }
 
 pub fn validate_value(value: &Value) -> Result<()> {

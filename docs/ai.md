@@ -15,7 +15,10 @@ pentool ai resolve --capability generate
 
 Or with no prior state: `pentool ai connect --name studio --adapter openai-compatible
 --endpoint https://host/v1 --credential-env STUDIO_KEY`. Keys are references
-(`--credential-env NAME`, `--credential-file PATH`); `--api-key` is rejected.
+(`--credential-env NAME`, `--credential-file PATH`); `--api-key` is rejected. `--default-model` takes a bare id or `NAME/model` (the prefix must
+match `--name`). On Windows, a `--credential-file` must live under your user profile and
+outside the current project directory (there is no cheap per-file ACL check); on Unix it
+must not be group/world readable. Files over 4 KiB fail with `limit-exceeded`.
 `--ephemeral` / `PENTOOL_AI_EPHEMERAL=1` resolves from the environment and writes
 nothing. Generic variables: `PENTOOL_AI_PROVIDER`, `PENTOOL_AI_ENDPOINT`,
 `PENTOOL_AI_KEY`, `PENTOOL_AI_KEY_FILE`, `PENTOOL_AI_MODEL` (`provider/model`),
@@ -32,7 +35,11 @@ Errors under `--json` carry a stable `code` and a `fix` naming the corrective st
 | `openai-compatible` | generate | `/images/generations`, `b64_json` only; URL results are never fetched |
 
 Endpoints must be `https` (plain `http` only for loopback), cannot embed credentials,
-never follow redirects, and can be restricted with `PENTOOL_AI_ALLOW_HOSTS`.
+cannot carry a `#fragment` or a credential-like query parameter (`key`, `api_key`,
+`token`, `secret`, ... ; benign ones such as `api-version` are fine), never follow
+redirects, and can be restricted with `PENTOOL_AI_ALLOW_HOSTS`. `--dry-run` applies the
+same endpoint and host policy as a live call. Errors never print the query or fragment.
+`PENTOOL_AI=off` disables the commands and hides `ai` from `pentool --help`.
 
 ## Generate, review, accept
 
@@ -48,20 +55,31 @@ pentool ai run accept poster.pen RUN --candidate 2 --replace hero # swap pixels,
 pentool ai run discard poster.pen RUN
 ```
 
-Candidates are stored under `.pentool/ai-runs/` (newest 16 kept) and the document does
+Candidates are stored per document under `.pentool/ai-runs/<document-scope>/` (newest 16
+kept per document; documents in one folder never see each other's runs) and the document does
 not change until `accept`, which is one transaction with `--dry-run` and `--if-revision`.
+`--replace` fails with `stale-source` when the run was edited from an image that has since
+changed (pass `--allow-stale-source` to overwrite deliberately) and with `locked-layer` /
+`locked-node` when the target is locked; nothing is written in either case. Runs report
+`requested` versus `unique` candidates and a warning for provider duplicates (usage for
+every billed call is still recorded).
+
 Accepted nodes carry an `ai` provenance object (provider, model, prompt hash, run); the
 prompt text and credentials are never written to the document.
 
 Limits: `PENTOOL_AI_MAX_CALLS` (default and cap 8), `PENTOOL_AI_MAX_PIXELS`,
-`PENTOOL_AI_TIMEOUT_SECS`.
+`PENTOOL_AI_TIMEOUT_SECS` (1-3600). A malformed or out-of-range value fails closed with
+`invalid-option` before any request, and `pentool ai doctor` reports it under
+`limits.problems`.
 
 ## Background removal
 
 Models do not return alpha. Two supported routes:
 
 - `pentool ai edit doc.pen cut --source IMG --kind remove-background --allow-model-call`
-  asks the model for a flat `#FF00FF` background and keys it out locally.
+  asks the model for a flat `#FF00FF` background and keys it out locally. If the result
+  stays opaque (nothing keyed) the run fails with `keyout-failed`; transparent coverage is
+  recorded per candidate in the run (`keyout_transparent_coverage`).
 - `pentool ai keyout doc.pen cut --source IMG --key '#FF00FF'` is the offline route for
   any image already on a flat colour: no model, no network.
 
