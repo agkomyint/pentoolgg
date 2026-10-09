@@ -80,6 +80,9 @@ jobs:
           cargo run --release --locked --target ${{ matrix.target }} -- raw add photo-smoke.pen hero --file hero.dng
           cargo run --release --locked --target ${{ matrix.target }} -- raw develop photo-smoke.pen hero --exposure 0.3
           cargo run --release --locked --target ${{ matrix.target }} -- photo render photo-smoke.pen hero --out photo-smoke.png
+          cargo run --release --locked --target ${{ matrix.target }} -- photo place photo-smoke.pen hero --layer content --width 120
+          cargo run --release --locked --target ${{ matrix.target }} -- export photo-smoke.pen photo-page.png
+          cargo run --release --locked --target ${{ matrix.target }} -- export photo-smoke.pen photo-page.png
           cargo run --release --locked --target ${{ matrix.target }} -- photo export photo-smoke.pen --selection hero --recipe web-gallery --out photo-out
           cargo run --release --locked --target ${{ matrix.target }} -- benchmark --photo --photos 4 --megapixels 0.5 --repetitions 2 --max-ms 60000
       - name: Smoke test pages and import
