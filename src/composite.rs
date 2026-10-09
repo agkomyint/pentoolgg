@@ -9,7 +9,17 @@ use std::sync::{
     Arc,
 };
 thread_local! { static CANCEL: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) }; }
+#[cfg(test)]
+thread_local! { static TRIP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 pub(crate) fn check_cancelled() -> Result<()> {
+    #[cfg(test)]
+    if TRIP.with(|t| {
+        let left = t.get();
+        t.set(left.saturating_sub(1));
+        left == 1
+    }) {
+        bail!("[cancelled] cancelled at a test checkpoint")
+    }
     if CANCEL.with(|c| {
         c.borrow()
             .as_ref()
@@ -33,6 +43,15 @@ pub(crate) fn with_cancel<T>(
     let _reset = Reset(old);
     check_cancelled()?;
     operation()
+}
+/// Test hook: run `operation` with cancellation at its `n`th check on this
+/// thread (1-based). Returns the result and whether that check was reached.
+#[cfg(test)]
+pub(crate) fn cancel_at_check<T>(n: usize, operation: impl FnOnce() -> T) -> (T, bool) {
+    TRIP.with(|t| t.set(n));
+    let result = operation();
+    let reached = TRIP.with(|t| t.replace(0)) == 0;
+    (result, reached)
 }
 
 pub const VERSION: u64 = 6;

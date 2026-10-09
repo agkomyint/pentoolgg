@@ -580,7 +580,9 @@ fn read_look(tiff: &Tiff, ifd: &Ifd) -> Result<Option<HueSatMap>> {
         }
         Some(d) if d.len() == 3 && d[0] >= 1 && d[1] >= 2 => {
             let vals = d[2].max(1) as usize;
-            let entries = d[0] as usize * d[1] as usize * vals;
+            let entries = (d[0] as usize)
+                    .saturating_mul(d[1] as usize)
+                    .saturating_mul(vals);
             if entries > MAX_LUT_ENTRIES {
                 bail!("[limit-exceeded] ProfileLookTableDims {d:?} has {entries} entries; the limit is {MAX_LUT_ENTRIES}")
             }
@@ -664,7 +666,9 @@ impl CameraProfile {
             None => None,
             Some(d) if d.len() == 3 && d[0] >= 1 && d[1] >= 2 => {
                 let vals = d[2].max(1) as usize;
-                let entries = d[0] as usize * d[1] as usize * vals;
+                let entries = (d[0] as usize)
+                    .saturating_mul(d[1] as usize)
+                    .saturating_mul(vals);
                 if entries > MAX_LUT_ENTRIES {
                     bail!("[limit-exceeded] ProfileHueSatMapDims {d:?} has {entries} entries; the limit is {MAX_LUT_ENTRIES}")
                 }

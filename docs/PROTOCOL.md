@@ -51,7 +51,9 @@ format-migration consent; local plans never load linked files from the network.
 (`photo`) read the shared catalog and return its `revision`. `POST
 /api/photo/preview` (`photo`, `variant`, `edge`, `space` `srgb`|`display-p3`,
 `overlay` `none`|`clipping`|`gamut`|`mask:ID`, `uncropped`) returns `report` and a
-base64 `png` tagged for the space; it never writes. `POST /api/photo/edit`
+base64 `png` tagged for the space; it never writes the document. Previews are kept
+in `.pentool/cache/photo/` unless the server runs with `--no-cache`, and
+`report.cache` is `hit`, `miss` or `off`. `POST /api/photo/edit`
 (`edit`, `revision`, `dry_run`) applies one develop, rate, keyword, variant,
 snapshot, restore, sync or paint edit through the CLI engines as one
 revision-guarded, undoable transaction. A stale revision is `[conflict]` and any

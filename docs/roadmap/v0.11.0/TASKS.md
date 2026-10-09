@@ -362,6 +362,43 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 - [ ] **16. Prove conformance and performance.** Test hostile RAWs, profiles,
   precision, corrections, masks, merges, privacy, rollback, packaging, and caches.
 
+  *Status: implemented for review.* This item has five parts:
+  - `src/photo/cache.rs`: the preview cache specified in "Caches". Entries are
+    content-addressed PNGs carrying a CRC-checked `pnCk` key chunk, written
+    atomically and bounded by `PENTOOL_PHOTO_CACHE_BYTES` with LRU eviction.
+    It is used by the studio (`serve --no-cache` turns it off) and by the new
+    `photo preview` and `photo cache clear` commands;
+  - `pentool benchmark --photo` in `src/benchmark.rs`: ingest, cull, repeated
+    full-size develop, cold and cached preview, and batch export of a synthetic
+    Bayer shoot, with limits and `--max-ms`. Measurements are in
+    `docs/performance.md`;
+  - `tests/v0110_conformance.rs`: hostile DNG, DCP, lens-profile and PNG
+    mutation sweeps; pinned develop and HDR-merge digests; rollback of about
+    thirty failing commands; the cache contract; and a packaged shoot that
+    reproduces its exports byte for byte after installation elsewhere;
+  - `photo::cancellation` unit tests: decode and development, an external HDR
+    merge, and exports into new and existing directories are cancelled at
+    every checkpoint without mutation or orphan files;
+  - a bug the sweep found: a hostile `.dcp` whose table dimensions overflowed
+    `usize` panicked in `src/photo/profile.rs`. The sizes now saturate and are
+    refused with `[limit-exceeded]`, with a regression test.
+
+  Decisions:
+  - cancellation at each checkpoint is driven by a `#[cfg(test)]` counter in
+    `composite::check_cancelled`, so release builds carry no test hook;
+  - the shared transaction's "revision mismatch" error keeps its wording and
+    maps to `revision_conflict` as before, and the rollback test accepts it;
+  - the golden digests were pinned on Windows. Linux and macOS agreement is
+    proven only when hosted CI passes;
+  - benchmark figures come from one developer machine and are not a hosted-CI
+    claim;
+  - open contract question, not implemented: page rendering of a `photo` node
+    still fails with `[unsupported-capability]`, as "Until a build includes the
+    development pipeline" in `docs/photography-v1.md` allows. Whether v0.11.0
+    must render photo nodes on pages needs a decision before release.
+
+  The checkbox stays open until review and hosted CI pass.
+
 ## CLI direction
 
 ```sh

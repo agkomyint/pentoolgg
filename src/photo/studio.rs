@@ -56,7 +56,7 @@ impl Overlay {
         })
     }
 
-    fn name(&self) -> String {
+    pub fn name(&self) -> String {
         match self {
             Self::None => "none".into(),
             Self::Clipping => "clipping".into(),
@@ -193,6 +193,36 @@ pub fn preview(raw: &Value, document: &Path, request: &PreviewRequest) -> Result
         "delivery": output::report(&out, &counts, &measured),
     });
     Ok(Preview { png: bytes, report })
+}
+
+/// [`preview`] through `cache`, adding `cache` (`hit`, `miss` or `off`) to the
+/// report. The document is always validated first; a hit returns the same PNG
+/// bytes and report as a render, and only successful renders are stored.
+pub fn preview_cached(
+    raw: &Value,
+    document: &Path,
+    request: &PreviewRequest,
+    cache: Option<&super::cache::Cache>,
+) -> Result<Preview> {
+    use super::cache::{preview_key, Outcome};
+    crate::scene::validate(raw)?;
+    let key = cache.and_then(|_| preview_key(raw, request).ok());
+    if let (Some(cache), Some(key)) = (cache, &key) {
+        if let Some((png, mut report)) = cache.get(key) {
+            report["cache"] = json!(Outcome::Hit.name());
+            return Ok(Preview { png, report });
+        }
+    }
+    let mut preview = preview(raw, document, request)?;
+    let outcome = match (cache, &key) {
+        (Some(cache), Some(key)) => {
+            cache.put(key, &preview.png, &preview.report);
+            Outcome::Miss
+        }
+        _ => Outcome::Off,
+    };
+    preview.report["cache"] = json!(outcome.name());
+    Ok(preview)
 }
 
 /// 1 when a channel is at the top code, 2 when otherwise a channel is 0.

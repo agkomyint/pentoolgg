@@ -857,6 +857,12 @@ enum RawAction {
 }
 
 #[derive(Subcommand)]
+enum PhotoCacheAction {
+    /// Remove every cached preview of a document; the document is not changed.
+    Clear { input: PathBuf },
+}
+
+#[derive(Subcommand)]
 enum PhotoAction {
     /// Manage verified camera and lens profiles in photography.profiles.
     Profile {
@@ -903,6 +909,36 @@ enum PhotoAction {
         id: String,
         #[arg(long, default_value = "master")]
         variant: String,
+    },
+    /// Write the editor's 8-bit preview of a variant (served from the preview
+    /// cache when an identical preview was rendered before).
+    Preview {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        #[arg(long, default_value = "master")]
+        variant: String,
+        #[arg(long)]
+        out: PathBuf,
+        /// Long edge in pixels (1 to 4096); smaller develops are not enlarged.
+        #[arg(long, default_value_t = 1600)]
+        edge: u32,
+        #[arg(long, default_value = "srgb", value_parser = ["srgb", "display-p3"])]
+        space: String,
+        /// none, clipping, gamut or mask:ADJUSTMENT.
+        #[arg(long, default_value = "none")]
+        overlay: String,
+        /// Ignore the variant's crop.
+        #[arg(long)]
+        uncropped: bool,
+        /// Render instead of reading or writing `.pentool/cache/photo/`.
+        #[arg(long)]
+        no_cache: bool,
+    },
+    /// Manage the disposable preview cache in `.pentool/cache/photo/`.
+    Cache {
+        #[command(subcommand)]
+        action: PhotoCacheAction,
     },
     /// Merge exposure brackets into a new photo with a derived scene-linear DNG source.
     MergeHdr {
@@ -1583,6 +1619,16 @@ enum Command {
         /// Operations per image for --images (0-8).
         #[arg(long, default_value_t = 2)]
         operations: usize,
+        /// Benchmark photography: ingest, cull, develop, preview and export a
+        /// synthetic Bayer shoot.
+        #[arg(long, conflicts_with_all = ["images", "composite"])]
+        photo: bool,
+        /// Photos in the synthetic shoot for --photo (1-500).
+        #[arg(long, default_value_t = 24)]
+        photos: usize,
+        /// Megapixels of each source for --photo (0.01-50).
+        #[arg(long, default_value_t = 2.0)]
+        megapixels: f64,
         /// Emit machine-readable JSON (benchmark output is JSON by default).
         #[arg(long)]
         json: bool,
@@ -1740,6 +1786,9 @@ enum Command {
         host: String,
         #[arg(short, long, default_value_t = 4711)]
         port: u16,
+        /// Render every photo preview instead of using `.pentool/cache/photo/`.
+        #[arg(long)]
+        no_cache: bool,
     },
     /// Create an empty .pen document.
     New {
@@ -3007,6 +3056,7 @@ async fn run() -> Result<()> {
         input: None,
         host: "127.0.0.1".into(),
         port: 4711,
+        no_cache: false,
     }) {
         Command::Raw { action } => match action {
             RawAction::Add {
@@ -3807,6 +3857,50 @@ async fn run() -> Result<()> {
                 } else {
                     export::run(&raw, &input, &recipe, &planned, &out)?
                 };
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Preview {
+                input,
+                id,
+                variant,
+                out,
+                edge,
+                space,
+                overlay,
+                uncropped,
+                no_cache,
+            } => {
+                use pentool::photo::{cache::Cache, studio};
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let cache = (!no_cache).then(|| Cache::for_document(&input));
+                let preview = studio::preview_cached(
+                    &raw,
+                    &input,
+                    &studio::PreviewRequest {
+                        photo: &id,
+                        variant: &variant,
+                        edge,
+                        space: &space,
+                        overlay: studio::Overlay::parse(&overlay)?,
+                        uncropped,
+                    },
+                    cache.as_ref(),
+                )?;
+                let temporary = out.with_extension("png.tmp");
+                fs::write(&temporary, &preview.png)
+                    .with_context(|| format!("write {}", temporary.display()))?;
+                fs::rename(&temporary, &out).with_context(|| format!("write {}", out.display()))?;
+                let mut report = preview.report;
+                report["out"] = serde_json::json!(out.display().to_string());
+                report["bytes"] = serde_json::json!(preview.png.len());
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Cache {
+                action: PhotoCacheAction::Clear { input },
+            } => {
+                let report = pentool::photo::cache::clear(&input)?;
                 println!("{}", serde_json::to_string_pretty(&report)?);
                 Ok(())
             }
@@ -4846,9 +4940,21 @@ async fn run() -> Result<()> {
             blur_radius,
             source_size,
             operations,
+            photo: photo_benchmark,
+            photos,
+            megapixels,
             json: _,
         } => {
-            let value = if composite_benchmark {
+            let value = if photo_benchmark {
+                if scale != 1.0 || warmups != 1 {
+                    anyhow::bail!("photo benchmark sets its own sizes; omit --scale and --warmups")
+                }
+                benchmark::run_photo(benchmark::PhotoBenchmark {
+                    photos,
+                    megapixels,
+                    repetitions,
+                })?
+            } else if composite_benchmark {
                 if scale != 1.0 || warmups != 1 {
                     anyhow::bail!("composite benchmark uses scale 1 and one cold run; omit --scale and --warmups")
                 }
@@ -4879,6 +4985,25 @@ async fn run() -> Result<()> {
             } else {
                 benchmark::run(layers, objects, png, max_ms)?
             };
+            if photo_benchmark {
+                if let Some(max_ms) = max_ms {
+                    let t = &value["timings_us"];
+                    let develop = t["develop"].as_array().into_iter().flatten();
+                    let total = develop
+                        .filter_map(serde_json::Value::as_u64)
+                        .max()
+                        .unwrap_or(0)
+                        + t["ingest"].as_u64().unwrap_or(0)
+                        + t["cull"].as_u64().unwrap_or(0)
+                        + t["export"].as_u64().unwrap_or(0);
+                    if total as f64 / 1000.0 > max_ms as f64 {
+                        anyhow::bail!(
+                            "photo benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
+                            total as f64 / 1000.0
+                        )
+                    }
+                }
+            }
             if composite_benchmark {
                 if let Some(max_ms) = max_ms {
                     let worst = value["runs"]
@@ -5040,7 +5165,12 @@ async fn run() -> Result<()> {
             println!("{}", serde_json::json!({"change":change,"changes":changes}));
             Ok(())
         }
-        Command::Serve { host, port, input } => server::serve(&host, port, input).await,
+        Command::Serve {
+            host,
+            port,
+            input,
+            no_cache,
+        } => server::serve(&host, port, input, no_cache).await,
         Command::Page {
             input,
             action,

@@ -118,3 +118,47 @@ Correctness hardening lives in `tests/raster_hardening.rs`: seeded fuzzers for s
 streams, brush JSON, selection geometry, journal and tile corruption, and brush-asset
 imports; plus seam, soft-alpha/pressure and replay tests. The first run of the selection
 fuzzer found integer overflows in marquee and lasso bounds, now fixed.
+
+## Photography benchmark (v0.11)
+
+`pentool benchmark --photo` qualifies the photo engine on a synthetic shoot
+written to a temporary directory and removed afterwards:
+
+```sh
+pentool benchmark --photo --photos 24 --megapixels 2 --repetitions 3
+pentool benchmark --photo --photos 1 --megapixels 24 --repetitions 3 --max-ms 120000
+```
+
+Each source is a 3:2 RGGB DNG of 16-bit uncompressed strips (12-bit values,
+black 256, white 4095) with a smooth scene and deterministic per-photo texture.
+The run:
+
+1. writes the sources and ingests them by reference, as `raw add --external` does;
+2. culls: rates every photo 2, every other one 4, and searches `rating>=4`;
+3. develops the first photo at full size with tone, presence and a radial local
+   adjustment, `--repetitions` times, and requires identical bits;
+4. renders its Display P3 clipping preview twice through the preview cache, a
+   miss and then a hit, and requires identical bytes;
+5. exports the whole shoot with the `web-gallery` recipe.
+
+The JSON report holds the fixture, `timings_us` (`generate`, `ingest`, `cull`,
+`develop` per repetition, `preview` with each `cache` outcome, `export`), the
+export file count and bytes, the develop and preview digests, and the peak
+resident memory. `--max-ms` bounds the worst develop plus ingest, cull and
+export. `--photos` is 1–500, `--megapixels` 0.01–50 and `--repetitions` 1–20;
+`--scale` and `--warmups` are refused.
+
+Measured on Windows 11 with an Intel Core i9-11900H, rustc 1.85.1, release
+build, one developer machine (not a hosted-CI claim):
+
+| Case | Result |
+| --- | --- |
+| 8 photos of 0.5 MP | develop 0.19–0.21 s; preview 247 ms cold, 11 ms from the cache; export of 8 files 1.73 s; peak 50 MB |
+| 100 photos of 2 MP | generate 22 s; ingest 0.45 s; cull 3 ms; develop 0.69 s; export of 100 files 101 s (23 MB); peak 111 MB |
+| 1 photo of 24 MP (6000x4000) | develop median 10–12 s (runs 9.5–16.6 s); preview 12.4 s cold, 26 ms from the cache; export 15.4 s; peak 1.12 GB |
+
+A first 24 MP develop of 48.6 s was a single outlier that did not reproduce.
+Memory grows with the size of the photo being developed, not with the size of
+the shoot: 100 photos peak lower than a single 24 MP develop. Batch export is the
+long pole of a large shoot at about 1 s per 2 MP photo, and a cached preview turns
+a full develop into a file read.

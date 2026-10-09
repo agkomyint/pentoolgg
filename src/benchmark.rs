@@ -574,3 +574,288 @@ fn image_bench_in(dir: &std::path::Path, c: ImageBenchmark) -> Result<Value> {
             "source_height":c.source_size,"operations_per_image":c.operations,"document_bytes":fs::metadata(&path)?.len()},
         "render":{"scale":c.scale},"runs":runs,"peak_resident_bytes":peak_resident_bytes()}))
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct PhotoBenchmark {
+    /// Photos in the synthetic shoot.
+    pub photos: usize,
+    /// Megapixels of each 3:2 Bayer source.
+    pub megapixels: f64,
+    pub repetitions: usize,
+}
+
+/// A 16-bit uncompressed RGGB DNG, 12-bit values (black 256, white 4095), of
+/// a smooth scene with deterministic texture that varies with `seed`.
+pub(crate) fn bayer_dng(width: u32, height: u32, seed: u64) -> Vec<u8> {
+    let rows_per_strip = 256.min(height);
+    let mut pixels = Vec::with_capacity(width as usize * height as usize * 2);
+    for y in 0..height {
+        for x in 0..width {
+            let mut h = ((u64::from(x / 4) << 32) | u64::from(y / 4))
+                ^ seed.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            h ^= h >> 29;
+            h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            h ^= h >> 32;
+            let (u, v) = (
+                f64::from(x) / f64::from(width),
+                f64::from(y) / f64::from(height),
+            );
+            let channel = [1.0, 0.8, 0.8, 0.55][((y & 1) * 2 + (x & 1)) as usize];
+            let scene = 0.08 + 0.55 * u * (1.0 - 0.4 * v) + 0.12 * ((h % 1000) as f64 / 1000.0);
+            let value = 256.0 + (scene * channel).min(1.0) * 3839.0;
+            pixels.extend((value.round() as u16).to_le_bytes());
+        }
+    }
+    let row_bytes = width * 2;
+    let strips = height.div_ceil(rows_per_strip);
+    let offsets: Vec<u32> = (0..strips)
+        .map(|s| 8 + s * rows_per_strip * row_bytes)
+        .collect();
+    let counts: Vec<u32> = (0..strips)
+        .map(|s| (height - s * rows_per_strip).min(rows_per_strip) * row_bytes)
+        .collect();
+    let srational = |v: &[f64]| -> Vec<u8> {
+        v.iter()
+            .flat_map(|x| {
+                [
+                    ((x * 10_000.0).round() as i32).to_le_bytes(),
+                    10_000i32.to_le_bytes(),
+                ]
+                .concat()
+            })
+            .collect()
+    };
+    let shorts = |v: &[u16]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let longs = |v: &[u32]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let model = b"Pentool Benchmark Body\0".to_vec();
+    // (tag, TIFF type, count, little-endian value bytes), in tag order.
+    let entries: Vec<(u16, u16, u32, Vec<u8>)> = vec![
+        (254, 4, 1, longs(&[0])),
+        (256, 4, 1, longs(&[width])),
+        (257, 4, 1, longs(&[height])),
+        (258, 3, 1, shorts(&[16])),
+        (259, 3, 1, shorts(&[1])),
+        (262, 3, 1, shorts(&[32803])),
+        (273, 4, strips, longs(&offsets)),
+        (277, 3, 1, shorts(&[1])),
+        (278, 4, 1, longs(&[rows_per_strip])),
+        (279, 4, strips, longs(&counts)),
+        (33421, 3, 2, shorts(&[2, 2])),
+        (33422, 1, 4, vec![0, 1, 1, 2]),
+        (50706, 1, 4, vec![1, 4, 0, 0]),
+        (50708, 2, model.len() as u32, model),
+        (50714, 4, 1, longs(&[256])),
+        (50717, 4, 1, longs(&[4095])),
+        (
+            50721,
+            10,
+            9,
+            srational(&[
+                0.6461, -0.0907, -0.0882, -0.4300, 1.2184, 0.2378, -0.0819, 0.1944, 0.5931,
+            ]),
+        ),
+        (50728, 10, 3, srational(&[0.5, 1.0, 0.75])),
+        (50778, 3, 1, shorts(&[21])),
+    ];
+    let mut out = b"II*\0".to_vec();
+    let ifd = 8 + pixels.len();
+    out.extend((ifd as u32).to_le_bytes());
+    out.extend(pixels);
+    let mut data_at = ifd + 2 + 12 * entries.len() + 4;
+    let mut data = Vec::new();
+    out.extend((entries.len() as u16).to_le_bytes());
+    for (tag, kind, count, bytes) in &entries {
+        out.extend(tag.to_le_bytes());
+        out.extend(kind.to_le_bytes());
+        out.extend(count.to_le_bytes());
+        if bytes.len() <= 4 {
+            let mut inline = bytes.clone();
+            inline.resize(4, 0);
+            out.extend(inline);
+        } else {
+            out.extend((data_at as u32).to_le_bytes());
+            data.extend(bytes);
+            data_at += bytes.len();
+            if bytes.len() % 2 == 1 {
+                data.push(0);
+                data_at += 1;
+            }
+        }
+    }
+    out.extend(0u32.to_le_bytes());
+    out.extend(data);
+    out
+}
+
+/// Photography qualification: ingest and cull a synthetic Bayer shoot, develop
+/// one photo at full size with tone, presence and a radial local adjustment,
+/// render its editor preview cold and then from the cache, and batch-export
+/// the shoot with the `web-gallery` recipe. Repeated develops and the cached
+/// preview must be identical to the first.
+pub fn run_photo(c: PhotoBenchmark) -> Result<Value> {
+    use crate::photo::{cache, catalog, export, organize, studio};
+    use rand_core::RngCore;
+    if !(1..=500).contains(&c.photos)
+        || !(0.01..=50.0).contains(&c.megapixels)
+        || !(1..=20).contains(&c.repetitions)
+    {
+        bail!("photo benchmark: photos 1–500, megapixels 0.01–50, repetitions 1–20")
+    }
+    let width = (((c.megapixels * 1e6 * 1.5).sqrt() / 2.0).round() as u32 * 2).max(16);
+    let height = ((f64::from(width) / 3.0).round() as u32 * 2).max(16);
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let path = std::env::temp_dir().join(format!(
+        "pentool-photo-bench-{:016x}",
+        rand_core::OsRng.next_u64()
+    ));
+    fs::create_dir_all(path.join("shoot"))?;
+    let scratch = Scratch(path);
+    let document = scratch.0.join("shoot.pen");
+
+    let start = Instant::now();
+    let mut source_bytes = 0u64;
+    for i in 0..c.photos {
+        let bytes = bayer_dng(width, height, i as u64);
+        source_bytes += bytes.len() as u64;
+        fs::write(scratch.0.join("shoot").join(format!("p{i:03}.dng")), bytes)?;
+    }
+    let generate_us = micros(start);
+
+    let mut raw = crate::scene::new_document(1200, 800);
+    let ids: Vec<String> = (0..c.photos).map(|i| format!("p{i:03}")).collect();
+    let start = Instant::now();
+    for id in &ids {
+        let relative = std::path::PathBuf::from(format!("shoot/{id}.dng"));
+        let bytes = fs::read(scratch.0.join(&relative))?;
+        catalog::add_raw(
+            &mut raw,
+            id,
+            id,
+            &bytes,
+            crate::image::external_storage(&relative)?,
+            catalog::camera_profile("auto")?,
+        )?;
+    }
+    let ingest_us = micros(start);
+
+    let rating = |n| organize::Rating {
+        rating: Some(n),
+        pick: None,
+        label: None,
+    };
+    let start = Instant::now();
+    let alternate: Vec<String> = ids.iter().step_by(2).cloned().collect();
+    organize::rate(&mut raw, &organize::Selection::Ids(ids.clone()), &rating(2))?;
+    organize::rate(&mut raw, &organize::Selection::Ids(alternate), &rating(4))?;
+    let picked = organize::search(&raw, "rating>=4", 100, 0)?;
+    let cull_us = micros(start);
+    if picked["matches"] != json!(c.photos.div_ceil(2)) {
+        bail!(
+            "photo benchmark: culling selected {} photos",
+            picked["matches"]
+        )
+    }
+
+    let develop = &mut raw["photography"]["photos"][0]["variants"][0]["develop"];
+    develop["tone"] = json!({"exposure": 0.35, "contrast": 12, "highlights": -20, "shadows": 15});
+    develop["presence"] = json!({"clarity": 10, "vibrance": 15});
+    develop["local"] = json!([{"id": "center", "mask": {"components": [
+        {"kind": "radial", "mode": "add", "center": [0.5, 0.5], "radius": [0.3, 0.3]}]},
+        "params": {"exposure": 0.4}}]);
+    crate::scene::validate(&raw)?;
+    let json_bytes = serde_json::to_vec(&raw)?;
+    fs::write(&document, &json_bytes)?;
+
+    let mut develops = Vec::new();
+    let mut develop_hash = None;
+    for _ in 0..c.repetitions {
+        let start = Instant::now();
+        let developed = catalog::render_validated(&raw, &document, "p000", "master")?;
+        develops.push(micros(start));
+        let bits: Vec<u8> = developed
+            .image
+            .rgb
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let hash = crate::resource::sha256(&bits);
+        if develop_hash.as_ref().is_some_and(|e| *e != hash) {
+            bail!("repeated photo develops differ")
+        }
+        develop_hash = Some(hash);
+    }
+
+    let preview_cache = cache::Cache::with_limit(&document, cache::DEFAULT_LIMIT);
+    let request = studio::PreviewRequest {
+        photo: "p000",
+        variant: "master",
+        edge: studio::DEFAULT_EDGE,
+        space: "display-p3",
+        overlay: studio::Overlay::Clipping,
+        uncropped: false,
+    };
+    let mut previews = Vec::new();
+    let mut preview_hash = None;
+    for _ in 0..2 {
+        let start = Instant::now();
+        let preview = studio::preview_cached(&raw, &document, &request, Some(&preview_cache))?;
+        let elapsed = micros(start);
+        let hash = crate::resource::sha256(&preview.png);
+        if preview_hash.as_ref().is_some_and(|e| *e != hash) {
+            bail!("cached photo preview differs from the rendered one")
+        }
+        preview_hash = Some(hash);
+        previews.push(json!({"cache": preview.report["cache"], "total_us": elapsed, "png_bytes": preview.png.len()}));
+    }
+
+    let recipe = export::Recipe::named(&raw, "web-gallery")?;
+    let out = scratch.0.join("delivery");
+    let start = Instant::now();
+    let planned = export::plan(
+        &raw,
+        &document,
+        &recipe,
+        &ids,
+        &export::Variants::Master,
+        &out,
+        false,
+    )?;
+    export::run(&raw, &document, &recipe, &planned, &out)?;
+    let export_us = micros(start);
+    let output_bytes: u64 = fs::read_dir(&out)?
+        .filter_map(|e| e.ok()?.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum();
+
+    Ok(json!({
+        "schema_version": 1,
+        "benchmark": "photo",
+        "fixture": {
+            "photos": c.photos,
+            "width": width,
+            "height": height,
+            "megapixels": f64::from(width) * f64::from(height) / 1e6,
+            "source_bytes": source_bytes,
+            "catalog_json_bytes": json_bytes.len(),
+            "develop": "p000: tone, presence and one radial local adjustment",
+        },
+        "timings_us": {
+            "generate": generate_us,
+            "ingest": ingest_us,
+            "cull": cull_us,
+            "develop": develops,
+            "preview": previews,
+            "export": export_us,
+        },
+        "export": {"recipe": "web-gallery", "files": planned.len(), "bytes": output_bytes},
+        "develop_sha256": develop_hash,
+        "preview_sha256": preview_hash,
+        "peak_resident_bytes": peak_resident_bytes(),
+    }))
+}

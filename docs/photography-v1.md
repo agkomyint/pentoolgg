@@ -1497,6 +1497,35 @@ or a package.
 - A cache write failure never fails the command, and no read-only command modifies
   the document.
 
+Previews are what the cache holds today: the studio's `POST /api/photo/preview`
+and `pentool photo preview DOC PHOTO --out FILE.png [--variant ID] [--edge N]
+[--space srgb|display-p3] [--overlay none|clipping|gamut|mask:ID] [--uncropped]
+[--no-cache]`, which writes the same 8-bit PNG and prints its report.
+
+- The key is the hex SHA-256 of canonical JSON `{cache: 1, purpose:
+  "studio-preview", preview, engine, process, source, profiles, masks, develop,
+  space, size, overlay, uncropped}`. `profiles` and `masks` are the `sha256:`
+  digests the develop settings name, split by whether `photography.profiles`
+  holds them; `size` is the requested long edge.
+- An entry is `{key}.png`: the preview PNG with one extra ancillary `pnCk` chunk
+  before `IEND` that holds `{key, report}`. A read verifies every chunk CRC,
+  requires exactly one `pnCk` whose key equals the file name's, and returns the
+  PNG without that chunk, so a hit is byte-identical to a render. A corrupt,
+  truncated or renamed entry is a miss and is overwritten.
+- Writes go to a temporary file renamed into place. A hit refreshes the entry's
+  modification time, and after each write the oldest entries are deleted until
+  the total is within the bound, never the entry just written. A value of
+  `PENTOOL_PHOTO_CACHE_BYTES` that is not an integer means the default; `0` keeps
+  nothing.
+- The preview report carries `cache`: `hit`, `miss` or `off` (`--no-cache`, or
+  `serve --no-cache` for the studio).
+- `photo cache clear DOC` deletes only regular files named like entries (64 hex
+  digits and `.png`, or an interrupted `.tmp-` write) and reports
+  `{directory, removed_entries, removed_bytes}`. A missing document is
+  `[missing-resource]`.
+- `package pack` packs `.pen` documents only, so caches beside a packaged
+  catalog never enter a package.
+
 ## Page placement (`photo` node)
 
 ```json
@@ -1526,7 +1555,12 @@ ordering depends on the thread count. Transcendental functions (`log2`, `exp2`,
 `pow`, `sin`, `cos`, `atan2`) are in-tree, fixed-coefficient implementations shared
 with the raster engine's approach. Parallelism is per tile with independent outputs.
 Seeds (grain, RANSAC) are stored in the document. Golden tests compare SHA-256
-hashes of 16-bit outputs on Linux, Windows, macOS ARM and macOS Intel.
+hashes of 16-bit outputs on Linux, Windows, macOS ARM and macOS Intel:
+`tests/v0110_conformance.rs` pins the 16-bit Display P3 render of
+`photo-dng-rggb16.dng` under a develop that touches white balance, tone,
+presence, sharpening, seeded grain, vignette, lens distortion and a radial local
+adjustment, and the derived-source digest of an HDR merge. A change to either is
+a process-version change, never a refreshed hash.
 
 ## Commands (CLI surface)
 
@@ -1711,3 +1745,27 @@ things:
   without modifying it.
 
 Item 3 replaces that last check with real validation.
+
+`tests/v0110_conformance.rs` and the `photo::cancellation` unit tests prove the
+release as a whole:
+
+- hostile inputs: every truncation of `photo-dng-rggb16.dng`, a `.dcp`, a lens
+  profile and `photo-rgb16-p3.png`, and every byte of each set to `0xFF` or
+  inverted, go through inspection, metadata reading, import and development (or
+  profile and PNG reading) without a panic, and every refusal names a code;
+- determinism: the pinned digests above;
+- rollback: about thirty failing photo commands (bad values, revision guards,
+  unknown IDs, hostile and foreign sources, escaping paths, bad recipes and
+  exports) leave the document and every file in its folder byte-identical;
+- cancellation: decode and development, an HDR merge with `--external`, and
+  exports into a new or an existing directory are cancelled at every
+  checkpoint they reach; each fails with `[cancelled]` and leaves no change,
+  derived source, staged file or created directory;
+- caches: the contract in [Caches](#caches), including corrupt and renamed
+  entries, the LRU bound, `0`, an unusable cache directory and `clear`;
+- offline reproduction: a rated, profiled, locally adjusted shoot with a
+  monochrome variant, synced settings and an HDR merge is exported with
+  `web-gallery`, `archive-master`, `photo-lab` and a document recipe, packed,
+  installed elsewhere and exported again with identical bytes, and its preview
+  cache stays out of the package;
+- the photo benchmark's report and limits.

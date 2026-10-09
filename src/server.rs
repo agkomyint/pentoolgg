@@ -20,6 +20,8 @@ struct Shared {
     project_root: PathBuf,
     gate: Arc<Mutex<()>>,
     previews: Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+    /// Bypass the photo preview cache (`serve --no-cache`).
+    no_cache: bool,
 }
 
 const INDEX: &str = include_str!("../web/index.html");
@@ -30,7 +32,7 @@ const COMPOSITE_PANEL_JS: &str = include_str!("../web/composite-panel.js");
 const RASTER_PANEL_JS: &str = include_str!("../web/raster-panel.js");
 const PHOTO_PANEL_JS: &str = include_str!("../web/photo-panel.js");
 
-pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
+pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool) -> Result<()> {
     if let Some(path) = &file {
         let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
         crate::transaction::validate_value(&value)?;
@@ -105,6 +107,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
             project_root: std::env::current_dir()?,
             gate: Arc::new(Mutex::new(())),
             previews: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            no_cache,
         });
     println!("Pentool listening on http://{address}");
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -810,10 +813,12 @@ fn photo_preview_value(
     raw: &serde_json::Value,
     file: &std::path::Path,
     body: &PhotoPreviewRequest,
+    no_cache: bool,
 ) -> Result<serde_json::Value> {
-    use crate::photo::studio;
+    use crate::photo::{cache::Cache, studio};
     use base64::Engine;
-    let preview = studio::preview(
+    let cache = (!no_cache).then(|| Cache::for_document(file));
+    let preview = studio::preview_cached(
         raw,
         file,
         &studio::PreviewRequest {
@@ -824,6 +829,7 @@ fn photo_preview_value(
             overlay: studio::Overlay::parse(&body.overlay)?,
             uncropped: body.uncropped,
         },
+        cache.as_ref(),
     )?;
     Ok(serde_json::json!({
         "report": preview.report,
@@ -837,7 +843,7 @@ async fn photo_preview(
 ) -> Response {
     let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
         let (file, raw, revision) = shared_photo_document(&state)?;
-        let mut value = photo_preview_value(&raw, &file, &body)?;
+        let mut value = photo_preview_value(&raw, &file, &body, state.no_cache)?;
         value["revision"] = serde_json::json!(revision);
         Ok(value)
     })
