@@ -910,6 +910,38 @@ enum PhotoAction {
         #[arg(long, default_value = "master")]
         variant: String,
     },
+    /// Place a variant on a page layer as a `photo` node. Without --width and
+    /// --height the node takes the developed size; with one, the other follows
+    /// the developed aspect ratio. Use --page to choose a page.
+    Place {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        #[arg(long, default_value = "master")]
+        variant: String,
+        #[arg(long)]
+        layer: String,
+        /// Node ID (default: PHOTO-VARIANT, numbered when taken).
+        #[arg(long = "id")]
+        node_id: Option<String>,
+        #[arg(long, default_value_t = 0.0)]
+        x: f64,
+        #[arg(long, default_value_t = 0.0)]
+        y: f64,
+        #[arg(long)]
+        width: Option<f64>,
+        #[arg(long)]
+        height: Option<f64>,
+        #[arg(long, value_enum, default_value = "contain")]
+        fit: image::Fit,
+        /// Focal position within the frame, as X,Y in 0–1.
+        #[arg(long, value_delimiter = ',', default_value = "0.5,0.5")]
+        position: Vec<f64>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
     /// Write the editor's 8-bit preview of a variant (served from the preview
     /// cache when an identical preview was rendered before).
     Preview {
@@ -3493,6 +3525,53 @@ async fn run() -> Result<()> {
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let report = pentool::photo::catalog::photo_info(&raw, &input, &id, &variant)?;
                 println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Place {
+                input,
+                id,
+                variant,
+                layer,
+                node_id,
+                x,
+                y,
+                width,
+                height,
+                fit,
+                position,
+                dry_run,
+                if_revision,
+            } => {
+                let position: [f64; 2] = position.try_into().map_err(|_| {
+                    anyhow::anyhow!("[invalid-input] --position takes two numbers such as 0.5,0.5")
+                })?;
+                let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let placement = pentool::photo::catalog::Placement {
+                    page: selected_page.map(str::to_string),
+                    layer,
+                    id: node_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    fit: fit.as_str().to_string(),
+                    position,
+                };
+                let result =
+                    pentool::photo::catalog::place(&mut raw, &input, &id, &variant, &placement)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "photo-place",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"change":change,"result":result})
+                    )?
+                );
                 Ok(())
             }
             PhotoAction::MergeHdr {

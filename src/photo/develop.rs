@@ -51,8 +51,14 @@ pub(super) fn group<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, 
 
 pub(super) fn allowed(object: &Map<String, Value>, keys: &[&str], what: &str) -> Result<()> {
     if let Some(key) = object.keys().find(|key| !keys.contains(&key.as_str())) {
+        // `crop` is its own group, not part of `geometry`.
+        let hint = if key == "crop" && what.ends_with(" geometry") {
+            "; crop is a separate group, so use crop.rect, crop.aspect or crop.constrain"
+        } else {
+            ""
+        };
         bail!(
-            "[invalid-develop] {what} has unknown parameter {key:?}; expected one of {}",
+            "[invalid-develop] {what} has unknown parameter {key:?}; expected one of {}{hint}",
             keys.join(", ")
         )
     }
@@ -109,6 +115,9 @@ pub fn validate(develop: &Map<String, Value>, source: &Source, what: &str) -> Re
         bail!("[invalid-develop] {what} develop has unknown group {key:?}")
     }
     for (key, value) in develop {
+        if key == "monochrome" && value.is_boolean() {
+            bail!("[invalid-develop] {what} develop.monochrome must be an object; set monochrome.enabled={value} instead")
+        }
         if key != "process" && key != "local" && !value.is_object() {
             bail!("[invalid-develop] {what} develop.{key} must be an object")
         }
@@ -273,7 +282,7 @@ fn validate_development(develop: &Map<String, Value>, what: &str) -> Result<()> 
             match grain.get("seed") {
                 Some(seed) if seed.as_u64().is_some_and(|s| s <= u64::from(u32::MAX)) => {}
                 Some(seed) => bail!("[invalid-develop] {where_}.seed must be an integer in 0–4294967295; got {seed}"),
-                None => bail!("[invalid-develop] {where_}.seed is required so the grain is reproducible"),
+                None => bail!("[invalid-develop] {where_}.seed is required so the grain is reproducible; add one, for example {{\"amount\": 25, \"seed\": 1}}"),
             }
         }
     }

@@ -22,6 +22,8 @@ pub const DEFAULT_LIMIT: u64 = 2 << 30;
 pub const LIMIT_VARIABLE: &str = "PENTOOL_PHOTO_CACHE_BYTES";
 /// Bumped whenever preview rendering changes its output for the same inputs.
 const PREVIEW_VERSION: u64 = 1;
+/// Bumped whenever page renditions change their output for the same inputs.
+const RENDITION_VERSION: u64 = 1;
 /// The private ancillary chunk holding `{key, report}`.
 const CHUNK: [u8; 4] = *b"pnCk";
 
@@ -194,23 +196,59 @@ pub fn clear(document: &Path) -> Result<Value> {
     }))
 }
 
-/// The key of a studio preview: SHA-256 of canonical JSON over the engine,
-/// process, source digest, referenced profile and mask digests, the develop
-/// settings and the request. Fails when the photo or variant does not exist,
-/// so the caller renders and reports the real error.
+/// The key of a studio preview. Fails when the photo or variant does not
+/// exist, so the caller renders and reports the real error.
 pub fn preview_key(raw: &Value, request: &super::studio::PreviewRequest) -> Result<String> {
+    key(
+        raw,
+        request.photo,
+        request.variant,
+        json!({
+            "purpose": "studio-preview",
+            "preview": PREVIEW_VERSION,
+            "space": request.space,
+            "size": request.edge,
+            "overlay": request.overlay.name(),
+            "uncropped": request.uncropped,
+        }),
+    )
+}
+
+/// The key of a page rendition of a `photo` node: the 8-bit sRGB PNG of
+/// `photo`/`variant`, reduced to `max_edge` when one is given.
+pub fn rendition_key(
+    raw: &Value,
+    photo: &str,
+    variant: &str,
+    max_edge: Option<u32>,
+) -> Result<String> {
+    key(
+        raw,
+        photo,
+        variant,
+        json!({
+            "purpose": "page-rendition",
+            "rendition": RENDITION_VERSION,
+            "size": max_edge,
+        }),
+    )
+}
+
+/// SHA-256 of canonical JSON over the engine, process, source digest,
+/// referenced profile and mask digests, the develop settings and `request`.
+fn key(raw: &Value, photo: &str, variant: &str, request: Value) -> Result<String> {
     let catalog = &raw["photography"];
     let photo = catalog["photos"]
         .as_array()
         .into_iter()
         .flatten()
-        .find(|p| p["id"] == request.photo)
+        .find(|p| p["id"] == photo)
         .context("photo")?;
     let develop = &photo["variants"]
         .as_array()
         .into_iter()
         .flatten()
-        .find(|v| v["id"] == request.variant)
+        .find(|v| v["id"] == variant)
         .context("variant")?["develop"];
     let mut digests = Vec::new();
     collect_digests(develop, &mut digests);
@@ -219,21 +257,18 @@ pub fn preview_key(raw: &Value, request: &super::studio::PreviewRequest) -> Resu
     let (profiles, masks): (Vec<_>, Vec<_>) = digests
         .into_iter()
         .partition(|d| catalog["profiles"].get(d.as_str()).is_some());
-    let canonical = json!({
+    let mut canonical = json!({
         "cache": 1,
-        "purpose": "studio-preview",
-        "preview": PREVIEW_VERSION,
         "engine": catalog::ENGINE,
         "process": develop["process"],
         "source": photo["source"],
         "profiles": profiles,
         "masks": masks,
         "develop": develop,
-        "space": request.space,
-        "size": request.edge,
-        "overlay": request.overlay.name(),
-        "uncropped": request.uncropped,
     });
+    if let (Some(canonical), Value::Object(request)) = (canonical.as_object_mut(), request) {
+        canonical.extend(request);
+    }
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(&canonical)?)))
 }
 

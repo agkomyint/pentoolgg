@@ -197,16 +197,34 @@ pub fn preview(raw: &Value, document: &Path, request: &PreviewRequest) -> Result
 
 /// The `srgb8` rendition a page shows for a `photo` node: the developed variant,
 /// reduced in linear light when `max_edge` (a version 5 proxy render) is
-/// smaller, through stage 11 into sRGB with the perceptual intent. Returns the RGBA pixels and the developed
-/// size, which placement uses so that a reduced rendition lands in the same
-/// rectangle. `raw` must already be validated.
+/// smaller, through stage 11 into sRGB with the perceptual intent. Returns the
+/// rendition as PNG bytes and the developed size, which placement uses so that
+/// a reduced rendition lands in the same rectangle. `raw` must already be
+/// validated.
+///
+/// Renditions go through `cache` like previews: a hit returns the same PNG
+/// bytes a render would, and only successful renders are stored.
 pub fn node_rendition(
     raw: &Value,
     document: &Path,
     photo: &str,
     variant: &str,
     max_edge: Option<u32>,
-) -> Result<(image::RgbaImage, u32, u32)> {
+    cache: Option<&super::cache::Cache>,
+) -> Result<(Vec<u8>, u32, u32)> {
+    let key = cache.and_then(|_| super::cache::rendition_key(raw, photo, variant, max_edge).ok());
+    if let (Some(cache), Some(key)) = (cache, &key) {
+        if let Some((png, report)) = cache.get(key) {
+            let size = |i: usize| {
+                report["developed"][i]
+                    .as_u64()
+                    .and_then(|v| u32::try_from(v).ok())
+            };
+            if let (Some(dw), Some(dh)) = (size(0), size(1)) {
+                return Ok((png, dw, dh));
+            }
+        }
+    }
     let developed = catalog::render_validated(raw, document, photo, variant)?;
     let (dw, dh) = (developed.image.width, developed.image.height);
     let (width, height) = max_edge.map_or((dw, dh), |edge| fit(dw, dh, edge));
@@ -217,6 +235,7 @@ pub fn node_rendition(
     };
     let out = output::Output::new(Some("srgb"), Some(8), "perceptual", None, None)?;
     let (raster, _) = output::render(&image, &developed.rendering, true, &out)?;
+    drop(image);
     let Samples::Eight(samples) = raster.samples else {
         bail!("photo node rendition must be 8-bit")
     };
@@ -227,7 +246,15 @@ pub fn node_rendition(
         .collect();
     let pixels = image::RgbaImage::from_raw(raster.width, raster.height, rgba)
         .context("photo node rendition has the wrong size")?;
-    Ok((pixels, dw, dh))
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(pixels)
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .context("could not encode the photo node rendition")?;
+    let png = encoded.into_inner();
+    if let (Some(cache), Some(key)) = (cache, &key) {
+        cache.put(key, &png, &json!({"developed": [dw, dh]}));
+    }
+    Ok((png, dw, dh))
 }
 
 /// [`preview`] through `cache`, adding `cache` (`hit`, `miss` or `off`) to the

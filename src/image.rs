@@ -34,7 +34,7 @@ pub enum Fit {
 }
 
 impl Fit {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Fill => "fill",
             Self::Contain => "contain",
@@ -836,12 +836,14 @@ fn write_photo(
     context: &SvgContext,
     clip_index: &mut usize,
 ) -> Result<()> {
-    let (pixels, width, height) = crate::photo::studio::node_rendition(
+    let cache = crate::photo::cache::Cache::for_document(context.document);
+    let (png, width, height) = crate::photo::studio::node_rendition(
         raw,
         context.document,
         string(node, "photo")?,
         string(node, "variant")?,
         context.proxy_edge,
+        Some(&cache),
     )?;
     let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
     write_placed(
@@ -850,7 +852,10 @@ fn write_photo(
         (f64::from(width), f64::from(height)),
         &[0.0, 0.0, 1.0, 1.0],
         opacity,
-        &png_href(pixels)?,
+        &format!(
+            "href=\"data:image/png;base64,{}\"",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        ),
         clip_index,
     )
 }

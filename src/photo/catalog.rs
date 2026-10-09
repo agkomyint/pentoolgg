@@ -1541,6 +1541,142 @@ pub fn brush_plane(
 
 /// `photo info`: the resolved frame of a variant without decoding pixels,
 /// plus the number of output pixels whose source lies outside the image.
+/// Where `photo place` puts a photo node. A missing width or height follows
+/// the variant's developed aspect ratio; when both are missing the node takes
+/// the developed size.
+pub struct Placement {
+    pub page: Option<String>,
+    pub layer: String,
+    pub id: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub fit: String,
+    pub position: [f64; 2],
+}
+
+/// `photo place`: add a `photo` node showing a variant to a page layer.
+pub fn place(
+    raw: &mut Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+    placement: &Placement,
+) -> Result<Value> {
+    crate::scene::validate(raw)?;
+    for (name, value) in [("width", placement.width), ("height", placement.height)] {
+        if value.is_some_and(|v| !(v.is_finite() && v > 0.0)) {
+            bail!("[invalid-input] --{name} must be a positive number")
+        }
+    }
+    let (width, height) = match (placement.width, placement.height) {
+        (Some(w), Some(h)) => (w, h),
+        (w, h) => {
+            let report = info_validated(raw, document, photo_id, variant_id)?;
+            let size = |i: usize| report["output"][i].as_f64().unwrap_or(1.0).max(1.0);
+            let (dw, dh) = (size(0), size(1));
+            match (w, h) {
+                (Some(w), None) => (w, w * dh / dw),
+                (None, Some(h)) => (h * dw / dh, h),
+                _ => (dw, dh),
+            }
+        }
+    };
+    // Refuse a missing photo or variant before touching the page.
+    find(raw, document, photo_id, variant_id)?;
+
+    let mut document_value = raw.clone();
+    let pages = document_value
+        .get_mut("pages")
+        .and_then(Value::as_array_mut)
+        .context("[malformed-resource] the document has no pages")?;
+    let page = match placement.page.as_deref() {
+        Some(page_id) => pages
+            .iter_mut()
+            .find(|page| page["id"] == page_id)
+            .with_context(|| format!("[missing-resource] page {page_id} not found"))?,
+        None => pages
+            .first_mut()
+            .context("[missing-resource] the document has no pages")?,
+    };
+    let page_id = page["id"].as_str().unwrap_or_default().to_string();
+    let mut used = HashSet::new();
+    fn collect(nodes: &[Value], used: &mut HashSet<String>) {
+        for node in nodes {
+            if let Some(id) = node["id"].as_str() {
+                used.insert(id.to_string());
+            }
+            if let Some(children) = node["children"].as_array() {
+                collect(children, used);
+            }
+        }
+    }
+    for layer in page["layers"].as_array().into_iter().flatten() {
+        if let Some(id) = layer["id"].as_str() {
+            used.insert(id.to_string());
+        }
+        collect(
+            layer["nodes"].as_array().map_or(&[], Vec::as_slice),
+            &mut used,
+        );
+    }
+    let node_id = match &placement.id {
+        Some(id) if used.contains(id) => {
+            bail!("[invalid-input] node ID {id} is already used on page {page_id}; choose a unique --id")
+        }
+        Some(id) => id.clone(),
+        None => {
+            let base = format!("{photo_id}-{variant_id}");
+            std::iter::once(base.clone())
+                .chain((2..).map(|n| format!("{base}-{n}")))
+                .find(|id| !used.contains(id))
+                .unwrap()
+        }
+    };
+    let layer_id = &placement.layer;
+    let layer = page["layers"]
+        .as_array_mut()
+        .and_then(|layers| layers.iter_mut().find(|layer| layer["id"] == *layer_id))
+        .with_context(|| {
+            format!("[missing-resource] layer {layer_id} not found on page {page_id}")
+        })?;
+    if layer["locked"] == true {
+        bail!("[locked-node] photo target layer {layer_id} is locked; unlock it first")
+    }
+    layer["nodes"]
+        .as_array_mut()
+        .context("[malformed-resource] layer nodes are missing")?
+        .push(json!({
+            "kind": "photo",
+            "id": node_id,
+            "photo": photo_id,
+            "variant": variant_id,
+            "x": placement.x,
+            "y": placement.y,
+            "width": width,
+            "height": height,
+            "fit": placement.fit,
+            "position": placement.position,
+            "opacity": 1,
+            "blend_mode": "normal"
+        }));
+    crate::scene::validate(&document_value)?;
+    *raw = document_value;
+    Ok(json!({
+        "id": node_id,
+        "photo": photo_id,
+        "variant": variant_id,
+        "page": page_id,
+        "layer": layer_id,
+        "x": placement.x,
+        "y": placement.y,
+        "width": width,
+        "height": height,
+        "fit": placement.fit,
+    }))
+}
+
 pub fn photo_info(raw: &Value, document: &Path, photo_id: &str, variant_id: &str) -> Result<Value> {
     crate::scene::validate(raw)?;
     info_validated(raw, document, photo_id, variant_id)
@@ -2079,6 +2215,7 @@ pub fn add_raw(
         "upgraded": upgraded,
         "variant": "master",
         "unsupported_opcodes": unsupported,
+        "warnings": dng.warnings,
     }))
 }
 

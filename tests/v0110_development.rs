@@ -315,6 +315,21 @@ fn invalid_settings_are_refused_without_writing() {
         let error = work.refuse(&args);
         assert!(error.contains(code), "{args:?}: {error}");
     }
+    // Common slips name the setting that works.
+    for (args, hint) in [
+        (
+            vec!["--set", "effects.grain={\"amount\": 20}"],
+            "\"seed\": 1",
+        ),
+        (vec!["--set", "monochrome=true"], "monochrome.enabled=true"),
+        (
+            vec!["--set", "geometry.crop={\"rect\": [0, 0, 0.5, 0.5]}"],
+            "use crop.rect",
+        ),
+    ] {
+        let error = work.refuse(&args);
+        assert!(error.contains(hint), "{args:?}: {error}");
+    }
 }
 
 #[test]

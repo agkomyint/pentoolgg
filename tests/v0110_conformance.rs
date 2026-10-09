@@ -995,6 +995,77 @@ fn photo_benchmark_reports_a_bounded_reproducible_run() {
 /// A `photo` node on a page shows the developed variant as `srgb8`, placed by
 /// `fit` and `position` like an image, with the node's opacity applied once.
 #[test]
+fn photo_place_adds_photo_nodes_through_a_transaction() {
+    let work = Workspace::new("place");
+    let layer = work.doc()["pages"][0]["layers"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let place = |extra: &[&str]| {
+        let mut args = vec!["photo", "place", "catalog.pen", "b2", "--layer", &layer];
+        args.extend(extra);
+        work.run(&args)
+    };
+
+    // Refusals name the problem and leave the document unchanged.
+    let before = work.bytes();
+    for (extra, code) in [
+        (vec!["--variant", "missing"], "[missing-resource]"),
+        (vec!["--width", "0"], "[invalid-input]"),
+        (vec!["--position", "0.5"], "[invalid-input]"),
+        (vec!["--dry-run"], ""),
+    ] {
+        let (ok, _, error) = place(&extra);
+        assert_eq!(ok, code.is_empty(), "{extra:?}: {error}");
+        assert!(error.contains(code), "{extra:?}: {error}");
+        assert_eq!(work.bytes(), before, "{extra:?}");
+    }
+    let (ok, _, error) = work.run(&["photo", "place", "catalog.pen", "b2", "--layer", "nope"]);
+    assert!(!ok && error.contains("[missing-resource]"), "{error}");
+
+    // Without a size the node takes the developed size; with one side the
+    // other follows the developed aspect ratio. IDs are numbered when taken.
+    let (ok, out, error) = place(&[]);
+    assert!(ok, "{error}");
+    let first = &out["result"];
+    assert_eq!(first["id"], "b2-master");
+    assert_eq!(
+        (first["width"].as_f64(), first["height"].as_f64()),
+        (Some(W.into()), Some(H.into()))
+    );
+    let (ok, out, error) = place(&["--width", "24", "--x", "10", "--fit", "cover"]);
+    assert!(ok, "{error}");
+    assert_eq!(out["result"]["id"], "b2-master-2");
+    assert_eq!(out["result"]["height"].as_f64(), Some(f64::from(H) / 2.0));
+    let (ok, _, error) = place(&["--id", "b2-master"]);
+    assert!(!ok && error.contains("[invalid-input]"), "{error}");
+
+    let nodes = &work.doc()["pages"][0]["layers"][0]["nodes"];
+    let placed = nodes.as_array().unwrap().last().unwrap();
+    assert_eq!(
+        placed,
+        &json!({"kind": "photo", "id": "b2-master-2", "photo": "b2", "variant": "master",
+                "x": 10.0, "y": 0.0, "width": 24.0, "height": f64::from(H) / 2.0,
+                "fit": "cover", "position": [0.5, 0.5], "opacity": 1, "blend_mode": "normal"})
+    );
+    // The placed node draws: the photo, not the white page, is under it.
+    work.ok(&["export", "catalog.pen", "page.png"]);
+    let page = image::load_from_memory(&work.read("page.png"))
+        .unwrap()
+        .to_rgba8();
+    assert_ne!(page.get_pixel(W / 2, H / 2).0, [255, 255, 255, 255]);
+
+    // A locked layer is refused.
+    let mut locked = work.doc();
+    locked["pages"][0]["layers"][0]["locked"] = json!(true);
+    std::fs::write(work.path(), serde_json::to_vec_pretty(&locked).unwrap()).unwrap();
+    let before = work.bytes();
+    let (ok, _, error) = place(&[]);
+    assert!(!ok && error.contains("[locked-node]"), "{error}");
+    assert_eq!(work.bytes(), before);
+}
+
+#[test]
 fn photo_nodes_render_their_developed_variant_on_pages() {
     let work = Workspace::new("page");
     let mut raw = work.doc();
@@ -1028,8 +1099,14 @@ fn photo_nodes_render_their_developed_variant_on_pages() {
     let rendition = image::load_from_memory(&rendition).unwrap().to_rgba8();
     assert_eq!(rendition.dimensions(), (W, H));
 
+    assert!(work.cached().is_empty(), "{:?}", work.cached());
     work.ok(&["export", "catalog.pen", "page.png"]);
     let first = work.read("page.png");
+    // Three nodes of one variant develop once: one rendition is cached.
+    assert_eq!(work.cached().len(), 1, "{:?}", work.cached());
+    work.ok(&["export", "catalog.pen", "page.png"]);
+    assert_eq!(work.read("page.png"), first, "a cached export is identical");
+    work.ok(&["photo", "cache", "clear", "catalog.pen"]);
     work.ok(&["export", "catalog.pen", "page.png"]);
     assert_eq!(work.read("page.png"), first, "page export is deterministic");
     assert_eq!(work.bytes(), before, "export never writes the document");
@@ -1079,6 +1156,7 @@ fn photo_nodes_render_their_developed_variant_on_pages() {
         first,
         "a develop change reaches the page"
     );
+    assert_eq!(work.cached().len(), 2, "new settings are a new rendition");
 
     for out in ["page.svg", "page.pdf"] {
         work.ok(&["export", "catalog.pen", out]);
