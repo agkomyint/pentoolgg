@@ -117,8 +117,10 @@ a grid, loupe and filmstrip, keyboard culling, a histogram with clipping
 warnings, clipping, gamut and mask overlays on a Display P3 or sRGB preview,
 development sliders, crop, radial, linear and brush masks, variant compare, and
 copy/sync. Every change is one undoable, revision-guarded edit made by the same
-Rust engines. Its previews, and `pentool photo preview`, are kept in a disposable
-cache in `.pentool/cache/photo/` (`photo cache clear`, `--no-cache`), and `pentool
+Rust engines. `pentool photo place` puts a developed variant on a page as a
+`photo` node. Studio previews, `pentool photo preview` and the page renditions of
+photo nodes are kept in a disposable cache in `.pentool/cache/photo/` (`photo
+cache clear`, `--no-cache`), and `pentool
 benchmark --photo` measures ingest, culling, development, previews and export on
 a synthetic shoot.
 
@@ -157,6 +159,7 @@ pentool photo privacy-report catalog.pen
 pentool photo export catalog.pen --selection "rating>=4" --recipe web-gallery --out ./delivery --dry-run
 pentool photo export catalog.pen --selection hero --recipe photo-lab --print 6x4in --fit crop --out ./lab
 pentool photo preview catalog.pen hero --out ./hero-preview.png --space display-p3 --overlay clipping
+pentool photo place catalog.pen hero --layer content --x 40 --y 40 --width 600 --fit cover
 pentool photo cache clear catalog.pen
 pentool benchmark --photo --photos 24 --megapixels 2 --repetitions 3
 ```

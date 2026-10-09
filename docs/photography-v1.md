@@ -337,17 +337,16 @@ a context that does not use them are `[invalid-develop]`. Ranges are inclusive.
 | `curves` | `parametric {highlights, lights, darks, shadows -100–100; splits [3 increasing in 0.05–0.95]}`; `point {rgb, red, green, blue: 2–16 [in,out] points in 0–1, strictly increasing in}` |
 | `hsl` | `hue`, `saturation`, `luminance`: each maps the bands `red orange yellow green aqua blue purple magenta` to -100–100 |
 | `grading` | `shadows`, `midtones`, `highlights`, `global`: `{hue 0–360, saturation 0–100, luminance -100–100}`; `blending` 0–100 (50); `balance` -100–100 |
-| `monochrome` | `enabled` bool; `mix`: the 8 bands -100–100 |
+| `monochrome` | an object even for on/off: `enabled` bool (`--set monochrome.enabled=true`); `mix`: the 8 bands -100–100 |
 | `detail` | `sharpening {amount 0–150, radius 0.5–3, detail 0–100, masking 0–100}`; `noise {luminance, luminance_detail, luminance_contrast, color, color_detail, color_smoothness: 0–100}`; `moire` 0–100 |
 | `lens` | `profile` `"none"`\|`"embedded-opcodes"`\|`{"profile": digest}`; `distortion` -100–100; `vignetting {amount -100–100, midpoint 0–100}`; `chromatic_aberration {remove: bool, red_cyan -100–100, blue_yellow -100–100}`; `defringe {purple_amount 0–20, purple_hue [30–70, 30–70], green_amount 0–20, green_hue [40–60, 40–60]}` |
 | `geometry` | `upright` `off`\|`level`\|`vertical`\|`full`\|`guided` (an auto mode stores its resolved values plus `auto`); `guides` ≤ 4 line segments (guided only); `vertical`, `horizontal` -100–100; `rotate` -45–45°; `aspect` -100–100; `scale` 50–150 (100); `offset` [-100–100, -100–100] |
-| `crop` | `rect` [x, y, w, h] normalized to the post-geometry frame; `aspect` `"free"`\|`"original"`\|`"W:H"`; `constrain` bool (stay inside valid pixels) |
-| `effects` | `vignette {amount -100–100, midpoint, roundness -100–100, feather 0–100, highlights 0–100}`; `grain {amount 0–100, size 0–100, roughness 0–100, seed u32}` |
+| `crop` | a top-level group, not part of `geometry`: `rect` [x, y, w, h] normalized to the post-geometry frame; `aspect` `"free"`\|`"original"`\|`"W:H"`; `constrain` bool (stay inside valid pixels) |
+| `effects` | `vignette {amount -100–100, midpoint, roundness -100–100, feather 0–100, highlights 0–100}`; `grain {amount 0–100, size 0–100, roughness 0–100, seed u32}`. `seed` is required: `raw develop --set` refuses grain without one, and only the studio fills in seed 1 for you |
 | `calibration` | `shadows_tint` -100–100; `red`, `green`, `blue`: `{hue, saturation -100–100}` |
 | `local` | up to 32 local adjustments (below) |
 
-**Import defaults** are written explicitly into the master variant by `raw add` and
-`photo import`. For raw sources these are `raw.demosaic: "mhc"`,
+**Import defaults** are written explicitly into the master variant by `raw add`. For raw sources these are `raw.demosaic: "mhc"`,
 `raw.highlights: "blend"`, `raw.camera_profile: "embedded"`,
 `white_balance.mode: "as-shot"`, `lens.profile: "embedded-opcodes"`,
 `detail.sharpening {amount 40, radius 1, detail 25}` and `detail.noise.color 25`.
@@ -1497,7 +1496,8 @@ or a package.
 - A cache write failure never fails the command, and no read-only command modifies
   the document.
 
-Previews are what the cache holds today: the studio's `POST /api/photo/preview`
+The cache holds previews and page renditions of `photo` nodes (see [Page
+placement](#page-placement-photo-node)). Previews come from the studio's `POST /api/photo/preview`
 and `pentool photo preview DOC PHOTO --out FILE.png [--variant ID] [--edge N]
 [--space srgb|display-p3] [--overlay none|clipping|gamut|mask:ID] [--uncropped]
 [--no-cache]`, which writes the same 8-bit PNG and prints its report.
@@ -1544,13 +1544,20 @@ and `pentool photo preview DOC PHOTO --out FILE.png [--variant ID] [--edge N]
 - Tree and search report `kind: "photo"` with `photo`, `variant`, bounds and layer
   state, and never settings. A reference to a missing photo or variant is
   `[missing-resource]`.
-- Page export (PNG, SVG, PDF) and the editor canvas draw a photo node by
-  developing its variant on every render: the developed size is the node's
-  source size, so `fit: none` shows one develop pixel per page unit. The editor
-  canvas renders the page through the same compositor at its preview scale, so
-  each redraw develops every photo node at full size. The compositor applies
-  `opacity` and `blend_mode` once, as for image nodes. Page renders do not use
-  the preview cache, so an exported page never depends on cache contents.
+- Page export (PNG, SVG, PDF) and the editor canvas draw a photo node from its
+  variant's page rendition. The developed size is the node's source size, so
+  `fit: none` shows one develop pixel per page unit; the editor canvas reduces
+  the rendition to its preview scale. The compositor applies `opacity` and
+  `blend_mode` once, as for image nodes.
+- Page renditions go through the [cache](#caches) like previews, under the key
+  `{cache: 1, purpose: "page-rendition", rendition, engine, process, source,
+  profiles, masks, develop, size}`, where `size` is the editor's long edge or
+  `null` for export. Every node showing the same variant at the same size shares
+  one entry, whose report is `{developed: [width, height]}`. A hit is
+  byte-identical to a render, so an exported page never depends on cache
+  contents, only on how long it takes. A develop change is a new key.
+  `PENTOOL_PHOTO_CACHE_BYTES=0` stops new entries, and `photo cache clear`
+  forces a fresh develop.
 
 ## Determinism
 
@@ -1573,10 +1580,9 @@ a process-version change, never a refreshed hash.
 pentool raw add catalog.pen hero --file ./capture.dng --external --camera-profile auto
 pentool raw info catalog.pen hero
 pentool raw develop catalog.pen hero --exposure 0.7 --temperature 5400 --dry-run
-pentool photo import catalog.pen --file ./scan-16bit.tif --input-profile adobe-rgb-1998
 pentool photo variant add catalog.pen hero warm-editorial [--from master | --from-snapshot before-grade]
 pentool photo snapshot add catalog.pen hero/master before-grade
-pentool photo local add catalog.pen hero/master sky --linear 0.5,0,0.5,0.45 --exposure -0.4
+pentool raw develop catalog.pen hero --set 'local=[{"id":"sky","enabled":true,"amount":1,"mask":{"components":[{"kind":"linear","mode":"add","start":[0.5,0],"end":[0.5,0.45]}]},"params":{"exposure":-0.4}}]'
 pentool photo snapshot restore catalog.pen hero before-grade
 pentool photo settings sync catalog.pen hero --to @selected.json --except crop [--auto-per-photo]
 pentool photo rate catalog.pen hero,harbor --rating 4 --pick pick --label green
@@ -1597,6 +1603,28 @@ pentool photo export catalog.pen --selection hero --recipe photo-lab --print 6x4
 pentool photo recipe set catalog.pen client-proof @client-proof.json
 pentool photo place catalog.pen hero --variant warm-editorial --layer layer-1 --width 1200 --height 800
 ```
+
+There is no `photo import` yet: only raw (DNG) sources can be added, through
+`raw add`. Local adjustments are written with `raw develop --set local=[...]` and
+painted with `photo mask paint`; there is no separate `photo local` command.
+
+Commands that act on one variant take `PHOTO --variant ID` (default `master`).
+Commands that act on a selection take it positionally: `photo rate`,
+`photo keyword`, `photo describe` and `photo export --selection` accept IDs, `@file`
+or a query. `photo snapshot add` and `photo compare` name the variant inline as
+`PHOTO/VARIANT`.
+
+`photo place DOC PHOTO [--variant ID] --layer LAYER [--id NODE] [--x X] [--y Y]
+[--width W] [--height H] [--fit contain|cover|fill|none|scale-down] [--position X,Y]`
+adds a `photo` node to the layer on the first page or on `--page`. It runs as one
+revision-guarded transaction and supports `--dry-run` and `--if-revision`.
+- Without `--width` and `--height` the node takes the variant's developed size.
+  With only one of them, the other follows the developed aspect ratio.
+- The node ID defaults to `PHOTO-VARIANT`, numbered `-2`, `-3`… when that ID is
+  taken. A taken `--id` is `[invalid-input]`.
+- A missing photo, variant or layer is `[missing-resource]`, and a locked layer
+  is `[locked-node]`.
+- The result is `{id, photo, variant, page, layer, x, y, width, height, fit}`.
 
 `raw add` embeds the source by default (`--embed`); `--external` stores a path
 relative to the document, and the file must stay inside the document's folder.
