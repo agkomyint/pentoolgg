@@ -357,6 +357,19 @@ impl Ifd {
             .transpose()
     }
 
+    /// Whether any rational value of `tag` has a zero denominator.
+    pub fn has_zero_denominator(&self, tiff: &Tiff, tag: u16) -> Result<bool> {
+        let Some(entry) = self.entries.get(&tag).filter(|e| matches!(e.kind, 5 | 10)) else {
+            return Ok(false);
+        };
+        for i in 0..entry.count.min(64) as usize {
+            if tiff.u32_at(entry.at + 8 * i + 4)? == 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn numbers(&self, tiff: &Tiff, tag: u16, max: usize) -> Result<Option<Vec<f64>>> {
         self.entries
             .get(&tag)

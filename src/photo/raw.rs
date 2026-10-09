@@ -799,6 +799,40 @@ mod tests {
     }
 
     #[test]
+    fn zero_denominator_baseline_exposure_reads_as_absent() {
+        let plain: Vec<u8> = values().iter().flat_map(|v| v.to_le_bytes()).collect();
+        let strips = std::slice::from_ref(&plain);
+        // Magic Lantern stores an unset BaselineExposure as the SRATIONAL 0/0.
+        let unset = dng(4, 4, 16, 1, strips, vec![(50730, 10, vec![0; 8])]);
+        let parsed = Dng::inspect(&unset).unwrap();
+        assert_eq!(parsed.baseline_exposure, None);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("BaselineExposure"));
+        assert_eq!(
+            develop(&unset).unwrap(),
+            develop(&dng(4, 4, 16, 1, strips, vec![])).unwrap()
+        );
+        assert!(Dng::inspect(&dng(4, 4, 16, 1, strips, vec![]))
+            .unwrap()
+            .warnings
+            .is_empty());
+
+        // Required rationals stay strict.
+        let mut bytes = dng(4, 4, 16, 1, strips, vec![]);
+        let matrix = [1i32, 0, 0, 0, 1, 0, 0, 0, 1]
+            .iter()
+            .flat_map(|v| [v.to_le_bytes(), 1i32.to_le_bytes()].concat())
+            .collect::<Vec<u8>>();
+        let at = bytes
+            .windows(matrix.len())
+            .position(|w| w == matrix)
+            .unwrap();
+        bytes[at + 4..at + 8].copy_from_slice(&0i32.to_le_bytes());
+        let error = Dng::inspect(&bytes).err().unwrap().to_string();
+        assert!(error.contains("zero denominator"), "{error}");
+    }
+
+    #[test]
     fn every_compression_decodes_to_the_same_image() {
         let v = values();
         let plain: Vec<u8> = v.iter().flat_map(|v| v.to_le_bytes()).collect();

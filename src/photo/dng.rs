@@ -145,6 +145,8 @@ pub struct Dng<'a> {
     pub as_shot_neutral: Option<Vec<f64>>,
     pub unique_camera_model: String,
     pub opcodes: Vec<Opcode>,
+    /// Malformed optional tags that were tolerated and ignored.
+    pub warnings: Vec<String>,
 }
 
 /// Name a non-DNG RAW container from its signature.
@@ -435,7 +437,17 @@ impl<'a> Dng<'a> {
             Some(v @ 1..=8) => v as u8,
             Some(v) => bail!("[malformed-resource] Orientation (274) is {v}; expected 1–8"),
         };
-        let baseline_exposure = ifd0.numbers(&tiff, 50730, 1)?.map(|v| v[0]);
+        let mut warnings = Vec::new();
+        // Magic Lantern writes an unset BaselineExposure as 0/0. The tag is
+        // optional, so a zero denominator reads as absent rather than refusing the file.
+        let baseline_exposure = if ifd0.has_zero_denominator(&tiff, 50730)? {
+            warnings.push(
+                "BaselineExposure (50730) has a zero denominator and was ignored".to_string(),
+            );
+            None
+        } else {
+            ifd0.numbers(&tiff, 50730, 1)?.map(|v| v[0])
+        };
         if baseline_exposure.is_some_and(|v| !(-10.0..=10.0).contains(&v)) {
             bail!("[malformed-resource] BaselineExposure must lie in -10..10 EV");
         }
@@ -485,6 +497,7 @@ impl<'a> Dng<'a> {
             as_shot_neutral,
             unique_camera_model,
             opcodes,
+            warnings,
             tiff,
         })
     }
