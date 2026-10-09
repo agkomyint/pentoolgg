@@ -13,6 +13,7 @@ pub mod ljpeg;
 pub mod local;
 pub mod math;
 pub mod merge;
+pub mod metadata;
 pub mod opcode;
 pub mod organize;
 pub mod output;

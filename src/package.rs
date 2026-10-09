@@ -132,6 +132,7 @@ pub fn init(dir: &Path, name: &str) -> Result<Value> {
 pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
     let mut m = read_manifest(dir)?;
     let mut seen = HashSet::new();
+    let mut privacy = Vec::new();
     // Discover metadata-bearing assets and make the manifest's asset table canonical.
     for e in WalkDir::new(dir.join("assets"))
         .follow_links(false)
@@ -150,6 +151,22 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
             bail!("duplicate asset ID {}", am.id)
         }
         let rel = slash(e.path().strip_prefix(dir).unwrap());
+        if raw.get("photography").is_some() {
+            let report = crate::photo::metadata::privacy_report(&raw, e.path())?;
+            for source in report["private"].as_array().into_iter().flatten() {
+                let categories: Vec<&String> = source["categories"]
+                    .as_object()
+                    .map(|c| c.keys().collect())
+                    .unwrap_or_default();
+                let warning = format!(
+                    "{rel}: photo source {} carries private metadata ({}); review it with `pentool photo privacy-report` before sharing",
+                    source["source"].as_str().unwrap_or_default(),
+                    categories.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ")
+                );
+                eprintln!("warning: {warning}");
+                privacy.push(warning);
+            }
+        }
         m.assets.insert(
             am.id,
             PackageAsset {
@@ -195,9 +212,11 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
     }
     fs::rename(&temp, output)?;
     let bytes = fs::read(output)?;
-    Ok(
-        json!({"ok":true,"package":m.name,"version":m.version,"assets":m.assets.len(),"output":output,"hash":asset::hash_bytes(&bytes)}),
-    )
+    let mut report = json!({"ok":true,"package":m.name,"version":m.version,"assets":m.assets.len(),"output":output,"hash":asset::hash_bytes(&bytes)});
+    if !privacy.is_empty() {
+        report["privacy"] = json!(privacy);
+    }
+    Ok(report)
 }
 
 /// Validate a packaged asset document with the shared format validators and

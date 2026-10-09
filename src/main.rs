@@ -879,6 +879,8 @@ enum PhotoAction {
         out: PathBuf,
         #[command(flatten)]
         output: OutputArgs,
+        #[command(flatten)]
+        metadata: MetadataArgs,
     },
     /// Develop a variant through output rendering and report its histogram,
     /// gamut and luminance without writing a file.
@@ -1036,6 +1038,65 @@ enum PhotoAction {
         #[command(flatten)]
         sheet: SheetArgs,
     },
+    /// Show a photo's metadata by category; gps, serials and identity are redacted unless revealed.
+    Metadata {
+        input: PathBuf,
+        /// Photo ID.
+        id: String,
+        /// Show a private category: gps, serials or identity (repeatable).
+        #[arg(long)]
+        reveal: Vec<String>,
+    },
+    /// List sources whose bytes carry GPS, serial numbers or identity metadata.
+    PrivacyReport { input: PathBuf },
+    /// Set the title, caption, creator, copyright and location that exports may write.
+    /// An empty value removes the field.
+    Describe {
+        input: PathBuf,
+        /// Comma-separated photo IDs, a search query, or @FILE.json (an array of IDs).
+        selection: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        caption: Option<String>,
+        #[arg(long)]
+        creator: Option<String>,
+        #[arg(long)]
+        copyright: Option<String>,
+        #[arg(long)]
+        sublocation: Option<String>,
+        #[arg(long)]
+        city: Option<String>,
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long)]
+        country: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+}
+
+#[derive(clap::Args)]
+struct MetadataArgs {
+    /// Metadata written to the file: none, copyright, public or all-including-private.
+    #[arg(long, default_value = "none")]
+    metadata: String,
+    /// Also write these categories (comma-separated).
+    #[arg(long, value_delimiter = ',')]
+    metadata_include: Vec<String>,
+    /// Never write these categories (comma-separated).
+    #[arg(long, value_delimiter = ',')]
+    metadata_exclude: Vec<String>,
+}
+
+impl MetadataArgs {
+    fn policy(&self) -> Result<pentool::photo::metadata::Policy> {
+        pentool::photo::metadata::Policy::new(
+            &self.metadata,
+            &self.metadata_include,
+            &self.metadata_exclude,
+        )
+    }
 }
 
 #[derive(clap::Args)]
@@ -3175,11 +3236,14 @@ async fn run() -> Result<()> {
                 variant,
                 out,
                 output,
+                metadata,
             } => {
-                use pentool::photo::output;
+                use pentool::photo::{metadata as meta, output};
                 let resolved = output.resolve()?;
+                let policy = metadata.policy()?;
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let developed = pentool::photo::catalog::render_photo(&raw, &input, &id, &variant)?;
+                let embedded = meta::prepare(&raw, &input, &id, &policy)?;
                 let encoded = output::encode_png(
                     &developed.image,
                     &developed.rendering,
@@ -3187,8 +3251,9 @@ async fn run() -> Result<()> {
                     &resolved,
                     output::DEFAULT_BINS,
                 )?;
+                let bytes = meta::embed_png(&encoded.bytes, &embedded)?;
                 let temporary = out.with_extension("png.tmp");
-                fs::write(&temporary, &encoded.bytes)
+                fs::write(&temporary, &bytes)
                     .with_context(|| format!("write {}", temporary.display()))?;
                 fs::rename(&temporary, &out).with_context(|| format!("write {}", out.display()))?;
                 let mut report = developed.report;
@@ -3198,8 +3263,9 @@ async fn run() -> Result<()> {
                 report["space"] = serde_json::json!(resolved.space.id);
                 report["depth"] = serde_json::json!(resolved.depth.bits());
                 report["clipped_pixels"] = encoded.report["clipped_pixels"].clone();
-                report["bytes"] = serde_json::json!(encoded.bytes.len());
+                report["bytes"] = serde_json::json!(bytes.len());
                 report["delivery"] = encoded.report;
+                report["metadata"] = embedded.report(&policy);
                 println!("{}", serde_json::to_string_pretty(&report)?);
                 Ok(())
             }
@@ -3606,6 +3672,47 @@ async fn run() -> Result<()> {
                     4
                 };
                 run_photo_sheet(&raw, &input, &items, columns, sheet)
+            }
+            PhotoAction::Metadata { input, id, reveal } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let report = pentool::photo::metadata::show(&raw, &input, &id, &reveal)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::PrivacyReport { input } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let report = pentool::photo::metadata::privacy_report(&raw, &input)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Describe {
+                input,
+                selection,
+                title,
+                caption,
+                creator,
+                copyright,
+                sublocation,
+                city,
+                state,
+                country,
+                edit,
+            } => {
+                use pentool::photo::metadata;
+                let selection = selection_arg(&selection)?;
+                let description = metadata::Description {
+                    title,
+                    caption,
+                    creator,
+                    copyright,
+                    sublocation,
+                    city,
+                    state,
+                    country,
+                };
+                run_photo_edit(&input, "photo-describe", edit, |raw| {
+                    metadata::describe(raw, &selection, &description)
+                })
             }
         },
         Command::Image { action } => match action {

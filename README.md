@@ -103,6 +103,11 @@ settings groups to other photos in one transaction.
 `pentool photo rate`, `photo keyword`, `photo stack`, `photo collection` and
 `photo search` organize the catalog inside the document, and `pentool photo
 contact-sheet` and `photo compare` write captioned PNG or PDF proof sheets.
+Exports strip metadata by default: `pentool photo render --metadata
+copyright|public|all-including-private` writes a deliberate EXIF/XMP subset, `photo
+describe` sets title, caption, creator, copyright and location, `photo metadata`
+shows a photo's metadata with GPS, serials and identity redacted, and `photo
+privacy-report` lists sources that carry them.
 Batch delivery lands with the rest of v0.11; see
 [docs/photography-v1.md](docs/photography-v1.md).
 
@@ -135,6 +140,9 @@ pentool photo settings sync catalog.pen hero --to harbor,pano-1/master --except 
 pentool photo rate catalog.pen hero,harbor --rating 4 --label green
 pentool photo search catalog.pen "rating>=4 keyword:\"blue hour\"" --limit 20
 pentool photo contact-sheet catalog.pen --selection "rating>=4" --columns 4 --out picks.pdf
+pentool photo describe catalog.pen hero --creator "Ana Photo" --copyright "(c) 2026 Ana Photo"
+pentool photo render catalog.pen hero --out hero.png --metadata public
+pentool photo privacy-report catalog.pen
 ```
 
 ## Raster paint (v0.10)

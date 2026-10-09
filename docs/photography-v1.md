@@ -1222,36 +1222,76 @@ Metadata is grouped into categories:
 
 | Category | Fields |
 |---|---|
-| `copyright` | copyright notice, rights usage terms |
-| `creator` | creator, creator job title and contact |
-| `description` | title, caption, headline |
-| `keywords` | keywords |
-| `location` | IPTC city, state, country, sublocation |
-| `camera` | make, model, lens model, focal length, aperture, exposure, ISO, flash |
-| `timestamps` | DateTimeOriginal, CreateDate, ModifyDate, sub-seconds, offsets |
-| `gps` | the whole GPS IFD and XMP `exif:GPS*` |
-| `serials` | body and lens serial numbers, ImageUniqueID |
-| `identity` | camera owner name, EXIF Artist when not chosen as creator, person and face regions |
+| `copyright` | the photo's `copyright` |
+| `creator` | the photo's `creator` |
+| `description` | the photo's `title` and `caption` |
+| `keywords` | the photo's `keywords` |
+| `location` | the photo's `location`: sublocation, city, state, country |
+| `camera` | make, model, lens make and model, focal length, aperture, exposure time, ISO, flash |
+| `timestamps` | ModifyDate, DateTimeOriginal, CreateDate, the three offsets and sub-second fields |
+| `gps` | every field of the GPS IFD; XMP `GPSLatitude`, `GPSLongitude`, `GPSAltitude` |
+| `serials` | camera, body and lens serial numbers, ImageUniqueID; XMP `SerialNumber`, `ImageUniqueID` |
+| `identity` | camera owner name, EXIF Artist when not replaced by a creator; XMP owner names, `PersonInImage` and face regions (`mwg-rs:Regions`, `MP:RegionInfo`) |
 | `software` | `pentool <version>`, written only when kept |
 
 Values for `copyright`, `creator`, `description`, `keywords` and `location` come
-from the photo entry. The other categories come from the source bytes. Maker notes,
-embedded previews and thumbnails are never exported.
+from the photo entry and are set with `photo describe` and `photo keyword`. The
+other categories are read from the source bytes: the EXIF of a DNG or TIFF (IFD0,
+the EXIF IFD and the GPS IFD), a JPEG's `Exif` APP1 segment, or a PNG's `eXIf`
+chunk. Source XMP (TIFF tag 700, the JPEG XMP APP1 segment, PNG iTXt
+`XML:com.adobe.xmp`) is only scanned for the private markers above; a compressed
+XMP chunk cannot be scanned and counts as `identity`. Source XMP, maker notes,
+embedded previews, thumbnails and IFD1 are never exported. A source field larger
+than 256 values or 1,024 characters is shown as omitted and never written. Rights
+usage terms, creator contact details and headlines are not part of v0.11.0.
 
 Export policy: `metadata: {"policy": P, "include": [...], "exclude": [...]}`.
 Policies are `none` (the default, which matches today's image exports), `copyright`
 (copyright and creator), `public` (everything except `gps`, `serials`, `identity`
 and `timestamps`) and `all-including-private`. `include` and `exclude` adjust the
-policy by category. Writing `gps`, `serials` or `identity` requires either that
-explicit policy name or an explicit `include` of the category. Writers: JPEG uses
-EXIF and XMP APP1 segments (no IPTC-IIM); PNG uses `eXIf` and iTXt
-`XML:com.adobe.xmp`; TIFF uses the EXIF IFD and tag 700. Serialization is
-deterministic, with no generated timestamps or UUIDs.
+policy by category; an unknown category, or one both included and excluded, is
+`[invalid-input]`. Writing `gps`, `serials` or `identity` therefore requires
+either that explicit policy name or an explicit `include` of the category.
 
-`photo metadata DOC ID` shows metadata grouped by category, with `gps`, `serials`
-and `identity` redacted unless `--reveal CATEGORY` is given. `photo privacy-report
-DOC` lists sources whose bytes contain private categories. `package` prints the same
-warning, because packaging carries the source bytes.
+What is written:
+
+- EXIF: IFD0 holds make, model, ModifyDate, Artist (the creator, or the source
+  Artist when `identity` is kept and no creator is set), Copyright, ImageDescription
+  (the caption, else the title), Software and the camera serial; the EXIF IFD holds
+  the other camera, timestamp, serial and owner fields; the GPS IFD is copied field
+  by field. Text that is not ASCII is written to XMP only, because EXIF ASCII
+  cannot carry it.
+- XMP: pentool's own packet with `dc:rights`, `dc:creator`, `dc:title`,
+  `dc:description`, `dc:subject`, `Iptc4xmpCore:Location`, `photoshop:City`,
+  `photoshop:State`, `photoshop:Country` and `xmp:CreatorTool`. There is no IPTC-IIM.
+- Software is written only together with another kept value, never alone.
+- JPEG uses EXIF and XMP APP1 segments after SOI and JFIF (each at most 65,533
+  bytes, otherwise `[limit-exceeded]`); PNG uses `eXIf` and an uncompressed iTXt
+  `XML:com.adobe.xmp` before the first IDAT; TIFF uses the EXIF IFD and tag 700.
+- Serialization is deterministic: little-endian TIFF with sorted tags, a fixed
+  xpacket ID, and no generated timestamps or UUIDs. The same document and policy
+  produce the same bytes.
+
+`photo render` takes `--metadata POLICY` (default `none`), `--metadata-include
+CATEGORY,...` and `--metadata-exclude CATEGORY,...`, and reports `metadata:
+{policy, categories, exif_bytes, xmp_bytes}`, where `categories` lists the
+categories that contributed at least one value.
+
+`photo describe DOC SELECTION [--title T] [--caption C] [--creator N] [--copyright
+C] [--sublocation S] [--city C] [--state S] [--country C]` sets the photo-entry
+fields of every selected photo in one transaction (`--dry-run`, `--if-revision`).
+Values are trimmed, an empty value removes the field, and control characters other
+than newline are `[invalid-input]`. It reports `{photos, changed}`.
+
+`photo metadata DOC ID [--reveal CATEGORY]...` shows metadata grouped by category:
+`{photo, source, categories: {category: {key: value}}, redacted}`. `gps`, `serials`
+and `identity` are shown as `{redacted: true, fields: N}` unless revealed; revealing
+any other category is `[invalid-input]`. `photo privacy-report DOC` reads every
+source and reports `{sources, flagged, private: [{source, kind, storage, photos,
+categories: {category: count}}], unreadable: [{source, photos, error}], note}`.
+`package pack` prints a warning to stderr and adds a `privacy` array to its result
+for each packaged asset document whose sources contain private categories, because
+packaging carries the source bytes.
 
 ## Output recipes and batch delivery
 
@@ -1367,6 +1407,10 @@ pentool photo stack add catalog.pen burst-12 hero,hero-2,hero-3
 pentool photo collection add catalog.pen picks --query "pick:pick" --name Picks
 pentool photo contact-sheet catalog.pen --selection "collection:picks" --columns 4 --out picks.pdf
 pentool photo compare catalog.pen hero hero/warm-editorial --out compare.png
+pentool photo describe catalog.pen hero,harbor --creator "Ana Photo" --copyright "(c) 2026 Ana Photo" --city Oslo
+pentool photo metadata catalog.pen hero [--reveal gps]
+pentool photo privacy-report catalog.pen
+pentool photo render catalog.pen hero --out hero.png --metadata public --metadata-exclude location
 pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr [--deghost medium] [--reference 2] [--scale 0.5] [--settings first] [--external merged/hero-hdr.dng]
 pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor-pano --projection cylindrical [--seed 7] [--focal 2400]
 pentool photo export catalog.pen --selection picks --recipe web-gallery --out ./delivery
@@ -1450,6 +1494,9 @@ peak_nits} | null, cicp, icc, pixels, transparent_pixels, out_of_gamut_pixels,
 mapped_pixels, clipped_pixels, outside_gamut: {space: count}, max_luminance,
 histogram: {bins, r, g, b}}`, plus `max_cll` and `max_fall` for HDR. Only raw
 sources render for now; a rendered source is `[unsupported-capability]`.
+
+With `--metadata POLICY` (see [Metadata privacy](#metadata-privacy)) the PNG also
+carries `eXIf` and XMP, and the report gains `metadata`.
 
 `photo inspect DOC PHOTO [--variant ID] [the same output options] [--bins N]`
 runs the same development and stage 11 without writing a file and reports

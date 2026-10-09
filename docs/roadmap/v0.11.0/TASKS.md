@@ -268,6 +268,29 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 
 - [ ] **13. Add metadata privacy.** Support a deliberate EXIF/IPTC/XMP subset and
   export policies for copyright, keywords, GPS, identity, serials, and timestamps.
+
+  *Status: implemented for review.* This item has four parts:
+  - `src/photo/metadata.rs`: categories, policies, the source reader for DNG/TIFF,
+    JPEG and PNG, a deterministic EXIF and XMP writer, PNG and JPEG embedding,
+    redaction and the privacy report, specified in "Metadata privacy" in
+    `docs/photography-v1.md`;
+  - `pentool photo metadata`, `photo privacy-report` and `photo describe`, and
+    `photo render --metadata`, `--metadata-include` and `--metadata-exclude`;
+  - a privacy warning in `package pack` for asset documents whose photo sources
+    carry GPS, serials or identity;
+  - unit tests of policies and writer round trips, and `tests/v0110_metadata.rs`.
+
+  Decisions:
+  - the category table is the implemented subset (no rights usage terms, creator
+    contact or headline); the spec now says so;
+  - source XMP is never copied; it is scanned for private markers only, and
+    pentool writes its own packet; compressed XMP counts as `identity`;
+  - non-ASCII text goes to XMP only; Software is never written alone;
+  - the JPEG writer and TIFF embedding are used by item 14's export; item 13
+    exposes PNG through `photo render`.
+
+  The checkbox stays open until review and hosted CI pass.
+
 - [ ] **14. Add output recipes and batch delivery.** Cover web, social, archive,
   and photo-lab dimensions, RGB profiles, precision, codec, naming, and sharpening.
 - [ ] **15. Build photographer UX.** Add filmstrip/grid, loupe, culling, histogram,
