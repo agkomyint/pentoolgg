@@ -1,5 +1,28 @@
 # v0.11.0 — Professional photography and RAW development
 
+> **Status (released as v0.11.0 on 2026-10-09):** 16 of 16 items are ticked and
+> implemented, with hosted Linux, Windows, macOS ARM and macOS Intel CI green (run
+> 37917091175 on 74cec1b). Release notes: `docs/release-v0.11.0.md`.
+>
+> | # | Item | State |
+> |---|------|-------|
+> | 1 | Freeze the photography specification | shipped |
+> | 2 | Add high-bit-depth RGB paths | shipped |
+> | 3 | Implement bounded RAW ingestion | shipped |
+> | 4 | Add camera profiles and white balance | shipped |
+> | 5 | Add lens and geometry correction | shipped |
+> | 6 | Build the development stack | shipped |
+> | 7 | Add detail processing | shipped |
+> | 8 | Add local adjustments | shipped |
+> | 9 | Add HDR and panorama merging | shipped |
+> | 10 | Add wide-gamut and HDR RGB delivery | shipped |
+> | 11 | Add variants, snapshots, and synchronized edits | shipped |
+> | 12 | Add local organization | shipped |
+> | 13 | Add metadata privacy | shipped |
+> | 14 | Add output recipes and batch delivery | shipped |
+> | 15 | Build photographer UX | shipped |
+> | 16 | Prove conformance and performance | shipped |
+
 Build a Lightroom-class, non-destructive photography workflow on v0.7.0–v0.10.0.
 This milestone owns RAW development, high-bit-depth RGB processing, lens correction,
 local adjustments, variants, organization, and batch delivery. Commercial-print
@@ -21,32 +44,32 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the photography specification.** Define RAW support, decode
+- [x] **1. Freeze the photography specification.** Define RAW support, decode
   limits, demosaic order, working RGB spaces, precision, metadata, development
   stages, variants, caches, schemas, migrations, and conformance fixtures.
-  *Status: drafted for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - [`docs/photography-v1.md`](../../photography-v1.md), the specification;
   - [`docs/pen-format-v7.schema.json`](../../pen-format-v7.schema.json), the schema;
   - `docs/fixtures/photo-*` with the `photo-conformance.json` manifest;
   - `tests/v0110_photo_spec.rs`.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **2. Add high-bit-depth RGB paths.** Support 16-bit storage and a documented
+  Hosted CI passed on all four platforms before release.
+- [x] **2. Add high-bit-depth RGB paths.** Support 16-bit storage and a documented
   floating-point working representation without accidental 8-bit/sRGB round trips.
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - `src/photo/` (`math`, `color`, `pixels`, `png`);
   - the "Working representation" section of the specification;
   - the `photo-rgb16-p3.png` fixture;
   - `tests/v0110_photo_precision.rs`.
 
-  Nothing user-facing calls this path until item 3. The checkbox stays open
-  until review and hosted CI pass.
-- [ ] **3. Implement bounded RAW ingestion.** Validate and decode a tested subset
+  Nothing user-facing calls this path until item 3. Hosted CI passed on
+  all four platforms before release.
+- [x] **3. Implement bounded RAW ingestion.** Validate and decode a tested subset
   of RAW containers, retain source bytes, and report unsupported cameras clearly.
   Decision (item 1): the tested subset is DNG 1.0–1.7, read by pentool's own
   bounded decoder with no new dependency. Other RAW containers are recognized by
   signature and refused, and the error says to convert them to DNG.
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - the bounded reader in `src/photo/` (`tiff`, `ljpeg`, `dng`, `opcode`, `raw`);
   - the v7 catalog and photo-node validation in `src/photo/catalog.rs`;
   - `pentool raw add` and `pentool raw info`, with explicit v7 migration that
@@ -55,11 +78,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     `tests/v0110_photo_spec.rs`.
 
   Photo nodes validate and appear in tree output. Rendering them on pages was
-  refused with `[unsupported-capability]` until item 16 added it. The checkbox
-  stays open until review and hosted CI pass.
-- [ ] **4. Add camera profiles and white balance.** Support embedded and verified
+  refused with `[unsupported-capability]` until item 16 added it. Hosted CI passed
+  on all four platforms before release.
+- [x] **4. Add camera profiles and white balance.** Support embedded and verified
   profiles plus as-shot, temperature/tint, sampled-neutral, and suggested balance.
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - the DNG SDK color kernels in `src/photo/profile.rs`: profile reading,
     interpolation, `NeutralToXY`, `SetWhiteXY`, hue/sat maps, Robertson
     temperature and tint, sampling and the gray-world suggestion;
@@ -73,10 +96,10 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   Decision: one tint unit is 1/3000 in uv, the DNG SDK's scale; the earlier
   "±0.0003" wording was corrected in `docs/photography-v1.md`. The kernels are
   documented there. The stage-3 transform is applied to pixels once rendering
-  exists (items 5–6). The checkbox stays open until review and hosted CI pass.
-- [ ] **5. Add lens and geometry correction.** Cover distortion, vignetting,
+  exists (items 5–6). Hosted CI passed on all four platforms before release.
+- [x] **5. Add lens and geometry correction.** Cover distortion, vignetting,
   chromatic aberration, perspective, leveling, rotation, and constrained crop.
-  *Status: implemented for review.* This item has five parts:
+  *Status: shipped in v0.11.0.* This item has five parts:
   - lens profiles and the bounded LCP subset in `src/photo/lens.rs`;
   - the lens chain, geometry, crop, single-pass warp and upright analysis in
     `src/photo/warp.rs`;
@@ -94,11 +117,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - guides are given in the lens-corrected oriented frame;
   - `photo render` handles raw sources only until rendered sources can be added.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **6. Build the development stack.** Add exposure, highlights/shadows,
+  Hosted CI passed on all four platforms before release.
+- [x] **6. Build the development stack.** Add exposure, highlights/shadows,
   whites/blacks, curves, clarity, texture, dehaze, vibrance, HSL, grading,
   monochrome, grain, vignette, calibration, and stable processing order.
-  *Status: implemented for review.* This item has five parts:
+  *Status: shipped in v0.11.0.* This item has five parts:
   - the stage 6–10 kernels and calibration in `src/photo/adjust.rs`, specified
     in "Development stack" in `docs/photography-v1.md`;
   - calibration composed into the stage-3 transform in `src/photo/profile.rs`,
@@ -119,10 +142,10 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     never re-analyzes;
   - the stage-11 shoulder and gamut mapping stay with item 10.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **7. Add detail processing.** Implement luminance/color noise reduction,
+  Hosted CI passed on all four platforms before release.
+- [x] **7. Add detail processing.** Implement luminance/color noise reduction,
   sharpening, moiré reduction, defective-pixel handling, and defringe.
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - the kernels in `src/photo/detail.rs`, specified in "Detail" in
     `docs/photography-v1.md`;
   - defective pixels in stage 1 (`raw::decode_with`), stage 2 in
@@ -140,10 +163,10 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - capture sharpening works on log luminance, so it is independent of
     exposure and keeps hue.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **8. Add local adjustments.** Reuse gradient, radial, range, depth, and
+  Hosted CI passed on all four platforms before release.
+- [x] **8. Add local adjustments.** Reuse gradient, radial, range, depth, and
   painted masks. AI-derived masks must first become materialized editable masks.
-  *Status: implemented for review.* This item has five parts:
+  *Status: shipped in v0.11.0.* This item has five parts:
   - validation and rendering in `src/photo/local.rs`, specified in "Local
     adjustments" in `docs/photography-v1.md`;
   - stage hooks in `adjust::apply_with` (after tone, presence, color and
@@ -163,10 +186,10 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - signed noise, moiré and defringe extrapolate away from the reduced image,
     and negative sharpness is a blur.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **9. Add HDR and panorama merging.** Provide bounded alignment, deghosting,
+  Hosted CI passed on all four platforms before release.
+- [x] **9. Add HDR and panorama merging.** Provide bounded alignment, deghosting,
   projection, seam blending, attribution, cancellation, and non-destructive output.
-  *Status: implemented for review.* This item has five parts:
+  *Status: shipped in v0.11.0.* This item has five parts:
   - the merges in `src/photo/merge.rs`, specified in "HDR and panorama merges"
     in `docs/photography-v1.md`;
   - the derived DNG writer and transparency reader in `src/photo/dngout.rs`,
@@ -189,10 +212,10 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - panoramas do not compensate exposure between frames;
   - the EXIF focal length assumes a 36 mm long edge.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **10. Add wide-gamut and HDR RGB delivery.** Define primaries, transfer
+  Hosted CI passed on all four platforms before release.
+- [x] **10. Add wide-gamut and HDR RGB delivery.** Define primaries, transfer
   functions, inspection, tone mapping, SDR conversion, metadata, and validation.
-  *Status: implemented for review.* This item has five parts:
+  *Status: shipped in v0.11.0.* This item has five parts:
   - stage 11 in `src/photo/output.rs` (look table and tone curve, the shoulder
     scaled to the output peak, perceptual or relative-colorimetric gamut
     mapping, quantization, measurement, chunk generation and verification),
@@ -214,11 +237,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     ICC and, where H.273 has codes, `cICP`;
   - the editor's Display P3 preview and overlays move to item 15.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **11. Add variants, snapshots, and synchronized edits.** Virtual copies do
+  Hosted CI passed on all four platforms before release.
+- [x] **11. Add variants, snapshots, and synchronized edits.** Virtual copies do
   not duplicate sources; synchronization supports selected settings and exceptions.
 
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - `src/photo/variants.rs`: variant add (from a variant or a snapshot), rename
     and remove; snapshot add, restore and remove; and settings sync, specified in
     "Photo entries, variants and snapshots" and "Synchronized settings" in
@@ -239,11 +262,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     cascading;
   - selection-query targets are refused until item 12 adds search.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **12. Add local organization.** Provide ratings, picks, labels, keywords,
+  Hosted CI passed on all four platforms before release.
+- [x] **12. Add local organization.** Provide ratings, picks, labels, keywords,
   stacks, contact sheets, compare/survey, and search without a required database.
 
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - `src/photo/organize.rs`: the search query language, ratings, picks, labels,
     keywords, stacks, manual and smart collections, and the contact sheet and
     compare builder, specified in "Stacks, collections and search" in
@@ -264,12 +287,12 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - contact sheets and compare share one layout and never change the document;
     photos without a thumbnail become reported gray cells rather than failing.
 
-  The checkbox stays open until review and hosted CI pass.
+  Hosted CI passed on all four platforms before release.
 
-- [ ] **13. Add metadata privacy.** Support a deliberate EXIF/IPTC/XMP subset and
+- [x] **13. Add metadata privacy.** Support a deliberate EXIF/IPTC/XMP subset and
   export policies for copyright, keywords, GPS, identity, serials, and timestamps.
 
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - `src/photo/metadata.rs`: categories, policies, the source reader for DNG/TIFF,
     JPEG and PNG, a deterministic EXIF and XMP writer, PNG and JPEG embedding,
     redaction and the privacy report, specified in "Metadata privacy" in
@@ -289,12 +312,12 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - the JPEG writer and TIFF embedding are used by item 14's export; item 13
     exposes PNG through `photo render`.
 
-  The checkbox stays open until review and hosted CI pass.
+  Hosted CI passed on all four platforms before release.
 
-- [ ] **14. Add output recipes and batch delivery.** Cover web, social, archive,
+- [x] **14. Add output recipes and batch delivery.** Cover web, social, archive,
   and photo-lab dimensions, RGB profiles, precision, codec, naming, and sharpening.
 
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - `src/photo/export.rs`: recipe validation and the four built-in recipes, the
     output frame of every resize mode and print fit, Lanczos-3 resizing in linear
     light, output sharpening, naming, the planner and the staged batch run,
@@ -320,12 +343,12 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     from earlier runs); `--selection picks` in the spec became a query such as
     `collection:picks`; export is single-worker.
 
-  The checkbox stays open until review and hosted CI pass.
+  Hosted CI passed on all four platforms before release.
 
-- [ ] **15. Build photographer UX.** Add filmstrip/grid, loupe, culling, histogram,
+- [x] **15. Build photographer UX.** Add filmstrip/grid, loupe, culling, histogram,
   clipping warnings, development panels, masks, crop, compare, and copy/sync.
 
-  *Status: implemented for review.* This item has four parts:
+  *Status: shipped in v0.11.0.* This item has four parts:
   - `src/photo/studio.rs`: previews and edits. A preview is developed, resized
     in linear light and run through stage 11 into sRGB or Display P3 with
     matching `iCCP`/`cICP`; it counts clipping and paints the clipping, gamut
@@ -358,11 +381,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     keys while open;
   - grain from the slider gets seed 1 when the variant has none.
 
-  The checkbox stays open until review and hosted CI pass.
-- [ ] **16. Prove conformance and performance.** Test hostile RAWs, profiles,
+  Hosted CI passed on all four platforms before release.
+- [x] **16. Prove conformance and performance.** Test hostile RAWs, profiles,
   precision, corrections, masks, merges, privacy, rollback, packaging, and caches.
 
-  *Status: implemented for review.* This item has six parts:
+  *Status: shipped in v0.11.0.* This item has six parts:
   - `src/photo/cache.rs`: the preview cache specified in "Caches". Entries are
     content-addressed PNGs carrying a CRC-checked `pnCk` key chunk, written
     atomically and bounded by `PENTOOL_PHOTO_CACHE_BYTES` with LRU eviction.
@@ -393,7 +416,7 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - the shared transaction's "revision mismatch" error keeps its wording and
     maps to `revision_conflict` as before, and the rollback test accepts it;
   - the golden digests were pinned on Windows. Linux and macOS agreement is
-    proven only when hosted CI passes;
+    confirmed by hosted CI run 37917091175;
   - benchmark figures come from one developer machine and are not a hosted-CI
     claim;
   - photo nodes are drawn on pages, as the user decided after the first review.
@@ -402,7 +425,7 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     `tests/v0110_conformance.rs` checks pixels, opacity, placement,
     determinism and that develop edits reach the page.
 
-  The checkbox stays open until review and hosted CI pass.
+  Hosted CI passed on all four platforms before release.
 
 ## CLI direction
 
