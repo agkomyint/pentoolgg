@@ -1074,6 +1074,43 @@ enum PhotoAction {
         #[command(flatten)]
         edit: EditArgs,
     },
+    /// Export selected photos through a recipe into a directory. Outputs are
+    /// staged and moved into place only when all succeed; the document is unchanged.
+    Export {
+        input: PathBuf,
+        /// Comma-separated photo IDs, a search query, or @FILE.json (an array of IDs).
+        #[arg(long)]
+        selection: String,
+        /// Built-in (web-gallery, social, archive-master, photo-lab) or document recipe.
+        #[arg(long)]
+        recipe: String,
+        /// Output directory; created if missing.
+        #[arg(long)]
+        out: PathBuf,
+        /// Export this variant of every photo (default: each master).
+        #[arg(long, conflicts_with = "all_variants")]
+        variant: Option<String>,
+        /// Export every variant of every photo.
+        #[arg(long)]
+        all_variants: bool,
+        /// Print size for a print recipe: WIDTHxHEIGHT in inches or centimeters, such as 6x4in.
+        #[arg(long)]
+        print: Option<String>,
+        /// When the aspect differs from the print: error, crop or pad.
+        #[arg(long)]
+        fit: Option<String>,
+        /// Replace files that already exist in the output directory.
+        #[arg(long)]
+        overwrite: bool,
+        /// Report the planned outputs without writing them.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Manage output recipes.
+    Recipe {
+        #[command(subcommand)]
+        action: PhotoRecipeAction,
+    },
 }
 
 #[derive(clap::Args)]
@@ -1097,6 +1134,29 @@ impl MetadataArgs {
             &self.metadata_exclude,
         )
     }
+}
+
+#[derive(Subcommand)]
+enum PhotoRecipeAction {
+    /// List the built-in recipes and the document's recipes.
+    List { input: PathBuf },
+    /// Add or replace a document recipe.
+    Set {
+        input: PathBuf,
+        name: String,
+        /// Recipe JSON, or @FILE.json.
+        #[arg(value_name = "JSON")]
+        recipe: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Remove a document recipe.
+    Remove {
+        input: PathBuf,
+        name: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
 }
 
 #[derive(clap::Args)]
@@ -3714,6 +3774,72 @@ async fn run() -> Result<()> {
                     metadata::describe(raw, &selection, &description)
                 })
             }
+            PhotoAction::Export {
+                input,
+                selection,
+                recipe,
+                out,
+                variant,
+                all_variants,
+                print,
+                fit,
+                overwrite,
+                dry_run,
+            } => {
+                use pentool::photo::export;
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let print = print.as_deref().map(export::parse_print).transpose()?;
+                let fit = fit.as_deref().map(export::Fit::parse).transpose()?;
+                let recipe = export::Recipe::named(&raw, &recipe)?.with_print(print, fit)?;
+                let photos = selection_arg(&selection)?.resolve(&raw)?;
+                if photos.is_empty() {
+                    anyhow::bail!("[invalid-input] the selection matches no photos")
+                }
+                let variants = match (variant, all_variants) {
+                    (Some(name), _) => export::Variants::Named(name),
+                    (None, true) => export::Variants::All,
+                    (None, false) => export::Variants::Master,
+                };
+                let planned =
+                    export::plan(&raw, &input, &recipe, &photos, &variants, &out, overwrite)?;
+                let report = if dry_run {
+                    export::plan_report(&recipe, &out, &planned)
+                } else {
+                    export::run(&raw, &input, &recipe, &planned, &out)?
+                };
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
+            }
+            PhotoAction::Recipe { action } => match action {
+                PhotoRecipeAction::List { input } => {
+                    let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                    let report = pentool::photo::export::Recipe::list(&raw)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                    Ok(())
+                }
+                PhotoRecipeAction::Set {
+                    input,
+                    name,
+                    recipe,
+                    edit,
+                } => {
+                    let text = match recipe.strip_prefix('@') {
+                        Some(path) => fs::read_to_string(path)
+                            .with_context(|| format!("[missing-resource] cannot read {path}"))?,
+                        None => recipe,
+                    };
+                    let recipe: serde_json::Value = serde_json::from_str(&text)
+                        .context("[invalid-input] the recipe must be a JSON object")?;
+                    run_photo_edit(&input, "photo-recipe-set", edit, |raw| {
+                        pentool::photo::export::set_recipe(raw, &name, recipe)
+                    })
+                }
+                PhotoRecipeAction::Remove { input, name, edit } => {
+                    run_photo_edit(&input, "photo-recipe-remove", edit, |raw| {
+                        pentool::photo::export::remove_recipe(raw, &name)
+                    })
+                }
+            },
         },
         Command::Image { action } => match action {
             ImageAction::Op { action } => {

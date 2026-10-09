@@ -108,8 +108,10 @@ copyright|public|all-including-private` writes a deliberate EXIF/XMP subset, `ph
 describe` sets title, caption, creator, copyright and location, `photo metadata`
 shows a photo's metadata with GPS, serials and identity redacted, and `photo
 privacy-report` lists sources that carry them.
-Batch delivery lands with the rest of v0.11; see
-[docs/photography-v1.md](docs/photography-v1.md).
+`pentool photo export` plans, renders and stages a batch through a recipe
+(`web-gallery`, `social`, `archive-master`, `photo-lab` or one stored with `photo
+recipe set`) into JPEG, PNG or TIFF, and moves the files into place only when every
+one succeeded; see [docs/photography-v1.md](docs/photography-v1.md).
 
 ```sh
 pentool raw add catalog.pen hero --file ./capture.dng --external --dry-run
@@ -143,6 +145,8 @@ pentool photo contact-sheet catalog.pen --selection "rating>=4" --columns 4 --ou
 pentool photo describe catalog.pen hero --creator "Ana Photo" --copyright "(c) 2026 Ana Photo"
 pentool photo render catalog.pen hero --out hero.png --metadata public
 pentool photo privacy-report catalog.pen
+pentool photo export catalog.pen --selection "rating>=4" --recipe web-gallery --out ./delivery --dry-run
+pentool photo export catalog.pen --selection hero --recipe photo-lab --print 6x4in --fit crop --out ./lab
 ```
 
 ## Raster paint (v0.10)

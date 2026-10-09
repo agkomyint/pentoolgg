@@ -1303,43 +1303,103 @@ packaging carries the source bytes.
  "naming": "{photo}-{variant}", "metadata": {"policy": "copyright"}}
 ```
 
-- `format` `jpeg` (8-bit, quality 1–100, chroma `420`\|`444`), `png` (8 or 16
-  bit, or HDR), or `tiff` (8 or 16 bit, `none`\|`deflate`). WebP, AVIF, HEIC, JPEG
-  XL and DNG export are out of scope for v0.11.0.
+- `format` `jpeg` (8-bit, quality 1–100, default 90, chroma `420`\|`444`, default
+  `420`), `png` (8 or 16 bit, or HDR), or `tiff` (8 or 16 bit, compression
+  `none`\|`deflate`, default `deflate`). A key that does not apply to the format
+  (`quality` or `chroma` outside JPEG, `compression` outside TIFF, `hdr` outside
+  PNG) is `[invalid-input]`, as is any unknown key. `bit_depth` defaults to 8, or 16
+  with `hdr`; `intent` defaults to `perceptual`; `dither` (`none`\|`ordered4`)
+  applies to 8-bit output. `color_space` is required. WebP, AVIF, HEIC, JPEG XL and
+  DNG export are out of scope for v0.11.0.
 - `resize.mode` `none`\|`long-edge`\|`short-edge`\|`width`\|`height`\|`megapixels`\|
-  `percent`\|`print`. `print` takes `{width, height, unit: in|cm, ppi, fit:
-  "error"|"crop"|"pad"}`. An aspect mismatch is an error unless `fit` says
-  otherwise; pentool never crops silently. Resampling is separable Lanczos-3 in
-  linear light.
+  `percent`\|`print`. The edge modes take a whole `value` of 1–32,768 pixels and set
+  that side exactly; `megapixels` takes 0–120 and `percent` 0–400. `enlarge`
+  defaults to `false`, which keeps a smaller photo at its size. `print` takes
+  `{width, height, unit: in|cm, ppi, fit: "error"|"crop"|"pad", enlarge}`; width and
+  height (0–1,000) may instead come from `--print WIDTHxHEIGHT(in|cm)`, `fit`
+  defaults to `error` and `enlarge` to `true`. The print turns to match the photo
+  (a 6x4 print holds a portrait photo as 4x6). A photo whose fitted size is within
+  one pixel of the print on each side matches; otherwise `fit: error` is
+  `[invalid-input]` naming both sizes, `crop` scales to cover and keeps the center,
+  and `pad` scales to fit and centers the photo on white. pentool never crops
+  silently. With `enlarge: false`, a print that needs upscaling is an error.
+- `ppi` (1–4,800) is written as the JPEG JFIF density, the PNG `pHYs` chunk and
+  the TIFF resolution. It defaults to the print's `ppi`, else 72; a print `ppi`
+  defaults to the recipe's, else 300, and the two may not disagree.
+- Resampling is separable Lanczos-3 in linear working light with premultiplied
+  alpha, accumulated in f64; each result is clamped to the range of the samples
+  it uses, so edges do not ring or go negative. Resize runs before stage 11, so the
+  output tone curve, gamut mapping, transfer and quantization see the final pixels.
 - `sharpen.target` `screen`\|`matte`\|`glossy`, `amount` `low`\|`standard`\|`high`,
-  applied after resize.
-- `naming` tokens: `{photo}`, `{variant}`, `{name}`, `{recipe}`, `{rating}`,
-  `{seq:N}` (1–6 digits) and `{captured:YYYYMMDD}`, which is allowed only when
-  `timestamps` is exported, so a filename cannot leak what the metadata strips.
-  Names are sanitized to `[A-Za-z0-9._-]`.
+  applied after resize with the capture sharpener (detail 25, no masking):
+
+  | Target | Radius | | Amount | Strength |
+  |---|---|---|---|---|
+  | `screen` | 0.5 | | `low` | 25 |
+  | `glossy` | 0.8 | | `standard` | 50 |
+  | `matte` | 1.0 | | `high` | 80 |
+
+- `naming` (1–256 bytes, default `{photo}-{variant}`) tokens: `{photo}`,
+  `{variant}`, `{name}` (the photo's name, else its ID), `{recipe}`, `{rating}`,
+  `{seq:N}` (the 1-based position in the plan, zero-padded to N = 1–6 digits) and
+  `{captured:YYYYMMDD}` (`undated` without a capture date), which is allowed only
+  when `timestamps` is exported, so a filename cannot leak what the metadata strips.
+  Names are sanitized to `[A-Za-z0-9._-]` (other characters become `_`), lose
+  leading dots, get `_` appended when they are a reserved Windows device name, and
+  may be at most 200 bytes with the extension (`.jpg`, `.png`, `.tif`). An empty
+  name is `[invalid-input]`.
+- `metadata` is a metadata policy (see "Metadata privacy"); the default is `none`.
+- JPEG has no alpha: transparent pixels are composited over white in output code
+  values, and the delivery report counts them as `flattened_pixels`. The JPEG
+  encoder is pentool's own baseline encoder with the Annex K tables scaled by
+  quality and 2x2-averaged chroma for `420`; it writes JFIF, `ICC_PROFILE` APP2
+  segments, then the metadata APP1 segments. TIFF is one strip, little-endian,
+  with horizontal differencing (predictor 2) under deflate, the ICC profile as tag
+  34675 and the metadata in its EXIF IFD.
 - Built-in recipes, which a document recipe may not shadow:
-  - `web-gallery`: sRGB JPEG, quality 85, long edge 2048, screen sharpening,
-    `copyright` metadata.
-  - `social`: sRGB JPEG, quality 90, long edge 1080, screen sharpening, `none`.
-  - `archive-master`: 16-bit `prophoto` TIFF with deflate, no resize, no
-    sharpening, `public` metadata.
-  - `photo-lab`: sRGB JPEG, quality 95, 300 ppi, `print` resize (size given per
-    run), glossy sharpening, `copyright` metadata.
 
-`photo export DOC --selection Q|picks|@ids.json --recipe R --out DIR [--variant V |
---all-variants] [--overwrite] [--dry-run]` works in four steps:
+  | Recipe | Format | Resize | Sharpening | Metadata |
+  |---|---|---|---|---|
+  | `web-gallery` | sRGB JPEG, quality 85, `420`, 72 ppi | long edge 2048 | screen, standard | `copyright` |
+  | `social` | sRGB JPEG, quality 90, `420`, 72 ppi | long edge 1080 | screen, standard | `none` |
+  | `archive-master` | 16-bit `prophoto` TIFF, deflate, relative colorimetric, 300 ppi | none | none | `public` |
+  | `photo-lab` | sRGB JPEG, quality 95, `444`, 300 ppi | `print`, size per run, `fit: error` | glossy, standard | `copyright` |
 
-1. Plan first: resolve the photos, compute every output name, size and the
-   estimated bytes, and detect collisions (an error unless `--overwrite`). At most
-   10,000 outputs per run.
+  Document recipes live in `photography.recipes` (at most 64) and are validated
+  with the document: a malformed recipe is `[malformed-resource]`.
+
+`photo export DOC --selection IDS|QUERY|@ids.json --recipe R --out DIR [--variant V
+| --all-variants] [--print WxH(in|cm)] [--fit error|crop|pad] [--overwrite]
+[--dry-run]` works in four steps:
+
+1. Plan first: validate the document, resolve the photos (each photo's master
+   unless `--variant` or `--all-variants`; a missing variant is
+   `[missing-resource]`), and compute every output name, size and the estimated
+   bytes. At most 10,000 outputs per run, checked before any develop. Two outputs
+   with the same name (compared ignoring case) are `[conflict]` naming both; files
+   that already exist in `DIR` are `[policy-denied]` unless `--overwrite`; an
+   existing directory at an output path, or a `--out` that is not a directory, is
+   an error.
 2. Render into `DIR/.pentool-export-<run>/`, one file at a time, with bounded memory
-   (one develop at a time per worker, `MAX_DEVELOP_BYTES` each).
+   (one develop at a time, `MAX_DEVELOP_BYTES` each). `DIR` is created if missing.
 3. Only after every output succeeds, rename each into `DIR`. On failure or
-   cancellation, the staging directory is deleted and nothing reaches `DIR`.
-4. Report the outputs (`{photo, variant, path, width, height, bytes, sha256}`) as
-   JSON. Export never modifies the document.
+   cancellation, the staging directory is deleted, any output already renamed that
+   did not exist before is removed, a `DIR` the run created is removed, and
+   nothing reaches `DIR`.
+4. Report `{recipe, out, count, bytes, outputs: [{photo, variant, path, width,
+   height, bytes, sha256, delivery}]}` as JSON, where `recipe` is the resolved
+   recipe and `delivery` is the stage-11 report with `metadata`. Export never
+   modifies the document, and the same document and recipe produce the same bytes.
 
-`--dry-run` prints the plan. It uses the same planner as a real export.
+`--dry-run` prints `{dry_run: true, recipe, out, count, estimated_bytes, outputs:
+[{photo, variant, path, width, height, estimated_bytes, exists}]}` and writes
+nothing. It uses the same planner as a real export, so a plan that succeeds runs
+with the same names and sizes.
+
+`photo recipe list DOC` reports `{recipes: [{name, built_in, recipe}]}`, built-ins
+first. `photo recipe set DOC NAME JSON|@FILE.json` adds or replaces a document
+recipe and `photo recipe remove DOC NAME` removes one; both are transactions
+(`--dry-run`, `--if-revision`), and a built-in name is `[invalid-input]`.
 
 ## Caches
 
@@ -1413,7 +1473,9 @@ pentool photo privacy-report catalog.pen
 pentool photo render catalog.pen hero --out hero.png --metadata public --metadata-exclude location
 pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr [--deghost medium] [--reference 2] [--scale 0.5] [--settings first] [--external merged/hero-hdr.dng]
 pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor-pano --projection cylindrical [--seed 7] [--focal 2400]
-pentool photo export catalog.pen --selection picks --recipe web-gallery --out ./delivery
+pentool photo export catalog.pen --selection collection:picks --recipe web-gallery --out ./delivery [--dry-run]
+pentool photo export catalog.pen --selection hero --recipe photo-lab --print 6x4in --fit crop --out ./lab
+pentool photo recipe set catalog.pen client-proof @client-proof.json
 pentool photo place catalog.pen hero --variant warm-editorial --layer layer-1 --width 1200 --height 800
 ```
 

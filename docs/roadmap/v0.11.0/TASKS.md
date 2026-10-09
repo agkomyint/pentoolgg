@@ -293,6 +293,35 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 
 - [ ] **14. Add output recipes and batch delivery.** Cover web, social, archive,
   and photo-lab dimensions, RGB profiles, precision, codec, naming, and sharpening.
+
+  *Status: implemented for review.* This item has four parts:
+  - `src/photo/export.rs`: recipe validation and the four built-in recipes, the
+    output frame of every resize mode and print fit, Lanczos-3 resizing in linear
+    light, output sharpening, naming, the planner and the staged batch run,
+    specified in "Output recipes and batch delivery" in `docs/photography-v1.md`;
+  - `src/photo/jpeg.rs`, a deterministic baseline JPEG encoder with 4:2:0 or 4:4:4
+    chroma, JFIF density and ICC segments, and a single-strip TIFF writer that
+    carries the metadata through `metadata::tiff_file`;
+  - `pentool photo export` and `photo recipe list|set|remove`; document recipes
+    are validated with the document;
+  - unit tests of recipes, frames, resampling and naming, and
+    `tests/v0110_export.rs`.
+
+  Decisions:
+  - pentool encodes JPEG itself because the bundled encoder cannot subsample
+    chroma and the recipe contract needs `420` and `444`;
+  - resizing happens in linear working light before stage 11, so the output tone
+    curve, gamut mapping and quantization see the final pixels; overshoot is
+    clamped, so edges do not ring;
+  - a print accepts a one-pixel difference per side as the same aspect, turns to
+    match the photo, pads with white, and enlarges by default; `--print` and
+    `--fit` supply the size and fit per run;
+  - same-name outputs are always `[conflict]` (`--overwrite` only replaces files
+    from earlier runs); `--selection picks` in the spec became a query such as
+    `collection:picks`; export is single-worker.
+
+  The checkbox stays open until review and hosted CI pass.
+
 - [ ] **15. Build photographer UX.** Add filmstrip/grid, loupe, culling, histogram,
   clipping warnings, development panels, masks, crop, compare, and copy/sync.
 - [ ] **16. Prove conformance and performance.** Test hostile RAWs, profiles,

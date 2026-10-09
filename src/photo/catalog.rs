@@ -3,7 +3,7 @@
 //! `raw add` / `raw info` operations.
 use super::dng::Dng;
 use super::VERSION;
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -479,12 +479,11 @@ fn validate_catalog<'a>(
             if RESERVED_RECIPES.contains(&name.as_str()) {
                 bail!("[malformed-resource] recipe {name} reuses a built-in recipe name; choose another")
             }
-            let what = format!("recipe {name}");
-            let recipe = object(recipe, &what)?;
-            one_of(recipe, "format", &["jpeg", "png", "tiff"], &what)?;
-            if !recipe.contains_key("format") || !recipe.contains_key("color_space") {
-                bail!("[malformed-resource] {what} requires format and color_space")
-            }
+            super::export::Recipe::parse(name, recipe).map_err(|error| {
+                let text = format!("{error:#}");
+                let text = text.strip_prefix("[invalid-input] ").unwrap_or(&text);
+                anyhow!("[malformed-resource] {text}")
+            })?;
         }
     }
     Ok(ids)
@@ -1446,6 +1445,16 @@ fn locate<'a>(
     variant_id: &str,
 ) -> Result<(&'a Value, Vec<u8>, &'a Value)> {
     crate::scene::validate(raw)?;
+    find(raw, document, photo_id, variant_id)
+}
+
+/// [`locate`] for a document that has already been validated.
+fn find<'a>(
+    raw: &'a Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+) -> Result<(&'a Value, Vec<u8>, &'a Value)> {
     let catalog = raw.get("photography").context(
         "[missing-resource] the document has no photography catalog; add a photo with `raw add` first",
     )?;
@@ -1480,7 +1489,19 @@ pub fn render_photo(
     photo_id: &str,
     variant_id: &str,
 ) -> Result<super::pipeline::Developed> {
-    let (develop, bytes, profiles) = locate(raw, document, photo_id, variant_id)?;
+    crate::scene::validate(raw)?;
+    render_validated(raw, document, photo_id, variant_id)
+}
+
+/// [`render_photo`] of a document already checked by `scene::validate`, so a
+/// batch validates once.
+pub fn render_validated(
+    raw: &Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+) -> Result<super::pipeline::Developed> {
+    let (develop, bytes, profiles) = find(raw, document, photo_id, variant_id)?;
     let dng = Dng::inspect(&bytes)?;
     let loader = profile_loader(document, profiles);
     let masks = super::local::Lookup { raw, document };
@@ -1490,7 +1511,18 @@ pub fn render_photo(
 /// `photo info`: the resolved frame of a variant without decoding pixels,
 /// plus the number of output pixels whose source lies outside the image.
 pub fn photo_info(raw: &Value, document: &Path, photo_id: &str, variant_id: &str) -> Result<Value> {
-    let (develop, bytes, profiles) = locate(raw, document, photo_id, variant_id)?;
+    crate::scene::validate(raw)?;
+    info_validated(raw, document, photo_id, variant_id)
+}
+
+/// [`photo_info`] of a document already checked by `scene::validate`.
+pub fn info_validated(
+    raw: &Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+) -> Result<Value> {
+    let (develop, bytes, profiles) = find(raw, document, photo_id, variant_id)?;
     let dng = Dng::inspect(&bytes)?;
     let loader = profile_loader(document, profiles);
     let plan = super::pipeline::plan(&dng, develop, &loader)?;

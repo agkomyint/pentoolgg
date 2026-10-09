@@ -691,6 +691,8 @@ pub fn privacy_report(raw: &Value, document: &Path) -> Result<Value> {
 pub struct Embedded {
     pub exif: Option<Vec<u8>>,
     pub xmp: Option<String>,
+    /// The EXIF fields of `exif`, for writers that lay out their own IFDs.
+    pub fields: Vec<(Dir, u16, Field)>,
     /// Categories that contributed at least one value.
     pub written: BTreeSet<&'static str>,
 }
@@ -725,6 +727,23 @@ type Encoded = (u16, (u16, u32, Vec<u8>));
 
 /// A little-endian TIFF block of IFD0, the EXIF IFD and the GPS IFD.
 fn exif_block(fields: &[(Dir, u16, Field)]) -> Vec<u8> {
+    layout(fields, &[], None)
+}
+
+/// A complete little-endian TIFF: `image` tags and the embedded EXIF fields in
+/// IFD0, the EXIF and GPS IFDs, the XMP packet as tag 700, then `strip` as the
+/// only strip; StripOffsets (273, which `image` must hold) points at it.
+pub fn tiff_file(image: &[(u16, Field)], embedded: &Embedded, strip: &[u8]) -> Vec<u8> {
+    let mut image = image.to_vec();
+    if let Some(xmp) = &embedded.xmp {
+        image.push((700, Field::Byte(xmp.as_bytes().to_vec())));
+    }
+    layout(&embedded.fields, &image, Some(strip))
+}
+
+/// IFD0 (image tags first, so they win over a duplicate EXIF tag), the EXIF
+/// IFD, the GPS IFD and an optional strip.
+fn layout(fields: &[(Dir, u16, Field)], image: &[(u16, Field)], strip: Option<&[u8]>) -> Vec<u8> {
     let group = |dir: Dir| -> Vec<Encoded> {
         let mut entries: Vec<_> = fields
             .iter()
@@ -737,7 +756,8 @@ fn exif_block(fields: &[(Dir, u16, Field)]) -> Vec<u8> {
     };
     let exif = group(Dir::Exif);
     let gps = group(Dir::Gps);
-    let mut ifd0 = group(Dir::Ifd0);
+    let mut ifd0: Vec<Encoded> = image.iter().map(|(tag, f)| (*tag, f.encode())).collect();
+    ifd0.extend(group(Dir::Ifd0));
     let size = |entries: &[Encoded]| -> usize {
         2 + 12 * entries.len()
             + 4
@@ -761,13 +781,17 @@ fn exif_block(fields: &[(Dir, u16, Field)]) -> Vec<u8> {
         ifd0.push(pointer(34853));
     }
     ifd0.sort_by_key(|(tag, _)| *tag);
+    ifd0.dedup_by_key(|(tag, _)| *tag);
     let exif_at = 8 + size(&ifd0);
     let gps_at = exif_at + if exif.is_empty() { 0 } else { size(&exif) };
+    let strip_at = gps_at + if gps.is_empty() { 0 } else { size(&gps) };
     for (tag, (_, _, bytes)) in &mut ifd0 {
         if *tag == 34665 {
             *bytes = (exif_at as u32).to_le_bytes().to_vec();
         } else if *tag == 34853 {
             *bytes = (gps_at as u32).to_le_bytes().to_vec();
+        } else if *tag == 273 && strip.is_some() {
+            *bytes = (strip_at as u32).to_le_bytes().to_vec();
         }
     }
     let mut out = b"II*\0".to_vec();
@@ -800,6 +824,10 @@ fn exif_block(fields: &[(Dir, u16, Field)]) -> Vec<u8> {
         }
         out.extend(0u32.to_le_bytes());
         out.extend(data);
+    }
+    if let Some(strip) = strip {
+        debug_assert_eq!(out.len(), strip_at);
+        out.extend_from_slice(strip);
     }
     out
 }
@@ -911,6 +939,7 @@ pub fn prepare(raw: &Value, document: &Path, photo: &str, policy: &Policy) -> Re
     }
     if fields.iter().any(|(_, tag, _)| *tag != 305) {
         embedded.exif = Some(exif_block(&fields));
+        embedded.fields = fields;
     }
     if embedded.exif.is_none() && embedded.xmp.is_none() {
         embedded.written.clear();
@@ -1139,6 +1168,7 @@ mod tests {
                 Field::Ascii("Owner".into()),
             )])),
             xmp: Some("<x:xmpmeta><exif:GPSLatitude>1</exif:GPSLatitude></x:xmpmeta>".into()),
+            fields: Vec::new(),
             written: BTreeSet::new(),
         };
         let image = image::RgbImage::from_pixel(2, 2, image::Rgb([9, 9, 9]));
