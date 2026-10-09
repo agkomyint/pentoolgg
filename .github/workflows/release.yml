@@ -72,6 +72,16 @@ jobs:
           cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen add p --width 100 --height 60
           cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen stroke p --samples '[[30,30],[60,40]]' --color '#FF0000'
           cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen verify p --replay
+      - name: Smoke test photography
+        shell: bash
+        run: |
+          cp docs/fixtures/v4-scene.pen photo-smoke.pen
+          cp docs/fixtures/photo-dng-rggb16.dng hero.dng
+          cargo run --release --locked --target ${{ matrix.target }} -- raw add photo-smoke.pen hero --file hero.dng
+          cargo run --release --locked --target ${{ matrix.target }} -- raw develop photo-smoke.pen hero --exposure 0.3
+          cargo run --release --locked --target ${{ matrix.target }} -- photo render photo-smoke.pen hero --out photo-smoke.png
+          cargo run --release --locked --target ${{ matrix.target }} -- photo export photo-smoke.pen --selection hero --recipe web-gallery --out photo-out
+          cargo run --release --locked --target ${{ matrix.target }} -- benchmark --photo --photos 4 --megapixels 0.5 --repetitions 2 --max-ms 60000
       - name: Smoke test pages and import
         shell: bash
         run: |
