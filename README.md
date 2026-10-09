@@ -112,6 +112,12 @@ privacy-report` lists sources that carry them.
 (`web-gallery`, `social`, `archive-master`, `photo-lab` or one stored with `photo
 recipe set`) into JPEG, PNG or TIFF, and moves the files into place only when every
 one succeeded; see [docs/photography-v1.md](docs/photography-v1.md).
+`pentool serve catalog.pen` opens the same catalog in a **Photos** studio. It has
+a grid, loupe and filmstrip, keyboard culling, a histogram with clipping
+warnings, clipping, gamut and mask overlays on a Display P3 or sRGB preview,
+development sliders, crop, radial, linear and brush masks, variant compare, and
+copy/sync. Every change is one undoable, revision-guarded edit made by the same
+Rust engines.
 
 ```sh
 pentool raw add catalog.pen hero --file ./capture.dng --external --dry-run

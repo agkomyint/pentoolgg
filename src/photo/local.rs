@@ -674,6 +674,16 @@ impl Local {
         Ok(())
     }
 
+    /// Take the computed weights (coverage times amount, per output pixel) of
+    /// an adjustment after [`Local::prepare`]. `None` when no enabled
+    /// adjustment with a non-zero amount has that ID.
+    pub fn take_weights(&mut self, id: &str) -> Option<Vec<f32>> {
+        self.adjustments
+            .iter_mut()
+            .find(|a| a.id == id)
+            .map(|a| std::mem::take(&mut a.weights))
+    }
+
     /// Stage 6: exposure, temperature and tint per pixel, then the tone curve
     /// sliders.
     pub fn tone(&self, image: &mut Working, context: &Context) -> Result<()> {

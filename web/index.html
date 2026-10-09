@@ -11,6 +11,7 @@
   <header class="topbar">
     <div class="brand"><span class="mark" aria-hidden="true">P</span><strong>Pentool</strong><span class="badge">OPEN SOURCE</span></div>
     <div class="actions">
+      <button id="photoOpen" title="Photo studio: cull, develop and compare RAW photos">Photos</button>
       <button id="newBtn" title="New document">New</button>
       <label class="button" for="openFile">Open .pen</label><input id="openFile" type="file" accept=".pen,application/json" hidden>
       <button id="saveBtn">Save .pen</button>
@@ -252,9 +253,85 @@
     </aside>
   </main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <section id="photoStudio" class="photo-studio" data-view="grid" aria-label="Photo studio" hidden>
+    <header class="photo-bar">
+      <form id="photoSearch" class="photo-row" role="search"><input id="photoQuery" type="search" placeholder="Query, e.g. rating>=3 pick:pick" aria-label="Photo query"><button>Search</button></form>
+      <span id="photoCount" class="text-help"></span>
+      <div class="photo-row" role="group" aria-label="View">
+        <button type="button" data-view="grid" title="Grid (G)">Grid</button><button type="button" data-view="loupe" title="Loupe (E)">Loupe</button><button type="button" data-view="compare" title="Compare (C)">Compare</button>
+      </div>
+      <label>Variant <select id="photoVariant" aria-label="Variant"></select></label>
+      <label>Preview <select id="photoSpace" aria-label="Preview color space"><option value="srgb">sRGB</option><option value="display-p3">Display P3</option></select></label>
+      <label>Overlay <select id="photoOverlay" aria-label="Overlay"><option value="none">None</option><option value="clipping">Clipping (J)</option><option value="gamut">Gamut</option></select></label>
+      <button id="photoUndo" type="button">Undo</button>
+      <button id="photoClose" type="button" title="Close (Esc)">Close</button>
+    </header>
+    <div class="photo-body">
+      <div class="photo-main">
+        <div id="photoLoupe" class="photo-loupe" aria-live="polite"></div>
+        <div id="photoGrid" class="photo-grid" aria-label="Photos"></div>
+      </div>
+      <aside class="photo-side" aria-label="Develop">
+        <section>
+          <canvas id="photoHistogram" width="256" height="96" aria-label="RGB histogram"></canvas>
+          <div class="photo-row"><button id="photoClipLow" type="button" class="photo-clip" aria-label="Shadow clipping">&#9699; Shadows</button><button id="photoClipHigh" type="button" class="photo-clip" aria-label="Highlight clipping">Highlights &#9701;</button></div>
+          <p id="photoGamutInfo" class="text-help"></p>
+        </section>
+        <section>
+          <h2>White balance</h2>
+          <div class="photo-row"><button id="photoAsShot" type="button">As shot</button><button id="photoAutoWb" type="button">Auto</button><button id="photoAutoTone" type="button">Auto tone</button></div>
+          <label class="photo-slider"><span>Temp</span><input id="photoTemperature" type="number" min="2000" max="50000" step="50"></label>
+          <label class="photo-slider"><span>Tint</span><input id="photoTint" type="number" min="-150" max="150" step="1"></label>
+          <button id="photoWbApply" type="button">Apply white balance</button>
+        </section>
+        <section id="photoDevelop"></section>
+        <section>
+          <h2>Crop</h2>
+          <div class="photo-row"><button id="photoCropStart" type="button">Crop&hellip;</button><select id="photoCropAspect" aria-label="Crop aspect"><option value="free">Free</option><option value="1:1">1:1</option><option value="3:2">3:2</option><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="4:5">4:5</option></select></div>
+          <div class="photo-row"><button id="photoCropApply" type="button">Apply crop</button><button id="photoCropClear" type="button">Clear crop</button></div>
+          <p id="photoCropInfo" class="text-help"></p>
+        </section>
+        <section>
+          <h2>Masks</h2>
+          <label class="photo-slider"><span>New exposure</span><input id="photoMaskExposure" type="range" min="-4" max="4" step="0.05" value="0.5"></label>
+          <div class="photo-row"><button id="photoMask-radial" type="button">+ Radial</button><button id="photoMask-linear" type="button">+ Linear</button><button id="photoMask-brush" type="button">+ Brush</button></div>
+          <label><input id="photoMaskOverlay" type="checkbox" checked> Show mask while editing</label>
+          <div id="photoBrushHint" class="photo-brush" hidden>
+            <label class="photo-slider"><span>Brush size %</span><input id="photoBrushSize" type="range" min="1" max="50" step="1" value="8"></label>
+            <label><input id="photoBrushErase" type="checkbox"> Erase</label>
+            <p class="text-help">Paint on the uncropped photo; each stroke is one undoable edit. Esc stops.</p>
+          </div>
+          <div id="photoMaskList"></div>
+        </section>
+        <section>
+          <h2>Copy &amp; sync</h2>
+          <div class="photo-row"><button id="photoCopy" type="button">Copy settings</button><span id="photoCopied" class="text-help"></span></div>
+          <input id="photoSyncTo" placeholder="Targets: IDs or query (default: selection)" aria-label="Sync targets">
+          <div id="photoGroups" class="photo-groups"></div>
+          <label><input id="photoAutoPerPhoto" type="checkbox"> Re-run auto tone/WB per photo</label>
+          <button id="photoSync" type="button">Sync to targets</button>
+        </section>
+        <section>
+          <h2>Variants &amp; snapshots</h2>
+          <label>Compare with <select id="photoCompareB" aria-label="Compare variant"></select></label>
+          <input id="photoNewId" placeholder="New ID" aria-label="New variant or snapshot ID">
+          <div class="photo-row"><button id="photoVariantAdd" type="button">New variant</button><button id="photoSnapshotAdd" type="button">Snapshot</button></div>
+          <div class="photo-row"><select id="photoSnapshots" aria-label="Snapshots"></select><button id="photoRestore" type="button">Restore</button></div>
+        </section>
+        <section>
+          <h2>Keywords</h2>
+          <p id="photoKeywords" class="text-help"></p>
+          <form id="photoKeywordForm" class="photo-row"><input id="photoKeywordInput" placeholder="comma, separated" aria-label="Keywords"><button value="add">Add</button><button value="remove">Remove</button></form>
+          <p class="text-help">Keys: 0-5 rate &middot; P pick &middot; X reject &middot; U unflag &middot; 6-9 label &middot; arrows next &middot; G/E/C views &middot; J clipping.</p>
+        </section>
+      </aside>
+    </div>
+    <footer id="photoStatus" class="photo-status" role="status"></footer>
+  </section>
   <script src="/app.js"></script>
   <script src="/image-panel.js"></script>
   <script src="/composite-panel.js"></script>
   <script src="/raster-panel.js"></script>
+  <script src="/photo-panel.js"></script>
 </body>
 </html>

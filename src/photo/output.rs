@@ -314,6 +314,29 @@ pub fn render(
     scene_referred: bool,
     output: &Output,
 ) -> Result<(Raster, Counts)> {
+    render_with(image, rendering, scene_referred, output, None)
+}
+
+/// [`render`] that also marks each pixel that was outside the output range
+/// before gamut mapping (the editor's gamut overlay).
+pub fn render_marked(
+    image: &Working,
+    rendering: &Rendering,
+    scene_referred: bool,
+    output: &Output,
+) -> Result<(Raster, Counts, Vec<bool>)> {
+    let mut marks = vec![false; image.width as usize * image.height as usize];
+    let (raster, counts) = render_with(image, rendering, scene_referred, output, Some(&mut marks))?;
+    Ok((raster, counts, marks))
+}
+
+fn render_with(
+    image: &Working,
+    rendering: &Rendering,
+    scene_referred: bool,
+    output: &Output,
+    mut marks: Option<&mut Vec<bool>>,
+) -> Result<(Raster, Counts)> {
     let pixels = pixels::check_buffer(image)?;
     let quantizer = Quantizer::new(output.transfer(), output.depth, output.dither)?;
     let to_output: Matrix = output.space.from_working();
@@ -355,6 +378,9 @@ pub fn render(
         }
         if v.iter().any(|c| !quantizer.in_range(c * k)) {
             counts.out_of_gamut += 1;
+            if let Some(marks) = marks.as_deref_mut() {
+                marks[pixel] = true;
+            }
             match output.intent {
                 Intent::RelativeColorimetric => counts.clipped += 1,
                 Intent::Perceptual => match desaturate(v, luminance, peak) {

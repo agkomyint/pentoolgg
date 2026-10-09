@@ -171,6 +171,32 @@ pub fn develop(
     profiles: Profiles,
     masks: Option<&local::Lookup>,
 ) -> Result<Developed> {
+    develop_keeping(dng, develop, profiles, masks, None).map(|(developed, _)| developed)
+}
+
+/// [`develop`] that also returns the weights of local adjustment `mask`, one
+/// per output pixel, for the editor's mask overlay.
+pub fn develop_mask(
+    dng: &Dng,
+    develop: &Value,
+    profiles: Profiles,
+    masks: Option<&local::Lookup>,
+    mask: &str,
+) -> Result<(Developed, Vec<f32>)> {
+    let (developed, weights) = develop_keeping(dng, develop, profiles, masks, Some(mask))?;
+    let weights = weights.with_context(|| {
+        format!("[invalid-input] no enabled local adjustment {mask} with a non-zero amount; enable it to show its mask")
+    })?;
+    Ok((developed, weights))
+}
+
+fn develop_keeping(
+    dng: &Dng,
+    develop: &Value,
+    profiles: Profiles,
+    masks: Option<&local::Lookup>,
+    mask: Option<&str>,
+) -> Result<(Developed, Option<Vec<f32>>)> {
     let plan = plan(dng, develop, profiles)?;
     let rendering = rendering(dng, develop, profiles)?;
     // Refuse an unresolved dehaze and load masks before any decoding work.
@@ -196,12 +222,19 @@ pub fn develop(
     }
     report["white"] = white.report();
     report["invalid_pixels"] = json!(invalid_pixels);
-    Ok(Developed {
-        image,
-        invalid_pixels,
-        report,
-        rendering,
-    })
+    let weights = match (mask, local.as_mut()) {
+        (Some(id), Some(local)) => local.take_weights(id),
+        _ => None,
+    };
+    Ok((
+        Developed {
+            image,
+            invalid_pixels,
+            report,
+            rendering,
+        },
+        weights,
+    ))
 }
 
 /// Stages 1–5 of the whole (uncropped) frame, box-averaged to the analysis

@@ -24,6 +24,7 @@ pub mod pixels;
 pub mod png;
 pub mod profile;
 pub mod raw;
+pub mod studio;
 pub mod tiff;
 pub mod variants;
 pub mod warp;

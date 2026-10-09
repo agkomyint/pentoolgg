@@ -324,6 +324,41 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 
 - [ ] **15. Build photographer UX.** Add filmstrip/grid, loupe, culling, histogram,
   clipping warnings, development panels, masks, crop, compare, and copy/sync.
+
+  *Status: implemented for review.* This item has four parts:
+  - `src/photo/studio.rs`: previews and edits. A preview is developed, resized
+    in linear light and run through stage 11 into sRGB or Display P3 with
+    matching `iCCP`/`cICP`; it counts clipping and paints the clipping, gamut
+    and mask overlays. An edit dispatches develop, rate, keyword, variant,
+    snapshot, restore, sync and paint (including creating a brush adjustment)
+    to the existing engines. Supporting changes are `output::render_marked`,
+    `pipeline::develop_mask` and `catalog::render_mask`/`brush_plane`;
+  - `/api/photo/catalog`, `detail`, `preview` and `edit` in `src/server.rs`;
+    edits are revision-guarded transactions with dry run and undo;
+  - `web/photo-panel.js` and the Photos studio in `web/index.html` and
+    `web/style.css`: grid/filmstrip, loupe, compare, culling keys, histogram
+    with clipping indicators, overlays, white balance and development sliders,
+    crop, radial/linear/brush masks, copy/sync, variants, snapshots and
+    keywords; specified in "Photo editor" in `docs/photography-v1.md`;
+  - unit tests in `studio.rs` and `tests/v0110_studio.rs`, which cover the
+    preview tags, overlays, every panel's edit, refusals, brush strokes and the
+    HTTP endpoints with a stale-revision conflict.
+
+  Decisions:
+  - the browser does no develop math and never writes the document. Previews
+    are Rust renders, so what the studio shows is what export produces;
+  - the preview is 8-bit and perceptually mapped. The space defaults to Display
+    P3 when the display reports P3. HDR display preview stays out of scope;
+  - brush strokes from the studio accumulate into the adjustment's last brush
+    component on the current plane, so erasing works and a session never hits
+    the 16-component limit. The CLI still adds a component unless
+    `--component` is given;
+  - the studio is a full-screen overlay rather than inspector panels, because
+    the 272-pixel inspector cannot hold a loupe and filmstrip; it captures
+    keys while open;
+  - grain from the slider gets seed 1 when the variant has none.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **16. Prove conformance and performance.** Test hostile RAWs, profiles,
   precision, corrections, masks, merges, privacy, rollback, packaging, and caches.
 

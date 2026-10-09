@@ -1060,10 +1060,10 @@ chunks must equal those recomputed from the decoded codes, with
 `MaxFALL <= MaxCLL <= mDCV maximum`. A mismatch is `[malformed-resource]` and
 nothing is written.
 
-The editor's Display P3 preview with matching `iCCP`/`cICP`, and its clipping
-and gamut overlays, belong to the editor work (item 15). The browser and
-operating system own monitor calibration. HDR display preview is out of scope:
-the editor shows the SDR rendition.
+The editor previews through this stage in sRGB or Display P3, with matching
+`iCCP`/`cICP`, and paints its clipping and gamut overlays from the same codes
+(see "Photo editor"). The browser and operating system own monitor calibration.
+HDR display preview is out of scope: the editor shows the SDR rendition.
 
 ## Catalog (`photography`)
 
@@ -1400,6 +1400,86 @@ with the same names and sizes.
 first. `photo recipe set DOC NAME JSON|@FILE.json` adds or replaces a document
 recipe and `photo recipe remove DOC NAME` removes one; both are transactions
 (`--dry-run`, `--if-revision`), and a built-in name is `[invalid-input]`.
+
+## Photo editor
+
+`pentool serve CATALOG.pen` adds a **Photos** studio to the browser editor. It is
+a view over the catalog: the browser does no develop math and writes nothing
+itself. Every preview is rendered by the Rust pipeline, and every change is one
+revision-guarded transaction through the same engines as the CLI, so it is one
+undo step and the CLI sees it at once.
+
+**Views.** A grid of the search results (the query language of "Stacks,
+collections and search"), a loupe with a filmstrip, and a side-by-side compare
+of two variants. Thumbnails are 320-pixel previews developed one at a time.
+Click selects, ctrl/cmd-click toggles and shift-click selects a range.
+
+**Culling keys** act on the selection: `0`–`5` rating, `P` pick, `X` reject,
+`U` unflag, `6`–`9` red, yellow, green and blue labels, arrow keys move, `G`,
+`E` and `C` switch view, `J` toggles the clipping overlay, `Ctrl+Z` undoes and
+`Esc` leaves crop or brush mode, then closes the studio. Keys typed into a field
+are never captured, and the canvas editor underneath does not react while the
+studio is open.
+
+**Preview.** `POST /api/photo/preview` develops a variant, scales it in linear
+light so its long edge is at most `edge` (1–4096, default 1600, never enlarged),
+and runs stage 11 at 8 bits with perceptual mapping into `srgb` or `display-p3`.
+The editor picks Display P3 when the display reports `(color-gamut: p3)`. The PNG
+carries that space's `iCCP` and `cICP` (`[1,13,0,1]` or `[12,13,0,1]`). The
+report holds the preview and developed sizes, the delivery report of the preview
+codes (histogram, out-of-gamut and luminance) and two clipping counts:
+`highlight_clipped_pixels` (a channel at 255) and `shadow_clipped_pixels` (no
+channel at 255 and one at 0). With `uncropped`, the crop is ignored, so the crop
+tool and brushes see the whole frame. The histogram and counts are always taken
+before an overlay is painted.
+
+**Overlays** replace pixels in the preview only:
+
+| `overlay` | Paints | `marked_pixels` |
+|---|---|---|
+| `none` | nothing | 0 |
+| `clipping` | highlights `#FF0000`, shadows `#0040FF` | both clipping counts |
+| `gamut` | pixels the output mapping moved, `#FF00FF` | `delivery.out_of_gamut_pixels` |
+| `mask:ID` | local adjustment `ID`'s final weight as a 60% `#FF2020` tint | pixels with weight > 0 |
+
+A mask overlay needs an enabled adjustment with a non-zero amount; otherwise it
+is `[invalid-input]`, as is any other overlay name.
+
+**Panels.** A histogram with highlight and shadow clipping indicators; white
+balance (as shot, suggested, or temperature and tint) and auto tone; sliders for
+tone, presence, detail, geometry and effects, where releasing a slider sets the
+path and double-clicking unsets it; crop with a free or fixed aspect; masks; copy
+and sync; variants and snapshots; and keywords. Setting a grain amount on a
+variant without a grain seed also sets seed 1, so grain stays reproducible.
+
+**Masks.** Radial and linear adjustments are added with a default geometry and
+exposure. A new brush adjustment is created by its first stroke. Strokes are
+drawn on the uncropped preview and sent on pointer-up as samples normalized to
+the uncropped frame (0–1), with a size that is a fraction of its long edge. They
+are scaled to the brush plane and painted with the raster brush engine. A stroke
+without an explicit `component` goes into the adjustment's last brush component
+on the current plane, or starts a new one. Erasing needs such a component.
+
+**Edits.** `POST /api/photo/edit` takes `{"edit": {...}, "revision": "...",
+"dry_run": false}`. `edit.op` is one of:
+
+| `op` | Fields | Engine |
+|---|---|---|
+| `develop` | `photo`, `variant`, `set` (`{path: value}`), `unset`, `white_balance` (`{mode: as-shot\|temperature\|neutral\|sample\|suggest, ...}`), `upright`, `auto_tone` | `raw develop` |
+| `rate` | `selection`, `rating`, `pick`, `label` | `photo rate` |
+| `keyword` | `selection`, `add`, `remove`, `clear` | `photo keyword` |
+| `variant` | `photo`, `id`, `from` or `from_snapshot`, `name` | `photo variant add` |
+| `snapshot` | `photo`, `variant`, `id`, `name` | `photo snapshot add` |
+| `restore` | `photo`, `snapshot` | `photo snapshot restore` |
+| `sync` | `source`, `to`, `groups`, `except`, `auto_per_photo` | `photo settings sync` |
+| `paint` | `photo`, `variant`, `adjustment` and optional `component`, or `create` (`{id, name?, amount?, params?}`); `samples` (`[{x, y, pressure?}]`, 1–4096), `size`, `brush`, `erase` | `photo mask paint` |
+
+An unknown op or field is `[invalid-input]`. The edit is applied in memory and
+validated, then committed with the expected revision. A revision that no longer
+matches the file is `[conflict]`, and a failed edit leaves the file unchanged.
+`GET /api/photo/catalog?query=&offset=&limit=` (default 200) and `GET
+/api/photo/detail?photo=` return the search page and one photo's entry, oriented
+size and local adjustment IDs, each with the current `revision`.
 
 ## Caches
 

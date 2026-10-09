@@ -1508,6 +1508,37 @@ pub fn render_validated(
     super::pipeline::develop(&dng, develop, &loader, Some(&masks))
 }
 
+/// [`render_validated`] plus the weights of local adjustment `mask`, one per
+/// output pixel (the editor's mask overlay).
+pub fn render_mask(
+    raw: &Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+    mask: &str,
+) -> Result<(super::pipeline::Developed, Vec<f32>)> {
+    let (develop, bytes, profiles) = find(raw, document, photo_id, variant_id)?;
+    let dng = Dng::inspect(&bytes)?;
+    let loader = profile_loader(document, profiles);
+    let masks = super::local::Lookup { raw, document };
+    super::pipeline::develop_mask(&dng, develop, &loader, Some(&masks), mask)
+}
+
+/// The brush plane of a variant: the uncropped frame scaled to a long edge of
+/// at most 4096 pixels. Brush samples are in its pixels.
+pub fn brush_plane(
+    raw: &Value,
+    document: &Path,
+    photo_id: &str,
+    variant_id: &str,
+) -> Result<(u32, u32)> {
+    let (develop, bytes, profiles) = find(raw, document, photo_id, variant_id)?;
+    let dng = Dng::inspect(&bytes)?;
+    let loader = profile_loader(document, profiles);
+    let frame = super::pipeline::plan(&dng, develop, &loader)?.mapping.frame;
+    Ok(super::local::brush_size(frame))
+}
+
 /// `photo info`: the resolved frame of a variant without decoding pixels,
 /// plus the number of output pixels whose source lies outside the image.
 pub fn photo_info(raw: &Value, document: &Path, photo_id: &str, variant_id: &str) -> Result<Value> {

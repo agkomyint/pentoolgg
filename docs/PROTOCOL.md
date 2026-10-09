@@ -45,6 +45,19 @@ file, even if the server has one open. The editor records a local undo step and
 requires Save .pen to persist it. Standalone imports still require explicit
 format-migration consent; local plans never load linked files from the network.
 
+### Photo studio API
+
+`GET /api/photo/catalog` (`query`, `offset`, `limit`) and `GET /api/photo/detail`
+(`photo`) read the shared catalog and return its `revision`. `POST
+/api/photo/preview` (`photo`, `variant`, `edge`, `space` `srgb`|`display-p3`,
+`overlay` `none`|`clipping`|`gamut`|`mask:ID`, `uncropped`) returns `report` and a
+base64 `png` tagged for the space; it never writes. `POST /api/photo/edit`
+(`edit`, `revision`, `dry_run`) applies one develop, rate, keyword, variant,
+snapshot, restore, sync or paint edit through the CLI engines as one
+revision-guarded, undoable transaction. A stale revision is `[conflict]` and any
+failure leaves the file unchanged. The contract is "Photo editor" in
+[`photography-v1.md`](photography-v1.md).
+
 ### Protocol principles
 
 1. `.pen` files and `.penpkg` archives are portable data, never executable code.

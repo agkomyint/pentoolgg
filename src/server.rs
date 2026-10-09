@@ -28,6 +28,7 @@ const STYLE: &str = include_str!("../web/style.css");
 const IMAGE_PANEL_JS: &str = include_str!("../web/image-panel.js");
 const COMPOSITE_PANEL_JS: &str = include_str!("../web/composite-panel.js");
 const RASTER_PANEL_JS: &str = include_str!("../web/raster-panel.js");
+const PHOTO_PANEL_JS: &str = include_str!("../web/photo-panel.js");
 
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
     if let Some(path) = &file {
@@ -58,6 +59,14 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>) -> Result<()> {
             "/composite-panel.js",
             get(|| async { asset(COMPOSITE_PANEL_JS, "text/javascript; charset=utf-8") }),
         )
+        .route(
+            "/photo-panel.js",
+            get(|| async { asset(PHOTO_PANEL_JS, "text/javascript; charset=utf-8") }),
+        )
+        .route("/api/photo/catalog", get(photo_catalog))
+        .route("/api/photo/detail", get(photo_detail))
+        .route("/api/photo/preview", post(photo_preview))
+        .route("/api/photo/edit", post(photo_edit))
         .route("/api/composite/analyze", post(composite_analyze))
         .route("/api/composite/dependencies", get(composite_dependencies))
         .route("/api/composite/cancel", post(composite_cancel))
@@ -711,6 +720,192 @@ async fn image_bake(State(state): State<Shared>, Json(body): Json<BakeRequest>) 
         Err(error) => problem(error),
     }
 }
+#[derive(serde::Deserialize, Default)]
+struct PhotoCatalogQuery {
+    #[serde(default)]
+    query: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+/// The shared document's bytes and their revision, for the photo endpoints.
+fn shared_photo_document(state: &Shared) -> Result<(PathBuf, serde_json::Value, String)> {
+    let file = state
+        .file
+        .clone()
+        .context("[missing-resource] no shared document; run `pentool serve CATALOG.pen`")?;
+    let bytes = std::fs::read(&file)?;
+    let raw = serde_json::from_slice(&bytes)?;
+    Ok((file, raw, crate::transaction::revision(&bytes)))
+}
+
+/// The grid and filmstrip: `photo search` rows of the shared document.
+async fn photo_catalog(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PhotoCatalogQuery>,
+) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let (_, raw, revision) = shared_photo_document(&state)?;
+        let mut value = crate::photo::organize::search(
+            &raw,
+            &q.query,
+            q.limit.unwrap_or(200),
+            q.offset.unwrap_or(0),
+        )?;
+        value["revision"] = serde_json::json!(revision);
+        Ok(value)
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PhotoDetailQuery {
+    photo: String,
+}
+
+async fn photo_detail(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PhotoDetailQuery>,
+) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let (_, raw, revision) = shared_photo_document(&state)?;
+        let mut value = crate::photo::studio::detail(&raw, &q.photo)?;
+        value["revision"] = serde_json::json!(revision);
+        Ok(value)
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PhotoPreviewRequest {
+    photo: String,
+    #[serde(default = "master")]
+    variant: String,
+    edge: Option<u32>,
+    #[serde(default = "srgb")]
+    space: String,
+    #[serde(default)]
+    overlay: String,
+    #[serde(default)]
+    uncropped: bool,
+}
+
+fn master() -> String {
+    "master".into()
+}
+
+fn srgb() -> String {
+    "srgb".into()
+}
+
+/// Develop a preview: `{report, png}` with the PNG base64-encoded, tagged with
+/// the preview space's `iCCP` and `cICP`.
+fn photo_preview_value(
+    raw: &serde_json::Value,
+    file: &std::path::Path,
+    body: &PhotoPreviewRequest,
+) -> Result<serde_json::Value> {
+    use crate::photo::studio;
+    use base64::Engine;
+    let preview = studio::preview(
+        raw,
+        file,
+        &studio::PreviewRequest {
+            photo: &body.photo,
+            variant: &body.variant,
+            edge: body.edge.unwrap_or(studio::DEFAULT_EDGE),
+            space: &body.space,
+            overlay: studio::Overlay::parse(&body.overlay)?,
+            uncropped: body.uncropped,
+        },
+    )?;
+    Ok(serde_json::json!({
+        "report": preview.report,
+        "png": base64::engine::general_purpose::STANDARD.encode(preview.png),
+    }))
+}
+
+async fn photo_preview(
+    State(state): State<Shared>,
+    Json(body): Json<PhotoPreviewRequest>,
+) -> Response {
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let (file, raw, revision) = shared_photo_document(&state)?;
+        let mut value = photo_preview_value(&raw, &file, &body)?;
+        value["revision"] = serde_json::json!(revision);
+        Ok(value)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PhotoEditRequest {
+    edit: serde_json::Value,
+    /// The revision the browser last read; the edit is refused if the
+    /// document changed since.
+    revision: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Apply one photo edit under the document gate as a guarded transaction.
+fn photo_edit_apply(
+    file: &std::path::Path,
+    gate: &Mutex<()>,
+    body: &PhotoEditRequest,
+) -> Result<serde_json::Value> {
+    let _guard = gate
+        .lock()
+        .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+    let bytes = std::fs::read(file)?;
+    let current = crate::transaction::revision(&bytes);
+    let expected = body.revision.clone().unwrap_or(current.clone());
+    if expected != current {
+        anyhow::bail!(
+            "[conflict] the document changed since revision {expected} (now {current}); reload the photo and edit again"
+        )
+    }
+    let mut raw = serde_json::from_slice(&bytes)?;
+    let result = crate::photo::studio::edit(&mut raw, file, &body.edit)?;
+    let operation = format!(
+        "browser-photo-{}",
+        body.edit["op"].as_str().unwrap_or("edit")
+    );
+    let change =
+        crate::transaction::commit_value(file, &operation, body.dry_run, Some(&expected), &raw)?;
+    let revision = crate::transaction::revision(&std::fs::read(file)?);
+    Ok(serde_json::json!({"change":change,"result":result,"revision":revision}))
+}
+
+async fn photo_edit(State(state): State<Shared>, Json(body): Json<PhotoEditRequest>) -> Response {
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let file = state
+            .file
+            .clone()
+            .context("[missing-resource] no shared document; run `pentool serve CATALOG.pen`")?;
+        photo_edit_apply(&file, &state.gate, &body)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|r| r);
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 async fn history_list(State(state): State<Shared>) -> Response {
     let Some(file) = state.file else {
         return (StatusCode::NOT_FOUND, "No shared document").into_response();
