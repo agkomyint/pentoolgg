@@ -423,12 +423,19 @@ fn validate_catalog<'a>(
         if stacks.len() > MAX_STACKS {
             bail!("[limit-exceeded] photography has more than {MAX_STACKS} stacks")
         }
+        let mut stacked: HashMap<&str, &str> = HashMap::new();
         for (name, stack) in stacks {
             let what = format!("stack {name}");
             id(Some(&json!(name)), "stack ID")?;
             let stack = object(stack, &what)?;
             keys(stack, &["photos"], &what)?;
             known(&stack["photos"], &what, 2)?;
+            for photo in stack["photos"].as_array().into_iter().flatten() {
+                let photo = photo.as_str().unwrap_or_default();
+                if let Some(other) = stacked.insert(photo, name) {
+                    bail!("[malformed-resource] photo {photo} is in stacks {other} and {name}; a photo belongs to at most one stack")
+                }
+            }
         }
     }
     if let Some(collections) = catalog.get("collections") {
@@ -455,6 +462,8 @@ fn validate_catalog<'a>(
                     {
                         bail!("[malformed-resource] {what} query must be 1–4096 characters")
                     }
+                    super::organize::parse(collection["query"].as_str().unwrap_or_default())
+                        .with_context(|| format!("[malformed-resource] {what} query"))?;
                 }
                 _ => bail!("[malformed-resource] {what} kind must be manual or smart"),
             }
@@ -741,11 +750,13 @@ fn validate_photo<'a>(
         if keywords.len() > MAX_KEYWORDS
             || !keywords.iter().all(|keyword| {
                 keyword.as_str().is_some_and(|keyword| {
-                    !keyword.is_empty() && keyword.chars().count() <= 64 && seen.insert(keyword)
+                    !keyword.is_empty()
+                        && keyword.chars().count() <= 64
+                        && seen.insert(keyword.to_lowercase())
                 })
             })
         {
-            bail!("[malformed-resource] {what} keywords must be at most {MAX_KEYWORDS} unique strings of 1–64 characters")
+            bail!("[malformed-resource] {what} keywords must be at most {MAX_KEYWORDS} strings of 1–64 characters, unique ignoring case")
         }
     }
     if let Some(location) = record.get("location") {

@@ -960,6 +960,160 @@ enum PhotoAction {
         #[command(subcommand)]
         action: PhotoSettingsAction,
     },
+    /// Search the catalog: rows in catalog order, paginated. An empty query lists every photo.
+    Search {
+        input: PathBuf,
+        /// Terms combined with AND, for example "rating>=4 keyword:\"blue hour\" camera:fuji".
+        #[arg(default_value = "")]
+        query: String,
+        #[arg(long, default_value_t = pentool::photo::organize::DEFAULT_LIMIT)]
+        limit: usize,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+    },
+    /// Set the rating, pick flag or color label of selected photos.
+    Rate {
+        input: PathBuf,
+        /// Comma-separated photo IDs, a search query, or @FILE.json (an array of IDs).
+        selection: String,
+        /// 0–5; 0 removes the rating.
+        #[arg(long)]
+        rating: Option<u64>,
+        /// pick, reject or none.
+        #[arg(long)]
+        pick: Option<String>,
+        /// none, red, yellow, green, blue or purple.
+        #[arg(long)]
+        label: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Add or remove keywords of selected photos (compared ignoring case).
+    Keyword {
+        input: PathBuf,
+        /// Comma-separated photo IDs, a search query, or @FILE.json (an array of IDs).
+        selection: String,
+        #[arg(long, value_delimiter = ',')]
+        add: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        remove: Vec<String>,
+        /// Remove every keyword before adding.
+        #[arg(long)]
+        clear: bool,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Group related photos into stacks.
+    Stack {
+        #[command(subcommand)]
+        action: PhotoStackAction,
+    },
+    /// Manage manual and smart collections.
+    Collection {
+        #[command(subcommand)]
+        action: PhotoCollectionAction,
+    },
+    /// Write a captioned grid of selected photos to a PNG or PDF file.
+    ContactSheet {
+        input: PathBuf,
+        /// Comma-separated photo IDs, a search query, or @FILE.json (an array of IDs).
+        #[arg(long)]
+        selection: String,
+        #[arg(long, default_value_t = 4)]
+        columns: u32,
+        #[command(flatten)]
+        sheet: SheetArgs,
+        /// Variant shown for every photo.
+        #[arg(long, default_value = "master")]
+        variant: String,
+    },
+    /// Write photos or variants side by side (one row of up to 4, then a grid).
+    Compare {
+        input: PathBuf,
+        /// 2–16 photo[/variant] items.
+        #[arg(num_args = 2..=16, required = true)]
+        items: Vec<String>,
+        #[command(flatten)]
+        sheet: SheetArgs,
+    },
+}
+
+#[derive(clap::Args)]
+struct SheetArgs {
+    /// Cell size in pixels, 32–1024.
+    #[arg(long, default_value_t = 256)]
+    cell: u32,
+    /// Caption template with {id}, {name}, {rating} and {variant}.
+    #[arg(long, default_value = "{id}")]
+    caption: String,
+    /// Output file: .png or .pdf.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Subcommand)]
+enum PhotoStackAction {
+    /// Stack two or more photos; the first is the top.
+    Add {
+        input: PathBuf,
+        stack: String,
+        /// Comma-separated photo IDs (top first), a search query, or @FILE.json.
+        photos: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Make PHOTO the top of the stack.
+    Top {
+        input: PathBuf,
+        stack: String,
+        photo: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Unstack; the photos stay in the catalog.
+    Remove {
+        input: PathBuf,
+        stack: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhotoCollectionAction {
+    /// Add a manual collection (--photos) or a smart collection (--query).
+    Add {
+        input: PathBuf,
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Photos of a manual collection: IDs, a query (frozen now) or @FILE.json.
+        #[arg(long, conflicts_with = "query", required_unless_present = "query")]
+        photos: Option<String>,
+        /// The stored query of a smart collection.
+        #[arg(long)]
+        query: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Add or remove photos of a manual collection.
+    Update {
+        input: PathBuf,
+        id: String,
+        #[arg(long)]
+        add: Option<String>,
+        #[arg(long)]
+        remove: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Remove a collection; its photos stay in the catalog.
+    Remove {
+        input: PathBuf,
+        id: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
 }
 
 #[derive(clap::Args)]
@@ -2013,20 +2167,35 @@ fn run_photo_edit(
     Ok(())
 }
 
-/// `--to` of `photo settings sync`: comma-separated `photo[/variant]` entries or
-/// `@FILE.json` holding an array of them.
-fn sync_targets(to: &str) -> Result<Vec<(String, String)>> {
-    use pentool::photo::variants;
+/// Read `@FILE.json`: a JSON array of strings, at most 16 MiB.
+fn id_list_file(path: &str) -> Result<Vec<String>> {
+    let size = fs::metadata(path)
+        .with_context(|| format!("[missing-resource] cannot read list {path}"))?
+        .len();
+    if size > 16 * 1024 * 1024 {
+        anyhow::bail!("[limit-exceeded] list {path} is larger than 16 MiB")
+    }
+    serde_json::from_slice(&fs::read(path)?)
+        .with_context(|| format!("[invalid-input] list {path} must be a JSON array of strings"))
+}
+
+/// A photo selection: `@FILE.json`, a search query or comma-separated IDs.
+fn selection_arg(text: &str) -> Result<pentool::photo::organize::Selection> {
+    use pentool::photo::organize::Selection;
+    Ok(match text.strip_prefix('@') {
+        Some(path) => Selection::Ids(id_list_file(path)?),
+        None => Selection::parse(text),
+    })
+}
+
+/// `--to` of `photo settings sync`: comma-separated `photo[/variant]` entries,
+/// `@FILE.json` holding an array of them, or a search query (each match's master).
+fn sync_targets(to: &str, raw: &serde_json::Value) -> Result<Vec<(String, String)>> {
+    use pentool::photo::{organize, variants};
     let entries: Vec<String> = if let Some(path) = to.strip_prefix('@') {
-        let size = fs::metadata(path)
-            .with_context(|| format!("[missing-resource] cannot read target list {path}"))?
-            .len();
-        if size > 16 * 1024 * 1024 {
-            anyhow::bail!("[limit-exceeded] target list {path} is larger than 16 MiB")
-        }
-        serde_json::from_slice(&fs::read(path)?).with_context(|| {
-            format!("[invalid-input] target list {path} must be a JSON array of \"photo[/variant]\" strings")
-        })?
+        id_list_file(path)?
+    } else if to.contains([':', '<', '>', '=', ' ', '*', '?']) {
+        organize::select(raw, to)?
     } else {
         to.split(',')
             .map(|entry| entry.trim().to_string())
@@ -2041,13 +2210,33 @@ fn sync_targets(to: &str) -> Result<Vec<(String, String)>> {
     }
     entries
         .iter()
-        .map(|entry| {
-            if entry.contains([':', '<', '>', '=', ' ']) {
-                anyhow::bail!("[unsupported-capability] --to {entry:?} looks like a selection query; this build accepts photo[/variant] IDs or @FILE.json")
-            }
-            variants::split_target(entry)
-        })
+        .map(|entry| variants::split_target(entry))
         .collect()
+}
+
+/// Build and write a contact sheet or compare view, then print its report.
+fn run_photo_sheet(
+    raw: &serde_json::Value,
+    input: &Path,
+    items: &[(String, String)],
+    columns: u32,
+    sheet: SheetArgs,
+) -> Result<()> {
+    use pentool::photo::organize;
+    let (scene, mut report) = organize::sheet(
+        raw,
+        input,
+        items,
+        &organize::Sheet {
+            columns,
+            cell: sheet.cell,
+            caption: sheet.caption,
+        },
+    )?;
+    organize::write_sheet(&scene, input, &sheet.out)?;
+    report["out"] = serde_json::json!(sheet.out.display().to_string());
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 
 fn run_photo_merge(
@@ -3255,9 +3444,9 @@ async fn run() -> Result<()> {
             } => {
                 use pentool::photo::variants;
                 let source = variants::split_target(&source)?;
-                let targets = sync_targets(&to)?;
                 let document = input.clone();
                 run_photo_edit(&input, "photo-settings-sync", edit, |raw| {
+                    let targets = sync_targets(&to, raw)?;
                     variants::sync_settings(
                         raw,
                         &document,
@@ -3270,6 +3459,153 @@ async fn run() -> Result<()> {
                         },
                     )
                 })
+            }
+            PhotoAction::Search {
+                input,
+                query,
+                limit,
+                offset,
+            } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let result = pentool::photo::organize::search(&raw, &query, limit, offset)?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                Ok(())
+            }
+            PhotoAction::Rate {
+                input,
+                selection,
+                rating,
+                pick,
+                label,
+                edit,
+            } => {
+                use pentool::photo::organize;
+                let selection = selection_arg(&selection)?;
+                run_photo_edit(&input, "photo-rate", edit, |raw| {
+                    organize::rate(
+                        raw,
+                        &selection,
+                        &organize::Rating {
+                            rating,
+                            pick,
+                            label,
+                        },
+                    )
+                })
+            }
+            PhotoAction::Keyword {
+                input,
+                selection,
+                add,
+                remove,
+                clear,
+                edit,
+            } => {
+                let selection = selection_arg(&selection)?;
+                run_photo_edit(&input, "photo-keyword", edit, |raw| {
+                    pentool::photo::organize::keywords(raw, &selection, &add, &remove, clear)
+                })
+            }
+            PhotoAction::Stack { action } => {
+                use pentool::photo::organize;
+                match action {
+                    PhotoStackAction::Add {
+                        input,
+                        stack,
+                        photos,
+                        edit,
+                    } => {
+                        let selection = selection_arg(&photos)?;
+                        run_photo_edit(&input, "photo-stack-add", edit, |raw| {
+                            organize::add_stack(raw, &stack, &selection)
+                        })
+                    }
+                    PhotoStackAction::Top {
+                        input,
+                        stack,
+                        photo,
+                        edit,
+                    } => run_photo_edit(&input, "photo-stack-top", edit, |raw| {
+                        organize::stack_top(raw, &stack, &photo)
+                    }),
+                    PhotoStackAction::Remove { input, stack, edit } => {
+                        run_photo_edit(&input, "photo-stack-remove", edit, |raw| {
+                            organize::remove_stack(raw, &stack)
+                        })
+                    }
+                }
+            }
+            PhotoAction::Collection { action } => {
+                use pentool::photo::organize;
+                match action {
+                    PhotoCollectionAction::Add {
+                        input,
+                        id,
+                        name,
+                        photos,
+                        query,
+                        edit,
+                    } => {
+                        let spec = match (photos, query) {
+                            (Some(photos), _) => {
+                                organize::CollectionSpec::Manual(selection_arg(&photos)?)
+                            }
+                            (None, Some(query)) => organize::CollectionSpec::Smart(query),
+                            (None, None) => unreachable!("clap requires --photos or --query"),
+                        };
+                        run_photo_edit(&input, "photo-collection-add", edit, |raw| {
+                            organize::add_collection(raw, &id, name.as_deref(), spec)
+                        })
+                    }
+                    PhotoCollectionAction::Update {
+                        input,
+                        id,
+                        add,
+                        remove,
+                        edit,
+                    } => {
+                        let add = add.as_deref().map(selection_arg).transpose()?;
+                        let remove = remove.as_deref().map(selection_arg).transpose()?;
+                        run_photo_edit(&input, "photo-collection-update", edit, |raw| {
+                            organize::update_collection(raw, &id, add.as_ref(), remove.as_ref())
+                        })
+                    }
+                    PhotoCollectionAction::Remove { input, id, edit } => {
+                        run_photo_edit(&input, "photo-collection-remove", edit, |raw| {
+                            organize::remove_collection(raw, &id)
+                        })
+                    }
+                }
+            }
+            PhotoAction::ContactSheet {
+                input,
+                selection,
+                columns,
+                sheet,
+                variant,
+            } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let ids = selection_arg(&selection)?.resolve(&raw)?;
+                let items: Vec<(String, String)> =
+                    ids.into_iter().map(|id| (id, variant.clone())).collect();
+                run_photo_sheet(&raw, &input, &items, columns, sheet)
+            }
+            PhotoAction::Compare {
+                input,
+                items,
+                sheet,
+            } => {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                let items = items
+                    .iter()
+                    .map(|item| pentool::photo::variants::split_target(item))
+                    .collect::<Result<Vec<_>>>()?;
+                let columns = if items.len() <= 4 {
+                    items.len() as u32
+                } else {
+                    4
+                };
+                run_photo_sheet(&raw, &input, &items, columns, sheet)
             }
         },
         Command::Image { action } => match action {

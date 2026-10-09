@@ -1104,8 +1104,11 @@ Profiles use the same storage contract as assets (`storage`, `byte_length`).
   restore` copies it back into its variant (one undoable transaction).
 - Organization fields belong to the photo, not the variant: `rating` 0–5, `pick`
   `none`\|`pick`\|`reject`, `label` `none`\|`red`\|`yellow`\|`green`\|`blue`\|`purple`,
-  and `keywords` (at most 64, each 1–64 characters, NFC normalized, unique ignoring
-  case). Absent means 0, `none`, `none`, `[]`.
+  and `keywords` (at most 64, each 1–64 characters without control characters,
+  unique ignoring case). Keywords are stored as given (trimmed) and compared with
+  simple Unicode lowercasing; they are not NFC-normalized, so precomposed and
+  decomposed spellings are different keywords. Absent means 0, `none`, `none`,
+  `[]`.
 - Limits: 10,000 photos, 64 variants and 64 snapshots per photo, 32 local
   adjustments per variant, 256 profiles, 1,024 stacks, 256 collections (a manual one
   holds at most 10,000 IDs), 64 recipes.
@@ -1150,21 +1153,59 @@ that already exist are `[conflict]`.
 
 ### Stacks, collections and search
 
-- A photo belongs to at most one stack. A stack's first photo is its top.
-- `photo search DOC QUERY [--limit N --offset N]` combines terms with AND:
-  `rating>=N` (also `=`, `<=`), `pick:pick|reject|none`, `label:COLOR`,
-  `keyword:TEXT`, `camera:TEXT`, `lens:TEXT`, `iso>=N`, `focal>=N`,
-  `captured>=YYYY-MM-DD`, `captured<=YYYY-MM-DD`, `stack:top`, `has:variants`,
-  `has:local`, `id:GLOB`, `collection:NAME`. Matching is case-insensitive.
-  Results are ordered by catalog order. Output follows the tree/search contract:
-  `matches`, `returned`, `offset`, `limit`, `has_more`, with compact rows (ID, source
-  kind, dimensions, rating, pick, label, variant count) and no settings. Search uses
-  only document JSON and never decodes sources.
+Organization reads and writes document JSON only; no database or sidecar index is
+needed, and nothing except contact sheets and compare decodes sources.
+
+A *selection* argument is a comma-separated list of photo IDs (no spaces),
+`@ids.json` (a JSON array of IDs, at most 16 MiB), or a search query: any text that
+contains `:`, `<`, `>`, `=`, a space, `*` or `?`, or is empty (every photo). A
+selection that matches no photo, an unknown or repeated ID is refused.
+
+- `photo search DOC [QUERY] [--limit N (1–1000, default 50)] [--offset N]`
+  combines whitespace-separated terms with AND; a value with spaces is quoted
+  (`keyword:"blue hour"`). At most 32 terms and 4,096 characters:
+  `rating>=N` (also `=`, `:`, `<=`; 0–5), `pick:pick|reject|none`, `label:COLOR`,
+  `keyword:TEXT` (whole keyword), `camera:TEXT` (substring of make, model and DNG
+  unique camera model), `lens:TEXT` (substring), `iso>=N`, `focal>=N` (also `=`,
+  `<=`), `captured>=YYYY-MM-DD`, `captured<=YYYY-MM-DD` (date part of `captured`),
+  `stack:top`, `has:variants` (more than one), `has:local`, `id:GLOB` (`*` and `?`)
+  and `collection:NAME`. Keys and values match case-insensitively; an unknown key,
+  an ordered comparison on an unordered key or a malformed value is
+  `[invalid-input]`. Photos without a capture field never match a term on it.
+  Results are in catalog order. Output follows the tree/search contract: `query`,
+  `matches`, `returned`, `offset`, `limit`, `has_more`, and compact rows `{id, kind,
+  width, height, rating, pick, label, variants, stack?}` (dimensions after
+  orientation) with no settings.
+- `photo rate DOC SELECTION [--rating N] [--pick P] [--label L]` sets at least one of
+  the three; a default value (`0`, `none`) removes the key. `photo keyword DOC
+  SELECTION [--add K,...] [--remove K,...] [--clear]` clears first, then removes,
+  then adds; an added keyword that exists in another case keeps the stored
+  spelling. Both report `{photos, changed}` and are one transaction.
+- A photo belongs to at most one stack, and a stack holds 2 or more photos; its
+  first photo is the top. `photo stack add DOC STACK SELECTION` (top first; a photo
+  already stacked is `[conflict]`), `photo stack top DOC STACK PHOTO` and `photo
+  stack remove DOC STACK` (the photos stay).
 - A collection is either `{"kind": "manual", "photos": [...]}` or
-  `{"kind": "smart", "query": "..."}`.
-- `photo contact-sheet DOC --selection Q --columns N [--cell PX] --out FILE.png|.pdf`
-  renders cached or freshly developed thumbnails with captions built from
-  `{id}`, `{name}`, `{rating}` and `{variant}`.
+  `{"kind": "smart", "query": "..."}`, with an optional `name`. A smart query is
+  parsed when the document is validated and evaluated when it is used; it may
+  refer to other collections at most 8 deep, and a cycle is `[invalid-input]`.
+  `photo collection add DOC ID [--name TEXT] (--photos SELECTION | --query Q)`
+  (a query given to `--photos` is frozen into IDs), `photo collection update DOC
+  ID [--add SELECTION] [--remove SELECTION]` (manual only) and `photo collection
+  remove DOC ID` (refused while a smart collection refers to it).
+- `photo contact-sheet DOC --selection SELECTION [--columns N (1–16, default 4)]
+  [--cell PX (32–1024, default 256)] [--variant ID] [--caption TEMPLATE] --out
+  FILE.png|.pdf` and `photo compare DOC ITEM ITEM... [--cell PX] [--caption
+  TEMPLATE] --out FILE.png|.pdf` (2–16 `photo[/variant]` items, one row of up to
+  4, otherwise 4 columns) share one layout: square cells 16 px apart with a 14 px
+  caption built from `{id}`, `{name}`, `{rating}` and `{variant}` (default `{id}`,
+  at most 96 characters). Each thumbnail is the developed variant encoded to 8-bit
+  sRGB (perceptual intent) and scaled to fit its cell; a rendered source is decoded
+  directly. A thumbnail that cannot be made becomes a gray cell reported with
+  `unavailable`. At most 256 photos. The document is not changed; the file is
+  written through a temporary file. A PDF page carries the captions as searchable
+  text. The report is `{width, height, columns, rows, cells: [{photo, variant,
+  node, unavailable?}], out}`.
 
 ### Searchable capture summary
 
@@ -1319,8 +1360,13 @@ pentool photo snapshot add catalog.pen hero/master before-grade
 pentool photo local add catalog.pen hero/master sky --linear 0.5,0,0.5,0.45 --exposure -0.4
 pentool photo snapshot restore catalog.pen hero before-grade
 pentool photo settings sync catalog.pen hero --to @selected.json --except crop [--auto-per-photo]
-pentool photo rate catalog.pen hero --rating 4 --pick pick --label green
+pentool photo rate catalog.pen hero,harbor --rating 4 --pick pick --label green
+pentool photo keyword catalog.pen "rating>=4" --add "blue hour,harbor"
 pentool photo search catalog.pen "rating>=3 pick:pick" --limit 50
+pentool photo stack add catalog.pen burst-12 hero,hero-2,hero-3
+pentool photo collection add catalog.pen picks --query "pick:pick" --name Picks
+pentool photo contact-sheet catalog.pen --selection "collection:picks" --columns 4 --out picks.pdf
+pentool photo compare catalog.pen hero hero/warm-editorial --out compare.png
 pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr [--deghost medium] [--reference 2] [--scale 0.5] [--settings first] [--external merged/hero-hdr.dng]
 pentool photo merge-pano catalog.pen pano-1 pano-2 pano-3 --id harbor-pano --projection cylindrical [--seed 7] [--focal 2400]
 pentool photo export catalog.pen --selection picks --recipe web-gallery --out ./delivery

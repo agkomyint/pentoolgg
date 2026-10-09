@@ -14,6 +14,7 @@ pub mod local;
 pub mod math;
 pub mod merge;
 pub mod opcode;
+pub mod organize;
 pub mod output;
 pub mod pipeline;
 pub mod pixels;

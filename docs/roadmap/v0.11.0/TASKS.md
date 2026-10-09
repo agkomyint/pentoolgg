@@ -242,6 +242,30 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **12. Add local organization.** Provide ratings, picks, labels, keywords,
   stacks, contact sheets, compare/survey, and search without a required database.
+
+  *Status: implemented for review.* This item has four parts:
+  - `src/photo/organize.rs`: the search query language, ratings, picks, labels,
+    keywords, stacks, manual and smart collections, and the contact sheet and
+    compare builder, specified in "Stacks, collections and search" in
+    `docs/photography-v1.md`;
+  - `pentool photo search`, `photo rate`, `photo keyword`, `photo stack`,
+    `photo collection`, `photo contact-sheet` and `photo compare`; every edit is
+    one transaction with `--dry-run` and `--if-revision`, and `photo settings
+    sync --to` now accepts a query;
+  - catalog validation of cross-stack membership, keyword case and smart queries,
+    and unit tests of queries, globs and selections in `src/photo/organize.rs`;
+  - `tests/v0110_organize.rs`.
+
+  Decisions:
+  - keywords are compared with simple Unicode lowercasing and stored as given,
+    not NFC-normalized, to avoid a new dependency; the spec says so;
+  - a manual collection given a query freezes its matches into IDs; smart
+    collections are evaluated on use, nest at most 8 deep and refuse cycles;
+  - contact sheets and compare share one layout and never change the document;
+    photos without a thumbnail become reported gray cells rather than failing.
+
+  The checkbox stays open until review and hosted CI pass.
+
 - [ ] **13. Add metadata privacy.** Support a deliberate EXIF/IPTC/XMP subset and
   export policies for copyright, keywords, GPS, identity, serials, and timestamps.
 - [ ] **14. Add output recipes and batch delivery.** Cover web, social, archive,

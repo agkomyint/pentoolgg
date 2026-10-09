@@ -100,6 +100,9 @@ brackets and panoramas into a new photo with a derived scene-linear DNG source.
 `pentool photo variant` and `photo snapshot` keep virtual copies and saved settings
 without duplicating sources, and `pentool photo settings sync` copies selected
 settings groups to other photos in one transaction.
+`pentool photo rate`, `photo keyword`, `photo stack`, `photo collection` and
+`photo search` organize the catalog inside the document, and `pentool photo
+contact-sheet` and `photo compare` write captioned PNG or PDF proof sheets.
 Batch delivery lands with the rest of v0.11; see
 [docs/photography-v1.md](docs/photography-v1.md).
 
@@ -129,6 +132,9 @@ pentool photo variant add catalog.pen hero warm-editorial --name "Warm editorial
 pentool photo snapshot add catalog.pen hero/warm-editorial before-grade
 pentool photo snapshot restore catalog.pen hero before-grade
 pentool photo settings sync catalog.pen hero --to harbor,pano-1/master --except crop,geometry --auto-per-photo
+pentool photo rate catalog.pen hero,harbor --rating 4 --label green
+pentool photo search catalog.pen "rating>=4 keyword:\"blue hour\"" --limit 20
+pentool photo contact-sheet catalog.pen --selection "rating>=4" --columns 4 --out picks.pdf
 ```
 
 ## Raster paint (v0.10)

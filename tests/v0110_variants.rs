@@ -412,7 +412,7 @@ fn sync_copies_selected_groups_and_reports_each_target() {
         (vec!["--to", "b/nope"], "[missing-resource]"),
         (vec!["--to", "a"], "[invalid-input]"),
         (vec!["--to", "b,b"], "[invalid-input]"),
-        (vec!["--to", "rating>=3"], "[unsupported-capability]"),
+        (vec!["--to", "rating>=3"], "names no target variants"),
         (vec!["--to", "b", "--groups", "bogus"], "[invalid-input]"),
         (vec!["--to", "b", "--groups", "process"], "[invalid-input]"),
         (
