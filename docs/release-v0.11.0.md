@@ -93,6 +93,11 @@ new Photos studio in the browser editor. The specification is
 - `pentool benchmark --photo` measures ingest, culling, development, previews and
   batch export. Measurements are in `docs/performance.md`.
 
+## Building
+
+`Cargo.toml` now declares `rust-version = "1.85"`, the oldest toolchain the
+release is built and tested with. CI checks Clippy on current stable.
+
 ## Out of scope
 
 CMYK/Lab, spot inks, separations, soft proofing for print and PDF/X are planned

@@ -928,11 +928,12 @@ fn solve8(mut rows: [[f64; 9]; 8]) -> Option<[f64; 8]> {
             return None;
         }
         rows.swap(col, pivot);
-        for r in 0..8 {
+        let pivot_row = rows[col];
+        for (r, row) in rows.iter_mut().enumerate() {
             if r != col {
-                let k = rows[r][col] / rows[col][col];
-                for c in col..9 {
-                    rows[r][c] -= k * rows[col][c];
+                let k = row[col] / pivot_row[col];
+                for (x, p) in row[col..].iter_mut().zip(&pivot_row[col..]) {
+                    *x -= k * p;
                 }
             }
         }

@@ -451,7 +451,7 @@ fn brush_plane(raw: &Value, component: &Value) -> Result<Plane> {
     let surface = crate::raster::Surface::load_map(raw, width, height, &component["tiles"])?;
     let (w, h) = (width as usize, height as usize);
     let mut data = vec![0u8; w * h];
-    for (&(tx, ty), _) in surface.tiles.iter() {
+    for &(tx, ty) in surface.tiles.keys() {
         let tile = crate::raster::TILE as u32;
         for y in ty * tile..((ty + 1) * tile).min(height) {
             for x in tx * tile..((tx + 1) * tile).min(width) {

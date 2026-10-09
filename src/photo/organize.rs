@@ -90,10 +90,9 @@ fn split_term(token: &str) -> Option<(&str, Cmp, &str)> {
         (Cmp::Ge, v)
     } else if let Some(v) = rest.strip_prefix("<=") {
         (Cmp::Le, v)
-    } else if let Some(v) = rest.strip_prefix('=').or_else(|| rest.strip_prefix(':')) {
-        (Cmp::Eq, v)
     } else {
-        return None;
+        let v = rest.strip_prefix('=').or_else(|| rest.strip_prefix(':'))?;
+        (Cmp::Eq, v)
     };
     Some((key, cmp, value))
 }

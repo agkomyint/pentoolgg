@@ -802,7 +802,7 @@ mod tests {
     fn every_compression_decodes_to_the_same_image() {
         let v = values();
         let plain: Vec<u8> = v.iter().flat_map(|v| v.to_le_bytes()).collect();
-        let expected = develop(&dng(4, 4, 16, 1, &[plain.clone()], vec![])).unwrap();
+        let expected = develop(&dng(4, 4, 16, 1, std::slice::from_ref(&plain), vec![])).unwrap();
         assert_eq!((expected.width, expected.height), (4, 4));
         // The red site at (0, 0) is normalized but otherwise untouched.
         assert_eq!(expected.rgb[0], 0.0);
@@ -890,13 +890,13 @@ mod tests {
             4,
             16,
             1,
-            &[plain.clone()],
+            std::slice::from_ref(&plain),
             vec![(51022, 7, list(6, 0, &trim))],
         );
         let inspected = Dng::inspect(&bytes).unwrap();
         assert_eq!(inspected.pixel_size(), (3, 2));
         let trimmed = decode(&inspected, &reference()).unwrap();
-        let full = develop(&dng(4, 4, 16, 1, &[plain.clone()], vec![])).unwrap();
+        let full = develop(&dng(4, 4, 16, 1, std::slice::from_ref(&plain), vec![])).unwrap();
         assert_eq!(&trimmed.rgb[..9], &full.rgb[(4 + 1) * 3..(4 + 4) * 3]);
 
         // An optional unknown opcode is skipped; a mandatory one is refused.
@@ -905,7 +905,7 @@ mod tests {
             4,
             16,
             1,
-            &[plain.clone()],
+            std::slice::from_ref(&plain),
             vec![(51022, 7, list(99, 1, &[]))],
         );
         assert_eq!(develop(&optional).unwrap(), full);
