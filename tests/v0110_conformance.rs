@@ -991,3 +991,106 @@ fn photo_benchmark_reports_a_bounded_reproducible_run() {
         assert!(!ok, "{args:?} should fail: {error}");
     }
 }
+
+/// A `photo` node on a page shows the developed variant as `srgb8`, placed by
+/// `fit` and `position` like an image, with the node's opacity applied once.
+#[test]
+fn photo_nodes_render_their_developed_variant_on_pages() {
+    let work = Workspace::new("page");
+    let mut raw = work.doc();
+    raw["pages"][0]["canvas"]["width"] = json!(100);
+    raw["pages"][0]["canvas"]["height"] = json!(80);
+    let node = |id: &str, x: u32, y: u32, height: u32, fit: &str, opacity: f64| {
+        json!({"kind": "photo", "id": id, "photo": "b2", "variant": "master",
+               "x": x, "y": y, "width": W, "height": height, "fit": fit,
+               "position": [0.5, 0.5], "opacity": opacity, "blend_mode": "normal"})
+    };
+    raw["pages"][0]["layers"][0]["nodes"] = json!([
+        node("full", 0, 0, H, "fill", 1.0),
+        node("faded", 50, 0, H, "fill", 0.5),
+        node("boxed", 0, 40, 40, "contain", 1.0),
+    ]);
+    std::fs::write(work.path(), serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+    let before = work.bytes();
+
+    let (_, rendition) = work.preview(
+        &[],
+        &[
+            "--space",
+            "srgb",
+            "--edge",
+            "4096",
+            "--overlay",
+            "none",
+            "--no-cache",
+        ],
+    );
+    let rendition = image::load_from_memory(&rendition).unwrap().to_rgba8();
+    assert_eq!(rendition.dimensions(), (W, H));
+
+    work.ok(&["export", "catalog.pen", "page.png"]);
+    let first = work.read("page.png");
+    work.ok(&["export", "catalog.pen", "page.png"]);
+    assert_eq!(work.read("page.png"), first, "page export is deterministic");
+    assert_eq!(work.bytes(), before, "export never writes the document");
+    let page = image::load_from_memory(&first).unwrap().to_rgba8();
+    assert_eq!(page.dimensions(), (100, 80));
+
+    let close = |a: u8, b: u8, tolerance: u8| a.abs_diff(b) <= tolerance;
+    let mut distinct = std::collections::BTreeSet::new();
+    for y in 0..H {
+        for x in 0..W {
+            let expected = rendition.get_pixel(x, y).0;
+            distinct.insert(expected);
+            let full = page.get_pixel(x, y).0;
+            let faded = page.get_pixel(50 + x, y).0;
+            let boxed = page.get_pixel(x, 44 + y).0;
+            for c in 0..3 {
+                assert!(
+                    close(full[c], expected[c], 1),
+                    "full ({x},{y}) {full:?} {expected:?}"
+                );
+                assert!(close(boxed[c], expected[c], 1), "boxed ({x},{y}) {boxed:?}");
+                let mixed = ((u16::from(expected[c]) + 255) / 2) as u8;
+                assert!(
+                    close(faded[c], mixed, 2),
+                    "faded ({x},{y}) {faded:?} {mixed}"
+                );
+            }
+        }
+    }
+    assert!(
+        distinct.len() > 50,
+        "the rendition shows the scene, not a flat fill"
+    );
+    for (x, y) in [(24, 41), (24, 78), (49, 10), (99, 10)] {
+        assert_eq!(
+            page.get_pixel(x, y).0,
+            [255, 255, 255, 255],
+            "({x},{y}) is background"
+        );
+    }
+
+    // The page follows the develop settings.
+    work.ok(&["raw", "develop", "catalog.pen", "b2", "--exposure", "1"]);
+    work.ok(&["export", "catalog.pen", "page.png"]);
+    assert_ne!(
+        work.read("page.png"),
+        first,
+        "a develop change reaches the page"
+    );
+
+    for out in ["page.svg", "page.pdf"] {
+        work.ok(&["export", "catalog.pen", out]);
+        assert!(!work.read(out).is_empty());
+    }
+    let tree = work.ok(&["tree", "catalog.pen"]);
+    assert!(tree.to_string().contains("\"kind\":\"photo\""), "{tree}");
+
+    // A dangling reference is refused by validation, before any rendering.
+    let mut dangling = work.doc();
+    dangling["pages"][0]["layers"][0]["nodes"][0]["variant"] = json!("missing");
+    std::fs::write(work.path(), serde_json::to_vec_pretty(&dangling).unwrap()).unwrap();
+    let (ok, _, error) = work.run(&["export", "catalog.pen", "page.png"]);
+    assert!(!ok && error.contains("[missing-resource]"), "{error}");
+}

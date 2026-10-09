@@ -1259,7 +1259,7 @@ impl Renderer<'_> {
                 // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
                 self.reserve()?;
                 let mut content = node.clone();
-                if content["kind"] == "image" || content["kind"] == "raster" {
+                if matches!(content["kind"].as_str(), Some("image" | "raster" | "photo")) {
                     content["opacity"] = json!(1.0);
                     content["blend_mode"] = json!("normal");
                 }

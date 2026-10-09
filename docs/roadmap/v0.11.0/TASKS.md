@@ -54,9 +54,9 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   - `tests/v0110_raw_ingest.rs` and the item-3 fixtures in
     `tests/v0110_photo_spec.rs`.
 
-  Photo nodes validate and appear in tree output, but rendering them is refused
-  with `[unsupported-capability]` until the development pipeline (items 4–6)
-  exists. The checkbox stays open until review and hosted CI pass.
+  Photo nodes validate and appear in tree output. Rendering them on pages was
+  refused with `[unsupported-capability]` until item 16 added it. The checkbox
+  stays open until review and hosted CI pass.
 - [ ] **4. Add camera profiles and white balance.** Support embedded and verified
   profiles plus as-shot, temperature/tint, sampled-neutral, and suggested balance.
   *Status: implemented for review.* This item has four parts:
@@ -362,7 +362,7 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
 - [ ] **16. Prove conformance and performance.** Test hostile RAWs, profiles,
   precision, corrections, masks, merges, privacy, rollback, packaging, and caches.
 
-  *Status: implemented for review.* This item has five parts:
+  *Status: implemented for review.* This item has six parts:
   - `src/photo/cache.rs`: the preview cache specified in "Caches". Entries are
     content-addressed PNGs carrying a CRC-checked `pnCk` key chunk, written
     atomically and bounded by `PENTOOL_PHOTO_CACHE_BYTES` with LRU eviction.
@@ -381,7 +381,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     every checkpoint without mutation or orphan files;
   - a bug the sweep found: a hostile `.dcp` whose table dimensions overflowed
     `usize` panicked in `src/photo/profile.rs`. The sizes now saturate and are
-    refused with `[limit-exceeded]`, with a regression test.
+    refused with `[limit-exceeded]`, with a regression test;
+  - page rendering of `photo` nodes, which used to be refused with
+    `[unsupported-capability]`: page export and the editor canvas develop the
+    variant into `srgb8` and place it with the image node's `fit` and
+    `position` (`image::write_photo`, `studio::node_rendition`).
 
   Decisions:
   - cancellation at each checkpoint is driven by a `#[cfg(test)]` counter in
@@ -392,10 +396,11 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
     proven only when hosted CI passes;
   - benchmark figures come from one developer machine and are not a hosted-CI
     claim;
-  - open contract question, not implemented: page rendering of a `photo` node
-    still fails with `[unsupported-capability]`, as "Until a build includes the
-    development pipeline" in `docs/photography-v1.md` allows. Whether v0.11.0
-    must render photo nodes on pages needs a decision before release.
+  - photo nodes are drawn on pages, as the user decided after the first review.
+    Page renders skip the preview cache, so exports never depend on it, and
+    develop the variant once per node on every render;
+    `tests/v0110_conformance.rs` checks pixels, opacity, placement,
+    determinism and that develop edits reach the page.
 
   The checkbox stays open until review and hosted CI pass.
 

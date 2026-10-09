@@ -1544,8 +1544,13 @@ and `pentool photo preview DOC PHOTO --out FILE.png [--variant ID] [--edge N]
 - Tree and search report `kind: "photo"` with `photo`, `variant`, bounds and layer
   state, and never settings. A reference to a missing photo or variant is
   `[missing-resource]`.
-- Until a build includes the development pipeline, rendering a page that holds a
-  photo node fails with `[unsupported-capability]` instead of drawing a placeholder.
+- Page export (PNG, SVG, PDF) and the editor canvas draw a photo node by
+  developing its variant on every render: the developed size is the node's
+  source size, so `fit: none` shows one develop pixel per page unit. The editor
+  canvas renders the page through the same compositor at its preview scale, so
+  each redraw develops every photo node at full size. The compositor applies
+  `opacity` and `blend_mode` once, as for image nodes. Page renders do not use
+  the preview cache, so an exported page never depends on cache contents.
 
 ## Determinism
 

@@ -195,6 +195,41 @@ pub fn preview(raw: &Value, document: &Path, request: &PreviewRequest) -> Result
     Ok(Preview { png: bytes, report })
 }
 
+/// The `srgb8` rendition a page shows for a `photo` node: the developed variant,
+/// reduced in linear light when `max_edge` (a version 5 proxy render) is
+/// smaller, through stage 11 into sRGB with the perceptual intent. Returns the RGBA pixels and the developed
+/// size, which placement uses so that a reduced rendition lands in the same
+/// rectangle. `raw` must already be validated.
+pub fn node_rendition(
+    raw: &Value,
+    document: &Path,
+    photo: &str,
+    variant: &str,
+    max_edge: Option<u32>,
+) -> Result<(image::RgbaImage, u32, u32)> {
+    let developed = catalog::render_validated(raw, document, photo, variant)?;
+    let (dw, dh) = (developed.image.width, developed.image.height);
+    let (width, height) = max_edge.map_or((dw, dh), |edge| fit(dw, dh, edge));
+    let image = if (width, height) == (dw, dh) {
+        developed.image
+    } else {
+        export::resize(&developed.image, width, height)?
+    };
+    let out = output::Output::new(Some("srgb"), Some(8), "perceptual", None, None)?;
+    let (raster, _) = output::render(&image, &developed.rendering, true, &out)?;
+    let Samples::Eight(samples) = raster.samples else {
+        bail!("photo node rendition must be 8-bit")
+    };
+    let channels = if raster.alpha { 4 } else { 3 };
+    let rgba = samples
+        .chunks_exact(channels)
+        .flat_map(|p| [p[0], p[1], p[2], if raster.alpha { p[3] } else { u8::MAX }])
+        .collect();
+    let pixels = image::RgbaImage::from_raw(raster.width, raster.height, rgba)
+        .context("photo node rendition has the wrong size")?;
+    Ok((pixels, dw, dh))
+}
+
 /// [`preview`] through `cache`, adding `cache` (`hit`, `miss` or `off`) to the
 /// report. The document is always validated first; a hit returns the same PNG
 /// bytes and report as a render, and only successful renders are stored.

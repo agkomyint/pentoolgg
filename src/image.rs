@@ -418,6 +418,7 @@ pub(crate) fn fragment_svg(
         .as_u64()
         .context("canvas height missing")? as u32;
     let context = SvgContext {
+        document,
         root: crate::resource::document_root(document),
         link_dir: None,
         proxy_edge: None,
@@ -508,6 +509,7 @@ fn build_svg(
         escape(background)
     )?;
     let root = &SvgContext {
+        document,
         root: crate::resource::document_root(document),
         link_dir,
         proxy_edge,
@@ -556,6 +558,7 @@ fn build_svg(
 }
 
 struct SvgContext<'a> {
+    document: &'a Path,
     root: &'a Path,
     link_dir: Option<&'a Path>,
     proxy_edge: Option<u32>,
@@ -683,10 +686,7 @@ fn write_node(
         "text" => write_text(svg, object, root)?,
         "image" => write_image(svg, object, raw, root, clip_index)?,
         "raster" => write_raster(svg, node, raw)?,
-        "photo" => bail!(
-            "[unsupported-capability] photo node {} cannot be rendered yet: this build has no develop pipeline",
-            object.get("id").and_then(Value::as_str).unwrap_or("unknown")
-        ),
+        "photo" => write_photo(svg, object, raw, root, clip_index)?,
         kind => bail!("[unsupported-capability] cannot render node kind {kind}"),
     }
     svg.push_str("</g>");
@@ -799,18 +799,89 @@ fn write_image(
     let bytes = load_asset_bytes(raw, root, digest)?;
     let link = linked_href(context, node, asset, digest)?;
     let (source, pixels, processed) = resolve_pixels(node, asset, root, digest, &bytes)?;
-    let x = finite(node, "x")?;
-    let y = finite(node, "y")?;
-    let frame_w = finite(node, "width")?;
-    let frame_h = finite(node, "height")?;
     let crop = if processed {
         vec![0.0, 0.0, 1.0, 1.0]
     } else {
         normalized_array(node, "crop", 4, true)?
     };
+    let href = match link {
+        Some(href) => format!("{} data-sha256=\"{digest}\"", escape_href(&href)),
+        None => {
+            let pixels = match context.proxy_edge {
+                Some(edge) if pixels.width().max(pixels.height()) > edge => {
+                    let ratio = f64::from(edge) / f64::from(pixels.width().max(pixels.height()));
+                    let w = ((f64::from(pixels.width()) * ratio).round() as u32).max(1);
+                    let h = ((f64::from(pixels.height()) * ratio).round() as u32).max(1);
+                    image::imageops::resize(&pixels, w, h, image::imageops::FilterType::Triangle)
+                }
+                _ => pixels,
+            };
+            png_href(pixels)?
+        }
+    };
+    let source = (
+        f64::from(source.pixel_width),
+        f64::from(source.pixel_height),
+    );
+    let opacity = finite(node, "opacity")?;
+    write_placed(svg, node, source, &crop, opacity, &href, clip_index)
+}
+
+/// A photo node shows its developed variant as an `srgb8` image placed with the
+/// image node's `fit` and `position`; cropping belongs to the variant.
+fn write_photo(
+    svg: &mut String,
+    node: &Map<String, Value>,
+    raw: &Value,
+    context: &SvgContext,
+    clip_index: &mut usize,
+) -> Result<()> {
+    let (pixels, width, height) = crate::photo::studio::node_rendition(
+        raw,
+        context.document,
+        string(node, "photo")?,
+        string(node, "variant")?,
+        context.proxy_edge,
+    )?;
+    let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
+    write_placed(
+        svg,
+        node,
+        (f64::from(width), f64::from(height)),
+        &[0.0, 0.0, 1.0, 1.0],
+        opacity,
+        &png_href(pixels)?,
+        clip_index,
+    )
+}
+
+fn png_href(pixels: image::RgbaImage) -> Result<String> {
+    let mut normalized = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(pixels)
+        .write_to(&mut normalized, image::ImageFormat::Png)
+        .context("could not encode normalized image pixels")?;
+    Ok(format!(
+        "href=\"data:image/png;base64,{}\"",
+        base64::engine::general_purpose::STANDARD.encode(normalized.into_inner())
+    ))
+}
+
+/// Place a `source` (width, height) image in the node's frame by `crop`, `fit`
+/// and `position`, clipped to the frame.
+fn write_placed(
+    svg: &mut String,
+    node: &Map<String, Value>,
+    (source_w, source_h): (f64, f64),
+    crop: &[f64],
+    opacity: f64,
+    href: &str,
+    clip_index: &mut usize,
+) -> Result<()> {
+    let x = finite(node, "x")?;
+    let y = finite(node, "y")?;
+    let frame_w = finite(node, "width")?;
+    let frame_h = finite(node, "height")?;
     let position = normalized_array(node, "position", 2, false)?;
-    let source_w = f64::from(source.pixel_width);
-    let source_h = f64::from(source.pixel_height);
     let cropped_w = source_w * crop[2];
     let cropped_h = source_h * crop[3];
     let contain = (frame_w / cropped_w).min(frame_h / cropped_h);
@@ -836,32 +907,9 @@ fn write_image(
     let image_h = source_h * scale_y;
     let clip = *clip_index;
     *clip_index += 1;
-    let href = match link {
-        Some(href) => format!("{} data-sha256=\"{digest}\"", escape_href(&href)),
-        None => {
-            let pixels = match context.proxy_edge {
-                Some(edge) if pixels.width().max(pixels.height()) > edge => {
-                    let ratio = f64::from(edge) / f64::from(pixels.width().max(pixels.height()));
-                    let w = ((f64::from(pixels.width()) * ratio).round() as u32).max(1);
-                    let h = ((f64::from(pixels.height()) * ratio).round() as u32).max(1);
-                    image::imageops::resize(&pixels, w, h, image::imageops::FilterType::Triangle)
-                }
-                _ => pixels,
-            };
-            let mut normalized = Cursor::new(Vec::new());
-            image::DynamicImage::ImageRgba8(pixels)
-                .write_to(&mut normalized, image::ImageFormat::Png)
-                .context("could not encode normalized image pixels")?;
-            format!(
-                "href=\"data:image/png;base64,{}\"",
-                base64::engine::general_purpose::STANDARD.encode(normalized.into_inner())
-            )
-        }
-    };
     write!(
         svg,
-        r#"<defs><clipPath id="image-clip-{clip}"><rect x="{x}" y="{y}" width="{frame_w}" height="{frame_h}"/></clipPath></defs><image x="{image_x}" y="{image_y}" width="{image_w}" height="{image_h}" opacity="{}" clip-path="url(#image-clip-{clip})" preserveAspectRatio="none" {href}/>"#,
-        finite(node, "opacity")?,
+        r#"<defs><clipPath id="image-clip-{clip}"><rect x="{x}" y="{y}" width="{frame_w}" height="{frame_h}"/></clipPath></defs><image x="{image_x}" y="{image_y}" width="{image_w}" height="{image_h}" opacity="{opacity}" clip-path="url(#image-clip-{clip})" preserveAspectRatio="none" {href}/>"#,
     )?;
     Ok(())
 }
