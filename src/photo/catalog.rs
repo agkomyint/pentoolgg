@@ -17,8 +17,8 @@ pub const MAX_PROFILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ASSETS: usize = 10_000;
 const MAX_PROFILES: usize = 256;
 const MAX_PHOTOS: usize = 10_000;
-const MAX_VARIANTS: usize = 64;
-const MAX_SNAPSHOTS: usize = 64;
+pub(super) const MAX_VARIANTS: usize = 64;
+pub(super) const MAX_SNAPSHOTS: usize = 64;
 const MAX_STACKS: usize = 1024;
 const MAX_COLLECTIONS: usize = 256;
 const MAX_RECIPES: usize = 64;
@@ -165,7 +165,7 @@ pub fn validate_node(node: &Map<String, Value>) -> Result<()> {
 }
 
 /// Every photo node in page order, including group children and instance fallbacks.
-fn photo_nodes(raw: &Value) -> Vec<&Map<String, Value>> {
+pub(super) fn photo_nodes(raw: &Value) -> Vec<&Map<String, Value>> {
     fn walk<'a>(node: &'a Value, out: &mut Vec<&'a Map<String, Value>>) {
         let Some(object) = node.as_object() else {
             return;
@@ -1063,7 +1063,7 @@ pub struct DevelopChanges {
 
 /// The groups the dehaze airlight is measured through (stages 1–6). A change
 /// to any of them re-resolves a stored airlight.
-const AIRLIGHT_INPUTS: [&str; 6] = [
+pub(super) const AIRLIGHT_INPUTS: [&str; 6] = [
     "raw",
     "white_balance",
     "calibration",
@@ -1142,7 +1142,7 @@ fn unset_path(develop: &mut Value, path: &str) -> Result<()> {
 /// Apply an upright mode to `develop["geometry"]`: `off` clears upright, its
 /// provenance, guides, rotation and perspective; another mode stores the
 /// solved values and clears the keys it does not solve.
-fn apply_upright(develop: &mut Value, mode: &str, solved: &Value) {
+pub(super) fn apply_upright(develop: &mut Value, mode: &str, solved: &Value) {
     if !develop.get("geometry").is_some_and(Value::is_object) {
         develop["geometry"] = json!({});
     }
@@ -1414,7 +1414,7 @@ pub fn develop_raw(
 
 /// Resolves a profile digest of `photography.profiles` to its verified bytes
 /// and record.
-fn profile_loader<'a>(
+pub(super) fn profile_loader<'a>(
     document: &'a Path,
     profiles: &'a Value,
 ) -> impl Fn(&str) -> Result<(Vec<u8>, Value)> + 'a {

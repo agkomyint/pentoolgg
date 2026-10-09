@@ -23,7 +23,7 @@ impl Source<'_> {
     }
 }
 
-const GROUPS: [&str; 16] = [
+pub const GROUPS: [&str; 16] = [
     "process",
     "raw",
     "white_balance",

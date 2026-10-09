@@ -945,6 +945,128 @@ enum PhotoAction {
         #[command(flatten)]
         common: MergeArgs,
     },
+    /// Add, rename or remove virtual copies (variants) of a photo.
+    Variant {
+        #[command(subcommand)]
+        action: PhotoVariantAction,
+    },
+    /// Save, restore or remove immutable snapshots of a variant's settings.
+    Snapshot {
+        #[command(subcommand)]
+        action: PhotoSnapshotAction,
+    },
+    /// Synchronize develop settings between variants.
+    Settings {
+        #[command(subcommand)]
+        action: PhotoSettingsAction,
+    },
+}
+
+#[derive(clap::Args)]
+struct EditArgs {
+    /// Report the change without writing the document.
+    #[arg(long)]
+    dry_run: bool,
+    /// Refuse the change unless the document is at this revision.
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum PhotoVariantAction {
+    /// Add a variant with a copy of another variant's or a snapshot's settings.
+    /// The source is shared, never duplicated.
+    Add {
+        input: PathBuf,
+        /// Photo ID.
+        photo: String,
+        /// ID of the new variant.
+        id: String,
+        /// Copy the settings of this variant (default master).
+        #[arg(long, conflicts_with = "from_snapshot")]
+        from: Option<String>,
+        /// Copy the settings of this snapshot instead.
+        #[arg(long)]
+        from_snapshot: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Set (or, without --name, clear) a variant's display name.
+    Rename {
+        input: PathBuf,
+        photo: String,
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Remove a variant; master and variants with snapshots or photo nodes are refused.
+    Remove {
+        input: PathBuf,
+        photo: String,
+        id: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhotoSnapshotAction {
+    /// Save the current settings of PHOTO[/VARIANT] (default master) as a snapshot.
+    Add {
+        input: PathBuf,
+        /// photo or photo/variant.
+        target: String,
+        /// ID of the new snapshot.
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Copy a snapshot's settings back into its variant.
+    Restore {
+        input: PathBuf,
+        photo: String,
+        id: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+    /// Remove a snapshot.
+    Remove {
+        input: PathBuf,
+        photo: String,
+        id: String,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum PhotoSettingsAction {
+    /// Copy whole settings groups from SOURCE[/VARIANT] to target variants in one transaction.
+    Sync {
+        input: PathBuf,
+        /// photo or photo/variant (default master).
+        source: String,
+        /// Comma-separated photo[/variant] targets, or @FILE.json holding an array of them.
+        #[arg(long)]
+        to: String,
+        /// Copy only these groups (comma-separated); default every group except process.
+        #[arg(long, value_delimiter = ',')]
+        groups: Vec<String>,
+        /// Do not copy these groups (comma-separated), for example crop,geometry.
+        #[arg(long, value_delimiter = ',')]
+        except: Vec<String>,
+        /// Run auto white balance, upright and auto tone again for each target.
+        #[arg(long)]
+        auto_per_photo: bool,
+        #[command(flatten)]
+        edit: EditArgs,
+    },
 }
 
 #[derive(clap::Args)]
@@ -1867,6 +1989,67 @@ fn read_profile_file(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
 
 /// `photo merge-hdr` and `photo merge-pano`: merge, then commit the document
 /// and any external DNG together.
+/// Apply one photo catalog edit to `input` as a single transaction and print
+/// `{change, result}`.
+fn run_photo_edit(
+    input: &Path,
+    operation: &str,
+    edit: EditArgs,
+    apply: impl FnOnce(&mut serde_json::Value) -> Result<serde_json::Value>,
+) -> Result<()> {
+    let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(input)?)?;
+    let result = apply(&mut raw)?;
+    let change = transaction::commit_value(
+        input,
+        operation,
+        edit.dry_run,
+        edit.if_revision.as_deref(),
+        &raw,
+    )?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({"change":change,"result":result}))?
+    );
+    Ok(())
+}
+
+/// `--to` of `photo settings sync`: comma-separated `photo[/variant]` entries or
+/// `@FILE.json` holding an array of them.
+fn sync_targets(to: &str) -> Result<Vec<(String, String)>> {
+    use pentool::photo::variants;
+    let entries: Vec<String> = if let Some(path) = to.strip_prefix('@') {
+        let size = fs::metadata(path)
+            .with_context(|| format!("[missing-resource] cannot read target list {path}"))?
+            .len();
+        if size > 16 * 1024 * 1024 {
+            anyhow::bail!("[limit-exceeded] target list {path} is larger than 16 MiB")
+        }
+        serde_json::from_slice(&fs::read(path)?).with_context(|| {
+            format!("[invalid-input] target list {path} must be a JSON array of \"photo[/variant]\" strings")
+        })?
+    } else {
+        to.split(',')
+            .map(|entry| entry.trim().to_string())
+            .collect()
+    };
+    if entries.len() > variants::MAX_SYNC_TARGETS {
+        anyhow::bail!(
+            "[limit-exceeded] {} targets exceed the limit of {} per sync",
+            entries.len(),
+            variants::MAX_SYNC_TARGETS
+        )
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            if entry.contains([':', '<', '>', '=', ' ']) {
+                anyhow::bail!("[unsupported-capability] --to {entry:?} looks like a selection query; this build accepts photo[/variant] IDs or @FILE.json")
+            }
+            variants::split_target(entry)
+        })
+        .collect()
+}
+
 fn run_photo_merge(
     input: PathBuf,
     photos: &[String],
@@ -2985,6 +3168,108 @@ async fn run() -> Result<()> {
                     scale: common.scale,
                 });
                 run_photo_merge(input, &photos, &id, name, kind, common, "photo-merge-pano")
+            }
+            PhotoAction::Variant { action } => {
+                use pentool::photo::variants;
+                match action {
+                    PhotoVariantAction::Add {
+                        input,
+                        photo,
+                        id,
+                        from,
+                        from_snapshot,
+                        name,
+                        edit,
+                    } => run_photo_edit(&input, "photo-variant-add", edit, |raw| {
+                        let from = match &from_snapshot {
+                            Some(snapshot) => variants::VariantSource::Snapshot(snapshot),
+                            None => variants::VariantSource::Variant(
+                                from.as_deref().unwrap_or("master"),
+                            ),
+                        };
+                        variants::add_variant(raw, &photo, &id, from, name.as_deref())
+                    }),
+                    PhotoVariantAction::Rename {
+                        input,
+                        photo,
+                        id,
+                        name,
+                        edit,
+                    } => run_photo_edit(&input, "photo-variant-rename", edit, |raw| {
+                        variants::rename_variant(raw, &photo, &id, name.as_deref())
+                    }),
+                    PhotoVariantAction::Remove {
+                        input,
+                        photo,
+                        id,
+                        edit,
+                    } => run_photo_edit(&input, "photo-variant-remove", edit, |raw| {
+                        variants::remove_variant(raw, &photo, &id)
+                    }),
+                }
+            }
+            PhotoAction::Snapshot { action } => {
+                use pentool::photo::variants;
+                match action {
+                    PhotoSnapshotAction::Add {
+                        input,
+                        target,
+                        id,
+                        name,
+                        edit,
+                    } => {
+                        let (photo, variant) = variants::split_target(&target)?;
+                        run_photo_edit(&input, "photo-snapshot-add", edit, |raw| {
+                            variants::add_snapshot(raw, &photo, &variant, &id, name.as_deref())
+                        })
+                    }
+                    PhotoSnapshotAction::Restore {
+                        input,
+                        photo,
+                        id,
+                        edit,
+                    } => run_photo_edit(&input, "photo-snapshot-restore", edit, |raw| {
+                        variants::restore_snapshot(raw, &photo, &id)
+                    }),
+                    PhotoSnapshotAction::Remove {
+                        input,
+                        photo,
+                        id,
+                        edit,
+                    } => run_photo_edit(&input, "photo-snapshot-remove", edit, |raw| {
+                        variants::remove_snapshot(raw, &photo, &id)
+                    }),
+                }
+            }
+            PhotoAction::Settings {
+                action:
+                    PhotoSettingsAction::Sync {
+                        input,
+                        source,
+                        to,
+                        groups,
+                        except,
+                        auto_per_photo,
+                        edit,
+                    },
+            } => {
+                use pentool::photo::variants;
+                let source = variants::split_target(&source)?;
+                let targets = sync_targets(&to)?;
+                let document = input.clone();
+                run_photo_edit(&input, "photo-settings-sync", edit, |raw| {
+                    variants::sync_settings(
+                        raw,
+                        &document,
+                        variants::SyncRequest {
+                            source: (&source.0, &source.1),
+                            targets: &targets,
+                            groups: &groups,
+                            except: &except,
+                            auto_per_photo,
+                        },
+                    )
+                })
             }
         },
         Command::Image { action } => match action {

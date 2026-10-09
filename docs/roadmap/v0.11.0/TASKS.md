@@ -217,6 +217,29 @@ separations, paper simulation, and PDF/X belong to v0.12.0.
   The checkbox stays open until review and hosted CI pass.
 - [ ] **11. Add variants, snapshots, and synchronized edits.** Virtual copies do
   not duplicate sources; synchronization supports selected settings and exceptions.
+
+  *Status: implemented for review.* This item has four parts:
+  - `src/photo/variants.rs`: variant add (from a variant or a snapshot), rename
+    and remove; snapshot add, restore and remove; and settings sync, specified in
+    "Photo entries, variants and snapshots" and "Synchronized settings" in
+    `docs/photography-v1.md`;
+  - `pentool photo variant`, `photo snapshot` and `photo settings sync`, each one
+    transaction with `--dry-run` and `--if-revision`;
+  - unit tests of group selection and skip rules in `src/photo/variants.rs`;
+  - `tests/v0110_variants.rs`.
+
+  Decisions:
+  - sync copies whole groups; a group the source does not set is removed from
+    the target, and `process` is never synchronized;
+  - `--auto-per-photo` re-runs gray-world white balance, upright and auto tone
+    per target; a dehaze airlight is always measured again on a raw target whose
+    inputs changed, because it is a measurement of the image;
+  - `raw` is also skipped when its stored camera profile is for another camera;
+  - removing a variant with snapshots or photo nodes is refused rather than
+    cascading;
+  - selection-query targets are refused until item 12 adds search.
+
+  The checkbox stays open until review and hosted CI pass.
 - [ ] **12. Add local organization.** Provide ratings, picks, labels, keywords,
   stacks, contact sheets, compare/survey, and search without a required database.
 - [ ] **13. Add metadata privacy.** Support a deliberate EXIF/IPTC/XMP subset and

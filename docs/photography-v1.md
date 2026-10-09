@@ -1114,19 +1114,39 @@ Profiles use the same storage contract as assets (`storage`, `byte_length`).
 
 `photo settings sync DOC SOURCE[/VARIANT] --to TARGETS [--groups G,...] [--except
 G,...] [--auto-per-photo]` copies whole settings groups from one variant to target
-variants (default `master`). `TARGETS` is a selection query, `@ids.json`, or a
-comma-separated list of `photo[/variant]` entries. Groups are the `develop` group
-names. `local` copies masks with normalized coordinates, and `crop` and `geometry`
-can be excluded.
+variants (default `master`). `TARGETS` is a selection query, `@ids.json` (a JSON
+array of `"photo[/variant]"` strings), or a comma-separated list of
+`photo[/variant]` entries. Groups are the `develop` group names except `process`,
+which is fixed by the engine; the default is every group. `local` copies masks with
+normalized coordinates (brush tiles stay shared by digest), and `crop` and
+`geometry` can be excluded. A group the source does not set is removed from the
+target. At most 10,000 targets; the source itself and repeated targets are
+refused.
 
 - Explicit values copy as values. Mode values such as `white_balance.mode:
   "as-shot"` copy as modes, so each target keeps its own as-shot balance.
-- An `auto`-resolved value copies as its resolved value. With `--auto-per-photo`,
-  the analysis runs again for each target and stores each target's own result.
-- `raw` and `white_balance` are skipped for a target whose source kind differs.
-  Each skipped item is reported per target; nothing is skipped silently.
-- The whole sync is one transaction. Its dry run reports, per target, the groups
-  that changed and the groups that were skipped.
+- An `auto`-resolved value copies as its resolved value, with its provenance. With
+  `--auto-per-photo`, the analysis runs again for each target and stores each
+  target's own result: gray-world white balance (`white_balance.auto`), upright
+  (`geometry.auto`) and auto tone (`tone.auto`), in that order.
+- `presence.dehaze_airlight` is a measurement of the image, so it is measured again
+  on every raw target where dehaze is active and the airlight inputs, `presence`
+  or `local` changed.
+- `raw` and `white_balance` are skipped for a target whose source kind differs, and
+  `raw` is skipped when it names a stored camera profile for another camera (unless
+  the profile was added with `--force-model`). Analyses of a rendered target are
+  skipped and reported. Each skipped item is reported per target; nothing is skipped
+  silently.
+- The whole sync is one transaction. Its result (and dry run) reports, per target,
+  `{photo, variant, changed: [groups], skipped: [{group, reason}], resolved}`.
+
+Variants: `photo variant add DOC PHOTO ID [--from VARIANT | --from-snapshot SNAP]
+[--name TEXT]` copies a complete develop object; `photo variant rename DOC PHOTO ID
+[--name TEXT]` sets or clears the display name; `photo variant remove DOC PHOTO ID`
+refuses `master`, a variant with snapshots and a variant shown by a photo node.
+Snapshots: `photo snapshot add DOC PHOTO[/VARIANT] ID [--name TEXT]`, `photo
+snapshot restore DOC PHOTO ID` and `photo snapshot remove DOC PHOTO ID`. New IDs
+that already exist are `[conflict]`.
 
 ### Stacks, collections and search
 
@@ -1294,10 +1314,11 @@ pentool raw add catalog.pen hero --file ./capture.dng --external --camera-profil
 pentool raw info catalog.pen hero
 pentool raw develop catalog.pen hero --exposure 0.7 --temperature 5400 --dry-run
 pentool photo import catalog.pen --file ./scan-16bit.tif --input-profile adobe-rgb-1998
-pentool photo variant add catalog.pen hero warm-editorial [--from master]
+pentool photo variant add catalog.pen hero warm-editorial [--from master | --from-snapshot before-grade]
 pentool photo snapshot add catalog.pen hero/master before-grade
 pentool photo local add catalog.pen hero/master sky --linear 0.5,0,0.5,0.45 --exposure -0.4
-pentool photo settings sync catalog.pen hero --to @selected.json --except crop
+pentool photo snapshot restore catalog.pen hero before-grade
+pentool photo settings sync catalog.pen hero --to @selected.json --except crop [--auto-per-photo]
 pentool photo rate catalog.pen hero --rating 4 --pick pick --label green
 pentool photo search catalog.pen "rating>=3 pick:pick" --limit 50
 pentool photo merge-hdr catalog.pen bracket-1 bracket-2 bracket-3 --id hero-hdr [--deghost medium] [--reference 2] [--scale 0.5] [--settings first] [--external merged/hero-hdr.dng]

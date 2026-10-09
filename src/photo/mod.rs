@@ -21,6 +21,7 @@ pub mod png;
 pub mod profile;
 pub mod raw;
 pub mod tiff;
+pub mod variants;
 pub mod warp;
 
 /// Document format version that adds the photography catalog and photo nodes.
