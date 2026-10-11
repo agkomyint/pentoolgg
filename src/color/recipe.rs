@@ -44,12 +44,74 @@ pub struct Recipe {
     pub compress: Option<bool>,
     /// `spot_policy: "reject"`: spot paints that PDF/X would flatten are errors.
     pub reject_spot_flattening: bool,
+    /// Spot ink substitutions as sorted `(from, to)` pairs: every paint of the
+    /// first ink is separated onto the second ink's plate.
+    pub spot_substitutions: Vec<(String, String)>,
     /// Catalog name of the ICC CMYK output profile (used as an `icc-cmyk`
     /// destination when no explicit `--to` is given).
     pub profile: Option<String>,
 }
 
 impl Recipe {
+    /// Move every spot paint of a substituted ink onto its target ink, in memory
+    /// only. Both inks must exist in the document's library, so a misspelled ID
+    /// is an error rather than a silent no-op. Returns the paints changed.
+    pub fn substitute_spots(&self, raw: &mut serde_json::Value) -> Result<usize> {
+        if self.spot_substitutions.is_empty() {
+            return Ok(0);
+        }
+        let library = super::spot::document_library(raw)?;
+        let mut resolved = Vec::new();
+        for (from, to) in &self.spot_substitutions {
+            let from = library.resolve(from).with_context(|| {
+                format!("[missing-resource] recipe spot_substitutions names unknown ink {from}")
+            })?;
+            let to = library.resolve(to).with_context(|| {
+                format!("[missing-resource] recipe spot_substitutions targets unknown ink {to}")
+            })?;
+            resolved.push((from.id.clone(), to.id.clone()));
+        }
+        fn walk(
+            nodes: &mut [serde_json::Value],
+            resolved: &[(String, String)],
+            library: &super::spot::Library,
+            changed: &mut usize,
+            depth: usize,
+        ) {
+            if depth > 64 {
+                return;
+            }
+            for node in nodes {
+                for slot in ["fill", "stroke"] {
+                    let Some(ink) = node["style"][slot]["spot"]["ink"].as_str() else {
+                        continue;
+                    };
+                    let Ok(found) = library.resolve(ink) else {
+                        continue;
+                    };
+                    if let Some((_, to)) = resolved.iter().find(|(from, _)| *from == found.id) {
+                        node["style"][slot]["spot"]["ink"] = serde_json::json!(to);
+                        *changed += 1;
+                    }
+                }
+                if let Some(children) = node.get_mut("children").and_then(|c| c.as_array_mut()) {
+                    walk(children, resolved, library, changed, depth + 1);
+                }
+            }
+        }
+        let mut changed = 0;
+        if let Some(pages) = raw.get_mut("pages").and_then(|p| p.as_array_mut()) {
+            for page in pages {
+                for layer in page["layers"].as_array_mut().into_iter().flatten() {
+                    if let Some(nodes) = layer.get_mut("nodes").and_then(|n| n.as_array_mut()) {
+                        walk(nodes, &resolved, &library, &mut changed, 0);
+                    }
+                }
+            }
+        }
+        Ok(changed)
+    }
+
     /// The output destination the recipe names, if any.
     pub fn destination(&self) -> Option<super::value::Destination> {
         let profile = self.profile.as_ref()?;
@@ -105,6 +167,7 @@ pub fn parse(bytes: &[u8]) -> Result<Recipe> {
         require_marks: false,
         compress: None,
         reject_spot_flattening: false,
+        spot_substitutions: Vec::new(),
         profile: None,
     };
     for (key, value) in fields {
@@ -179,6 +242,34 @@ pub fn parse(bytes: &[u8]) -> Result<Recipe> {
                     ids.push(id.to_owned());
                 }
                 recipe.allowed_spots = Some(ids);
+            }
+            "spot_substitutions" => {
+                let map = value
+                    .as_object()
+                    .filter(|m| m.len() <= 16)
+                    .context("[invalid-input] recipe spot_substitutions must be an object of at most 16 ink IDs")?;
+                let valid = |s: &str| {
+                    !s.is_empty()
+                        && s.len() <= 64
+                        && s.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                };
+                for (from, to) in map {
+                    let to = to
+                        .as_str()
+                        .filter(|t| valid(t) && valid(from))
+                        .context("[invalid-input] recipe spot_substitutions maps ink IDs of 1..=64 characters of A-Z a-z 0-9 - _ . to ink IDs")?;
+                    ensure!(
+                        from != to,
+                        "[invalid-input] recipe spot_substitutions maps {from} to itself"
+                    );
+                    ensure!(
+                        !map.contains_key(to),
+                        "[invalid-input] recipe spot_substitutions chains {from} through {to}; map each ink directly to its final ink"
+                    );
+                    recipe.spot_substitutions.push((from.clone(), to.to_owned()));
+                }
+                recipe.spot_substitutions.sort();
             }
             "scale" => recipe.scale = Some(range(value, key, 0.1, 8.0)? as f32),
             "auto_trap" => recipe.auto_trap = Some(range(value, key, 0.001, 1024.0)?),

@@ -863,7 +863,12 @@ declares no printer's marks. `compression` is `"flate"` (default) or `"none"` an
 and `color package` Flate-compress the page image and profile streams; the PDF
 report records it. `spot_policy` is `"convert"` (default; spot paints the flattened PDF/X export
 cannot carry are a `spot-not-in-pdfx` warning) or `"reject"` (the same finding
-is an error, so `color package` refuses the job). Resampling is not a separate
+is an error, so `color package` refuses the job). `spot_substitutions` is an object of at most 16
+`"from-ink": "to-ink"` entries (ink IDs, no self-maps or chains): before separation, preflight or
+PDF/X export the CLI moves every spot paint of the first ink onto the second ink, keeping its
+tint and fallback. Both inks must be in the document's library (else an error names the ink); the
+change is in memory only, and `color package` still copies the original `document.pen`.
+Spot-to-process conversion is not implemented. Resampling is not a separate
 recipe field: the draft PDF/X export flattens the page to one CMYK raster, so
 every embedded image is resampled once at the recipe `ppi`. Per-image
 resampling arrives only with vector/live-image PDF output.

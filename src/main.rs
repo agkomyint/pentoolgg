@@ -4113,11 +4113,14 @@ async fn run() -> Result<()> {
             if to.as_ref().is_some_and(|value| value.len() > 256) {
                 bail!("[limit-exceeded] destination JSON is limited to 256 bytes");
             }
-            let (raw, _) = read_color_document(&input, None)?;
+            let (mut raw, _) = read_color_document(&input, None)?;
             let recipe = recipe
                 .as_deref()
                 .map(|spec| print_recipe::resolve(spec, &raw))
                 .transpose()?;
+            if let Some(recipe) = &recipe {
+                recipe.substitute_spots(&mut raw)?;
+            }
             let bits = bits
                 .or_else(|| recipe.as_ref().and_then(|r| r.plate_bits))
                 .unwrap_or(8);
@@ -4202,11 +4205,14 @@ async fn run() -> Result<()> {
                 &input,
                 pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
             )?;
-            let (raw, _) = read_color_document(&input, None)?;
+            let (mut raw, _) = read_color_document(&input, None)?;
             let recipe = recipe
                 .as_deref()
                 .map(|spec| print_recipe::resolve(spec, &raw))
                 .transpose()?;
+            if let Some(recipe) = &recipe {
+                recipe.substitute_spots(&mut raw)?;
+            }
             let destination = to
                 .as_deref()
                 .map(|value| -> Result<Destination> {
@@ -4286,11 +4292,14 @@ async fn run() -> Result<()> {
                 },
         } => {
             use pentool::color::{preflight, recipe as print_recipe};
-            let (raw, _) = read_color_document(&input, None)?;
+            let (mut raw, _) = read_color_document(&input, None)?;
             let recipe = recipe
                 .as_deref()
                 .map(|spec| print_recipe::resolve(spec, &raw))
                 .transpose()?;
+            if let Some(recipe) = &recipe {
+                recipe.substitute_spots(&mut raw)?;
+            }
             let defaults = preflight::Options::default();
             let bleed_scale = bleed_scale
                 .or_else(|| recipe.as_ref().and_then(|r| r.bleed_scale))
@@ -4337,7 +4346,7 @@ async fn run() -> Result<()> {
             if to.as_ref().is_some_and(|value| value.len() > 256) {
                 bail!("[limit-exceeded] destination JSON is limited to 256 bytes");
             }
-            let (raw, _) = read_color_document(&input, None)?;
+            let (mut raw, _) = read_color_document(&input, None)?;
             let destination = to
                 .as_deref()
                 .map(|value| -> Result<Destination> {
@@ -4350,6 +4359,9 @@ async fn run() -> Result<()> {
                 .as_deref()
                 .map(|spec| print_recipe::resolve(spec, &raw))
                 .transpose()?;
+            if let Some(recipe) = &recipe {
+                recipe.substitute_spots(&mut raw)?;
+            }
             let destination = destination.or_else(|| recipe.as_ref().and_then(|r| r.destination()));
             let intent = intent
                 .as_deref()

@@ -345,8 +345,8 @@ remain at the shared ICC, catalog, role, package and performance foundations.
   `--recipe @NAME` reads a recipe embedded in the document's `print_recipes`.
   `compression` (`flate`|`none`) sets PDF stream compression
   (tests/v0120_pdfx.rs). `spot_policy: "reject"` turns PDF/X spot flattening into a preflight error
-  (tests/v0120_preflight.rs). Resampling is governed by `ppi` alone while export is one
-  flattened raster; per-image resampling and true spot substitution remain open.
+  (tests/v0120_preflight.rs). `spot_substitutions` (up to 16 `{"from":"to"}` ink IDs, no chains) moves every paint of one spot ink onto another ink's plate in memory for `color separate`, `package`, `preflight` and `pdfx`; an unknown ink is an error and the document on disk is untouched (tests/v0120_spot_substitution.rs). Resampling is governed by `ppi` alone while export is one
+  flattened raster; per-image resampling and spot-to-process substitution remain open.
 - [ ] **15. Build print-focused UX** for channels, separations, overprint, gamut,
   ink warnings, proof setup, bleed overlays, preflight navigation, and export.
   In progress: a "Print preflight" panel (`web/print-panel.js`) and read-only
