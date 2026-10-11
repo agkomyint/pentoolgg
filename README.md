@@ -737,6 +737,24 @@ Dual-licensed under MIT or Apache-2.0, at your option.
 Bundled fonts have a separate [SIL Open Font License](assets/fonts/OFL.txt).
 See [font attribution](assets/fonts/README.md).
 
+### Deterministic semantic raster strokes
+
+Compact absolute SVG paths compile to the same canonical raster samples and
+journal operations used by pointer strokes. Optional normalized curves vary brush
+properties deterministically along path distance:
+
+```sh
+pentool raster portrait.pen stroke-path paint \
+  --path 'M20 180 C80 20 220 20 300 180' \
+  --brush '{"size":18,"spacing":0.2}' \
+  --curves '{"size":[[0,8],[0.5,24],[1,10]],"pressure":[[0,0.2],[0.5,1],[1,0.4]]}' \
+  --color '#8B5A3C' --seed 42
+```
+
+Line, quadratic, cubic, and arc segments are supported. Dry run, revision guards,
+locks, bounded compilation, history, replay, batch, and the shared raster API use
+the same planner. See [the raster-paint contract](docs/raster-paint-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

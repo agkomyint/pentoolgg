@@ -47,7 +47,7 @@ commits as one history entry and must be reviewable before execution.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the agent-painting protocol and threat model.** Specify
+- [x] **1. Freeze the agent-painting protocol and threat model.** Specify
   high-level paths, pressure curves, region constraints, sampled colors, palettes,
   vector fields, paint plans, comparison metrics, canonical compilation, hashes,
   engine compatibility, cancellation, resource limits, and stable JSON results.
@@ -55,7 +55,7 @@ commits as one history entry and must be reviewable before execution.
   before adding mutation commands. Explicitly bound path segments, samples,
   generated dabs, fields, regions, palette size, passes, pixels, and output.
 
-- [ ] **2. Add deterministic semantic stroke paths.** Accept SVG-compatible line,
+- [x] **2. Add deterministic semantic stroke paths.** Accept SVG-compatible line,
   quadratic, cubic, and arc paths instead of requiring agents to manufacture
   dense pointer events. Add piecewise size, pressure, flow, opacity, rotation,
   and color curves along normalized path distance. Define flatness, arc-length

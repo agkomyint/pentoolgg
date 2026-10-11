@@ -39,6 +39,7 @@ mod preset;
 mod recovery;
 mod retouch;
 mod selection;
+mod semantic;
 mod shape;
 mod tip;
 pub use api::{apply, batch, MAX_BATCH_OPS, MAX_BATCH_SAMPLES};
@@ -73,6 +74,7 @@ pub use preset::{
 pub use recovery::{repair, replay, verify, RepairStrategy};
 pub use retouch::Tool;
 pub use selection::{clear_op as select_clear, info_op as select_info, Mode as SelectionMode};
+pub use semantic::{paint_path, PathRequest};
 pub use shape::{
     delete as select_delete, lasso as select_lasso, load as select_load, marquee as select_marquee,
     modify as select_modify, quickmask as select_quickmask, save as select_save, Marquee,

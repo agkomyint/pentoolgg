@@ -7,6 +7,15 @@ object storage, mirrors, or a searchable hosted catalog.
 
 ## Principles
 
+### Frozen agent-painting protocol
+
+The specification-only v1 contract for deterministic semantic stroke requests,
+data-only paint plans, stable results, content hashes, cancellation, hard resource
+limits, and hostile-input handling is
+[`agent-painting-protocol-v1.md`](agent-painting-protocol-v1.md). Its schemas and
+fixtures freeze the interface before mutation commands are added. They do not by
+themselves indicate that the v0.13 painting commands are implemented.
+
 ### Development v8 catalog compatibility
 
 The developing [professional color contract](professional-color-v1.md) and

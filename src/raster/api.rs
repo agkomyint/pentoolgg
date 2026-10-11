@@ -54,6 +54,27 @@ pub fn apply(
         "clear" => super::clear(raw, page, id)?,
         "select-info" => super::select_info(raw, id)?,
         "select-clear" => super::select_clear(raw, id)?,
+        "stroke-path" => {
+            let brush = super::Brush::parse(&super::resolve_preset(
+                raw,
+                &if args["brush"].is_null() { json!({}) } else { args["brush"].clone() },
+                args["preset"].as_str(),
+            )?)?;
+            super::paint_path(
+                raw,
+                page,
+                id,
+                super::PathRequest {
+                    path: args["path"].as_str().context("[invalid-path] args.path must be a string")?.to_owned(),
+                    flatness: args["flatness"].as_f64().unwrap_or(0.25),
+                    brush,
+                    color: super::parse_color(&text("color", "#000000"))?,
+                    blend: super::Blend::parse(&text("blend", "normal"))?,
+                    seed: args["seed"].as_u64().unwrap_or(0),
+                    curves: if args["curves"].is_null() { json!({}) } else { args["curves"].clone() },
+                },
+            )?
+        }
         "stroke" | "quickmask" | "clone" | "heal" => {
             let normalized = super::normalize_input(&args["samples"])?;
             let input_summary = normalized.summary();
@@ -163,7 +184,7 @@ pub fn apply(
         super::SelectionMode::parse(&text("mode", "replace"))?,
         )?,
         other => bail!(
-            "[invalid-input] unknown raster action {other:?}; use info, stroke, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-info or select-clear"
+            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-info or select-clear"
         ),
     };
     Ok(result)

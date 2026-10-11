@@ -3233,6 +3233,29 @@ enum RasterAction {
         #[arg(long, default_value_t = 0)]
         seed: u64,
     },
+    /// Compile an absolute SVG M/L/Q/C/A path into deterministic canonical raster strokes.
+    StrokePath {
+        id: String,
+        /// Absolute SVG path with one subpath and no close command.
+        #[arg(long)]
+        path: String,
+        /// Curve-flattening tolerance in pixels.
+        #[arg(long, default_value_t = 0.25)]
+        flatness: f64,
+        /// JSON object containing size, pressure, flow, opacity, rotation or color curves, or @file.json.
+        #[arg(long, default_value = "{}")]
+        curves: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long, default_value = "#000000")]
+        color: String,
+        #[arg(long, default_value = "normal")]
+        blend: String,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
     /// Choose where clone strokes on a layer copy from (resets the aligned anchor).
     CloneSource {
         /// Target raster layer that clone strokes paint into.
@@ -7211,6 +7234,46 @@ async fn run() -> Result<()> {
                     let mut result = raster::paint(&mut raw, page, &id, request)?;
                     result["input"] = input_summary;
                     ("raster-stroke", result)
+                }
+                RasterAction::StrokePath {
+                    id,
+                    path,
+                    flatness,
+                    curves,
+                    brush,
+                    preset,
+                    color,
+                    blend,
+                    seed,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                const MAX_JSON: u64 = 4 << 20;
+                                if fs::metadata(path)?.len() > MAX_JSON {
+                                    bail!("[limit-exceeded] {path} is larger than 4 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let request = raster::PathRequest {
+                        path,
+                        flatness,
+                        brush: raster::Brush::parse(&raster::resolve_preset(
+                            &raw,
+                            &read(&brush)?,
+                            preset.as_deref(),
+                        )?)?,
+                        color: raster::parse_color(&color)?,
+                        blend: raster::Blend::parse(&blend)?,
+                        seed,
+                        curves: read(&curves)?,
+                    };
+                    let result = raster::paint_path(&mut raw, page, &id, request)?;
+                    ("raster-stroke-path", result)
                 }
             };
             let summary = transaction::commit_value(

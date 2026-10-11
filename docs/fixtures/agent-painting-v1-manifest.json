@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "protocol": "agent-painting-v1",
+  "fixtures": [
+    {"file": "agent-painting-v1-valid-request.json", "kind": "request", "expect": "valid"},
+    {"file": "agent-painting-v1-valid-plan.json", "kind": "plan", "expect": "valid"},
+    {"file": "agent-painting-v1-valid-result.json", "kind": "result", "expect": "valid"},
+    {"file": "agent-painting-v1-invalid-curve.json", "kind": "request", "expect": "invalid", "error": "invalid-curve"},
+    {"file": "agent-painting-v1-adversarial-budget.json", "kind": "plan", "expect": "invalid", "error": "limit-exceeded"},
+    {"file": "agent-painting-v1-cross-platform.json", "kind": "cross-platform", "expect": "valid"}
+  ]
+}
