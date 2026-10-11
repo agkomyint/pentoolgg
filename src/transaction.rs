@@ -92,6 +92,33 @@ pub fn commit_value(
     value: &Value,
 ) -> Result<ChangeSummary> {
     validate_value(value)?;
+    // Skip no-op commits: when the new value is semantically identical to the
+    // stored document (e.g. same-target migrate, zero-match replace, flagless
+    // canvas), leave the file byte-identical and record no history entry, so a
+    // later undo restores a genuinely prior state. The revision guard still
+    // applies, and dry run reports the same file state as a commit would.
+    let before = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    let current = revision(&before);
+    if expected.is_some_and(|wanted| wanted != current) {
+        bail!("revision mismatch: expected {expected:?}, current {current}")
+    }
+    let unchanged = serde_json::from_slice::<Value>(&before)
+        .ok()
+        .is_some_and(|before_value| before_value == *value);
+    if unchanged {
+        return Ok(ChangeSummary {
+            ok: true,
+            operation: operation.into(),
+            file: path.into(),
+            dry_run,
+            revision_before: current.clone(),
+            revision_after: current,
+            bytes_before: before.len(),
+            bytes_after: before.len(),
+            backup: None,
+            history: None,
+        });
+    }
     commit_bytes(
         path,
         operation,
@@ -238,6 +265,28 @@ pub fn validate_value(value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn semantically_identical_commits_leave_bytes_and_history_untouched() {
+        let dir = std::env::temp_dir().join(format!("pentool-noop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("doc.pen");
+        let doc = serde_json::to_value(crate::document::Document::new(10, 10)).unwrap();
+        // Store compact JSON so a pretty-printing commit would change bytes.
+        std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        let before = fs::read(&path).unwrap();
+        let summary = commit_value(&path, "test", false, None, &doc).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(summary.history.is_none());
+        assert_eq!(summary.revision_after, summary.revision_before);
+        assert_eq!(summary.bytes_after, summary.bytes_before);
+        let mut edited = doc.clone();
+        edited["name"] = Value::String("Renamed".into());
+        let summary = commit_value(&path, "test", false, None, &edited).unwrap();
+        assert!(summary.history.is_some());
+        assert_ne!(summary.revision_after, summary.revision_before);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn failed_validation_and_revision_leave_bytes_unchanged() {
         let path =
