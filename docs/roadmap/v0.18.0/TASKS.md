@@ -33,17 +33,35 @@ print and packaging.
 - [ ] **3. Built-in mockup presets** and a CLI to apply artwork to a preset.
 - [ ] **4. Color and print path:** managed colors for textures, 3D nodes in
   separations and PDF/X output with effective-ppi preflight.
-- [ ] **5. Editor:** mockup gallery, drag-artwork-to-slot, camera presets.
-- [ ] **6. Batch rendering:** many artworks through one mockup with stable output
+- [ ] **5. Packaging design:** a dieline is a first-class vector structure
+  (cut, crease, perforation and bleed line roles with explicit units). A folded
+  3D preview is derived from it: panels become faces, creases become hinges with
+  a fold-angle parameter, and each panel's artwork is a live texture binding
+  (task 1). Built-in templates: folding carton (tuck-end, straight-tuck,
+  reverse-tuck), sleeve, mailer box, cylinder/tube, pouch and bottle label wrap.
+  Paperboard thickness and glue flaps are modeled so panels meet correctly.
+- [ ] **6. Packaging output:** artwork exports back to the flat dieline sheet
+  with correct bleed, spot colors for cut and crease (separations), and PDF/X
+  draft; `pentool pack` CLI to build, fold-preview and export from a template
+  plus artwork, with stable JSON output.
+- [ ] **7. Editor:** mockup gallery, drag-artwork-to-slot, camera presets, and a
+  fold slider showing the flat-to-folded transition for packaging.
+- [ ] **8. Batch rendering:** many artworks through one mockup with stable output
   names and a bounded work queue.
-- [ ] **7. Evidence:** goldens, size check, hostile cases, docs.
+- [ ] **9. Evidence:** goldens, size check, hostile cases, docs.
 
 ## Acceptance targets
 
 - Changing the source artwork changes only the affected mockup pixels and the
   render cache invalidates exactly the dependents.
 - A mockup exported to a PDF/X draft passes preflight with correct effective ppi.
+- Editing a panel on the flat dieline updates the folded 3D preview; the flat
+  export keeps cut and crease lines on their own separations and the folded
+  panels meet without gaps for every built-in template.
 
 ## Explicitly deferred
 
 - Cloth, fluid or soft-body simulation, and photoreal ray tracing.
+- Automatic dieline generation from arbitrary 3D meshes (unfolding); only
+  parametric templates and imported dielines ship first.
+- Structural engineering checks (compression strength, material yield).
