@@ -2122,7 +2122,7 @@ pub fn apply_text(
         TextAction::Put { layer, .. }
         | TextAction::Set { layer, .. }
         | TextAction::Remove { layer, .. } => layer.clone(),
-        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("handled above"),
+        TextAction::Story { .. } | TextAction::Frame { .. } | TextAction::Shape { .. } | TextAction::FontReport => unreachable!("handled above"),
     };
     ensure_layer_unlocked(page, &layer_id)?;
     match action {
@@ -2214,7 +2214,7 @@ pub fn apply_text(
                 bail!("text not found in layer {layer_id}: {id}")
             }
         }
-        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("handled above"),
+        TextAction::Story { .. } | TextAction::Frame { .. } | TextAction::Shape { .. } | TextAction::FontReport => unreachable!("handled above"),
     }
     validate(raw)
 }

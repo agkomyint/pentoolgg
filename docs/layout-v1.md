@@ -480,6 +480,49 @@ the operating system's font service in compose or export, so output depends only
 on documented, declared fonts (v0.6.x asset model). Subsetting and embedding
 for PDF keep only the used glyphs and record the subset in the export report.
 
+### 6.8 Implementation notes (task 4)
+
+Engine version 1 (`shaping::ENGINE`). Shaping uses `rustybuzz` (pure-Rust
+HarfBuzz port), UAX #9 via `unicode-bidi`, UAX #14 via `unicode-linebreak`,
+script runs via `unicode-script` and subsetting via `subsetter`.
+
+- `pentool text DOC shape --text T | --story ID [--font F --weight W --italic
+  --size PT --features LIST --axes LIST --language TAG --direction
+  auto|ltr|rtl --kerning metrics|optical|none --tracking N --baseline-shift PT
+  --h-scale PCT --v-scale PCT --skew DEG --offset N --limit N]` is read-only
+  and works on documents of every version. Glyph rows are
+  `[glyph_id, cluster_char_offset, x_advance, y_advance, x_offset, y_offset]`
+  in LU, in visual order per run, paginated (`matches`, `returned`, `offset`,
+  `limit`, `has_more`). `runs`, `breaks` (character offset plus
+  `allowed|mandatory`) and `missing_glyphs` are reported in full.
+- Features: any four-character OpenType tag, with `-tag` to disable and
+  `tag=N` for alternates; readable aliases (`ligatures`, `small-caps`,
+  `oldstyle-figures`, `lining-figures`, `tabular-figures`, `fractions`,
+  `ordinals`, `contextual-alternates`, `swashes`, ...). Variable-font axes are
+  validated against the font's own axes.
+- Tracking is 1/1000 em added after each glyph; horizontal scale multiplies
+  advances; baseline shift adds to the vertical offset; vertical scale and skew
+  are recorded in the report's `transform` for the renderer.
+- **Optical kerning** (`--kerning optical`) disables the font's kerning and
+  adjusts each adjacent pair by half the distance between the pair's summed
+  side bearings and a 0.06 em target, clamped to +/-0.1 em. It is a
+  deterministic approximation of outline-based optical kerning, versioned with
+  the engine.
+- Fonts resolve only from embedded document fonts, then the bundled default
+  family; the operating system's fonts are never read. `text DOC font-report`
+  lists every requested family with how it resolves; a miss is disclosed as
+  `family-unavailable:<family>`, `style-substituted` or
+  `weight-substituted:<from>-><to>`. A script the chosen face cannot draw
+  appears as `missing_glyphs` rather than silently falling back. Embed a font
+  with `pentool font DOC add ID --file FONT` (now also for version 4+ documents).
+- `shaping::subset` keeps only the used glyphs plus `.notdef`; the subset
+  renumbers glyphs densely and returns the old-to-new mapping. PDF embedding
+  of composed frame text lands with the composer (task 5) and publishing
+  exports (task 15).
+- No non-Latin font is bundled to keep the binary small: Arabic, Hebrew,
+  Devanagari, Thai and CJK text shapes and orders correctly when a covering
+  font is embedded.
+
 ## 7. Grids and guides
 
 - A **baseline grid** is `{start, increment, relative_to: page|margin, color}`

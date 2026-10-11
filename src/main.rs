@@ -7299,6 +7299,17 @@ async fn run() -> Result<()> {
             if_revision,
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            match &action {
+                text::TextAction::Shape(args) => {
+                    println!("{}", pentool::shaping::run_shape(&raw, args)?);
+                    return Ok(());
+                }
+                text::TextAction::FontReport => {
+                    println!("{}", pentool::shaping::font_report(&raw)?);
+                    return Ok(());
+                }
+                _ => {}
+            }
             if scene::is_scene_document(&raw) {
                 if matches!(
                     action,
@@ -7338,14 +7349,30 @@ async fn run() -> Result<()> {
             action,
             dry_run,
             if_revision,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "font",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| text::font(doc, action),
-        ),
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                let result = pentool::shaping::scene_font(&mut raw, action)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "font",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!("{}", serde_json::json!({"change": change, "result": result}));
+                Ok(())
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "font",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| text::font(doc, action),
+                )
+            }
+        }
         Command::Fonts { input } => {
             let doc = match input {
                 Some(path) => read_document(&path, selected_page)?,

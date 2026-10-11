@@ -91,6 +91,65 @@ pub enum TextAction {
         #[command(subcommand)]
         action: crate::stories::FrameAction,
     },
+    /// Shape text with the OpenType engine and report glyphs, runs and breaks as JSON.
+    Shape(ShapeArgs),
+    /// Report the fonts the document requests and how each resolves (disclosing substitution).
+    FontReport,
+}
+
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
+pub struct ShapeArgs {
+    /// Text to shape; paragraphs are separated by newlines.
+    #[arg(long, conflicts_with = "story")]
+    pub text: Option<String>,
+    /// Shape the text of this story instead (version 9 documents).
+    #[arg(long)]
+    pub story: Option<String>,
+    /// Font family; embedded document fonts are tried before the bundled default.
+    #[arg(long, default_value = "Atkinson Hyperlegible")]
+    pub font: String,
+    #[arg(long, default_value_t = 400)]
+    pub weight: u16,
+    #[arg(long)]
+    pub italic: bool,
+    /// Size in points.
+    #[arg(long, default_value_t = 12.0)]
+    pub size: f64,
+    /// OpenType features, e.g. `liga,-kern,smcp,ss01,cv05=2` (names such as `small-caps` also work).
+    #[arg(long)]
+    pub features: Option<String>,
+    /// Variable-font axes, e.g. `wght=700,wdth=90`.
+    #[arg(long)]
+    pub axes: Option<String>,
+    /// BCP 47 language tag, e.g. `tr` or `de-CH`.
+    #[arg(long)]
+    pub language: Option<String>,
+    /// Paragraph direction: auto, ltr or rtl.
+    #[arg(long, default_value = "auto")]
+    pub direction: String,
+    /// Kerning: metrics, optical or none.
+    #[arg(long, default_value = "metrics")]
+    pub kerning: String,
+    /// Tracking in 1/1000 em.
+    #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+    pub tracking: i32,
+    /// Baseline shift in points (positive raises).
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    pub baseline_shift: f64,
+    /// Horizontal scale in percent.
+    #[arg(long, default_value_t = 100.0)]
+    pub h_scale: f64,
+    /// Vertical scale in percent.
+    #[arg(long, default_value_t = 100.0)]
+    pub v_scale: f64,
+    /// Skew in degrees.
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    pub skew: f64,
+    #[arg(long, default_value_t = 0)]
+    pub offset: usize,
+    /// Maximum glyph rows returned.
+    #[arg(long, default_value_t = 200)]
+    pub limit: usize,
 }
 fn position() -> f64 {
     100.0
@@ -100,14 +159,23 @@ fn ink() -> String {
 }
 
 pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
-    if matches!(action, TextAction::Story { .. } | TextAction::Frame { .. }) {
+    if matches!(
+        action,
+        TextAction::Story { .. }
+            | TextAction::Frame { .. }
+            | TextAction::Shape { .. }
+            | TextAction::FontReport
+    ) {
         bail!("[unsupported-version] stories and frames need a version 9 document; run `pentool migrate --target 9` first");
     }
     let layer_id = match &action {
         TextAction::Put { layer, .. }
         | TextAction::Set { layer, .. }
         | TextAction::Remove { layer, .. } => layer,
-        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("rejected above"),
+        TextAction::Story { .. }
+        | TextAction::Frame { .. }
+        | TextAction::Shape { .. }
+        | TextAction::FontReport => unreachable!("rejected above"),
     };
     let layer_index = doc
         .layers
@@ -222,7 +290,10 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
                 .context("text object not found")?;
             layer.texts.remove(i);
         }
-        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("rejected above"),
+        TextAction::Story { .. }
+        | TextAction::Frame { .. }
+        | TextAction::Shape { .. }
+        | TextAction::FontReport => unreachable!("rejected above"),
     }
     updated.version = updated.version.max(2);
     updated.validate().map_err(anyhow::Error::msg)?;

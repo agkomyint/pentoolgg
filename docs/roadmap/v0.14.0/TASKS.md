@@ -166,6 +166,15 @@ and documentation.
   - Font embedding and subsetting for PDF, and a missing-font report with
     substitution disclosed.
 
+  *Progress:* the shaping engine (`src/shaping.rs`: rustybuzz shaping, UAX #9
+  bidi, UAX #14 break opportunities, features, axes, tracking, scale, optical
+  kerning, font resolution with disclosed substitution, subsetting) and the
+  `text shape` / `text font-report` commands are implemented and covered by
+  `tests/v0140_shaping.rs`; contract in `docs/layout-v1.md` section 6.8. Still
+  open before this box is ticked: PDF embedding of subset fonts (needs the
+  composer), shaping coverage against embedded Arabic/Devanagari/Thai/CJK
+  fonts (none bundled), vertical text, and cross-platform CI evidence.
+
 - [ ] **5. Build the paragraph composer.**
   - A total-fit line breaker in the Knuth–Plass family, plus a single-line
     composer.
