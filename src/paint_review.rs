@@ -211,6 +211,16 @@ pub fn preview(
     page: Option<&str>,
     options: PreviewOptions,
 ) -> Result<Value> {
+    preview_image(raw, document, page, options).map(|(report, _)| report)
+}
+
+/// `preview` plus the bounded preview image itself (for Studio's crop view).
+pub fn preview_image(
+    raw: &Value,
+    document: &Path,
+    page: Option<&str>,
+    options: PreviewOptions,
+) -> Result<(Value, RgbaImage)> {
     ensure!(
         (1..=8192).contains(&options.max_edge),
         "[invalid-request] --max-edge must be between 1 and 8192"
@@ -250,7 +260,7 @@ pub fn preview(
         }
         None => None,
     };
-    Ok(json!({
+    let report = json!({
         "algorithm": ALGORITHM,
         "status": "ok",
         "scope": source.scope,
@@ -260,7 +270,8 @@ pub fn preview(
         "downscaled": shown.width() != source.image.width() || shown.height() != source.image.height(),
         "source_hash": source.hash,
         "artifact": artifact,
-    }))
+    });
+    Ok((report, shown))
 }
 
 fn over(p: [u8; 4], bg: [u8; 3]) -> [u8; 4] {
@@ -476,6 +487,16 @@ pub fn compare(
     page: Option<&str>,
     options: CompareOptions,
 ) -> Result<Value> {
+    compare_with_heat(raw, document, page, options).map(|(report, _)| report)
+}
+
+/// `compare` plus the grayscale value-difference heat map (for Studio's overlay).
+pub fn compare_with_heat(
+    raw: &Value,
+    document: &Path,
+    page: Option<&str>,
+    options: CompareOptions,
+) -> Result<(Value, GrayImage)> {
     let current = crop(
         raw,
         document,
@@ -528,7 +549,7 @@ pub fn compare(
         }
         None => None,
     };
-    Ok(json!({
+    let report = json!({
         "algorithm": ALGORITHM,
         "scope": current.scope,
         "origin": current.origin,
@@ -539,7 +560,8 @@ pub fn compare(
         "reference_hash": ref_hash,
         "metrics": m.value,
         "heatmap": artifact,
-    }))
+    });
+    Ok((report, m.heat))
 }
 
 #[derive(clap::Subcommand, Debug)]

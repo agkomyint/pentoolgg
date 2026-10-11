@@ -192,3 +192,74 @@ fn long_sessions_stay_bounded() {
 fn ten_thousand_strokes_stay_bounded() {
     long_session(157);
 }
+
+#[test]
+fn hostile_colors_references_and_fields_fail_cleanly() {
+    use pentool::paint_review::{compare, CompareOptions};
+    // Palette colors: never a panic, always Ok or a structured error.
+    let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
+    for _ in 0..500 {
+        let len = (rng.next() % 12) as usize;
+        let text: String = (0..len)
+            .map(|_| char::from_u32((rng.next() % 0x2fff) as u32 + 1).unwrap_or('?'))
+            .collect();
+        let _ = pentool::paint_palette::parse_color(&text);
+    }
+    assert!(pentool::paint_palette::parse_color("#zzzzzz").is_err());
+
+    // Damaged references: truncated, garbage, and empty files are errors that
+    // leave the document untouched.
+    let dir = std::env::temp_dir().join(format!("pentool-v0130-hostile-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let raw = document(32);
+    let before = raw.clone();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(16, 16, image::Rgba([9, 9, 9, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let good = png.into_inner();
+    let cases: [(&str, Vec<u8>); 3] = [
+        ("truncated.png", good[..good.len() / 2].to_vec()),
+        (
+            "garbage.png",
+            (0..200u32).map(|i| (i * 37 % 251) as u8).collect(),
+        ),
+        ("empty.png", Vec::new()),
+    ];
+    for (name, bytes) in cases {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let result = compare(
+            &raw,
+            &dir.join("doc.pen"),
+            None,
+            CompareOptions {
+                scope: "page".into(),
+                rect: None,
+                selection: None,
+                reference_image: Some(path.to_string_lossy().into_owned()),
+                reference_document: None,
+                reference_scope: None,
+                background: [255, 255, 255],
+                heatmap: None,
+            },
+        );
+        assert!(result.is_err(), "{name} was accepted");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Hostile field specs and plan arguments are rejected, not run.
+    for field in [
+        json!({}),
+        json!({"method": "nope"}),
+        json!({"scale": -1}),
+        json!(null),
+    ] {
+        assert!(
+            pentool::paint_fields::preview_value(&raw, "p", &field, None, None, &json!({}), 0, 10)
+                .is_err(),
+            "{field}"
+        );
+    }
+    assert_eq!(raw, before);
+}

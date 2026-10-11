@@ -342,11 +342,20 @@ fn diff(before: &raster::Surface, after: &raster::Surface) -> (u64, u64, Option<
     (pixels, tiles, bounds)
 }
 
+/// Cooperative cancellation point. The error names the last completed stage and
+/// states that nothing was written (`[cancelled]`, protocol "Cancellation").
+fn checkpoint(stage: &str) -> Result<()> {
+    crate::composite::check_cancelled()
+        .map_err(|e| anyhow::anyhow!("{e}; last completed stage: {stage}; nothing was written"))
+}
+
 /// Run the plan on a clone of `raw`. On success `raw` is replaced and the report is
 /// returned; on any failure `raw` is untouched and the error names the pass.
 pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result<Value> {
+    checkpoint("start")?;
     let plan = Plan::parse(plan_json)?;
     let plan_hash = plan.hash()?;
+    checkpoint("parse")?;
     let page = plan.page.as_deref().or(page);
     let mut next = raw.clone();
     let (mut dabs, mut pixels, mut tiles, mut strokes) = (0_u64, 0_u64, 0_u64, 0_u64);
@@ -359,6 +368,7 @@ pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result
                 plan.id, pass.id, pass.action, pass.target
             )
         };
+        checkpoint(&format!("pass {index} planned"))?;
         let before = raster::layer_surface(&next, &pass.target)
             .with_context(|| fail("has no such raster layer"))?;
         let result = raster::apply(&mut next, page, &pass.target, &pass.action, &pass.args)
@@ -401,6 +411,7 @@ pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result
                 )
             }
         }
+        checkpoint(&format!("pass {index} applied"))?;
         reports.push(json!({
             "index": index,
             "id": pass.id,
@@ -418,6 +429,7 @@ pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result
         }));
     }
     transaction::validate_value(&next)?;
+    checkpoint("validate")?;
     let mut targets: Vec<&str> = plan.passes.iter().map(|p| p.target.as_str()).collect();
     targets.sort_unstable();
     targets.dedup();
@@ -502,4 +514,51 @@ pub fn run(args: PlanArgs, selected_page: Option<&str>) -> Result<()> {
         )?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> (Value, Value) {
+        let mut raw = crate::scene::new_document(64, 64);
+        raster::add(&mut raw, None, None, "p", 0.0, 0.0, 64, 64).unwrap();
+        let passes: Vec<Value> = (0..3)
+            .map(|i| {
+                json!({"id": format!("s{i}"), "target": "p", "action": "stroke-path",
+                       "args": {"path": format!("M2 {} L60 {}", 8 + i * 8, 8 + i * 8),
+                                "brush": {"size": 4, "hardness": 1}, "color": "#336699"}})
+            })
+            .collect();
+        (
+            raw,
+            json!({"schema": 1, "engine": 1, "id": "c", "passes": passes}),
+        )
+    }
+
+    #[test]
+    fn cancellation_at_every_checkpoint_writes_nothing_and_names_the_stage() {
+        let (raw, plan) = fixture();
+        let mut checkpoints = 0;
+        for n in 1..=64 {
+            let mut working = raw.clone();
+            let (result, reached) =
+                crate::composite::cancel_at_check(n, || execute(&mut working, None, &plan));
+            if !reached {
+                // Past the last checkpoint the plan simply completes.
+                assert!(result.is_ok());
+                break;
+            }
+            checkpoints = n;
+            let error = format!("{:#}", result.unwrap_err());
+            assert!(error.contains("[cancelled]"), "{n}: {error}");
+            assert!(error.contains("last completed stage"), "{n}: {error}");
+            assert_eq!(
+                working, raw,
+                "cancelled at checkpoint {n} mutated the document"
+            );
+        }
+        // start, parse, 3 x (planned, applied), validate.
+        assert_eq!(checkpoints, 9);
+    }
 }

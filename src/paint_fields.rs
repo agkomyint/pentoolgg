@@ -65,8 +65,36 @@ pub fn run(input: &PathBuf, action: FieldAction) -> Result<()> {
         seed,
         max_vectors,
     } = action;
-    let field_json = crate::paint_guide::resolve_field(&raw, &read_json(&field)?)?;
-    let built = fields::build(&raw, &id, &FieldSpec::parse(&field_json)?)?;
+    let params = params.map(|text| read_json(&text)).transpose()?;
+    let constraints = constraints.map(|text| read_json(&text)).transpose()?;
+    let result = preview_value(
+        &raw,
+        &id,
+        &read_json(&field)?,
+        params,
+        constraints,
+        &read_json(&brush)?,
+        seed,
+        max_vectors,
+    )?;
+    println!("{result}");
+    Ok(())
+}
+
+/// The `paint-fields preview` result for already-parsed inputs (shared with Studio).
+#[allow(clippy::too_many_arguments)]
+pub fn preview_value(
+    raw: &Value,
+    id: &str,
+    field: &Value,
+    params: Option<Value>,
+    constraints: Option<Value>,
+    brush: &Value,
+    seed: u64,
+    max_vectors: usize,
+) -> Result<Value> {
+    let field_json = crate::paint_guide::resolve_field(raw, field)?;
+    let built = fields::build(raw, id, &FieldSpec::parse(&field_json)?)?;
     let mut samples = Vec::new();
     let mut defined = 0_u64;
     for (index, v) in built.vectors.iter().enumerate() {
@@ -95,22 +123,14 @@ pub fn run(input: &PathBuf, action: FieldAction) -> Result<()> {
     if let Some(params) = params {
         let request = FieldRequest {
             field: field_json,
-            params: read_json(&params)?,
-            brush: Brush::parse(&crate::raster::resolve_preset(
-                &raw,
-                &read_json(&brush)?,
-                None,
-            )?)?,
+            params,
+            brush: Brush::parse(&crate::raster::resolve_preset(raw, brush, None)?)?,
             color: [0, 0, 0],
             blend: Blend::parse("normal")?,
             seed,
-            constraints: match &constraints {
-                Some(text) => read_json(text)?,
-                None => Value::Null,
-            },
+            constraints: constraints.unwrap_or(Value::Null),
         };
-        result["plan"] = fields::plan_report(&raw, &id, &request)?;
+        result["plan"] = fields::plan_report(raw, id, &request)?;
     }
-    println!("{result}");
-    Ok(())
+    Ok(result)
 }

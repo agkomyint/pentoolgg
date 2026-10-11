@@ -143,13 +143,25 @@ commits as one history entry and must be reviewable before execution.
   replace it with authoritative Rust output. Agent-produced plans appear as normal
   editable operations, not an autonomous chat surface.
 
-- [x] **14. Harden conformance, performance, and failure recovery.** Add golden
+- [ ] **14. Harden conformance, performance, and failure recovery.** Add golden
   tests for path compilation, palette extraction, fields, constrained tile edges,
   materials, plans, metrics, and exports on Linux, Windows, Intel macOS, and Apple
   Silicon. Fuzz schemas, curves, fields, plans, references, palettes, and hostile
   dimensions. Test cancellation at every stage, stale revisions, damaged assets,
   locks, memory/disk budgets, transaction rollback, crash recovery, packaging,
   offline replay, and 10,000-pass/stroke bounded-session behavior.
+
+  Status (left unchecked on purpose): covered locally are plan, tile and
+  canonicalization goldens (computed on Windows only), fuzzing of plans, palette
+  colors, reference images and field specs, hostile dimensions, locks, stale
+  revisions, rollback, cancellation at every plan checkpoint, leftover temp-file
+  and history recovery (`tests/v0130_recovery.rs`), packaging, and the 10,048-stroke
+  run (`cargo test --release --test v0130_conformance -- --ignored`, passed in 35 s
+  on Windows). Still open:
+  Linux and Apple Silicon confirmation of the goldens (CI is the authority),
+  automatic repair of an `atomic_write` killed between its two renames (history
+  restore is the supported path), and memory/disk budget tests beyond the plan
+  limits. Tick this item only after a green CI matrix.
 
 ## CLI direction
 

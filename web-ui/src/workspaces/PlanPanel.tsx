@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { create } from "zustand";
 import { Button } from "@/components/ui/button";
 import { postJson, type Doc } from "@/lib/api";
@@ -19,6 +20,7 @@ type Pass = {
   region: string; // "x,y,w,h" or empty
   protect: string; // one "x,y,w,h" per line
   palette: string; // space/comma separated hex colors
+  media: string; // material kind, or empty for the default brush
 };
 
 type PassReport = {
@@ -36,12 +38,25 @@ type Report = {
   passes: PassReport[];
 };
 
+type Comparison = {
+  size: [number, number];
+  reference_hash: string;
+  metrics: Record<string, unknown>;
+  heatmap_png_base64?: string;
+};
+
 type State = {
   passes: Pass[];
   report: Report | null;
   preview: Doc | null;
   score: { assessment?: { trend: string; basis: string }; before?: { score: number }; after?: { score: number } } | null;
   goal: string;
+  sample: { x: number; y: number; radius: number };
+  reference: { name: string; base64: string } | null;
+  comparison: Comparison | null;
+  kinds: string[];
+  crop: { rect: string; png: string; report: string } | null;
+  field: { json: string; vectors: [number, number, number, number][]; summary: string };
   busy: boolean;
   status: string;
   set: (patch: Partial<State>) => void;
@@ -58,6 +73,7 @@ const blank = (n: number): Pass => ({
   region: "",
   protect: "",
   palette: "",
+  media: "",
 });
 
 const useDraft = create<State>((set) => ({
@@ -66,6 +82,12 @@ const useDraft = create<State>((set) => ({
   preview: null,
   score: null,
   goal: '{"coverage":[0.01,0.5]}',
+  sample: { x: 0, y: 0, radius: 2 },
+  reference: null,
+  comparison: null,
+  kinds: [],
+  crop: null,
+  field: { json: '{"source":{"kind":"layer"},"method":"structure-tensor","scale":12}', vectors: [], summary: "" },
   busy: false,
   status: "",
   set: (patch) => set(patch),
@@ -75,6 +97,10 @@ const nums = (text: string): number[] | null => {
   const parts = text.split(/[\s,]+/).filter(Boolean).map(Number);
   return parts.every(Number.isFinite) ? parts : null;
 };
+
+function rectOf(text: string): [number, number, number, number] | null {
+  return rect(text);
+}
 
 function rect(text: string): [number, number, number, number] | null {
   const v = nums(text);
@@ -87,7 +113,8 @@ function buildPlan(passes: Pass[], target: string): Record<string, unknown> {
     engine: 1,
     id: "studio-plan",
     passes: passes.map((p) => {
-      const brush = { size: p.size, hardness: p.hardness, spacing: 0.1 };
+      const brush: Record<string, unknown> = { size: p.size, hardness: p.hardness, spacing: 0.1 };
+      if (p.media) brush.media = { kind: p.media };
       const out: Record<string, unknown> = { id: p.id, target };
       if (p.mode === "path") {
         out.action = "stroke-path";
@@ -112,7 +139,17 @@ function buildPlan(passes: Pass[], target: string): Record<string, unknown> {
   };
 }
 
-function Overlay({ passes, report, size }: { passes: Pass[]; report: Report | null; size: { w: number; h: number } }) {
+function Overlay({
+  passes,
+  report,
+  size,
+  vectors,
+}: {
+  passes: Pass[];
+  report: Report | null;
+  size: { w: number; h: number };
+  vectors: [number, number, number, number][];
+}) {
   const s = Math.min(1, 240 / Math.max(size.w, size.h));
   return (
     <svg width={size.w * s} height={size.h * s} viewBox={`0 0 ${size.w} ${size.h}`} className="rounded border bg-card" aria-label="Plan overlay">
@@ -126,6 +163,9 @@ function Overlay({ passes, report, size }: { passes: Pass[]; report: Report | nu
           .map(rect)
           .map((r, i) => r && <rect key={`p-${p.id}-${i}`} x={r[0]} y={r[1]} width={r[2]} height={r[3]} fill="#ef444433" stroke="#ef4444" />),
       )}
+      {vectors.map(([x, y, vx, vy], i) => (
+        <line key={`f-${i}`} x1={x} y1={y} x2={x + (vx / 32767) * 10} y2={y + (vy / 32767) * 10} stroke="#a855f7" strokeWidth={1} />
+      ))}
       {report?.passes.map((p) => {
         const b = p.changed_bounds;
         const warned = !!p.diagnostics?.warnings?.some((w) => w.basis === "measured");
@@ -142,6 +182,12 @@ export function PlanPanel() {
   const layers = useRasterLayers();
   const { doc, pageId, replaceDoc, notify } = useStudio();
   const layer = layers[0];
+  useEffect(() => {
+    if (d.kinds.length) return;
+    postJson<{ kinds: { kind: string }[] }>("/api/paint/media", {})
+      .then((r) => useDraft.getState().set({ kinds: r.kinds.map((k) => k.kind) }))
+      .catch(() => undefined);
+  }, [d.kinds.length]);
   if (!layer || !doc) return null;
   const size = (() => {
     const canvas = doc.pages.find((p) => p.id === pageId)?.canvas ?? doc.pages[0]?.canvas;
@@ -177,6 +223,81 @@ export function PlanPanel() {
     d.set({ preview: null, report: null, status: "Committed as one undoable step." });
   };
 
+  // Palette sampling reads the rendered canvas (preview if one is pending, else
+  // the committed document) through the Rust sampler; nothing is written.
+  const canvasDoc = d.preview ?? doc;
+  const addColors = (i: number, colors: string[]) => {
+    const have = d.passes[i]!.palette.split(/[\s,]+/).filter(Boolean);
+    const merged = [...new Set([...have, ...colors])].slice(0, 16);
+    update(i, { palette: merged.join(" ") });
+  };
+  const samplePoint = async (i: number) => {
+    try {
+      const r = await postJson<{ color: string; empty: boolean }>("/api/paint/palette", {
+        document: canvasDoc, page: pageId, action: "sample", ...d.sample,
+      });
+      if (r.empty) d.set({ status: "That point is transparent; no color sampled." });
+      else {
+        addColors(i, [r.color.slice(0, 7)]);
+        d.set({ status: `Sampled ${r.color} at ${d.sample.x},${d.sample.y}.` });
+      }
+    } catch (e) {
+      d.set({ status: e instanceof Error ? e.message : "Could not sample." });
+    }
+  };
+  const extractPalette = async (i: number) => {
+    try {
+      const r = await postJson<{ colors: { color: string }[] }>("/api/paint/palette", {
+        document: canvasDoc, page: pageId, action: "extract", role: "dominant", count: 6,
+      });
+      addColors(i, r.colors.map((c) => c.color.slice(0, 7)));
+      d.set({ status: `Extracted ${r.colors.length} dominant colors from the canvas.` });
+    } catch (e) {
+      d.set({ status: e instanceof Error ? e.message : "Could not extract a palette." });
+    }
+  };
+  const cropPreview = async () => {
+    const rect = rectOf(d.crop?.rect ?? "");
+    try {
+      const r = await postJson<{ report: { source: [number, number] }; png_base64: string }>("/api/paint/preview", {
+        document: canvasDoc, page: pageId, scope: "page", ...(rect ? { rect } : {}), max_edge: 256,
+      });
+      d.set({ crop: { rect: d.crop?.rect ?? "", png: r.png_base64, report: `${r.report.source[0]}x${r.report.source[1]} px region` } });
+    } catch (e) {
+      d.set({ status: e instanceof Error ? e.message : "Could not preview." });
+    }
+  };
+  const showField = async () => {
+    try {
+      const r = await postJson<{ samples: [number, number, number, number][]; field: { hash?: string }; returned: number }>("/api/paint/field", {
+        document: canvasDoc, layer: layer.id, field: JSON.parse(d.field.json), max_vectors: 200,
+      });
+      d.set({ field: { ...d.field, vectors: r.samples, summary: `${r.returned} field vectors${r.field.hash ? " · " + r.field.hash.slice(0, 19) : ""}` } });
+    } catch (e) {
+      d.set({ status: e instanceof Error ? e.message : "Could not build the field." });
+    }
+  };
+  const loadReference = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      d.set({ reference: { name: file.name, base64: url.slice(url.indexOf(",") + 1) }, comparison: null });
+    };
+    reader.readAsDataURL(file);
+  };
+  const compareReference = async () => {
+    if (!d.reference) return;
+    try {
+      const comparison = await postJson<Comparison>("/api/paint/compare", {
+        document: canvasDoc, page: pageId, scope: "page", reference_image_base64: d.reference.base64, heatmap: true,
+      });
+      d.set({ comparison, status: "Compared the " + (d.preview ? "preview" : "canvas") + " with the reference." });
+    } catch (e) {
+      d.set({ status: e instanceof Error ? e.message : "Could not compare." });
+    }
+  };
+
   const compare = async () => {
     if (!d.preview) return;
     try {
@@ -192,7 +313,7 @@ export function PlanPanel() {
     <div className="space-y-2 border-t p-3 text-xs">
       <h3 className="font-semibold">Plan passes</h3>
       <p className="text-muted-foreground">Ordered passes run on layer {layer.id} as one atomic, undoable plan. Preview and commit use the same Rust planner.</p>
-      <Overlay passes={d.passes} report={d.report} size={size} />
+      <Overlay passes={d.passes} report={d.report} size={size} vectors={d.field.vectors} />
       {d.passes.map((p, i) => (
         <fieldset key={i} className="space-y-1 rounded border p-2">
           <legend className="px-1">
@@ -223,11 +344,83 @@ export function PlanPanel() {
             <input type="number" className={field} value={p.hardness} min={0} max={1} step={0.1} onChange={(e) => update(i, { hardness: Number(e.target.value) })} title="Hardness" />
             <input type="color" className={field} value={p.color} onChange={(e) => update(i, { color: e.target.value })} title="Color" />
           </div>
+          <select className={field} value={p.media} onChange={(e) => update(i, { media: e.target.value })} aria-label="Material">
+            <option value="">Material: default brush</option>
+            {d.kinds.map((k) => (
+              <option key={k} value={k}>
+                Material: {k}
+              </option>
+            ))}
+          </select>
           <input className={field} placeholder="Region x,y,w,h (optional)" value={p.region} onChange={(e) => update(i, { region: e.target.value })} />
           <textarea className={`${field} h-12`} placeholder="Protected regions: x,y,w,h per line" value={p.protect} onChange={(e) => update(i, { protect: e.target.value })} />
           <input className={field} placeholder="Palette to hold, e.g. #3070c0 #101010" value={p.palette} onChange={(e) => update(i, { palette: e.target.value })} />
+          <div className="flex flex-wrap items-center gap-1">
+            <Button size="sm" variant="outline" onClick={() => void extractPalette(i)}>
+              Palette from canvas
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void samplePoint(i)}>
+              Sample point
+            </Button>
+          </div>
         </fieldset>
       ))}
+      <div className="grid grid-cols-3 gap-1">
+        {(["x", "y", "radius"] as const).map((k) => (
+          <label key={k} className="text-muted-foreground">
+            Sample {k}
+            <input type="number" min={0} className={field} value={d.sample[k]} onChange={(e) => d.set({ sample: { ...d.sample, [k]: Math.max(0, Number(e.target.value)) } })} />
+          </label>
+        ))}
+      </div>
+      <div className="space-y-1 rounded border p-2">
+        <label className="block">
+          Crop preview region x,y,w,h (blank for the page)
+          <input className={field} value={d.crop?.rect ?? ""} onChange={(e) => d.set({ crop: { rect: e.target.value, png: d.crop?.png ?? "", report: d.crop?.report ?? "" } })} />
+        </label>
+        <Button size="sm" variant="outline" onClick={() => void cropPreview()}>
+          Crop preview
+        </Button>
+        {d.crop?.png && (
+          <figure>
+            <img alt="Crop preview" className="max-h-40 rounded border" src={`data:image/png;base64,${d.crop.png}`} />
+            <figcaption className="text-muted-foreground">{d.crop.report}</figcaption>
+          </figure>
+        )}
+      </div>
+      <div className="space-y-1 rounded border p-2">
+        <label className="block">
+          Stroke field (JSON)
+          <textarea className={`${field} h-14`} value={d.field.json} onChange={(e) => d.set({ field: { ...d.field, json: e.target.value, vectors: [] } })} />
+        </label>
+        <Button size="sm" variant="outline" onClick={() => void showField()}>
+          Show field vectors
+        </Button>
+        {d.field.summary && <p className="text-muted-foreground">{d.field.summary}; drawn in purple on the overlay.</p>}
+      </div>
+      <div className="space-y-1 rounded border p-2">
+        <label className="block">
+          Reference image
+          <input type="file" accept="image/png,image/jpeg,image/webp" className={field} onChange={(e) => loadReference(e.target.files?.[0])} />
+        </label>
+        <Button size="sm" variant="outline" disabled={!d.reference} onClick={() => void compareReference()}>
+          Compare with reference
+        </Button>
+        {d.comparison && (
+          <>
+            {d.comparison.heatmap_png_base64 && (
+              <figure>
+                <img alt="Value-difference heat map (brighter is more different)" className="max-h-40 rounded border" src={`data:image/png;base64,${d.comparison.heatmap_png_base64}`} />
+                <figcaption className="text-muted-foreground">Difference overlay: brighter pixels differ more.</figcaption>
+              </figure>
+            )}
+            <pre className="max-h-40 overflow-auto rounded bg-card p-1" aria-live="polite">
+              {JSON.stringify(d.comparison.metrics, null, 1)}
+            </pre>
+          </>
+        )}
+        <p className="text-muted-foreground">Metrics describe pixel differences only; they are not an artistic quality score.</p>
+      </div>
       <div className="flex flex-wrap gap-1">
         <Button size="sm" variant="outline" onClick={() => d.set({ passes: [...d.passes, blank(d.passes.length + 1)], report: null, preview: null })}>
           Add pass

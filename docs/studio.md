@@ -58,6 +58,12 @@ protected areas and the changed bounds returned by each pass (amber when a
 measured warning applies). "Preview plan" and "Commit" both call
 `POST /api/paint/plan`, so the report is the authoritative Rust output, never a
 browser estimate; commit is one undoable step guarded by the plan hash.
-"Score preview against goal" calls `POST /api/paint/score`. Plans appear as
+"Score preview against goal" calls `POST /api/paint/score`. "Palette from canvas"
+and "Sample point" read the rendered canvas through `POST /api/paint/palette` and
+add colors to the pass palette; "Compare with reference" uploads a reference image
+to `POST /api/paint/compare` and shows the metrics with a difference overlay;
+"Crop preview" uses `POST /api/paint/preview`; "Show field vectors" draws a stroke
+field on the plan overlay via `POST /api/paint/field`; the per-pass Material list
+comes from `POST /api/paint/media` and sets `brush.media`. Plans appear as
 normal editable passes, not a chat surface, and the panel states that every pass is
 generated work and which warnings are measured versus heuristic.

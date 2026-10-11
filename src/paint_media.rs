@@ -16,18 +16,31 @@ pub enum MediaAction {
     },
 }
 
+/// The media kinds and their defaults.
+pub fn list_value() -> Value {
+    let kinds: Vec<Value> = KINDS
+        .iter()
+        .map(|(name, _)| {
+            let media = Media::parse(&json!({"kind": name})).expect("default media");
+            json!({"kind": name, "defaults": media.to_json()})
+        })
+        .collect();
+    json!({"algorithm": ALGORITHM, "kinds": kinds, "blend": "normal"})
+}
+
+/// Canonical form and digest of a media object.
+pub fn describe_value(value: &Value) -> Result<Value> {
+    let parsed = Media::parse(value)?;
+    Ok(json!({
+        "algorithm": ALGORITHM,
+        "media": parsed.to_json(),
+        "digest": parsed.digest(),
+    }))
+}
+
 pub fn run(action: MediaAction) -> Result<()> {
     let out = match action {
-        MediaAction::List => {
-            let kinds: Vec<Value> = KINDS
-                .iter()
-                .map(|(name, _)| {
-                    let media = Media::parse(&json!({"kind": name})).expect("default media");
-                    json!({"kind": name, "defaults": media.to_json()})
-                })
-                .collect();
-            json!({"algorithm": ALGORITHM, "kinds": kinds, "blend": "normal"})
-        }
+        MediaAction::List => list_value(),
         MediaAction::Describe { media } => {
             let text = match media.strip_prefix('@') {
                 Some(path) => std::fs::read_to_string(path)
@@ -36,12 +49,7 @@ pub fn run(action: MediaAction) -> Result<()> {
             };
             let value: Value =
                 serde_json::from_str(&text).context("[invalid-request] media must be JSON")?;
-            let parsed = Media::parse(&value)?;
-            json!({
-                "algorithm": ALGORITHM,
-                "media": parsed.to_json(),
-                "digest": parsed.digest(),
-            })
+            describe_value(&value)?
         }
     };
     println!("{}", serde_json::to_string_pretty(&out)?);

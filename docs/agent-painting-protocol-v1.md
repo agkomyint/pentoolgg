@@ -363,6 +363,24 @@ and returns `{result, dry_run, document?}`; `result` is byte-identical to
 `{before, after, layer, goal}` and returns the `paint-score` report. Both are
 stateless and read nothing from disk.
 
+`POST /api/paint/plan` also accepts `job`, a cancellable job ID shared with
+`/api/composite/cancel`; a cancelled plan returns `[cancelled]`, names the last
+completed stage and writes nothing. The read-only authoring endpoints are:
+
+- `POST /api/paint/palette` `{document, page?, scope?, rect?, action: "sample"|"extract",
+  x?, y?, radius?, role?, count?}`: samples the rendered canvas (`paint-palette
+  sample`/`extract`) so a pass palette can be built from what is on the page.
+- `POST /api/paint/compare` `{document, page?, scope?, rect?, reference_image_base64,
+  background?, heatmap?}`: reference-image comparison (`paint-review compare`); with
+  `heatmap` the value-difference overlay is returned as `heatmap_png_base64`.
+- `POST /api/paint/preview` `{document, page?, scope?, rect?, max_edge?}`: a bounded
+  crop preview as `{report, png_base64}`.
+- `POST /api/paint/field` `{document, layer, field, params?, constraints?, brush?,
+  seed?, max_vectors?}`: field summary and sample vectors for visualization
+  (`paint-fields preview`).
+- `POST /api/paint/media` `{media?}`: the material kinds, or the canonical form and
+  digest of one media object (`paint-media`).
+
 ## Conformance and recovery (engine 1 implementation)
 
 `tests/v0130_conformance.rs` pins the canonical plan hash and tile-map digest of a
@@ -375,8 +393,23 @@ limits are hard ceilings: more than 64 passes or a raised `limits` value is
 rejected. A long session (64-pass plans repeated) keeps one tile and embeds no
 per-stroke history; the full 10,048-stroke run is
 `cargo test --release --test v0130_conformance -- --ignored`. Dry run, stale
-revisions and plan-hash guards are covered in `tests/v0130_plan.rs`, and crash
-safety comes from the shared atomic transaction path.
+revisions and plan-hash guards are covered in `tests/v0130_plan.rs`.
+
+Cancellation is cooperative and checked at `start`, `parse`, before and after every
+pass, and `validate`; `paint_plan::tests` cancels at every checkpoint in turn and
+asserts the document is unchanged and the error names the last completed stage.
+`tests/v0130_recovery.rs` covers leftover `.pentool-tmp-*`/`.pentool-old-*` files
+from a killed writer, stale revisions, failed and invalid commits (byte-identical
+document, no history entry), history undo/redo/restore of a committed plan, and the
+rollback of a bundle whose resource write fails.
+
+Known limits of the recovery claim: a process killed between the two renames of
+`atomic_write` leaves the previous copy as `.NAME.pentool-old-PID` and no `NAME`;
+the data is intact but is not restored automatically, and a history revision
+(`pentool history restore`) is the supported way back. The pinned digests in
+`tests/v0130_conformance.rs` were computed on Windows; they use only integer
+arithmetic, but Linux and Apple Silicon confirmation comes from the CI matrix and
+must not be assumed from this note.
 
 ## Material paint modes (engine 1 implementation)
 
