@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "spec": "layout-v1",
+  "format_version": 9,
+  "fixtures": [
+    {
+      "file": "layout-v9-valid.pen",
+      "kind": "document",
+      "expect": "valid"
+    },
+    {
+      "file": "layout-v9-invalid-thread-cycle.pen",
+      "kind": "document",
+      "expect": "invalid",
+      "error": "thread-cycle",
+      "enforced_by": "rust-semantic"
+    },
+    {
+      "file": "layout-v9-invalid-unknown-style.pen",
+      "kind": "document",
+      "expect": "invalid",
+      "error": "unknown-style",
+      "enforced_by": "rust-semantic"
+    },
+    {
+      "file": "layout-v9-invalid-style-cycle.pen",
+      "kind": "document",
+      "expect": "invalid",
+      "error": "style-cycle",
+      "enforced_by": "rust-semantic"
+    },
+    {
+      "file": "layout-v9-invalid-negative-width.pen",
+      "kind": "document",
+      "expect": "invalid",
+      "error": "invalid-dimension",
+      "enforced_by": "schema"
+    },
+    {
+      "file": "layout-v9-adversarial-limits.json",
+      "kind": "adversarial",
+      "expect": "invalid",
+      "error": "limit-exceeded",
+      "enforced_by": "rust-limits"
+    },
+    {
+      "file": "penbook-valid.penbook",
+      "kind": "book",
+      "expect": "valid"
+    },
+    {
+      "file": "penbook-invalid-path-escape.penbook",
+      "kind": "book",
+      "expect": "invalid",
+      "error": "path-escape",
+      "enforced_by": "schema"
+    },
+    {
+      "file": "penbook-invalid-absolute.penbook",
+      "kind": "book",
+      "expect": "invalid",
+      "error": "path-escape",
+      "enforced_by": "schema"
+    },
+    {
+      "file": "layout-v1-page-numbering.json",
+      "kind": "cross-platform",
+      "expect": "valid"
+    }
+  ],
+  "idml_corpus": {
+    "directory": "idml",
+    "status": "planned",
+    "groups": [
+      "minimal-single-page",
+      "threaded-columns",
+      "parents-overrides",
+      "styles-inheritance",
+      "wrap-anchored",
+      "table-spanning",
+      "notes-xrefs",
+      "hostile"
+    ],
+    "note": "IDML files are authored with the importer in tasks 13-14; no group is claimed available until its files exist."
+  }
+}

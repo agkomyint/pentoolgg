@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/layout-v1.json",
+  "title": "Pentool page layout object (format v9, developing contract)",
+  "description": "The layout object of a v9 document plus the text-frame and graphic-frame scene nodes. See docs/layout-v1.md. Cross-reference integrity (threads, style chains, parents, sections) and the numeric limits are additionally enforced by Rust.",
+  "type": "object",
+  "required": ["engine"],
+  "properties": {
+    "engine": {"type": "integer", "minimum": 1},
+    "page_defaults": {"$ref": "#/$defs/pageGeometry"},
+    "spreads": {"type": "array", "maxItems": 5000, "items": {"$ref": "#/$defs/spread"}},
+    "parents": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/parent"}},
+    "sections": {"type": "array", "maxItems": 5000, "items": {"$ref": "#/$defs/section"}},
+    "stories": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/story"}},
+    "styles": {"$ref": "#/$defs/styles"},
+    "lists": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "tables": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "notes": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "conditions": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "variables": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "generated": {"type": "array", "items": {"$ref": "#/$defs/generated"}},
+    "guides": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "baseline_grid": {"$ref": "#/$defs/baselineGrid"}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000-\\u001f/\\\\]+$"},
+    "idObject": {"type": "object", "required": ["id"], "properties": {"id": {"$ref": "#/$defs/id"}}},
+    "length": {"type": "number", "minimum": -1000000, "maximum": 1000000},
+    "extent": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000000},
+    "insets": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1000000}},
+    "pageGeometry": {
+      "type": "object",
+      "properties": {
+        "margins": {"$ref": "#/$defs/insets"},
+        "columns": {"type": "integer", "minimum": 1, "maximum": 40},
+        "gutter": {"type": "number", "minimum": 0, "maximum": 100000}
+      }
+    },
+    "spread": {
+      "type": "object",
+      "required": ["id", "pages"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "pages": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"$ref": "#/$defs/id"}},
+        "facing": {"type": "boolean"}
+      }
+    },
+    "parent": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "based_on": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "name": {"type": "string", "maxLength": 256},
+        "pages": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/id"}},
+        "margins": {"$ref": "#/$defs/insets"},
+        "columns": {"type": "integer", "minimum": 1, "maximum": 40},
+        "gutter": {"type": "number", "minimum": 0, "maximum": 100000}
+      }
+    },
+    "section": {
+      "type": "object",
+      "required": ["id", "start_page"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "start_page": {"$ref": "#/$defs/id"},
+        "start_number": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "style": {"enum": ["arabic", "upper-roman", "lower-roman", "upper-alpha", "lower-alpha"]},
+        "prefix": {"type": "string", "maxLength": 16, "pattern": "^[\\u0020-\\u007e]*$"},
+        "continue": {"type": "boolean"}
+      }
+    },
+    "story": {
+      "type": "object",
+      "required": ["id", "paragraphs"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "language": {"type": "string", "maxLength": 35},
+        "paragraphs": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/paragraph"}}
+      }
+    },
+    "paragraph": {
+      "type": "object",
+      "required": ["runs"],
+      "properties": {
+        "style": {"$ref": "#/$defs/id"},
+        "overrides": {"type": "object"},
+        "runs": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/run"}}
+      }
+    },
+    "run": {
+      "type": "object",
+      "oneOf": [
+        {"required": ["text"], "properties": {"text": {"type": "string", "maxLength": 16777216}, "style": {"$ref": "#/$defs/id"}, "overrides": {"type": "object"}}},
+        {"required": ["anchor"], "properties": {"anchor": {"$ref": "#/$defs/id"}}},
+        {"required": ["note"], "properties": {"note": {"$ref": "#/$defs/id"}}},
+        {"required": ["variable"], "properties": {"variable": {"$ref": "#/$defs/id"}}},
+        {"required": ["xref"], "properties": {"xref": {"$ref": "#/$defs/id"}}},
+        {"required": ["index"], "properties": {"index": {"$ref": "#/$defs/id"}}},
+        {"required": ["link"], "properties": {"link": {"$ref": "#/$defs/id"}}},
+        {"required": ["table"], "properties": {"table": {"$ref": "#/$defs/id"}}},
+        {"required": ["special"], "properties": {"special": {"enum": ["tab", "line-break", "column-break", "frame-break", "page-break", "em-space", "en-space", "thin-space", "hair-space", "flush-space", "right-indent-tab", "section-marker", "page-number", "next-page-number", "previous-page-number", "discretionary-hyphen", "nonbreaking-hyphen"]}}},
+        {"required": ["condition"], "properties": {"condition": {"$ref": "#/$defs/id"}, "runs": {"type": "array", "items": {"type": "object"}}}}
+      ]
+    },
+    "styles": {
+      "type": "object",
+      "properties": {
+        "paragraph": {"$ref": "#/$defs/styleMap"},
+        "character": {"$ref": "#/$defs/styleMap"},
+        "object": {"$ref": "#/$defs/styleMap"},
+        "table": {"$ref": "#/$defs/styleMap"},
+        "cell": {"$ref": "#/$defs/styleMap"}
+      },
+      "additionalProperties": false
+    },
+    "styleMap": {
+      "type": "object",
+      "maxProperties": 2000,
+      "propertyNames": {"$ref": "#/$defs/id"},
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "based_on": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+          "next": {"$ref": "#/$defs/id"},
+          "group": {"type": "string", "maxLength": 256},
+          "font": {"type": "string", "maxLength": 256},
+          "size": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
+          "leading": {"anyOf": [{"const": "auto"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 10000}]},
+          "align": {"enum": ["left", "center", "right", "justify", "justify-last-left", "justify-last-center", "justify-last-right", "justify-last-all", "towards-spine", "away-from-spine"]},
+          "hyphenate": {"type": "boolean"},
+          "composer": {"enum": ["single-line", "paragraph"]},
+          "align_to_grid": {"enum": ["none", "first-line", "all-lines"]},
+          "language": {"type": "string", "maxLength": 35}
+        }
+      }
+    },
+    "baselineGrid": {
+      "type": "object",
+      "required": ["increment"],
+      "properties": {
+        "start": {"type": "number", "minimum": 0, "maximum": 1000000},
+        "increment": {"type": "number", "exclusiveMinimum": 0, "maximum": 10000},
+        "relative_to": {"enum": ["page", "margin"]}
+      }
+    },
+    "generated": {
+      "type": "object",
+      "required": ["id", "kind", "story"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["toc", "index", "captions", "list-of-figures"]},
+        "story": {"$ref": "#/$defs/id"},
+        "inputs": {"type": "array", "items": {"type": "string", "maxLength": 128}},
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "stale": {"type": "boolean"}
+      }
+    },
+    "textFrame": {
+      "type": "object",
+      "required": ["kind", "id", "story"],
+      "properties": {
+        "kind": {"const": "text-frame"},
+        "id": {"$ref": "#/$defs/id"},
+        "story": {"$ref": "#/$defs/id"},
+        "next": {"anyOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
+        "x": {"$ref": "#/$defs/length"},
+        "y": {"$ref": "#/$defs/length"},
+        "width": {"$ref": "#/$defs/extent"},
+        "height": {"$ref": "#/$defs/extent"},
+        "columns": {"type": "integer", "minimum": 1, "maximum": 40},
+        "gutter": {"type": "number", "minimum": 0, "maximum": 100000},
+        "inset": {"$ref": "#/$defs/insets"},
+        "vertical_align": {"enum": ["top", "center", "bottom", "justify"]},
+        "first_baseline": {"enum": ["ascent", "cap-height", "leading", "x-height", "fixed"]},
+        "auto_size": {"enum": ["off", "height", "width", "both"]},
+        "ignore_wrap": {"type": "boolean"},
+        "primary": {"type": "boolean"}
+      }
+    },
+    "graphicFrame": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {"const": "graphic-frame"},
+        "id": {"$ref": "#/$defs/id"},
+        "x": {"$ref": "#/$defs/length"},
+        "y": {"$ref": "#/$defs/length"},
+        "width": {"$ref": "#/$defs/extent"},
+        "height": {"$ref": "#/$defs/extent"},
+        "content": {"$ref": "#/$defs/id"},
+        "fit": {"enum": ["fill", "fit", "fit-content-to-frame", "fit-frame-to-content", "center", "proportional"]}
+      }
+    }
+  }
+}

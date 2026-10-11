@@ -1,0 +1,604 @@
+# Page layout and typesetting engine 1
+
+Status: frozen specification for the v0.14.0 roadmap (task 1). Nothing below
+claims that a command or capability has shipped; the roadmap remains the
+completion record. Where this document and `docs/roadmap/v0.14.0/TASKS.md`
+disagree, stop and resolve it explicitly (AGENTS.md).
+
+Companion files:
+
+- [`layout-v1.schema.json`](layout-v1.schema.json): the `layout` object and the
+  text/graphic frame nodes.
+- [`pen-format-v9.schema.json`](pen-format-v9.schema.json): the document envelope
+  for format version 9.
+- [`penbook-v1.schema.json`](penbook-v1.schema.json): the `.penbook` manifest.
+- [`idml-mapping-v1.md`](idml-mapping-v1.md): the IDML ⇄ `.pen` mapping table.
+- [`fixtures/layout-v1-manifest.json`](fixtures/layout-v1-manifest.json): valid,
+  invalid, adversarial and cross-platform fixtures.
+
+## 1. Scope and principles
+
+Pentool composes text in Rust. One composed result feeds the CLI, the editor,
+the API and every export (PNG, SVG, PDF, EPUB, IDML). The browser displays and
+edits what Rust composed; it never lays text out on its own.
+
+Design rules, in priority order:
+
+1. **Determinism.** Same document, fonts, hyphenation data and engine version
+   give the same line breaks, glyph positions and page assignments on every
+   release target. Section 6 defines how.
+2. **No silent loss.** Overset text, missing fonts, missing links, broken threads
+   and unsupported IDML content are reported with a location. They are never
+   clipped, substituted or dropped without a record.
+3. **Extend the existing model.** Frames are scene nodes; pages stay `pages[]`;
+   edits use the shared transaction, history and planner paths. There is no
+   parallel layout document.
+4. **Backward compatibility.** A document without a `layout` object renders
+   exactly as before. Single `text` nodes keep working (section 9).
+5. **Bounded work.** Every list, depth, size and iteration count has a limit
+   (section 12) checked before the expensive step.
+
+Out of scope here (see the roadmap's *Explicitly deferred*): `.indd`/`.indb`
+binaries, Adobe services, scripting, vertical CJK layout, time-based media.
+
+## 2. Format version and migration
+
+Layout data is **format version 9**, the next version after v8 (professional
+color). The number is provisional until the first release that ships it: if
+another milestone claims 9 first, this one takes the next free number and only
+this section, the schema file name and `layout.engine` change.
+
+- `version: 9` documents may contain a top-level `layout` object. A v9 document
+  without `layout` is valid and renders like its v8 equivalent.
+- `pentool migrate --target 9` is explicit, deterministic and validated. It
+  adds `layout: {"engine": 1, ...}` with one spread per existing page and no
+  parents, sections or stories. Migrating up is lossless and the result renders
+  pixel-identically. Existing `text` nodes are left as they are.
+- `pentool migrate --target 8` flattens layout: it fails, naming the first
+  construct it cannot represent (a story, a thread, a parent, a table), unless
+  `--flatten-layout` is given. Flattening composes each story and writes its
+  lines as positioned `text` nodes and its parents as ordinary page items; the
+  report lists every approximation. It never drops content silently.
+- Versions above the supported maximum fail clearly and without mutation.
+- Unknown fields on `layout`, spreads, parents, stories, frames and styles
+  survive load/edit/save. They do not affect rendering.
+
+## 3. Document structure
+
+### 3.1 Units and coordinates
+
+Page canvas units are those of the page (`production.units_per_inch`, default
+72, so 1 unit = 1 pt). Typographic sizes (font size, leading, indents, spacing)
+are stored in points and converted with `units = pt × units_per_inch / 72`.
+Frame coordinates are page-local; a spread offsets its pages along x with the
+documented binding gap of zero.
+
+### 3.2 Spreads and pages
+
+```json
+"layout": {
+  "engine": 1,
+  "spreads": [
+    {"id": "s1", "pages": ["page-1"], "facing": false},
+    {"id": "s2", "pages": ["page-2", "page-3"], "facing": true}
+  ],
+  "page_defaults": {"margins": [54, 54, 54, 54], "columns": 2, "gutter": 12}
+}
+```
+
+- `pages[]` (the existing array) remains the list of pages and their scene
+  layers. A spread orders one to ten pages; each page belongs to exactly one
+  spread. `facing: true` mirrors inside/outside margins on left/right pages.
+- A page may carry `layout`: `parent` (parent ID), `margins`
+  `[top, inner, bottom, outer]` (`[top, left, bottom, right]` when not facing),
+  `columns`, `gutter`, `section` is derived, never stored.
+- Page sizes, bleed and slug come from the v0.12.0 `production` object. A page
+  inherits margins and columns from its parent, then from `page_defaults`.
+- Spread and page order is the reading and numbering order. Reordering is a
+  mutation that reports reflow (section 3.6).
+
+### 3.3 Parents (master pages)
+
+```json
+{"id": "A-body", "based_on": null, "spread": "A", "pages": ["A-left","A-right"],
+ "margins": [54,54,54,54], "columns": 2, "gutter": 12}
+```
+
+A parent owns ordinary scene nodes on its pages (guides, folios, background
+frames). A page that references a parent receives those items as **parent
+items**. A parent may be based on another parent; the chain has depth ≤ 16 and
+no cycles.
+
+Override rules reuse the v0.6.24 component-override contract:
+
+- A parent item shows on the page under a derived ID `"<page>/<parent item>"`.
+  It is not editable until overridden.
+- An **override** records `{"item": "<parent item id>", "properties": {...}}` on
+  the page: only the listed properties differ; every other property keeps
+  following the parent. An override of an item that no longer exists in the
+  parent is *orphaned*: reported, kept, never dropped.
+- **Detach** copies the parent item onto the page as an ordinary node and
+  removes the link. **Remove override** restores the parent value.
+- Parent changes propagate to every page except where a property is overridden.
+  A page that sets `parent: null` shows no parent items. Parent items render
+  beneath the page's own items within the same layer order, then the page's
+  layers.
+- Text threads from a parent frame start a fresh story per page unless
+  `primary: true` is set on the parent frame; a primary frame is the auto-flow
+  target (section 4.4) and is overridable like any item.
+
+### 3.4 Sections and numbering
+
+```json
+"sections": [{"id": "sec-front", "start_page": "page-1", "start_number": 1,
+              "style": "lower-roman", "prefix": "", "continue": false}]
+```
+
+- A section starts at a page and runs to the next section. Styles:
+  `arabic`, `upper-roman`, `lower-roman`, `upper-alpha`, `lower-alpha`
+  (letters repeat: 1=a … 26=z, 27=aa, 28=bb, … 52=zz, 53=aaa).
+- `prefix` (≤ 16 printable characters) is prepended in the page marker.
+- Markers `current`, `next` and `previous` resolve per page in text and parents;
+  the first page has no previous, the last has no next (empty, reported by
+  preflight as `marker-unresolved` when used in a way that shows nothing).
+- Absolute page indices are 1-based in file order; numbering is computed, not
+  stored. Reference vectors are in `fixtures/layout-v1-page-numbering.json`.
+
+### 3.5 Layers
+
+A frame lives on an ordinary page layer. Layers are not duplicated per parent;
+a parent's items use the parent page's layers, merged by layer `id` and then by
+name.
+
+### 3.6 Page operations and reflow
+
+Insert, move, duplicate and delete page are planner operations with dry run.
+Each result reports `pages_added`, `pages_removed`, `stories_reflowed`,
+`frames_overset` and `sections_changed`. Deleting a page that holds threaded
+frames re-threads their neighbors (previous → next) and reports it; a story's
+last frame is never deleted without an explicit `--drop-story`. Document-wide
+reflow is bounded (section 12); exceeding the bound aborts with no mutation.
+
+## 4. Stories, frames and threads
+
+### 4.1 Stories
+
+```json
+{"id": "feature-body", "language": "en-US",
+ "paragraphs": [
+   {"style": "body", "overrides": {},
+    "runs": [
+      {"text": "Rivers carry more than water", "style": "lead-in"},
+      {"text": " — they carry the history of …", "overrides": {"italic": true}},
+      {"anchor": "pull-1"},
+      {"note": "fn-1"},
+      {"variable": "chapter-number"}
+    ]}]}
+```
+
+- A story is an ordered list of paragraphs; a paragraph is an ordered list of
+  runs. A run is **exactly one of** text, anchor, note, variable, cross-reference
+  (`"xref"`), index marker (`"index"`), hyperlink anchor (`"link"`),
+  conditional range (`"condition"`), discretionary hyphen (`"shy"`), no-break
+  range (`"nobreak"`) and special characters (`"special"`: tab, forced line
+  break, column break, frame break, page break, em/en/thin/hair space, flush
+  space, right-indent tab, section marker, current page number).
+- Runs reference a `style` (character style ID) and may carry `overrides`:
+  a property map with the same keys as the character style. Paragraphs likewise
+  reference a paragraph style and carry paragraph/character overrides.
+- Text is UTF-8, NFC-normalized on write. Control characters other than the
+  special-character runs are refused. Language is a BCP-47 tag per story, per
+  paragraph style and per run, for hyphenation and shaping.
+- A story with no frames is **unplaced**: valid, reported, never dropped.
+- Stories are separate from frames, so threading and reflow never rewrite text.
+
+### 4.2 Frames
+
+Frame nodes are scene nodes: `{"kind": "text-frame" | "graphic-frame", "id":
+…}` with the ordinary v4 `transform`, `style`, `clip` and lock/visibility fields.
+
+Text frame fields: `story`, `next` (the thread successor frame ID or `null`),
+`x`, `y`, `width`, `height`, `columns` (1–40), `gutter`, `inset`
+`[top, right, bottom, left]`, `vertical_align` (`top`, `center`, `bottom`,
+`justify`), `vertical_justify_max_spacing`, `first_baseline` (`ascent`,
+`cap-height`, `leading`, `x-height`, `fixed` + `first_baseline_min`),
+`auto_size` (`off`, `height`, `width`, `both` with a reference point and
+min/max), `ignore_wrap`, `baseline_grid` (`inherit`, `off`, or a frame grid),
+`shape` (`rect`, `ellipse`, or a `path` reference), and `primary`.
+
+Graphic frame fields: optional `content` (an image/vector node ID or an inline
+child), `fit` (`fill`, `fit`, `fit-content-to-frame`, `fit-frame-to-content`,
+`center`, `proportional`), `fit_align`, `fit_empty`.
+
+`unassigned` frames are graphic frames without content; they may later be given
+text (turning them into text frames) without changing their ID.
+
+### 4.3 Threads
+
+- A thread is the chain frame → `next`. The story's *thread* is the ordered
+  list of frames from the one with no predecessor.
+- Valid thread: every frame has the same `story`; each frame has at most one
+  predecessor and one successor; no cycles; all frames exist; **no frame is
+  threaded into a different story's chain**. Frames may be on different pages
+  and spreads. A thread length is ≤ 4096.
+- Threading, unthreading and inserting into a thread are planner operations.
+  Removing the middle frame re-links neighbors by default (`--break-thread`
+  keeps the tail as a new unplaced story with a derived ID `<story>-2`).
+- Overset: the text that does not fit the last frame. Report: `story`, `frame`
+  (last frame), `offset` (character offset in the story of the first
+  non-composed character), `paragraph`, and `characters_remaining`.
+
+### 4.4 Auto-flow
+
+Auto-flow places a story into its thread and, while overset remains, adds a page
+from the target parent with a primary frame and threads it. It is bounded by
+`--max-pages` (default 100, hard maximum 5000) and by the document page limit.
+It stops, reports `autoflow_truncated: true` with the remaining character count
+and leaves the document consistent when the bound is hit. An empty primary frame
+that does not advance the story (zero-height frame) aborts with
+`autoflow-stalled` rather than adding pages.
+
+## 5. Styles
+
+### 5.1 Style kinds and inheritance
+
+`layout.styles` has `paragraph`, `character`, `object`, `table`, `cell` maps
+keyed by style ID, each optionally grouped by a `group` path
+(`"Headings/Display"`), with `based_on`, `next` (paragraph styles only) and
+properties.
+
+Resolution for a character in a paragraph, lowest to highest:
+
+1. document defaults (`layout.defaults`, then built-in engine defaults);
+2. the paragraph style chain (`based_on` ancestors first);
+3. nested style, line style or GREP style matching (section 5.3), in document
+   order of the matching rule list;
+4. the character style chain of the run;
+5. paragraph overrides, then run overrides.
+
+Depth ≤ 16, no cycles; a missing `based_on` or `next` is a validation error
+naming the style. Redefining a style from an overridden paragraph copies the
+overrides into the style and clears them; *clear overrides* removes them.
+
+### 5.2 Paragraph style properties (v1)
+
+Font family/style/weight/italic/variable axes; size; leading (`auto` = 120% or
+points); alignment (`left`, `center`, `right`, `justify`,
+`justify-last-{left,center,right,all}`, `towards-spine`, `away-from-spine`);
+indents (left, right, first-line, last-line); space before/after; same-style
+spacing; tabs (position, alignment `left|center|right|decimal`, leader, align
+character); drop cap (lines, characters, character style); hyphenation (on/off,
+min word length, min before/after, max consecutive, zone, capitalized words,
+last word, across columns); justification (word/letter/glyph min-desired-max);
+composer (`single-line`, `paragraph`); keep options (together, with-next,
+start-position, widow/orphan lines); span columns (`none`, `all`, `n`) with
+space before/after; rules above/below; bullets/numbering (section 5.4);
+align-to-grid (`none`, `first-line`, `all-lines`); language; optical margin
+alignment; balance ragged lines; hanging punctuation.
+
+### 5.3 Character, nested, line and GREP styles
+
+Character properties: font, size, leading, tracking, kerning mode (`metrics`,
+`optical`, `none`, manual units), baseline shift, horizontal/vertical scale,
+skew, case (`normal`, `all-caps`, `small-caps`), position (`superscript`,
+`subscript`, `ordinal`, `numerator`, `denominator`), OpenType features
+(`liga`, `dlig`, `smcp`, `onum`, `lnum`, `tnum`, `frac`, `ordn`, `ss01`–`ss20`,
+`calt`, `swsh`), fill, stroke, underline, strikethrough, no-break, language,
+condition.
+
+- **Nested styles** apply a character style from the start of a paragraph
+  through *N* of a delimiter (character, word, sentence, tab, forced break) and
+  can repeat.
+- **Line styles** apply a character style to the first *N* lines.
+- **GREP styles** apply a character style to matches of a pattern.
+
+The regex dialect is a documented subset, matched by a Rust engine with a hard
+step budget and **no backtracking blow-up**: literals, `.`, classes (ASCII and
+Unicode general categories/scripts), anchors `^ $ \b \B`, groups, alternation,
+`* + ? {m,n}` (greedy and lazy), and look-ahead only. No back-references,
+look-behind, recursion, callouts or embedded code. Pattern length ≤ 512
+characters; each match attempt has a budget of 100,000 steps; exceeding it
+refuses the style at write time and reports `grep-budget-exceeded` at compose
+time without partial application.
+
+### 5.4 Lists
+
+Lists (`layout.lists`) define levels, bullet or number format (`1.`, `A)`,
+`i.`, custom `^#.^t`), restart policy (`after-higher-level`, `never`,
+`after-story`, `after-section`) and **continuation across stories** via a
+shared list ID. Numbers are computed during composition, never stored in text.
+
+### 5.5 Object, table and cell styles
+
+Object styles hold fill, stroke, effects, text frame options, wrap, anchored
+object options, and the `fit` of graphic frames. Table styles hold borders,
+alternating row/column patterns, header/footer repeat and spacing; cell styles
+hold insets, alignment, rotation, fill, stroke and the paragraph style applied
+to cell content.
+
+### 5.6 Import and reflow
+
+Styles import from another `.pen`, `.penbook` or IDML with an explicit
+conflict policy (`rename`, `skip`, `replace`) and a report. A style change
+recomposes **exactly** the stories (and tables, TOCs, indexes) that reference
+the style through the resolution chain, found through a dependency index, in a
+bounded transaction; `undo` restores the original bytes.
+
+## 6. Composition: algorithm and determinism
+
+### 6.1 Numeric model
+
+All composition arithmetic is **integer fixed point**: lengths are `i64`
+multiples of 1/1024 pt ("layout units", LU). Font design units are scaled to LU
+with round-half-away-from-zero integer division. No `f32`/`f64` value
+participates in line-break decisions, glyph advances or positions; floats appear
+only when converting LU to render coordinates. This removes platform and
+optimizer-dependent drift.
+
+### 6.2 Pipeline
+
+1. Resolve styles per character (section 5.1) into style spans.
+2. Segment into script/language/direction runs. Bidirectional ordering follows
+   UAX #9 at paragraph level, with the paragraph direction from the style or the
+   first strong character.
+3. Shape each run with the OpenType shaper at the style's features and variable
+   axes; keep clusters, advances in LU, and glyph IDs.
+4. Find break opportunities: UAX #14 line breaking, plus discretionary hyphens,
+   plus hyphenation opportunities (6.4); forced and no-break markers override.
+5. Compose lines (6.3) per frame/column.
+6. Position lines on the baseline grid if requested, apply keeps, widow/orphan
+   control, wrap and anchored objects (section 8), tables (section 9) and notes
+   (section 10), iterating to a bounded fixed point (≤ 8 passes; otherwise the
+   last consistent state is used and `compose-unstable` is reported).
+
+### 6.3 Line breaking
+
+- **Single-line composer:** first-fit; each line is filled greedily; the
+  fallback for frames/paragraphs where `composer: "single-line"`.
+- **Paragraph composer (total fit):** Knuth–Plass over boxes, glue and
+  penalties. Glue stretch/shrink come from the word-spacing min/desired/max;
+  letter-spacing and glyph-scaling ranges add flexibility ordered after word
+  spacing. For a feasible line with adjustment ratio *r*:
+  `badness = min(10000, floor(100 × |r|³))` (integer cubic table), with
+  `demerits = (linepenalty + badness)²` ± penalty/flag terms exactly as in the
+  published algorithm. `tolerance` passes: pass 1 without hyphenation and
+  tolerance 1000; pass 2 with hyphenation, tolerance 1000; pass 3 emergency,
+  unbounded with an overfull-box rule.
+- **Tie-breaking** is total: lowest total demerits, then the fewest lines, then
+  the earliest break position. Candidate iteration order is ascending by
+  position. There is no randomness and no time-based cutoff.
+- Per column, each frame's column widths and wrap-adjusted line extents are
+  inputs; a paragraph spanning columns/frames is composed line by line with the
+  width of the column the line lands in (re-evaluated on a width change by the
+  documented, bounded retry).
+- Exact agreement with Adobe's composer is **not** claimed (see the roadmap).
+
+### 6.4 Hyphenation
+
+Liang pattern hyphenation with exception lists, implemented in Rust against
+bundled, license-recorded pattern data. Each pattern set records its source,
+license and checksum in `docs/hyphenation-sources.md`; only licenses compatible
+with the project's license are bundled. Initial languages: en-US, en-GB, de,
+fr, es, it, pt, nl, sv, da, nb, fi, pl, cs, ru, uk, el, tr. Bundled data is
+≤ 1.5 MiB compressed in total. User dictionaries add words and exceptions per
+language and travel with the document. Unknown languages hyphenate nowhere and
+are reported as `hyphenation-unavailable`.
+
+### 6.5 Justification, keeps and decorations
+
+Word spacing 80/100/133 %, letter spacing 0/0/0 %, glyph scaling 100/100/100 %
+by default (min/desired/max). The composer uses word spacing first, then
+letter spacing, then glyph scaling, each only within its declared range. Last
+line alignment follows the style. Keep options are hard constraints evaluated
+after line breaking; violating a keep moves lines to the next column/frame and
+recomposes the affected range. Widow/orphan is expressed as keep lines.
+Drop caps occupy N lines with an indent computed from the glyph's cap height.
+Optical margin alignment and hanging punctuation shift the glyph by a
+documented fraction of its advance (table in the engine source, versioned with
+the engine).
+
+### 6.6 Versioning and recorded engine
+
+`layout.engine` records the engine version integer a document was composed
+with. A newer engine composes with the **recorded** behavior set unless the
+user upgrades the document explicitly, which is reported and diffable by line
+breaks. Behavior changes bump the engine and need a migration note and new
+goldens.
+
+### 6.7 Fonts
+
+Font identity is family + style + weight + italic + `sha256` of the embedded or
+referenced font file. Missing fonts are listed; substitution uses an explicit,
+disclosed fallback chain (document fallback list, then the bundled default
+face) and appears in the compose report and in preflight. Pentool never queries
+the operating system's font service in compose or export, so output depends only
+on documented, declared fonts (v0.6.x asset model). Subsetting and embedding
+for PDF keep only the used glyphs and record the subset in the export report.
+
+## 7. Grids and guides
+
+- A **baseline grid** is `{start, increment, relative_to: page|margin, color}`
+  at document level and optional per frame; `align_to_grid: none|first-line|
+  all-lines` snaps baselines by rounding **up** to the next grid line, so
+  composition never moves text upward past the previous line.
+- **Guides** (ruler, margin, column) and **layout grids** are persisted in
+  `layout.guides`; they never render in exports.
+- Align/distribute, key object, step-and-repeat and grids of frames are
+  planner operations producing ordinary node transforms and IDs; step-and-repeat
+  count is bounded (≤ 1000 per operation).
+
+## 8. Text wrap and anchored objects
+
+- Wrap modes: `none`, `bounding-box`, `shape` (object geometry), `alpha`
+  (alpha channel at a threshold), `clipping-path`, `jump-object`,
+  `jump-next-column`, with offsets (top, left, bottom, right), `side`
+  (`both`, `left`, `right`, `towards-spine`, `away-from-spine`, `largest`) and
+  `invert`.
+- Wrap shapes are rasterized/flattened to at most 256 horizontal bands per
+  object (tolerance in LU recorded in the engine version) and combined by
+  union; the result is a set of exclusion intervals per baseline.
+- Frames with `ignore_wrap: true` ignore all wrap. A wrapped object does not
+  affect text in the frame that contains it as an anchored object.
+- **Anchored objects** are `{"anchor": "<node id>"}` runs. Modes: `inline`
+  (sits in the line, baseline offset), `above-line` (aligned, space before/
+  after) and `custom` (reference point on the anchored object, on the anchor
+  marker, optionally relative to column/frame/margin/page, `keep_within_frame`,
+  `prevent_manual_positioning`). Anchored objects move with the text across
+  frames and pages; the anchor's frame, page and offset are reported.
+- Composition with wrap and anchors is bounded by 8 passes (6.2) and total
+  exclusion intervals ≤ 10,000 per frame.
+
+## 9. Tables
+
+Tables are story content (`{"table": "<id>"}` run) with a definition in
+`layout.tables`: rows with `height` and `min_height`, columns with widths,
+cells (`row`, `col`, `row_span`, `col_span`, content paragraphs, insets,
+alignment, rotation in 90° steps, strokes, fill, optional graphic content),
+header/footer row counts, and a table style. Rules:
+
+- Tables break at row boundaries; a row that does not fit goes to the next
+  column/frame unless it exceeds a full frame, in which case it is split at a
+  line boundary and reported. Header/footer rows repeat. Row spans keep rows
+  together where possible and report where they do not.
+- Merging/splitting is a planner operation that never drops cell content:
+  merging concatenates content with a paragraph break in cell order.
+- Text↔table conversion uses explicit row/column separators. CSV/TSV import
+  follows RFC 4180, UTF-8, rows ≤ 10,000, columns ≤ 256, cell ≤ 64 KiB, total
+  ≤ 8 MiB, and reports ragged rows.
+
+## 10. Long-document features
+
+- **Footnotes** are `{"note": "<id>"}` runs with bodies in `layout.notes`;
+  numbering restarts per page/story/section/document; they compose at the
+  bottom of the frame's column (or span columns); a note that cannot fit moves
+  with its anchor line, or splits with `continues` markers, and is reported.
+  **Endnotes** collect into a story at a chosen position.
+- **Cross-references** carry a target (paragraph anchor, page, text anchor) and
+  a format (`page`, `paragraph-text`, `paragraph-number`, `chapter`, custom
+  template). Broken targets render the documented placeholder `?` and are
+  reported as `xref-unresolved`.
+- **Hyperlinks and bookmarks** carry destinations (URL with scheme allowlist
+  `http`, `https`, `mailto`; page; text anchor); no scheme is fetched.
+- **Text variables:** `chapter-number`, `running-header` (from a style, first/
+  last on page), `creation-date`, `modification-date`, `output-date`,
+  `file-name`, `last-page-number`, `custom`. Dates are formatted by
+  locale-independent patterns and never read the wall clock during compose: the
+  document's recorded `generated_at` or an explicit `--date` is used.
+- **Conditional text:** conditions and condition sets (`show`/`hide`); hidden
+  text is excluded from composition and kept in the story.
+- **TOC, index, captions:** generated stories (`layout.generated`) record the
+  inputs (styles, markers), the content digest and `stale: true` when inputs
+  changed. Regeneration is explicit and deterministic and never edits user text
+  outside the generated story. Index sort uses a documented collation (Unicode
+  root collation tailored per language, with a code-point fallback) and page
+  ranges follow `page-range` rules (`first`, `contiguous`, `all`).
+
+## 11. Books (`.penbook`)
+
+A `.penbook` is readable JSON listing member `.pen` paths relative to the book
+file:
+
+```json
+{"format": "penbook", "version": 1, "name": "Guide",
+ "documents": [{"path": "01-intro.pen", "role": "chapter"},
+               {"path": "02-body.pen", "role": "chapter"}],
+ "numbering": {"page": "continuous", "chapter": "continuous", "footnote": "per-document"},
+ "synchronize": {"source": "01-intro.pen", "styles": true, "swatches": true,
+                 "parents": false}}
+```
+
+- Member paths must stay inside the book's directory; absolute paths, `..`
+  segments, drive prefixes and symlink escapes are refused. Members are ≤ 500,
+  ≤ 2 GiB combined.
+- Book operations (renumber, synchronize, TOC, index, preflight, package,
+  export) plan across all members first and write **all or none**: members are
+  staged, verified, and committed through the shared transaction/history
+  mechanism with a book-level journal; any failure restores every member
+  byte-for-byte.
+- Book export builds one PDF (through the v0.12.0 PDF/X path) or EPUB. Missing
+  members produce a report and abort; they are never skipped.
+
+## 12. Limits
+
+| Limit | Value |
+| --- | --- |
+| Pages per document | 5,000 |
+| Pages per spread | 10 |
+| Parents / parent chain depth | 500 / 16 |
+| Stories / paragraphs per story / runs per paragraph | 10,000 / 100,000 / 10,000 |
+| Characters per story / per document | 16 MiB / 64 MiB |
+| Thread length | 4,096 frames |
+| Frames per page | 10,000 |
+| Style count per kind / `based_on` depth | 2,000 / 16 |
+| Tables per document / cells per table | 1,000 / 100,000 |
+| Footnotes per document | 100,000 |
+| GREP pattern length / step budget | 512 / 100,000 per attempt |
+| Compose passes | 8 |
+| Reflow per edit (affected paragraphs) | 50,000, else aborted before mutation |
+| IDML archive size / entries / uncompressed / ratio | 512 MiB / 20,000 / 2 GiB / 100:1 |
+| IDML XML depth / attributes per element | 128 / 256 |
+| EPUB archive entries / uncompressed | 20,000 / 2 GiB |
+| Font file / glyphs processed per compose | 64 MiB / 50 M |
+| CSV/TSV import | 8 MiB, 10,000 rows, 256 columns |
+| Autoflow pages per operation | 100 default, 5,000 maximum |
+
+Every limit is checked before the expensive step and fails with an error naming
+the limit, the actual value and the location.
+
+## 13. Reports and diagnostics
+
+Compose, import, export and preflight use one structured result shape:
+`{"engine": 1, "ok": bool, "counts": {...}, "issues": [{"code", "severity",
+"page", "frame", "story", "offset", "node", "message", "action"}]}`. Codes are
+stable and documented. `tree` and `search` show stories, threads and overset
+compactly (IDs, kinds, hierarchy, bounds, counts) and never dump story text;
+`matches`, `returned`, `offset`, `limit` and `has_more` describe the emitted
+result exactly.
+
+## 14. Threat model
+
+Untrusted inputs: IDML and EPUB archives, `.pen`/`.penbook` files, fonts, CSV/
+TSV and JSON for data merge, hyphenation dictionaries, regex style patterns,
+hyperlink targets.
+
+| Threat | Mitigation |
+| --- | --- |
+| Zip slip, absolute paths, symlinks, drive prefixes | Reject entries whose normalized path is absolute, contains `..`, a drive, a NUL or a backslash escape; never extract to disk, read members in memory; `.penbook` paths contained in the book directory |
+| Zip bombs | Entry count, per-entry and total uncompressed size and compression ratio are checked from the central directory **and** enforced while streaming |
+| XML entity expansion, XXE, DTD fetch | DTDs and external entities are refused; the parser never resolves a URI; node count, depth and attribute counts are bounded before building a tree |
+| Hostile fonts | Size cap; parse failures are per-font and non-fatal; glyph, table and instruction budgets; no hinting bytecode is executed |
+| Catastrophic regex | Restricted dialect, no back-references, step budget (5.3) |
+| Quadratic or unbounded layout | Section 12 limits, bounded passes, reflow caps, cancellation checks between paragraphs/pages and between import/export stages |
+| Resource exhaustion in tables/wrap | Cell, band and interval caps (8, 9) |
+| Hostile dimensions | Finite, bounded, non-negative checks; NaN/∞ refused; page and frame sizes capped at 1,000,000 units |
+| Network | No scheme is fetched during open, compose or export; links are data |
+| Partial writes | Everything is built in memory and validated before the shared transaction writes; cancellation and crash recovery restore the original bytes |
+| Output injection | IDML/EPUB/PDF writers escape all text and attribute values and validate IDs |
+
+## 15. Dependencies
+
+The AGENTS.md bar: product benefit, compatible license, maintained upstream,
+bounded behavior, binary size and supply-chain cost.
+
+| Need | Decision | Why |
+| --- | --- | --- |
+| OpenType shaping | `rustybuzz` (already in the tree through `resvg`'s text stack) | Pure Rust HarfBuzz port, maintained, deterministic given inputs; no new dependency |
+| Bidi (UAX #9) | `unicode-bidi` (already in the tree) | Spec implementation, already audited by the build |
+| Scripts/vertical orientation | `unicode-script`, `unicode-vo` (already in the tree) | Already present |
+| Line breaking (UAX #14) | Evaluate `unicode-linebreak` (MIT/Apache, small, pure Rust) against writing the table lookup in-tree at task 4; record the choice and size delta in `docs/architecture.md` | Needed for CJK and general breaks; keep only if size cost is within budget |
+| Hyphenation | In-tree Liang implementation + bundled pattern data | Tiny algorithm, avoids a dependency, data is the only size cost (≤ 1.5 MiB budget) |
+| XML reading (IDML, EPUB) | `roxmltree` (already in the tree) | No DTD/entity expansion beyond bounds, node limit option, read-only |
+| XML writing | In-tree escaping writer | Small and fully controlled |
+| ZIP | `zip` (already a dependency) | Already used by packages; add hostile-archive checks from section 14 |
+| Font subsetting for PDF | Decision at task 4: in-tree glyf/CFF subsetter versus a maintained pure-Rust subsetter crate | Needs binary-size and correctness evidence; not decided here |
+| Validators (veraPDF, EPUBCheck) | CI/test only, never linked or shipped | Conformance evidence, not a runtime dependency |
+
+No Adobe SDK, no network library and no system font service is introduced.
+
+## 16. Required evidence per task
+
+Each roadmap task needs, before its checkbox is ticked: the implementation, the
+fixtures named in `fixtures/layout-v1-manifest.json` updated, tests in the
+owning module and in `tests/`, CLI help and README examples kept runnable,
+cross-platform golden digests for composition, and a note in this file or the
+roadmap when a deliberate decision changes the contract.

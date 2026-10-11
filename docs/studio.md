@@ -15,7 +15,7 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
   document logic in the browser.
 - Workspaces map to the roadmap (`web-ui/src/lib/workspaces.ts`): Design,
   Images (0.7), Composite (0.8), Photo (0.11), Print (0.12), Paint (0.13),
-  Layout (0.16). A workspace whose format or CLI is
+  Layout (0.14). A workspace whose format or CLI is
   not implemented says so and lists what the roadmap promises; it has no
   controls that cannot work.
 
