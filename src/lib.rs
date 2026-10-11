@@ -37,6 +37,7 @@ pub mod scene;
 pub mod selection;
 pub mod server;
 pub mod spreads;
+pub mod stories;
 pub mod style;
 pub mod text;
 pub mod transaction;

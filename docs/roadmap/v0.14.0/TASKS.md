@@ -145,6 +145,15 @@ and documentation.
   `text story` and `text frame` commands, and tree and search report stories,
   threads and overset text compactly.
 
+  *Progress:* stories, threaded frames, frame options, bounded auto-flow and
+  overset reporting are implemented in `src/stories.rs` (`text story` and
+  `text frame` commands, tree/search/page-operation reporting) and covered by
+  `tests/v0140_stories.rs`; contract in `docs/layout-v1.md` section 4.
+  Overset figures come from a provisional estimator (every figure carries
+  `"estimated": true`) until the composer in task 4 replaces it; frames render
+  nothing until then. Still open before this box is ticked: `width` auto-size
+  composition, Studio surfaces, and cross-platform CI evidence.
+
 - [ ] **4. Build the shaping and font engine.**
   - OpenType shaping for Latin, Greek, Cyrillic, Arabic, Hebrew, Devanagari,
     Thai and CJK, through an audited pure-Rust shaper.

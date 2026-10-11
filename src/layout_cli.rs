@@ -380,3 +380,32 @@ pub fn run_override(
     };
     finish(input, "override", dry_run, revision, &raw, result)
 }
+
+/// `text story ...` and `text frame ...`: the story/frame commands share the
+/// `text` command word. Read-only listings print without touching the file.
+pub fn run_text_layout(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    mut raw: Value,
+    action: crate::text::TextAction,
+) -> Result<()> {
+    use crate::stories::{FrameAction, StoryAction};
+    use crate::text::TextAction;
+    let (result, read_only) = match action {
+        TextAction::Story { action } => {
+            let read_only = matches!(action, StoryAction::List { .. } | StoryAction::Show { .. });
+            (crate::stories::run_story(&mut raw, action)?, read_only)
+        }
+        TextAction::Frame { action } => {
+            let read_only = matches!(action, FrameAction::List { .. });
+            (crate::stories::run_frame(&mut raw, action)?, read_only)
+        }
+        _ => bail!("[invalid-input] not a story or frame command"),
+    };
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    finish(input, "text", dry_run, revision, &raw, result)
+}

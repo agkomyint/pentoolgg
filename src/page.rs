@@ -39,7 +39,12 @@ pub enum PageAction {
     /// Move a page to a zero-based index.
     Move { id: String, index: usize },
     /// Remove a page.
-    Remove { id: String },
+    Remove {
+        id: String,
+        /// Also delete stories whose every frame is on the removed page (v9).
+        #[arg(long)]
+        drop_story: bool,
+    },
 }
 
 pub fn apply(doc: &mut Document, action: PageAction) -> Result<serde_json::Value> {
@@ -119,7 +124,7 @@ pub fn apply(doc: &mut Document, action: PageAction) -> Result<serde_json::Value
             doc.replace_pages(pages, &id).map_err(anyhow::Error::msg)?;
             Ok(serde_json::json!({"operation":"move","page":id,"index":index}))
         }
-        PageAction::Remove { id } => {
+        PageAction::Remove { id, .. } => {
             if pages.len() == 1 {
                 bail!("cannot remove the last page");
             }

@@ -464,6 +464,10 @@ enum SearchKind {
     Image,
     /// v6 raster-paint layers.
     Raster,
+    /// v9 text frames.
+    TextFrame,
+    /// v9 graphic frames.
+    GraphicFrame,
 }
 
 impl SearchKind {
@@ -473,6 +477,8 @@ impl SearchKind {
             Self::Text => "text",
             Self::Image => "image",
             Self::Raster => "raster",
+            Self::TextFrame => "text-frame",
+            Self::GraphicFrame => "graphic-frame",
         }
     }
     fn legacy(self) -> Result<agent::ObjectKind> {
@@ -484,6 +490,9 @@ impl SearchKind {
             ),
             Self::Raster => anyhow::bail!(
                 "[unsupported-capability] --kind raster requires a v6 document; migrate with `pentool migrate`"
+            ),
+            Self::TextFrame | Self::GraphicFrame => anyhow::bail!(
+                "[unsupported-capability] frame kinds require a v9 document; migrate with `pentool migrate --target 9`"
             ),
         }
     }
@@ -7291,6 +7300,18 @@ async fn run() -> Result<()> {
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
             if scene::is_scene_document(&raw) {
+                if matches!(
+                    action,
+                    text::TextAction::Story { .. } | text::TextAction::Frame { .. }
+                ) {
+                    return pentool::layout_cli::run_text_layout(
+                        &input,
+                        dry_run,
+                        if_revision.as_deref(),
+                        raw,
+                        action,
+                    );
+                }
                 scene::apply_text(&mut raw, selected_page, action)?;
                 let summary = transaction::commit_value(
                     &input,

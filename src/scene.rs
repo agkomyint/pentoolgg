@@ -707,7 +707,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                     });
                 Rect::new(x, y - size, x + width, y - size + height)
             }
-            "image" | "raster" | "photo" => Rect::new(
+            "image" | "raster" | "photo" | "text-frame" | "graphic-frame" => Rect::new(
                 node["x"].as_f64().context("image x missing")?,
                 node["y"].as_f64().context("image y missing")?,
                 node["x"].as_f64().unwrap()
@@ -2105,12 +2105,24 @@ pub fn apply_text(
     action: crate::text::TextAction,
 ) -> Result<()> {
     use crate::text::TextAction;
+    let action = match action {
+        TextAction::Story { action } => {
+            crate::stories::run_story(raw, action)?;
+            return Ok(());
+        }
+        TextAction::Frame { action } => {
+            crate::stories::run_frame(raw, action)?;
+            return Ok(());
+        }
+        other => other,
+    };
     validate(raw)?;
     let page = page_mut(raw, page_id)?;
     let layer_id = match &action {
         TextAction::Put { layer, .. }
         | TextAction::Set { layer, .. }
         | TextAction::Remove { layer, .. } => layer.clone(),
+        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("handled above"),
     };
     ensure_layer_unlocked(page, &layer_id)?;
     match action {
@@ -2202,6 +2214,7 @@ pub fn apply_text(
                 bail!("text not found in layer {layer_id}: {id}")
             }
         }
+        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("handled above"),
     }
     validate(raw)
 }
@@ -2293,7 +2306,7 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             pages.insert(index, page);
             json!({"operation":"move","page":id,"index":index})
         }
-        PageAction::Remove { id } => {
+        PageAction::Remove { id, .. } => {
             if pages.len() == 1 {
                 bail!("cannot remove the last page")
             }
@@ -3228,6 +3241,7 @@ pub(crate) fn validate_node(
             "adjustment" if compositing => crate::composite::validate_node(node)?,
             "raster" if compositing => crate::raster::validate_node(node)?,
             "photo" if compositing => crate::photo::catalog::validate_node(o)?,
+            "text-frame" | "graphic-frame" => crate::stories::validate_frame_node(o)?,
             "image" => crate::image::validate_node_for_version(
                 o,
                 image_assets.context(
@@ -3548,7 +3562,7 @@ pub fn inspect_paginated_v4(
         matches += layer_matches;
     }
 
-    Ok(json!({
+    let mut result = json!({
         "document": doc_name,
         "version": version,
         "page": active_page,
@@ -3559,7 +3573,14 @@ pub fn inspect_paginated_v4(
         "has_more": offset.saturating_add(returned) < matches,
         "stacking": "layers, then depth-first nodes; zero is back",
         "layers": layers
-    }))
+    });
+    if version >= crate::spreads::VERSION {
+        let stories = crate::stories::summary(raw);
+        if stories["stories"].as_u64().unwrap_or(0) > 0 || stories["frames"].as_u64().unwrap_or(0) > 0 {
+            result["stories"] = stories;
+        }
+    }
+    Ok(result)
 }
 
 fn collect_v4_matches(
@@ -3579,7 +3600,12 @@ fn collect_v4_matches(
         let query_matches = ancestor_match
             || id.to_lowercase().contains(needle)
             || name.to_lowercase().contains(needle)
-            || content.is_some_and(|value| value.to_lowercase().contains(needle));
+            || content.is_some_and(|value| value.to_lowercase().contains(needle))
+            || (kind == "text-frame"
+                && node
+                    .get("story")
+                    .and_then(Value::as_str)
+                    .is_some_and(|story| story.to_lowercase().contains(needle)));
         let kind_matches = match kind_filter {
             Some("text") => kind == "text",
             Some("path") => matches!(kind, "path" | "rect" | "ellipse" | "line"),
@@ -3611,6 +3637,10 @@ fn collect_v4_matches(
             }
             if let Some(asset) = node.get("asset").and_then(Value::as_str) {
                 object["asset"] = json!(asset);
+            }
+            if kind == "text-frame" {
+                object["story"] = node.get("story").cloned().unwrap_or(Value::Null);
+                object["next"] = node.get("next").cloned().unwrap_or(Value::Null);
             }
             if node.get("kind").and_then(Value::as_str) == Some("photo") {
                 for key in ["photo", "variant"] {

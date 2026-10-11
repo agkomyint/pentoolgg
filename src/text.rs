@@ -81,6 +81,16 @@ pub enum TextAction {
         #[arg(long)]
         layer: String,
     },
+    /// Create, edit, list and flow stories (version 9 documents).
+    Story {
+        #[command(subcommand)]
+        action: crate::stories::StoryAction,
+    },
+    /// Create, edit, thread and unthread text frames (version 9 documents).
+    Frame {
+        #[command(subcommand)]
+        action: crate::stories::FrameAction,
+    },
 }
 fn position() -> f64 {
     100.0
@@ -90,10 +100,14 @@ fn ink() -> String {
 }
 
 pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
+    if matches!(action, TextAction::Story { .. } | TextAction::Frame { .. }) {
+        bail!("[unsupported-version] stories and frames need a version 9 document; run `pentool migrate --target 9` first");
+    }
     let layer_id = match &action {
         TextAction::Put { layer, .. }
         | TextAction::Set { layer, .. }
         | TextAction::Remove { layer, .. } => layer,
+        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("rejected above"),
     };
     let layer_index = doc
         .layers
@@ -208,6 +222,7 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
                 .context("text object not found")?;
             layer.texts.remove(i);
         }
+        TextAction::Story { .. } | TextAction::Frame { .. } => unreachable!("rejected above"),
     }
     updated.version = updated.version.max(2);
     updated.validate().map_err(anyhow::Error::msg)?;

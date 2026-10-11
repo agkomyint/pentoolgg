@@ -1074,6 +1074,7 @@ dependencies = [
  "tiny-skia",
  "tokio",
  "ttf-parser",
+ "unicode-normalization",
  "url",
  "walkdir",
  "zip",

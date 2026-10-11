@@ -284,6 +284,25 @@ and leaves the document consistent when the bound is hit. An empty primary frame
 that does not advance the story (zero-height frame) aborts with
 `autoflow-stalled` rather than adding pages.
 
+### 4.5 Implementation notes (task 3)
+
+- Overset is computed by a provisional, deterministic estimator until the
+  composer lands: glyph advance is 0.5 x font size, line height is the
+  paragraph leading (default 1.2 x size, size 12), and each frame holds
+  `columns` containers. Every reported figure carries `"estimated": true`.
+- Overset report: `{story, frame, offset, paragraph, characters_remaining,
+  estimated}`; `tree` and `inspect` add a compact `stories` summary (counts and
+  at most 20 overset entries, with `overset_truncated`).
+- `unthread` and `--break-thread` split the story at the estimated overflow
+  point; the tail becomes story `<story>-2` and no text is lost. `frame thread`
+  of frames from different stories merges the second story onto the first.
+- Removing a page re-links threaded neighbours; if a story would lose its last
+  frame the command fails with `[story-last-frame]` unless `--drop-story`.
+  Duplicating a page gives its frames fresh IDs and fresh empty stories.
+- Story text is NFC-normalized; control characters other than newline and tab
+  are refused. Frames render nothing before the composer; `auto_size: width`
+  is stored but not yet applied.
+
 ## 5. Styles
 
 ### 5.1 Style kinds and inheritance

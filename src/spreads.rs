@@ -154,7 +154,7 @@ fn check_geometry(value: &Value, what: &str) -> Result<()> {
 /// document before v9 keeps `layout` as an uninterpreted extension.
 pub fn validate(raw: &Value, version: u64) -> Result<()> {
     if version < VERSION {
-        return Ok(());
+        return crate::stories::reject_frames(raw);
     }
     let page_list = pages(raw);
     ensure!(
@@ -171,6 +171,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
     for page in page_list {
         validate_page_layout(page, &parent_ids)?;
     }
+    crate::stories::validate(raw)?;
     Ok(())
 }
 
@@ -885,6 +886,7 @@ pub fn apply_page(raw: &mut Value, action: PageAction) -> Result<Value> {
     let mut added: Vec<String> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
     let mut sections_changed: Vec<String> = Vec::new();
+    let mut stories_reflowed = 0usize;
     let mut result;
 
     match action {
@@ -993,7 +995,10 @@ pub fn apply_page(raw: &mut Value, action: PageAction) -> Result<Value> {
                 .expect("pages array")
                 .insert(index + 1, copy);
             added.push(new_id.clone());
+            let copied = crate::stories::duplicate_page_frames(raw, &new_id)?;
+            stories_reflowed = copied["duplicated_frames"].as_array().map_or(0, Vec::len);
             result = json!({"operation": "duplicate", "page": id, "new_id": new_id});
+            result["frames"] = copied;
         }
         PageAction::Move { id, index } => {
             ensure!(
@@ -1008,12 +1013,15 @@ pub fn apply_page(raw: &mut Value, action: PageAction) -> Result<Value> {
             keys.remove(&id);
             result = json!({"operation": "move", "page": id, "index": index});
         }
-        PageAction::Remove { id } => {
+        PageAction::Remove { id, drop_story } => {
             ensure!(
                 pages(raw).len() > 1,
                 "[invalid-input] cannot remove the last page"
             );
             let index = page_index(raw, &id)?;
+            let frames_report = crate::stories::detach_page_frames(raw, &id, drop_story)?;
+            stories_reflowed = frames_report["rethreaded"].as_array().map_or(0, Vec::len)
+                + frames_report["stories_dropped"].as_array().map_or(0, Vec::len);
             let successor = pages(raw).get(index + 1).map(|p| page_id(p).to_string());
             raw["pages"]
                 .as_array_mut()
@@ -1053,6 +1061,7 @@ pub fn apply_page(raw: &mut Value, action: PageAction) -> Result<Value> {
                 .unwrap_or_default()
                 .to_string();
             result = json!({"operation": "remove", "page": id, "active_page": active});
+            result["frames"] = frames_report;
         }
     }
 
@@ -1068,13 +1077,14 @@ pub fn apply_page(raw: &mut Value, action: PageAction) -> Result<Value> {
     if let Some(layout) = raw.get("layout") {
         result["spreads"] = json!(list(layout, "spreads").len());
     }
+    let (reflowed, overset) = crate::stories::reflow_counts(raw, stories_reflowed);
     result["reflow"] = json!({
         "pages_added": added,
         "pages_removed": removed,
         "pages_renumbered": renumbered,
         "sections_changed": sections_changed,
-        "stories_reflowed": 0,
-        "frames_overset": 0,
+        "stories_reflowed": reflowed,
+        "frames_overset": overset,
     });
     Ok(result)
 }
