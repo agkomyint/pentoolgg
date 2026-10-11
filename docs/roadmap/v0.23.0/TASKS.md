@@ -30,5 +30,5 @@ HTML/CSS export that reflects them, from the same offline binary.
 ## Explicitly deferred
 
 - Scripted behavior and component frameworks (React/Vue code generation),
-  server-side rendering, and animation export beyond CSS transitions mapped from
-  v0.14.0 tracks.
+  server-side rendering, and any animation export (time-based media is out of
+  scope for Pentool).

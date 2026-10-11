@@ -108,5 +108,5 @@ pentool export DOC out.png --renderer reference   # or accelerated
 
 - Modeling, sculpting, UV unwrapping, rigging and physics.
 - Ray tracing and global illumination.
-- Animation (v0.19.0) and print-accurate color of 3D output beyond the existing
+- Animation (out of scope for Pentool) and print-accurate color of 3D output beyond the existing
   v0.12.0 policy.

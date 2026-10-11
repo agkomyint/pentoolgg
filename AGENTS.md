@@ -54,21 +54,23 @@ The current planned sequence is:
 6. `docs/roadmap/v0.11.0/TASKS.md`: photography and RAW development;
 7. `docs/roadmap/v0.12.0/TASKS.md`: color management and print production;
 8. `docs/roadmap/v0.13.0/TASKS.md`: agent-directed realistic painting;
-9. `docs/roadmap/v0.14.0/TASKS.md`: keyframe animation and lean video export
-   (PNG sequence, GIF, MP4/H.264 with Pentool's own encoders);
-10. `docs/roadmap/v0.15.0/TASKS.md`: audio and complete multimedia documents;
-11. `docs/roadmap/v0.16.0/TASKS.md`: professional page layout at InDesign
-    parity, `.penbook` books, and IDML interchange;
-12. `docs/roadmap/v0.17.0/TASKS.md`: static 3D objects (import, light, render);
-13. `docs/roadmap/v0.18.0/TASKS.md`: 3D in layouts and mockups;
-14. `docs/roadmap/v0.19.0/TASKS.md`: 3D animation on the timeline;
-15. `docs/roadmap/v0.20.0/TASKS.md`: design interchange (SVG, PDF, PSD, Figma,
+9. `docs/roadmap/v0.16.0/TASKS.md`: professional page layout at InDesign
+   parity, `.penbook` books, and IDML interchange;
+10. `docs/roadmap/v0.17.0/TASKS.md`: static 3D objects (import, light, render);
+11. `docs/roadmap/v0.18.0/TASKS.md`: 3D in layouts and mockups;
+12. `docs/roadmap/v0.20.0/TASKS.md`: design interchange (SVG, PDF, PSD, Figma,
     Sketch);
-16. `docs/roadmap/v0.21.0/TASKS.md`: scripting and extension API;
-17. `docs/roadmap/v0.22.0/TASKS.md`: design systems, brand kits, templates;
-18. `docs/roadmap/v0.23.0/TASKS.md`: web and UX output;
-19. `docs/roadmap/v0.24.0/TASKS.md`: collaboration;
-20. `docs/roadmap/v0.25.0/TASKS.md`: self-hostable hosted service.
+13. `docs/roadmap/v0.21.0/TASKS.md`: scripting and extension API;
+14. `docs/roadmap/v0.22.0/TASKS.md`: design systems, brand kits, templates;
+15. `docs/roadmap/v0.23.0/TASKS.md`: web and UX output (static and responsive);
+16. `docs/roadmap/v0.24.0/TASKS.md`: collaboration, with human and agent
+    contribution stats;
+17. `docs/roadmap/v0.25.0/TASKS.md`: self-hostable hosted service.
+
+Product focus is vector, images, painting, layout and static 3D. Time-based
+media (keyframe animation, video, audio) is out of scope and has no roadmap;
+its former plans (v0.14.0, v0.15.0, v0.19.0) were removed. Do not add video or
+audio dependencies or timeline features without an explicit new decision.
 
 GPU work uses `wgpu` as an optional `gpu` Cargo feature. The deterministic CPU
 renderer stays normative; goldens and digests come only from the CPU path.

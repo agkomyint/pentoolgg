@@ -358,7 +358,7 @@ pentool preflight mag.pen --profile print --json
 - Scripting (ExtendScript, UXP) and plugins, and executable content in
   documents. Automation goes through the CLI and agent API.
 - Interactive and animated exports such as SWF and animated or HTML5
-  publishing. Motion stays with v0.14.0 and v0.15.0.
+  publishing. Time-based media (animation, video, audio) is out of scope for Pentool.
 - Vertical CJK layout (tategaki), ruby, warichu and the full Japanese
   composition rules (JIS X 4051). These need their own contract and may follow
   in a later release.
