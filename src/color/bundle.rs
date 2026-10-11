@@ -86,9 +86,12 @@ pub fn build(
         },
     ) {
         Ok(separations) => {
+            // Unique per call: packages of the same bytes may be built concurrently.
+            static STAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let staged = std::env::temp_dir().join(format!(
-                "pentool-plates-{}-{}",
+                "pentool-plates-{}-{}-{}",
                 std::process::id(),
+                STAGE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 digest(source).get(..12).unwrap_or("x")
             ));
             let _ = std::fs::remove_dir_all(&staged);

@@ -211,3 +211,28 @@ fn package_plates_follow_the_recipe_depth_and_trap_options() {
     assert_eq!(bundle::verify(&out).unwrap()["ok"], true);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Packages of identical bytes built at the same time must not share a staging
+/// directory (a hosted-CI Linux run lost a plate file to exactly that race).
+#[test]
+fn concurrent_packages_of_the_same_document_do_not_collide() {
+    let dir = temp("concurrent");
+    let document = dir.join("a.pen");
+    let raw = doc(&document);
+    let source = serde_json::to_vec(&raw).unwrap();
+    std::fs::write(&document, &source).unwrap();
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = (0..4)
+            .map(|index| {
+                let (raw, document, source) = (&raw, &document, &source);
+                let out = dir.join(format!("pkg-{index}"));
+                scope.spawn(move || {
+                    bundle::build(raw, document, source, None, &out, &options()).unwrap()
+                })
+            })
+            .collect();
+        for job in jobs {
+            assert_eq!(job.join().unwrap()["plates"]["status"], "written");
+        }
+    });
+}
