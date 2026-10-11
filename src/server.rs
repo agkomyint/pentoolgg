@@ -31,6 +31,9 @@ const IMAGE_PANEL_JS: &str = include_str!("../web/image-panel.js");
 const COMPOSITE_PANEL_JS: &str = include_str!("../web/composite-panel.js");
 const RASTER_PANEL_JS: &str = include_str!("../web/raster-panel.js");
 const PHOTO_PANEL_JS: &str = include_str!("../web/photo-panel.js");
+const PRINT_PANEL_JS: &str = include_str!("../web/print-panel.js");
+/// Built from `web-ui/` (`bun run build`); committed so cargo needs no Node or Bun.
+const STUDIO: &str = include_str!("../web/studio.html");
 
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool) -> Result<()> {
     if let Some(path) = &file {
@@ -41,7 +44,9 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .parse()
         .context("invalid host or port")?;
     let app = Router::new()
-        .route("/", get(|| async { Html(INDEX) }))
+        .route("/", get(|| async { Html(STUDIO) }))
+        .route("/studio", get(|| async { Html(STUDIO) }))
+        .route("/classic", get(|| async { Html(INDEX) }))
         .route(
             "/app.js",
             get(|| async { asset(APP_JS, "text/javascript; charset=utf-8") }),
@@ -61,6 +66,13 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
             "/composite-panel.js",
             get(|| async { asset(COMPOSITE_PANEL_JS, "text/javascript; charset=utf-8") }),
         )
+        .route(
+            "/print-panel.js",
+            get(|| async { asset(PRINT_PANEL_JS, "text/javascript; charset=utf-8") }),
+        )
+        .route("/api/color/preflight", get(color_preflight))
+        .route("/api/color/plates", get(color_plates))
+        .route("/api/color/proof", get(color_proof))
         .route(
             "/photo-panel.js",
             get(|| async { asset(PHOTO_PANEL_JS, "text/javascript; charset=utf-8") }),
@@ -494,6 +506,184 @@ async fn composite_analyze(
         Err(error) => problem(error.into()),
     }
 }
+#[derive(serde::Deserialize)]
+struct PreflightQuery {
+    page: Option<String>,
+    min_ppi: Option<f64>,
+    min_bleed_inches: Option<f64>,
+    max_total_ink: Option<f64>,
+}
+
+/// Read-only print preflight and resolved production geometry of the shared
+/// document; nothing is written.
+#[derive(serde::Deserialize)]
+struct PlateQuery {
+    page: Option<String>,
+    plate: Option<String>,
+    scale: Option<f32>,
+}
+
+/// Bounded working raster for print views: at most ~1M pixels unless a smaller
+/// scale is requested.
+fn print_view_scale(raw: &serde_json::Value, page: Option<&str>, requested: Option<f32>) -> f32 {
+    let pages = raw["pages"].as_array().cloned().unwrap_or_default();
+    let page = match page {
+        Some(id) => pages.iter().find(|p| p["id"] == id),
+        None => pages.first(),
+    };
+    let area = page.map_or(1.0, |p| {
+        p["canvas"]["width"].as_f64().unwrap_or(1.0).max(1.0)
+            * p["canvas"]["height"].as_f64().unwrap_or(1.0).max(1.0)
+    });
+    let bounded = (1_000_000.0 / area).sqrt().clamp(0.05, 1.0) as f32;
+    requested.map_or(bounded, |s| s.clamp(0.05, bounded))
+}
+
+fn shared_document(state: &Shared) -> Result<(std::path::PathBuf, serde_json::Value)> {
+    let file = state
+        .file
+        .clone()
+        .context("[not-found] no shared document")?;
+    let raw = serde_json::from_slice(&crate::resource::read_bounded(
+        &file,
+        crate::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
+    )?)?;
+    Ok((file, raw))
+}
+
+fn png_response(bytes: Vec<u8>) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+/// Read-only plate viewer: without `plate`, per-plate coverage; with `plate`, that
+/// plate as a grayscale PNG (white is no ink). Nothing is written.
+async fn color_plates(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PlateQuery>,
+) -> Response {
+    let result = (|| -> Result<Response> {
+        let (file, raw) = shared_document(&state)?;
+        let scale = print_view_scale(&raw, q.page.as_deref(), q.scale);
+        let separations = crate::color::separation::separate(
+            &raw,
+            &file,
+            q.page.as_deref(),
+            &crate::color::separation::Options {
+                destination: None,
+                intent: None,
+                scale,
+                auto_trap: None,
+            },
+        )?;
+        let pixels = (separations.width as usize * separations.height as usize).max(1);
+        match q.plate {
+            None => {
+                let plates: Vec<serde_json::Value> = separations
+                    .plates
+                    .iter()
+                    .map(|plate| {
+                        let sum: f64 = plate.samples.iter().sum();
+                        serde_json::json!({"plate":plate.id,"spot":plate.spot,
+                            "average_coverage_percent":sum / pixels as f64 * 100.0,
+                            "max_percent":plate.samples.iter().fold(0.0_f64, |a, b| a.max(*b)) * 100.0})
+                    })
+                    .collect();
+                Ok(Json(serde_json::json!({"width":separations.width,
+                    "height":separations.height,"scale":scale,"plates":plates}))
+                .into_response())
+            }
+            Some(id) => {
+                let plate = separations
+                    .plates
+                    .iter()
+                    .find(|plate| plate.id == id)
+                    .with_context(|| format!("[missing-resource] plate not found: {id}"))?;
+                let gray: Vec<u8> = plate
+                    .samples
+                    .iter()
+                    .map(|v| ((1.0 - v.clamp(0.0, 1.0)) * 255.0 + 0.5).floor() as u8)
+                    .collect();
+                let buffer =
+                    ::image::GrayImage::from_raw(separations.width, separations.height, gray)
+                        .context("[internal] plate buffer size")?;
+                let mut png = Vec::new();
+                buffer.write_to(
+                    &mut std::io::Cursor::new(&mut png),
+                    ::image::ImageFormat::Png,
+                )?;
+                Ok(png_response(png))
+            }
+        }
+    })();
+    result.unwrap_or_else(problem)
+}
+
+/// Read-only soft-proof image of the output role; nothing is written.
+async fn color_proof(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PlateQuery>,
+) -> Response {
+    let result = (|| -> Result<Response> {
+        let (file, raw) = shared_document(&state)?;
+        let proof = crate::color::proofimage::render(&raw, &file, q.page.as_deref())?;
+        Ok(png_response(proof.png))
+    })();
+    result.unwrap_or_else(problem)
+}
+
+async fn color_preflight(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PreflightQuery>,
+) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let raw: serde_json::Value = serde_json::from_slice(&crate::resource::read_bounded(
+            &file,
+            crate::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
+        )?)?;
+        let defaults = crate::color::preflight::Options::default();
+        let mut report = crate::color::preflight::run(
+            &raw,
+            &file,
+            q.page.as_deref(),
+            &crate::color::preflight::Options {
+                min_ppi: q.min_ppi.unwrap_or(defaults.min_ppi),
+                min_bleed_inches: q.min_bleed_inches.unwrap_or(defaults.min_bleed_inches),
+                bleed_scale: defaults.bleed_scale,
+                max_total_ink: q.max_total_ink,
+                allowed_spots: None,
+                k_only_text: false,
+                require_marks: false,
+                reject_spot_flattening: false,
+            },
+        )?;
+        let pages = raw["pages"].as_array().cloned().unwrap_or_default();
+        let page = match q.page.as_deref() {
+            Some(id) => pages.iter().find(|p| p["id"] == id),
+            None => pages.first(),
+        };
+        report["production"] = match page {
+            Some(page) => crate::color::production::resolve(page, false)?
+                .map_or(serde_json::Value::Null, |g| g.json()),
+            None => serde_json::Value::Null,
+        };
+        Ok(report)
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 async fn composite_dependencies(State(state): State<Shared>) -> Response {
     let Some(file) = state.file else {
         return (StatusCode::NOT_FOUND, "No shared document").into_response();

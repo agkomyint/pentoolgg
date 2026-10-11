@@ -147,9 +147,10 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
                 bail!("gradient overlay requires a gradient fill")
             }
         } else if kind != "blur" {
-            crate::fill::color(
+            crate::fill::validate_color(
                 p.get("color").unwrap_or(&json!("#000000")),
                 raw.get("styles").unwrap_or(&Value::Null),
+                raw["version"] == crate::color::VERSION,
             )?;
         }
     }
@@ -169,12 +170,21 @@ fn blurred(image: RgbaImage, radius: f64) -> Result<RgbaImage> {
         ],
     )
 }
-// Two-pass octagonal distance metric (orthogonal=1, diagonal=sqrt(2)), pinned v1.
 fn distance(shape: &RgbaImage, inside: bool) -> Vec<f64> {
-    let (w, h) = (shape.width() as usize, shape.height() as usize);
-    let mut out: Vec<f64> = shape
-        .pixels()
-        .map(|p| if (p[3] > 0) == inside { 0.0 } else { 1e12 })
+    let filled: Vec<bool> = shape.pixels().map(|p| p[3] > 0).collect();
+    distance_field(
+        &filled,
+        shape.width() as usize,
+        shape.height() as usize,
+        inside,
+    )
+}
+// Two-pass octagonal distance metric (orthogonal=1, diagonal=sqrt(2)), pinned v1.
+// Byte and float stroke effects share it; only their coverage threshold differs.
+pub(crate) fn distance_field(filled: &[bool], w: usize, h: usize, inside: bool) -> Vec<f64> {
+    let mut out: Vec<f64> = filled
+        .iter()
+        .map(|&filled| if filled == inside { 0.0 } else { 1e12 })
         .collect::<Vec<_>>();
     let diagonal = 2.0_f64.sqrt();
     for y in 0..h {
@@ -211,12 +221,17 @@ fn distance(shape: &RgbaImage, inside: bool) -> Vec<f64> {
     }
     out
 }
-pub(crate) fn apply(
+pub(crate) fn apply<'a>(
     raw: &Value,
     node: &Value,
     source: &RgbaImage,
     document: &Path,
     scale: f32,
+    profiles: &'a crate::color::value::ProfileSet,
+    engines: &mut Vec<(
+        crate::color::icc::Intent,
+        crate::color::value::Evaluator<'a>,
+    )>,
 ) -> Result<RgbaImage> {
     let mut result = source.clone();
     let content = num(node, "content_opacity", 1.0, 0.0, 1.0)?;
@@ -295,14 +310,18 @@ pub(crate) fn apply(
             let ox = node["effect_origin"][0].as_f64().unwrap_or(0.0);
             let oy = node["effect_origin"][1].as_f64().unwrap_or(0.0);
             let fill = json!({"kind":"fill","id":"effect-gradient","x":-ox,"y":-oy,"width":f64::from(source.width())/f64::from(scale)+ox,"height":f64::from(source.height())/f64::from(scale)+oy,"fill":p["fill"]});
+            let definition = crate::fill::resolved(raw, &fill["fill"])?;
+            let engine = crate::color::gradient::setting(raw, definition)?
+                .map(|(_, intent)| crate::color::gradient::engine(profiles, engines, intent))
+                .transpose()?;
             effect = crate::fill::render(
                 raw,
                 &fill,
                 document,
                 kurbo::Affine::IDENTITY,
-                source.width(),
-                source.height(),
+                (source.width(), source.height()),
                 scale,
+                engine,
             )?;
             for (pixel, base) in effect.pixels_mut().zip(source.pixels()) {
                 pixel[3] = byte(f64::from(pixel[3]) * f64::from(base[3]) / 255.0 * opacity);

@@ -1,0 +1,54 @@
+{
+  "format": "pentool",
+  "version": 8,
+  "name": "Professional color catalog fixture",
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page 1",
+      "canvas": {
+        "width": 64,
+        "height": 48,
+        "background": "#ffffff"
+      },
+      "layers": [
+        {
+          "id": "art",
+          "name": "Artwork",
+          "visible": true,
+          "locked": false,
+          "nodes": [
+            {
+              "kind": "rect",
+              "id": "color-card",
+              "x": 8,
+              "y": 8,
+              "width": 48,
+              "height": 32,
+              "style": {
+                "fill": {
+                  "fallback": "#2468ac"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "styles": {},
+  "components": [],
+  "fonts": [],
+  "image_assets": {},
+  "compositing": {
+    "engine": 1,
+    "color_space": "srgb8"
+  },
+  "color_management": {
+    "engine": 1,
+    "legacy_rgb": "srgb",
+    "working_space": "srgb:linear",
+    "profiles": {},
+    "aliases": {}
+  }
+}

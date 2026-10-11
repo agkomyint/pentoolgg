@@ -1,0 +1,193 @@
+{
+  "color_management": {
+    "aliases": {
+      "cmyk-probe": "sha256:b5cb828d774d21bfb537686496f9a43e46522fb97de9c98c43e19d38a9862a0f"
+    },
+    "engine": 1,
+    "legacy_rgb": "srgb",
+    "profiles": {
+      "sha256:b5cb828d774d21bfb537686496f9a43e46522fb97de9c98c43e19d38a9862a0f": {
+        "byte_length": 656,
+        "class": "scnr",
+        "color_space": "CMYK",
+        "connection_space": "Lab ",
+        "icc_version": "4.4.0",
+        "metadata": {
+          "copyright": {
+            "country": "US",
+            "language": "en",
+            "text": "Authored by Pentool; CC0-1.0"
+          },
+          "description": {
+            "country": "US",
+            "language": "en",
+            "text": "Pentool CMYK mAB numerical probe; not a press condition"
+          },
+          "manufacturer": null,
+          "model": null
+        },
+        "redistribution": "allowed",
+        "storage": {
+          "data": "AAACkAAAAAAEQAAAc2NuckNNWUtMYWIgB+oAAQABAAAAAAAAYWNzcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAPbWAAEAAAAA0y0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEZGVzYwAAALQAAACKY3BydAAAAUAAAABUd3RwdAAAAZQAAAAUQTJCMAAAAagAAADobWx1YwAAAAAAAAABAAAADGVuVVMAAABuAAAAHABQAGUAbgB0AG8AbwBsACAAQwBNAFkASwAgAG0AQQBCACAAbgB1AG0AZQByAGkAYwBhAGwAIABwAHIAbwBiAGUAOwAgAG4AbwB0ACAAYQAgAHAAcgBlAHMAcwAgAGMAbwBuAGQAaQB0AGkAbwBuAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAADgAAAAcAEEAdQB0AGgAbwByAGUAZAAgAGIAeQAgAFAAZQBuAHQAbwBvAGwAOwAgAEMAQwAwAC0AMQAuADBYWVogAAAAAAAA9tYAAQAAAADTLW1BQiAAAAAABAMAAAAAACAAAAAAAAAAAAAAAEQAAAC4Y3VydgAAAAAAAAAAY3VydgAAAAAAAAAAY3VydgAAAAAAAAAAAgICAgAAAAAAAAAAAAAAAAIAAAD//4CAgIC//4CAgIC//4CAwMCAAICAwMC//8DAYGCAAMDAYGCAAMDAoKBAAMDAoKC//0BAYGCAAEBAYGCAAEBAoKBAAEBAoKCAAICAQEBAAICAQEBAAICAgIAAAICAgIBjdXJ2AAAAAAAAAABjdXJ2AAAAAAAAAABjdXJ2AAAAAAAAAABjdXJ2AAAAAAAAAAA=",
+          "encoding": "base64",
+          "kind": "embedded"
+        }
+      }
+    },
+    "working_space": "srgb:linear"
+  },
+  "components": [],
+  "compositing": {
+    "color_space": "srgb8",
+    "engine": 1
+  },
+  "fonts": [],
+  "format": "pentool",
+  "image_assets": {},
+  "name": "Native interpolation probes; not a printing condition",
+  "pages": [
+    {
+      "canvas": {
+        "background": "#ffffff",
+        "height": 48,
+        "width": 64
+      },
+      "id": "page-1",
+      "layers": [
+        {
+          "id": "art",
+          "locked": false,
+          "name": "Artwork",
+          "nodes": [
+            {
+              "kind": "fill",
+              "id": "linear-rgb",
+              "x": 0,
+              "y": 0,
+              "width": 64,
+              "height": 16,
+              "fill": {
+                "kind": "linear",
+                "space": {
+                  "space": "srgb:linear"
+                },
+                "intent": "relative-colorimetric",
+                "stops": [
+                  {
+                    "position": 0,
+                    "color": {
+                      "space": "srgb",
+                      "channels": [
+                        0,
+                        0,
+                        0
+                      ]
+                    }
+                  },
+                  {
+                    "position": 1,
+                    "color": {
+                      "space": "srgb",
+                      "channels": [
+                        1,
+                        1,
+                        1
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "kind": "fill",
+              "id": "physical-lab",
+              "x": 0,
+              "y": 16,
+              "width": 64,
+              "height": 16,
+              "fill": {
+                "kind": "linear",
+                "space": {
+                  "space": "lab-d50"
+                },
+                "intent": "relative-colorimetric",
+                "stops": [
+                  {
+                    "position": 0,
+                    "color": {
+                      "space": "lab-d50",
+                      "channels": [
+                        0,
+                        0,
+                        0
+                      ]
+                    }
+                  },
+                  {
+                    "position": 1,
+                    "color": {
+                      "space": "lab-d50",
+                      "channels": [
+                        100,
+                        0,
+                        0
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "kind": "fill",
+              "id": "device-cmyk",
+              "x": 0,
+              "y": 32,
+              "width": 64,
+              "height": 16,
+              "fill": {
+                "kind": "linear",
+                "space": {
+                  "space": "icc-cmyk",
+                  "profile": "cmyk-probe"
+                },
+                "intent": "perceptual",
+                "stops": [
+                  {
+                    "position": 0,
+                    "color": {
+                      "space": "icc-cmyk",
+                      "channels": [
+                        1,
+                        1,
+                        1,
+                        1
+                      ],
+                      "profile": "cmyk-probe"
+                    }
+                  },
+                  {
+                    "position": 1,
+                    "color": {
+                      "space": "icc-cmyk",
+                      "channels": [
+                        0,
+                        0,
+                        0,
+                        0
+                      ],
+                      "profile": "cmyk-probe"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Page 1"
+    }
+  ],
+  "styles": {},
+  "version": 8
+}

@@ -70,7 +70,37 @@ pub(crate) fn color(value: &Value, styles: &Value) -> Result<[f64; 4]> {
     }
     resolve(value, styles, 0)
 }
-fn stops(fill: &Value, styles: &Value) -> Result<Vec<(f64, [f64; 4])>> {
+pub(crate) fn validate_color(value: &Value, styles: &Value, native: bool) -> Result<()> {
+    fn check(value: &Value, styles: &Value, native: bool, depth: usize) -> Result<()> {
+        if depth > 64 {
+            bail!("[invalid-fill] color token depth exceeded")
+        }
+        if native && value.get("space").is_some() {
+            crate::color::value::NativeColor::parse(value)?;
+            return Ok(());
+        }
+        if let Some(reference) = value.get("ref").and_then(Value::as_str) {
+            if let Some(token) = styles.get(reference).and_then(|v| v.get("value")) {
+                return check(token, styles, native, depth + 1);
+            }
+            return check(
+                value
+                    .get("fallback")
+                    .context("missing color token fallback")?,
+                styles,
+                native,
+                depth + 1,
+            );
+        }
+        if let Some(fallback) = value.get("fallback") {
+            return check(fallback, styles, native, depth + 1);
+        }
+        color(value, styles)?;
+        Ok(())
+    }
+    check(value, styles, native, 0)
+}
+fn stops(fill: &Value, styles: &Value, validation: Option<bool>) -> Result<Vec<(f64, [f64; 4])>> {
     let values = fill["stops"]
         .as_array()
         .filter(|a| (2..=64).contains(&a.len()))
@@ -81,7 +111,13 @@ fn stops(fill: &Value, styles: &Value) -> Result<Vec<(f64, [f64; 4])>> {
             .as_f64()
             .filter(|v| (0.0..=1.0).contains(v))
             .context("gradient position must be in 0..1")?;
-        out.push((position, color(&value["color"], styles)?));
+        let color = if let Some(native) = validation {
+            validate_color(&value["color"], styles, native)?;
+            [0.0; 4]
+        } else {
+            color(&value["color"], styles)?
+        };
+        out.push((position, color));
     }
     if out[0].0 != 0.0 || out.last().unwrap().0 != 1.0 || out.windows(2).any(|w| w[0].0 >= w[1].0) {
         bail!("gradient stops must increase strictly from 0 to 1")
@@ -146,6 +182,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             "x2",
             "y2",
             "space",
+            "intent",
             "spread",
             "transform",
         ],
@@ -156,6 +193,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             "cy",
             "radius",
             "space",
+            "intent",
             "spread",
             "transform",
         ],
@@ -166,6 +204,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             "cy",
             "angle",
             "space",
+            "intent",
             "spread",
             "transform",
         ],
@@ -182,7 +221,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
         _ => bail!("unknown fill kind {kind}"),
     };
     for key in fill.as_object().context("fill must be an object")?.keys() {
-        if !keys.contains(&key.as_str()) {
+        if !keys.contains(&key.as_str()) || (key == "intent" && !fill["space"].is_object()) {
             bail!("unknown fill parameter {key}")
         }
     }
@@ -192,7 +231,11 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
     }
     match kind {
         "solid" => {
-            color(&fill["color"], styles)?;
+            validate_color(
+                &fill["color"],
+                styles,
+                raw["version"] == crate::color::VERSION,
+            )?;
         }
         "pattern" => {
             let asset = fill["asset"].as_str().context("pattern asset missing")?;
@@ -217,11 +260,20 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             }
         }
         _ => {
-            stops(fill, styles)?;
-            if !matches!(
-                fill.get("space").and_then(Value::as_str).unwrap_or("srgb"),
-                "srgb" | "linear"
-            ) {
+            stops(fill, styles, Some(raw["version"] == crate::color::VERSION))?;
+            if raw["version"] == crate::color::VERSION
+                && fill
+                    .get("space")
+                    .is_some_and(|space| !space.is_string() && !space.is_object())
+            {
+                bail!("gradient space must be srgb, linear, or a native destination object")
+            }
+            if crate::color::gradient::setting(raw, fill)?.is_none()
+                && !matches!(
+                    fill.get("space").and_then(Value::as_str).unwrap_or("srgb"),
+                    "srgb" | "linear"
+                )
+            {
                 bail!("gradient space must be srgb or linear")
             }
             if !matches!(
@@ -311,8 +363,8 @@ fn atan2(y: f64, x: f64) -> f64 {
         angle
     }
 }
-fn gradient(stops: &[(f64, [f64; 4])], mut t: f64, spread: &str, space: &str) -> [f64; 4] {
-    t = match spread {
+pub(crate) fn spread_position(t: f64, spread: &str) -> f64 {
+    match spread {
         "repeat" => t.rem_euclid(1.0),
         "reflect" => {
             let v = t.rem_euclid(2.0);
@@ -323,7 +375,10 @@ fn gradient(stops: &[(f64, [f64; 4])], mut t: f64, spread: &str, space: &str) ->
             }
         }
         _ => t.clamp(0.0, 1.0),
-    };
+    }
+}
+fn gradient(stops: &[(f64, [f64; 4])], t: f64, spread: &str, space: &str) -> [f64; 4] {
+    let t = spread_position(t, spread);
     for pair in stops.windows(2) {
         if t <= pair[1].0 {
             let f = (t - pair[0].0) / (pair[1].0 - pair[0].0);
@@ -349,15 +404,163 @@ fn gradient(stops: &[(f64, [f64; 4])], mut t: f64, spread: &str, space: &str) ->
     }
     stops.last().unwrap().1
 }
+/// Settings for uncomposited fill coverage in explicit working RGB. Node opacity,
+/// masks, effects and sibling blending belong to the shared scene compositor.
+pub struct LinearFillOptions {
+    pub dimensions: (u32, u32),
+    pub scale: f32,
+    pub working: crate::color::value::Destination,
+}
+
+pub struct LinearFillResult {
+    pub surface: crate::blend::LinearSurface,
+    /// Includes native endpoint conversions, selected ICC paths and conversion
+    /// into a legacy gradient's explicitly bounded sRGB interpolation domain.
+    pub conversion_clipped: bool,
+}
+
+struct FillTarget<'a> {
+    dimensions: (u32, u32),
+    scale: f32,
+    working: Option<&'a crate::color::value::Destination>,
+}
+enum FillOutput {
+    Preview(RgbaImage),
+    Working(LinearFillResult),
+}
+impl FillOutput {
+    fn new(target: &FillTarget<'_>) -> Result<Self> {
+        let (w, h) = target.dimensions;
+        if w == 0
+            || h == 0
+            || w > 16384
+            || h > 16384
+            || !(1.0 / 16384.0..=8.0).contains(&target.scale)
+        {
+            bail!("[invalid-fill] dimensions must be in 1..=16384 and scale in 1/16384..=8")
+        }
+        if let Some(working) = target.working {
+            if !working.is_linear_rgb() {
+                bail!("[unsupported-capability] working fill requires named linear RGB")
+            }
+            Ok(Self::Working(LinearFillResult {
+                surface: crate::blend::LinearSurface::new(w, h, working.space())?,
+                conversion_clipped: false,
+            }))
+        } else {
+            if u64::from(w) * u64::from(h) * 4 > crate::composite::MAX_TEMP_BYTES {
+                bail!("[limit-exceeded] fill surface exceeds temporary memory budget")
+            }
+            Ok(Self::Preview(RgbaImage::new(w, h)))
+        }
+    }
+    fn clipped(&mut self, clipped: bool) {
+        if let Self::Working(result) = self {
+            result.conversion_clipped |= clipped;
+        }
+    }
+    fn write(&mut self, x: u32, y: u32, rgba: [f64; 4]) -> Result<()> {
+        match self {
+            Self::Preview(image) => {
+                let pixel = std::array::from_fn(|i| {
+                    (rgba[i] * 255.0 + 0.5).floor().clamp(0.0, 255.0) as u8
+                });
+                *image.get_pixel_mut(x, y) = Rgba(pixel);
+                Ok(())
+            }
+            Self::Working(result) => result.surface.write_pixel(
+                y as usize * result.surface.dimensions().0 as usize + x as usize,
+                rgba,
+            ),
+        }
+    }
+}
+
+/// Render a fill's coverage into a bounded float surface using a caller-owned
+/// verified color context. Its intent must match an explicit native gradient.
+/// Source document, bindings and channel declarations are never changed.
+pub fn render_linear(
+    raw: &Value,
+    node: &Value,
+    document: &Path,
+    parent: kurbo::Affine,
+    options: &LinearFillOptions,
+    engine: &mut crate::color::value::Evaluator<'_>,
+) -> Result<LinearFillResult> {
+    crate::scene::validate(raw)?;
+    render_linear_prepared(raw, node, document, parent, options, engine)
+}
+
+/// Scene renderers validate once before walking their nodes and reuse the same
+/// verified profile snapshot. Keep fill-local validation in the shared loop.
+pub(crate) fn render_linear_prepared(
+    raw: &Value,
+    node: &Value,
+    document: &Path,
+    parent: kurbo::Affine,
+    options: &LinearFillOptions,
+    engine: &mut crate::color::value::Evaluator<'_>,
+) -> Result<LinearFillResult> {
+    if raw["version"] != crate::color::VERSION {
+        bail!("[unsupported-capability] working fill rendering requires an explicitly migrated v8 document")
+    }
+    if node["kind"] != "fill" {
+        bail!("[invalid-fill] working fill rendering requires a fill node")
+    }
+    match render_target(
+        raw,
+        node,
+        document,
+        parent,
+        FillTarget {
+            dimensions: options.dimensions,
+            scale: options.scale,
+            working: Some(&options.working),
+        },
+        Some(engine),
+    )? {
+        FillOutput::Working(result) => Ok(result),
+        FillOutput::Preview(_) => unreachable!("working fill target"),
+    }
+}
+
 pub(crate) fn render(
     raw: &Value,
     node: &Value,
     document: &Path,
     parent: kurbo::Affine,
-    width: u32,
-    height: u32,
+    dimensions: (u32, u32),
     scale: f32,
+    engine: Option<&mut crate::color::value::Evaluator<'_>>,
 ) -> Result<RgbaImage> {
+    match render_target(
+        raw,
+        node,
+        document,
+        parent,
+        FillTarget {
+            dimensions,
+            scale,
+            working: None,
+        },
+        engine,
+    )? {
+        FillOutput::Preview(image) => Ok(image),
+        FillOutput::Working(_) => unreachable!("preview fill target"),
+    }
+}
+
+fn render_target(
+    raw: &Value,
+    node: &Value,
+    document: &Path,
+    parent: kurbo::Affine,
+    target: FillTarget<'_>,
+    mut engine: Option<&mut crate::color::value::Evaluator<'_>>,
+) -> Result<FillOutput> {
+    let dimensions = target.dimensions;
+    let scale = target.scale;
+    let (width, height) = dimensions;
     validate(raw, node)?;
     let fill = resolved(raw, &node["fill"])?;
     let styles = raw.get("styles").unwrap_or(&Value::Null);
@@ -369,18 +572,85 @@ pub(crate) fn render(
         n(node, "height", 0.0)?,
     );
     let world = parent * crate::composite::transform(node)?;
+    if world.as_coeffs().iter().any(|v| !v.is_finite()) || !world.determinant().is_finite() {
+        bail!(
+            "[invalid-fill] accumulated fill transform overflow; reduce transform scale or nesting"
+        )
+    }
+    let mut out = FillOutput::new(&target)?;
     if world.determinant().abs() < 1e-12 {
-        return Ok(RgbaImage::new(width, height));
+        return Ok(out);
     }
     let inv = world.inverse();
     let fill_inv = crate::composite::transform(fill)?.inverse();
-    let stops = if matches!(kind, "linear" | "radial" | "conic") {
-        Some(stops(fill, styles)?)
+    let native = crate::color::gradient::setting(raw, fill)?;
+    if let (Some(_), Some((_, intent))) = (target.working, native.as_ref()) {
+        if engine
+            .as_deref()
+            .context("working fill color context missing")?
+            .intent()
+            != *intent
+        {
+            bail!("[invalid-fill] working color context intent differs from the native gradient intent")
+        }
+    }
+    let sources = native
+        .as_ref()
+        .map(|_| crate::color::gradient::sources(fill, styles))
+        .transpose()?;
+    let mut native_gradient = sources
+        .map(|sources| {
+            crate::color::gradient::Gradient::prepare(
+                sources,
+                &native.as_ref().unwrap().0,
+                engine
+                    .as_deref_mut()
+                    .context("native gradient color context missing")?,
+                target.working,
+            )
+        })
+        .transpose()?;
+    if let Some(native) = &native_gradient {
+        out.clipped(native.conversion_clipped());
+    }
+    let stops = if native.is_none() && matches!(kind, "linear" | "radial" | "conic") {
+        if target.working.is_some() {
+            let destination = crate::color::value::Destination::parse(&json!({"space":"srgb"}))?;
+            let context = engine
+                .as_deref_mut()
+                .context("working fill color context missing")?;
+            Some(
+                crate::color::gradient::sources(fill, styles)?
+                    .into_iter()
+                    .map(|(position, color)| {
+                        let evaluated = context.convert(&color, &destination)?;
+                        out.clipped(evaluated.clipped);
+                        let c = evaluated.color;
+                        Ok((
+                            position,
+                            [c.channels()[0], c.channels()[1], c.channels()[2], c.alpha()],
+                        ))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            )
+        } else {
+            Some(stops(fill, styles, None)?)
+        }
     } else {
         None
     };
     let solid = if kind == "solid" {
-        Some(color(&fill["color"], styles)?)
+        if let Some(working) = target.working {
+            let color = crate::color::gradient::color(&fill["color"], styles, 0)?;
+            let (rgba, clipped) = engine
+                .as_deref_mut()
+                .context("working fill color context missing")?
+                .working_rgba(&color, working)?;
+            out.clipped(clipped);
+            Some(rgba)
+        } else {
+            Some(color(&fill["color"], styles)?)
+        }
     } else {
         None
     };
@@ -397,88 +667,122 @@ pub(crate) fn render(
     let (node_w, node_h) = (bounds.2, bounds.3);
     let get = |key, default| n(fill, key, default).unwrap();
     let geo = |key: &str| n(fill, key, geometry_default(kind, key, node_w, node_h)).unwrap();
-    let mut out = RgbaImage::new(width, height);
-    for (x, y, pixel) in out.enumerate_pixels_mut() {
-        if x == 0 {
-            crate::composite::check_cancelled()?;
-        }
-        let mut sum = [0.0; 4];
-        for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
-            let p = inv
-                * kurbo::Point::new(
-                    (f64::from(x) + sx) / f64::from(scale),
-                    (f64::from(y) + sy) / f64::from(scale),
-                );
-            if p.x < bounds.0
-                || p.y < bounds.1
-                || p.x >= bounds.0 + bounds.2
-                || p.y >= bounds.1 + bounds.3
-            {
-                continue;
-            }
-            let p = fill_inv * kurbo::Point::new(p.x - bounds.0, p.y - bounds.1);
-            let c = if let Some(solid) = solid {
-                solid
-            } else if let Some(pattern) = &pattern {
-                let px = (p.x - get("origin_x", 0.0)) / get("scale_x", 1.0);
-                let py = (p.y - get("origin_y", 0.0)) / get("scale_y", 1.0);
-                let repeat = fill["repeat"].as_str().unwrap_or("repeat");
-                if ((!matches!(repeat, "repeat" | "repeat-x"))
-                    && (px < 0.0 || px >= f64::from(pattern.width())))
-                    || ((!matches!(repeat, "repeat" | "repeat-y"))
-                        && (py < 0.0 || py >= f64::from(pattern.height())))
+    for y in 0..height {
+        crate::composite::check_cancelled()?;
+        for x in 0..width {
+            let mut sum = [0.0; 4];
+            for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                let p = inv
+                    * kurbo::Point::new(
+                        (f64::from(x) + sx) / f64::from(scale),
+                        (f64::from(y) + sy) / f64::from(scale),
+                    );
+                if p.x < bounds.0
+                    || p.y < bounds.1
+                    || p.x >= bounds.0 + bounds.2
+                    || p.y >= bounds.1 + bounds.3
                 {
                     continue;
                 }
-                let pixel = pattern.get_pixel(
-                    px.rem_euclid(f64::from(pattern.width())).floor() as u32,
-                    py.rem_euclid(f64::from(pattern.height())).floor() as u32,
-                );
-                [
-                    f64::from(pixel[0]) / 255.0,
-                    f64::from(pixel[1]) / 255.0,
-                    f64::from(pixel[2]) / 255.0,
-                    f64::from(pixel[3]) / 255.0,
-                ]
-            } else {
-                let t = match kind {
-                    "linear" => {
-                        let (dx, dy) = (geo("x2") - geo("x1"), geo("y2") - geo("y1"));
-                        ((p.x - geo("x1")) * dx + (p.y - geo("y1")) * dy) / (dx * dx + dy * dy)
+                let p = fill_inv * kurbo::Point::new(p.x - bounds.0, p.y - bounds.1);
+                let c = if let Some(solid) = solid {
+                    solid
+                } else if let Some(pattern) = &pattern {
+                    let px = (p.x - get("origin_x", 0.0)) / get("scale_x", 1.0);
+                    let py = (p.y - get("origin_y", 0.0)) / get("scale_y", 1.0);
+                    let repeat = fill["repeat"].as_str().unwrap_or("repeat");
+                    if ((!matches!(repeat, "repeat" | "repeat-x"))
+                        && (px < 0.0 || px >= f64::from(pattern.width())))
+                        || ((!matches!(repeat, "repeat" | "repeat-y"))
+                            && (py < 0.0 || py >= f64::from(pattern.height())))
+                    {
+                        continue;
                     }
-                    "radial" => {
-                        let (dx, dy) = (p.x - geo("cx"), p.y - geo("cy"));
-                        (dx * dx + dy * dy).sqrt() / geo("radius")
+                    let pixel = pattern.get_pixel(
+                        px.rem_euclid(f64::from(pattern.width())).floor() as u32,
+                        py.rem_euclid(f64::from(pattern.height())).floor() as u32,
+                    );
+                    // Pattern assets are sRGB8 rasters, interpreted like images.
+                    let rgba = [
+                        f64::from(pixel[0]) / 255.0,
+                        f64::from(pixel[1]) / 255.0,
+                        f64::from(pixel[2]) / 255.0,
+                        f64::from(pixel[3]) / 255.0,
+                    ];
+                    if let Some(working) = target.working {
+                        engine
+                            .as_deref_mut()
+                            .context("working fill color context missing")?
+                            .srgb_working_rgba(rgba, working)?
+                    } else {
+                        rgba
                     }
-                    _ => {
-                        (atan2(p.y - geo("cy"), p.x - geo("cx"))
-                            - get("angle", 0.0) * std::f64::consts::PI / 180.0)
-                            .rem_euclid(std::f64::consts::TAU)
-                            / std::f64::consts::TAU
+                } else {
+                    let t = match kind {
+                        "linear" => {
+                            let (dx, dy) = (geo("x2") - geo("x1"), geo("y2") - geo("y1"));
+                            ((p.x - geo("x1")) * dx + (p.y - geo("y1")) * dy) / (dx * dx + dy * dy)
+                        }
+                        "radial" => {
+                            let (dx, dy) = (p.x - geo("cx"), p.y - geo("cy"));
+                            (dx * dx + dy * dy).sqrt() / geo("radius")
+                        }
+                        _ => {
+                            (atan2(p.y - geo("cy"), p.x - geo("cx"))
+                                - get("angle", 0.0) * std::f64::consts::PI / 180.0)
+                                .rem_euclid(std::f64::consts::TAU)
+                                / std::f64::consts::TAU
+                        }
+                    };
+                    if let Some(native) = &mut native_gradient {
+                        if let Some(working) = target.working {
+                            let (rgba, clipped) = native.sample_working(
+                                engine.as_deref_mut().unwrap(),
+                                working,
+                                t,
+                                fill["spread"].as_str().unwrap_or("pad"),
+                            )?;
+                            out.clipped(clipped);
+                            rgba
+                        } else {
+                            native.sample(
+                                engine.as_deref_mut().unwrap(),
+                                t,
+                                fill["spread"].as_str().unwrap_or("pad"),
+                            )?
+                        }
+                    } else {
+                        let rgba = gradient(
+                            stops.as_ref().unwrap(),
+                            t,
+                            fill["spread"].as_str().unwrap_or("pad"),
+                            fill["space"].as_str().unwrap_or("srgb"),
+                        );
+                        if let Some(working) = target.working {
+                            engine
+                                .as_deref_mut()
+                                .context("working fill color context missing")?
+                                .srgb_working_rgba(rgba, working)?
+                        } else {
+                            rgba
+                        }
                     }
                 };
-                gradient(
-                    stops.as_ref().unwrap(),
-                    t,
-                    fill["spread"].as_str().unwrap_or("pad"),
-                    fill["space"].as_str().unwrap_or("srgb"),
-                )
-            };
-            for i in 0..3 {
-                sum[i] += c[i] * c[3] * 0.25;
+                for i in 0..3 {
+                    sum[i] += c[i] * c[3] * 0.25;
+                }
+                sum[3] += c[3] * 0.25;
             }
-            sum[3] += c[3] * 0.25;
+            if sum[3] == 0.0 {
+                continue;
+            }
+            let mut rgba = [0.0; 4];
+            for i in 0..3 {
+                rgba[i] = sum[i] / sum[3];
+            }
+            rgba[3] = sum[3];
+            out.write(x, y, rgba)?;
         }
-        if sum[3] == 0.0 {
-            *pixel = Rgba([0, 0, 0, 0]);
-            continue;
-        }
-        let mut rgb = [0; 4];
-        for i in 0..3 {
-            rgb[i] = (sum[i] / sum[3] * 255.0 + 0.5).floor().clamp(0.0, 255.0) as u8;
-        }
-        rgb[3] = (sum[3] * 255.0 + 0.5).floor().clamp(0.0, 255.0) as u8;
-        *pixel = Rgba(rgb);
     }
     Ok(out)
 }
@@ -535,4 +839,62 @@ pub fn edit(
     crate::scene::validate(&candidate)?;
     *raw = candidate;
     Ok(result)
+}
+
+#[cfg(test)]
+mod linear_fill_tests {
+    use super::*;
+    use crate::color::{
+        icc::Intent,
+        value::{Destination, Evaluator, ProfileSet},
+    };
+
+    #[test]
+    fn cancellation_at_each_working_fill_row_discards_private_output() {
+        let mut raw: Value =
+            serde_json::from_slice(include_bytes!("../docs/fixtures/print-v8.pen")).unwrap();
+        raw["pages"][0]["canvas"] = json!({"width":1,"height":3,"background":"#00000000"});
+        raw["pages"][0]["layers"][0]["nodes"] = json!([{"kind":"fill","id":"paint","x":0,"y":0,"width":1,"height":3,
+            "fill":{"kind":"solid","color":{"space":"srgb:linear","channels":[0.2,0.4,0.6],"alpha":0.123456789}}}]);
+        let before = raw.clone();
+        let document = Path::new("target/cancel-working-fill.pen");
+        let set = ProfileSet::load(&raw, document, std::iter::empty()).unwrap();
+        let mut engine = Evaluator::new(&set, Intent::RelativeColorimetric).unwrap();
+        let options = LinearFillOptions {
+            dimensions: (1, 3),
+            scale: 1.0,
+            working: Destination::parse(&json!({"space":"srgb:linear"})).unwrap(),
+        };
+        let node = &raw["pages"][0]["layers"][0]["nodes"][0];
+        for checkpoint in 1..=3 {
+            let (result, reached) = crate::composite::cancel_at_check(checkpoint, || {
+                render_linear(
+                    &raw,
+                    node,
+                    document,
+                    kurbo::Affine::IDENTITY,
+                    &options,
+                    &mut engine,
+                )
+            });
+            assert!(reached);
+            assert!(result.err().unwrap().to_string().contains("[cancelled]"));
+            assert_eq!(raw, before);
+        }
+        let complete = render_linear(
+            &raw,
+            node,
+            document,
+            kurbo::Affine::IDENTITY,
+            &options,
+            &mut engine,
+        )
+        .unwrap();
+        for pixel in complete.surface.pixels() {
+            for (actual, expected) in pixel.iter().zip([0.2, 0.4, 0.6, 0.123456789]) {
+                assert!((actual - expected).abs() < 1e-15);
+            }
+        }
+        assert_eq!(raw, before);
+    }
 }

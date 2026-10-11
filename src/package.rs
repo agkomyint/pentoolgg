@@ -46,6 +46,12 @@ pub struct PackageAsset {
     /// Image blobs the asset document carries, with consumers, for audit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<Value>,
+    /// Verified, redistributable ICC dependencies embedded in the asset document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub icc_profiles: Vec<Value>,
+    /// Validated offline spot ink definitions declared by the asset document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spot_inks: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +88,7 @@ fn validate_manifest(m: &PackageManifest) -> Result<()> {
     for (id, a) in &m.assets {
         asset::validate_id(id)?;
         safe_relative(Path::new(&a.path))?;
+        crate::color::spot::validate_package_table(&a.spot_inks)?;
         if let Some(p) = &a.preview {
             safe_relative(Path::new(p))?;
         }
@@ -131,26 +138,37 @@ pub fn init(dir: &Path, name: &str) -> Result<Value> {
 
 pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
     let mut m = read_manifest(dir)?;
+    let package_root = dir.canonicalize()?;
     let mut seen = HashSet::new();
     let mut privacy = Vec::new();
+    let mut snapshots: BTreeMap<String, (String, Vec<u8>)> = BTreeMap::new();
     // Discover metadata-bearing assets and make the manifest's asset table canonical.
     for e in WalkDir::new(dir.join("assets"))
         .follow_links(false)
         .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| {
-            e.file_type().is_file() && e.path().extension().and_then(|s| s.to_str()) == Some("pen")
+        .filter_entry(|entry| {
+            !entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(".pentool")
         })
     {
-        let bytes = fs::read(e.path())?;
+        let e = e.context("discover package assets")?;
+        if !e.file_type().is_file() || e.path().extension().and_then(|s| s.to_str()) != Some("pen")
+        {
+            continue;
+        }
+        let rel = slash(e.path().strip_prefix(dir).unwrap());
+        let bytes = read_package_payload(&package_root, &rel)?;
         let raw: Value = serde_json::from_slice(&bytes)?;
         let am = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
         asset::validate_properties(&raw)?;
         let images = check_asset_document(&raw)?;
+        let icc_profiles = crate::color::catalog::package_table_validated(&raw)?;
+        let spot_inks = crate::color::spot::package_table(&raw)?;
         if !seen.insert(am.id.clone()) {
             bail!("duplicate asset ID {}", am.id)
         }
-        let rel = slash(e.path().strip_prefix(dir).unwrap());
         if raw.get("photography").is_some() {
             let report = crate::photo::metadata::privacy_report(&raw, e.path())?;
             for source in report["private"].as_array().into_iter().flatten() {
@@ -168,29 +186,71 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
             }
         }
         m.assets.insert(
-            am.id,
+            am.id.clone(),
             PackageAsset {
-                path: rel,
+                path: rel.clone(),
                 hash: asset::hash_bytes(&bytes),
                 preview: None,
                 images,
+                icc_profiles,
+                spot_inks,
             },
         );
+        snapshots.insert(rel, (am.id, bytes));
     }
     if m.assets.is_empty() {
         bail!("package contains no assets")
     }
+    // Manifest-only entries must pass the same checks as discovered assets.
+    // Capture their bytes once: re-reading after validation would let a changed
+    // source bypass its recorded hash, dependency and redistribution checks.
+    for (id, entry) in &mut m.assets {
+        if let Some((actual, _)) = snapshots.get(&entry.path) {
+            if actual != id {
+                bail!("asset ID mismatch: {id}")
+            }
+            continue;
+        }
+        let bytes = read_package_payload(&package_root, &entry.path)?;
+        let raw: Value = serde_json::from_slice(&bytes)?;
+        let metadata = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
+        if metadata.id != *id {
+            bail!("asset ID mismatch: {id}")
+        }
+        asset::validate_properties(&raw)?;
+        entry.images = check_asset_document(&raw)?;
+        entry.icc_profiles = crate::color::catalog::package_table_validated(&raw)?;
+        entry.spot_inks = crate::color::spot::package_table(&raw)?;
+        entry.hash = asset::hash_bytes(&bytes);
+        snapshots.insert(entry.path.clone(), (id.clone(), bytes));
+    }
     let manifest_bytes = canonical_json(&serde_json::to_value(&m)?)?;
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut reserved: HashSet<String> = m.assets.values().map(|entry| entry.path.clone()).collect();
+    reserved.extend(["pentool.package.json".into(), "LICENSE".into()]);
     files.insert("pentool.package.json".into(), manifest_bytes);
     for a in m.assets.values() {
-        files.insert(a.path.clone(), fs::read(dir.join(native(&a.path)))?);
+        files.insert(
+            a.path.clone(),
+            snapshots
+                .remove(&a.path)
+                .context("validated package asset snapshot missing")?
+                .1,
+        );
         if let Some(p) = &a.preview {
-            files.insert(p.clone(), fs::read(dir.join(native(p)))?);
+            if reserved.contains(p) {
+                bail!("[invalid-input] package preview {p} collides with a manifest, asset or license path")
+            }
+            if !files.contains_key(p) {
+                files.insert(p.clone(), read_package_payload(&package_root, p)?);
+            }
         }
     }
     if dir.join("LICENSE").is_file() {
-        files.insert("LICENSE".into(), fs::read(dir.join("LICENSE"))?);
+        files.insert(
+            "LICENSE".into(),
+            read_package_payload(&package_root, "LICENSE")?,
+        );
     }
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
@@ -217,6 +277,23 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         report["privacy"] = json!(privacy);
     }
     Ok(report)
+}
+
+fn read_package_payload(root: &Path, relative: &str) -> Result<Vec<u8>> {
+    safe_relative(Path::new(relative))?;
+    if Path::new(relative).components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(".pentool")
+    }) {
+        bail!("[private-resource] package file {relative} references private history/cache; collect the current document instead")
+    }
+    let path = root.join(native(relative)).canonicalize()?;
+    if !path.starts_with(root) {
+        bail!("[unsafe-path] package file {relative} escapes its root")
+    }
+    crate::resource::read_bounded(&path, crate::resource::MAX_RESOURCE_BYTES)
 }
 
 /// Validate a packaged asset document with the shared format validators and
@@ -318,6 +395,12 @@ pub fn verify(path: &Path) -> Result<Value> {
         }
         if check_asset_document(&raw)? != a.images {
             bail!("asset image table does not match its document: {id}")
+        }
+        if crate::color::catalog::package_table_validated(&raw)? != a.icc_profiles {
+            bail!("asset ICC profile table does not match its document: {id}")
+        }
+        if crate::color::spot::package_table(&raw)? != a.spot_inks {
+            bail!("asset spot ink table does not match its document: {id}")
         }
     }
     Ok(

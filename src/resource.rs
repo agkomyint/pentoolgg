@@ -1,9 +1,42 @@
 //! Offline, content-addressed resource primitives shared by packages and future nodes.
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const MAX_RESOURCE_BYTES: usize = 512 * 1024 * 1024;
+
+/// Bound the actual read as well as the initial size check (files can grow).
+pub fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>> {
+    if maximum == 0 || maximum > MAX_RESOURCE_BYTES {
+        bail!("[invalid-input] resource byte limit must be 1..={MAX_RESOURCE_BYTES}")
+    }
+    let file =
+        std::fs::File::open(path).with_context(|| format!("open resource {}", path.display()))?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        bail!(
+            "[invalid-input] resource {} must be a regular file",
+            path.display()
+        )
+    }
+    if metadata.len() > maximum as u64 {
+        bail!(
+            "[limit-exceeded] resource {} exceeds {maximum} bytes",
+            path.display()
+        )
+    }
+    let mut bytes = Vec::new();
+    file.take((maximum + 1) as u64).read_to_end(&mut bytes)?;
+    if bytes.len() > maximum {
+        bail!(
+            "[limit-exceeded] resource {} exceeds {maximum} bytes",
+            path.display()
+        )
+    }
+    Ok(bytes)
+}
 
 pub fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
@@ -69,14 +102,60 @@ pub fn cache_store(root: &Path, bytes: &[u8]) -> Result<PathBuf> {
     let digest = sha256(bytes);
     verify(bytes, &digest)?;
     let entry = cache_entry(root, &digest)?;
-    if entry.is_file() && cache_read(root, &digest).is_ok() {
+    if cache_read(root, &digest)?.is_some() {
         return Ok(entry);
     }
-    std::fs::create_dir_all(cache_dir(root))?;
-    let temp = entry.with_extension(format!("tmp-{}", std::process::id()));
-    std::fs::write(&temp, bytes)?;
+    std::fs::create_dir_all(root)?;
+    let canonical_root = root.canonicalize()?;
+    let mut parent = root.to_path_buf();
+    for segment in [".pentool", "cache", "sha256"] {
+        parent.push(segment);
+        if !parent.exists() {
+            match std::fs::create_dir(&parent) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error).context("create contained cache directory"),
+            }
+        }
+        if !parent.canonicalize()?.starts_with(&canonical_root) {
+            bail!("[unsafe-path] cache directory resolves outside its document root")
+        }
+    }
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let mut temporary = None;
+    for _ in 0..16 {
+        let temp = entry.with_extension(format!(
+            "tmp-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+        {
+            Ok(file) => {
+                temporary = Some((temp, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error).context("create private cache temporary"),
+        }
+    }
+    let (temp, mut file) = temporary.context(
+        "[limit-exceeded] could not allocate a private cache temporary after 16 attempts",
+    )?;
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        let _ = std::fs::remove_file(&temp);
+        return Err(error).context("write private cache temporary");
+    }
+    drop(file);
     if let Err(error) = std::fs::rename(&temp, &entry) {
         let _ = std::fs::remove_file(&temp);
+        if cache_read(root, &digest)?.is_some() {
+            return Ok(entry);
+        }
         return Err(error).context("failed to publish cache entry");
     }
     Ok(entry)
@@ -85,8 +164,21 @@ pub fn cache_store(root: &Path, bytes: &[u8]) -> Result<PathBuf> {
 /// Read a cache entry. A missing entry is `None`; a corrupt entry is a hard
 /// `[hash-mismatch]` failure and is never treated as a miss.
 pub fn cache_read(root: &Path, digest: &str) -> Result<Option<Vec<u8>>> {
+    cache_read_limited(root, digest, MAX_RESOURCE_BYTES)
+}
+
+pub fn cache_read_limited(root: &Path, digest: &str, maximum: usize) -> Result<Option<Vec<u8>>> {
     let entry = cache_entry(root, digest)?;
-    match std::fs::read(&entry) {
+    let resolved = if std::fs::symlink_metadata(&entry).is_ok() {
+        let resolved = entry.canonicalize()?;
+        if !resolved.starts_with(root.canonicalize()?) {
+            bail!("[unsafe-path] cached resource resolves outside its document root")
+        }
+        resolved
+    } else {
+        entry.clone()
+    };
+    match read_bounded(&resolved, maximum) {
         Ok(bytes) => {
             verify(&bytes, digest).with_context(|| {
                 format!(
@@ -96,16 +188,31 @@ pub fn cache_read(root: &Path, digest: &str) -> Result<Option<Vec<u8>>> {
             })?;
             Ok(Some(bytes))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(error).with_context(|| format!("[missing-resource] {}", entry.display())),
     }
 }
 
 pub fn read_external_offline(document: &Path, relative: &Path, expected: &str) -> Result<Vec<u8>> {
+    read_external_offline_limited(document, relative, expected, MAX_RESOURCE_BYTES)
+}
+
+pub fn read_external_offline_limited(
+    document: &Path,
+    relative: &Path,
+    expected: &str,
+    maximum: usize,
+) -> Result<Vec<u8>> {
     let relative = safe_relative_path(relative)?;
     let root = document_root(document);
     if !root.join(&relative).exists() {
-        if let Some(bytes) = cache_read(root, expected)? {
+        if let Some(bytes) = cache_read_limited(root, expected, maximum)? {
             return Ok(bytes);
         }
     }
@@ -119,13 +226,7 @@ pub fn read_external_offline(document: &Path, relative: &Path, expected: &str) -
     if !canonical_path.starts_with(&canonical_root) {
         bail!("[unsafe-path] external resource resolves outside its document root")
     }
-    let metadata = std::fs::metadata(&canonical_path)
-        .with_context(|| format!("[missing-resource] {}", canonical_path.display()))?;
-    if metadata.len() > MAX_RESOURCE_BYTES as u64 {
-        bail!("[limit-exceeded] resource exceeds the 512 MiB encoded-byte limit")
-    }
-    let bytes = std::fs::read(&canonical_path)
-        .with_context(|| format!("[missing-resource] {}", canonical_path.display()))?;
+    let bytes = read_bounded(&canonical_path, maximum)?;
     verify(&bytes, expected)?;
     Ok(bytes)
 }

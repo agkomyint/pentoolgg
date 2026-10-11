@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
-pub const LATEST_VERSION: u64 = crate::photo::VERSION;
+pub const LATEST_VERSION: u64 = crate::color::VERSION;
 pub const MAX_DEPTH: usize = 64;
 
 pub fn is_scene_document(raw: &Value) -> bool {
@@ -16,6 +16,7 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::image::VERSION)
             | Some(crate::composite::VERSION)
             | Some(crate::photo::VERSION)
+            | Some(crate::color::VERSION)
     )
 }
 
@@ -2697,7 +2698,11 @@ pub fn validate(raw: &Value) -> Result<()> {
     if raw.get("format").and_then(Value::as_str) != Some("pentool")
         || !matches!(
             version,
-            VERSION | crate::image::VERSION | crate::composite::VERSION | crate::photo::VERSION
+            VERSION
+                | crate::image::VERSION
+                | crate::composite::VERSION
+                | crate::photo::VERSION
+                | crate::color::VERSION
         )
     {
         bail!("not a supported Pentool scene document")
@@ -2790,11 +2795,16 @@ pub fn validate(raw: &Value) -> Result<()> {
     }
     // Photo catalog structure and photo node references (v7), or their absence.
     crate::photo::catalog::validate(raw, version)?;
+    crate::color::catalog::validate(raw, version)?;
+    crate::color::scene::validate(raw)?;
     Ok(())
 }
 
 pub fn flatten_to_v3(raw: &Value) -> Result<Value> {
     validate(raw)?;
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+        return flatten_to_v3(&crate::color::catalog::downgrade(raw.clone())?);
+    }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
         // Refuse photo content exactly as `--target 6` does; never drop the catalog.
         crate::photo::catalog::downgrade(raw.clone())?;

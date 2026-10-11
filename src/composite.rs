@@ -8,6 +8,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+mod adjustment;
+mod effect;
 thread_local! { static CANCEL: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
 thread_local! { static TRIP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
@@ -253,15 +255,18 @@ pub const ADJUSTMENTS: [&str; 13] = [
     "threshold",
 ];
 
-/// Version 6 and version 7 (v6 plus photography) both carry compositing.
+/// Scene versions 6 through 8 carry compositing.
 pub fn is_document(raw: &Value) -> bool {
     matches!(
         raw.get("version").and_then(Value::as_u64),
-        Some(VERSION | crate::photo::VERSION)
+        Some(VERSION | crate::photo::VERSION | crate::color::VERSION)
     )
 }
 
-pub fn migrate(raw: Value) -> Result<Value> {
+pub fn migrate(mut raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+        raw = crate::color::catalog::downgrade(raw)?;
+    }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
         return crate::photo::catalog::downgrade(raw);
     }
@@ -278,6 +283,9 @@ pub fn migrate(raw: Value) -> Result<Value> {
 
 /// Downgrade only an unextended v6 scene. Never demote required compositing data.
 pub fn downgrade(mut raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+        raw = crate::color::catalog::downgrade(raw)?;
+    }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
         raw = crate::photo::catalog::downgrade(raw)?;
     }
@@ -1054,8 +1062,116 @@ fn coverage_bounds<'a>(
     (x1 > x0 && y1 > y0).then_some((x0, y0, x1 - x0, y1 - y0))
 }
 
-fn over(dst: &mut RgbaImage, src: &RgbaImage) {
-    crate::blend::over(dst, src, "normal", "srgb").expect("internal surface dimensions match");
+#[derive(Clone)]
+enum SceneSurface {
+    Byte(RgbaImage),
+    Working(crate::blend::LinearSurface),
+}
+#[derive(Clone)]
+enum Coverage {
+    Byte(Vec<u8>),
+    Working(Vec<f64>),
+}
+impl Coverage {
+    fn bytes(&self) -> Option<&Vec<u8>> {
+        if let Self::Byte(values) = self {
+            Some(values)
+        } else {
+            None
+        }
+    }
+    fn occlude(&mut self, surface: &SceneSurface) {
+        match (self, surface) {
+            (Self::Byte(mask), SceneSurface::Byte(image)) => {
+                for (a, p) in mask.iter_mut().zip(image.pixels()) {
+                    *a = ((u32::from(*a) * u32::from(255 - p[3]) + 127) / 255) as u8;
+                }
+            }
+            (Self::Working(mask), SceneSurface::Working(image)) => {
+                for (a, p) in mask.iter_mut().zip(image.pixels()) {
+                    *a *= 1.0 - p[3];
+                }
+            }
+            _ => unreachable!("scene precision is fixed"),
+        }
+    }
+}
+impl SceneSurface {
+    fn byte_mut(&mut self, operation: &str) -> Result<&mut RgbaImage> {
+        match self {
+            Self::Byte(image) => Ok(image),
+            Self::Working(_) => {
+                bail!("[unsupported-capability] float scene {operation} is not implemented")
+            }
+        }
+    }
+    fn into_byte(self) -> Result<RgbaImage> {
+        match self {
+            Self::Byte(image) => Ok(image),
+            Self::Working(_) => bail!("[invalid-composite] expected a byte preview surface"),
+        }
+    }
+    fn alpha(&self) -> Coverage {
+        match self {
+            Self::Byte(image) => Coverage::Byte(image.pixels().map(|p| p[3]).collect()),
+            Self::Working(image) => {
+                Coverage::Working(image.pixels().iter().map(|p| p[3]).collect())
+            }
+        }
+    }
+    fn opacity(&mut self, opacity: f64) -> Result<()> {
+        match self {
+            Self::Byte(image) => {
+                for p in image.pixels_mut() {
+                    p[3] = round(f64::from(p[3]) * opacity);
+                }
+                Ok(())
+            }
+            Self::Working(image) => image.apply_opacity(opacity),
+        }
+    }
+    fn clip(&mut self, coverage: Option<&Coverage>) -> Result<()> {
+        match (self, coverage) {
+            (Self::Byte(image), Some(Coverage::Byte(mask))) => {
+                for (p, a) in image.pixels_mut().zip(mask) {
+                    p[3] = ((u32::from(p[3]) * u32::from(*a) + 127) / 255) as u8;
+                    if p[3] == 0 {
+                        *p = Rgba([0, 0, 0, 0]);
+                    }
+                }
+                Ok(())
+            }
+            (Self::Working(image), Some(Coverage::Working(mask))) => {
+                image.apply_coverage(mask, 1.0)
+            }
+            (Self::Byte(image), None) => {
+                for p in image.pixels_mut() {
+                    *p = Rgba([0, 0, 0, 0]);
+                }
+                Ok(())
+            }
+            (surface, None) => surface.opacity(0.0),
+            _ => bail!("[invalid-composite] clipping precision differs from scene precision"),
+        }
+    }
+    fn over(
+        &mut self,
+        source: &Self,
+        mode: &str,
+        space: &str,
+        context: Option<&crate::blend::LegacyBlendContext>,
+    ) -> Result<()> {
+        match (self, source) {
+            (Self::Byte(dst), Self::Byte(src)) => crate::blend::over(dst, src, mode, space),
+            (Self::Working(dst), Self::Working(src)) => dst.over_declared(
+                src,
+                mode,
+                space,
+                context.context("working blend context missing")?,
+            ),
+            _ => bail!("[invalid-composite] scene surface precisions differ"),
+        }
+    }
 }
 
 struct Renderer<'a> {
@@ -1067,9 +1183,32 @@ struct Renderer<'a> {
     height: u32,
     live_bytes: u64,
     pixel_work: u64,
+    peak_live_bytes: u64,
+    working: Option<&'a crate::color::roles::Setting>,
+    blend_context: Option<&'a crate::blend::LegacyBlendContext>,
+    conversion_clipped: bool,
+    gradient_profiles: &'a crate::color::value::ProfileSet,
+    gradient_engines: Vec<(
+        crate::color::icc::Intent,
+        crate::color::value::Evaluator<'a>,
+    )>,
 }
 
 impl Renderer<'_> {
+    fn pixel_bytes(&self) -> u64 {
+        if self.working.is_some() {
+            32
+        } else {
+            4
+        }
+    }
+    fn coverage_bytes(&self) -> u64 {
+        if self.working.is_some() {
+            8
+        } else {
+            1
+        }
+    }
     fn reserve(&mut self) -> Result<()> {
         self.reserve_pixels(u64::from(self.width) * u64::from(self.height))
     }
@@ -1081,21 +1220,239 @@ impl Renderer<'_> {
             .context("pixel work overflow")?;
         self.live_bytes = self
             .live_bytes
-            .checked_add(pixels * 4)
+            .checked_add(pixels * self.pixel_bytes())
             .context("surface allocation overflow")?;
+        self.peak_live_bytes = self.peak_live_bytes.max(self.live_bytes);
         if self.live_bytes > MAX_TEMP_BYTES || self.pixel_work > MAX_PIXEL_WORK {
             bail!("[limit-exceeded] compositing exceeds temporary surface or pixel-work budget; reduce canvas size, scale, or stack depth")
         }
         Ok(())
     }
-    fn release(&mut self) {
+    fn reserve_byte_scratch(&mut self) -> Result<()> {
+        let bytes = u64::from(self.width) * u64::from(self.height) * 4;
+        self.live_bytes = self
+            .live_bytes
+            .checked_add(bytes)
+            .context("surface allocation overflow")?;
+        self.peak_live_bytes = self.peak_live_bytes.max(self.live_bytes);
+        if self.live_bytes > MAX_TEMP_BYTES {
+            bail!("[limit-exceeded] compositing exceeds temporary surface or pixel-work budget; reduce canvas size, scale, or stack depth")
+        }
+        Ok(())
+    }
+    fn release_byte_scratch(&mut self) {
         self.live_bytes -= u64::from(self.width) * u64::from(self.height) * 4;
     }
-    fn empty(&mut self) -> Result<RgbaImage> {
-        self.reserve()?;
-        Ok(RgbaImage::new(self.width, self.height))
+    fn srgb8_surface(&mut self, bytes: RgbaImage) -> Result<SceneSurface> {
+        let working = self.working.context("working scene setting missing")?;
+        let destination = working.destination.clone();
+        let intent = working.intent;
+        let width = bytes.width();
+        let mut pixels = Vec::with_capacity(bytes.len() / 4);
+        let engine = crate::color::gradient::engine(
+            self.gradient_profiles,
+            &mut self.gradient_engines,
+            intent,
+        )?;
+        for (index, pixel) in bytes.pixels().enumerate() {
+            if index % width as usize == 0 {
+                check_cancelled()?;
+            }
+            let rgba = std::array::from_fn(|channel| f64::from(pixel[channel]) / 255.0);
+            pixels.push(engine.srgb_working_rgba(rgba, &destination)?);
+        }
+        let surface = crate::blend::LinearSurface::from_pixels(
+            bytes.width(),
+            bytes.height(),
+            destination.space(),
+            pixels,
+        )?;
+        self.release_byte_scratch();
+        Ok(SceneSurface::Working(surface))
     }
-    fn siblings(&mut self, nodes: &[Value], parent: kurbo::Affine) -> Result<RgbaImage> {
+    fn vector_plane(
+        &mut self,
+        node: &Value,
+        parent: kurbo::Affine,
+        slot: &str,
+    ) -> Result<Option<crate::blend::LinearSurface>> {
+        let working = self.working.context("working scene setting missing")?;
+        let color = crate::color::gradient::color(&node["style"][slot], &self.raw["styles"], 0)?;
+        let destination = working.destination.clone();
+        let intent = working.intent;
+        let (rgba, clipped) = {
+            let engine = crate::color::gradient::engine(
+                self.gradient_profiles,
+                &mut self.gradient_engines,
+                intent,
+            )?;
+            engine.working_rgba(&color, &destination)?
+        };
+        self.conversion_clipped |= clipped;
+        if rgba[3] == 0.0 {
+            return Ok(None);
+        }
+        self.reserve()?;
+        self.reserve_byte_scratch()?;
+        let mut content = node.clone();
+        content["style"]["fill"] =
+            json!({"fallback":if slot == "fill" {"#ffffffff"} else {"none"}});
+        content["style"]["stroke"] =
+            json!({"fallback":if slot == "stroke" {"#ffffffff"} else {"none"}});
+        if content
+            .get("mask")
+            .is_some_and(|mask| mask.get("resource").is_some())
+        {
+            content.as_object_mut().unwrap().remove("mask");
+        }
+        let fragment =
+            crate::image::fragment_svg(self.raw, self.page, self.document, &content, parent)?;
+        let coverage = crate::render::scene_to_rgba_proxy(&fragment, self.scale)?;
+        self.release_byte_scratch();
+        let mut surface =
+            crate::blend::LinearSurface::new(self.width, self.height, destination.space())?;
+        for (index, pixel) in coverage.pixels().enumerate() {
+            if index % self.width as usize == 0 {
+                check_cancelled()?;
+            }
+            surface.write_pixel(
+                index,
+                [
+                    rgba[0],
+                    rgba[1],
+                    rgba[2],
+                    rgba[3] * f64::from(pixel[3]) / 255.0,
+                ],
+            )?;
+        }
+        Ok(Some(surface))
+    }
+    fn vector_surface(&mut self, node: &Value, parent: kurbo::Affine) -> Result<SceneSurface> {
+        let mut result = self.empty()?;
+        for slot in ["fill", "stroke"] {
+            if slot == "stroke" && node["kind"] == "text" {
+                continue;
+            }
+            if let Some(plane) = self.vector_plane(node, parent, slot)? {
+                result.over(
+                    &SceneSurface::Working(plane),
+                    "normal",
+                    "srgb",
+                    self.blend_context,
+                )?;
+                self.release();
+            }
+        }
+        Ok(result)
+    }
+    fn working_effects(
+        &mut self,
+        node: &Value,
+        source: &crate::blend::LinearSurface,
+    ) -> Result<crate::blend::LinearSurface> {
+        let stack = crate::effects::stack(self.raw, node)?;
+        effect::validate_supported(stack)?;
+        let active: Vec<&Value> = stack.iter().filter(|op| op["enabled"] == true).collect();
+        let spatial = active.iter().any(|op| !effect::needs_surface(op));
+        self.reserve()?; // atomic stack result
+        self.reserve()?; // one prepared overlay paint or spatial effect surface
+        if spatial {
+            // Blur keeps three float planes alive (input, pass and next) and
+            // strokes two f64 distance fields; reserve the larger of the two.
+            for _ in 0..3 {
+                self.reserve()?;
+            }
+        }
+        let per_pixel: u64 = active
+            .iter()
+            .map(|op| if effect::needs_surface(op) { 5 } else { 32 })
+            .sum();
+        self.pixel_work = self
+            .pixel_work
+            .checked_add(per_pixel * u64::from(self.width) * u64::from(self.height))
+            .context("effect pixel work overflow")?;
+        if self.pixel_work > MAX_PIXEL_WORK {
+            bail!("[limit-exceeded] float effect pixel-work budget exceeded")
+        }
+        let context = self
+            .blend_context
+            .context("working blend context missing")?;
+        let result = effect::apply(source, node, stack, context, self.scale, |op| {
+            if !effect::needs_surface(op) {
+                let working = self.working.context("working scene setting missing")?;
+                let color = crate::color::gradient::color(
+                    op["params"].get("color").unwrap_or(&json!("#000000")),
+                    &self.raw["styles"],
+                    0,
+                )?;
+                let engine = crate::color::gradient::engine(
+                    self.gradient_profiles,
+                    &mut self.gradient_engines,
+                    working.intent,
+                )?;
+                let (rgba, clipped) = engine.working_rgba(&color, &working.destination)?;
+                self.conversion_clipped |= clipped;
+                return Ok(effect::Paint::Color(rgba));
+            }
+            let fill = if op["kind"] == "color-overlay" {
+                json!({"kind":"solid","color":op["params"].get("color").cloned().unwrap_or(json!("#000000"))})
+            } else {
+                op["params"]["fill"].clone()
+            };
+            let ox = node["effect_origin"][0].as_f64().unwrap_or(0.0);
+            let oy = node["effect_origin"][1].as_f64().unwrap_or(0.0);
+            let fill_node = json!({"kind":"fill","id":"working-effect-paint","x":-ox,"y":-oy,
+                "width":f64::from(self.width)/f64::from(self.scale)+ox,
+                "height":f64::from(self.height)/f64::from(self.scale)+oy,"fill":fill});
+            let definition = crate::fill::resolved(self.raw, &fill_node["fill"])?;
+            let working = self.working.context("working scene setting missing")?;
+            let intent = crate::color::gradient::setting(self.raw, definition)?
+                .map_or(working.intent, |(_, intent)| intent);
+            let engine = crate::color::gradient::engine(
+                self.gradient_profiles,
+                &mut self.gradient_engines,
+                intent,
+            )?;
+            let paint = crate::fill::render_linear_prepared(
+                self.raw,
+                &fill_node,
+                self.document,
+                kurbo::Affine::IDENTITY,
+                &crate::fill::LinearFillOptions {
+                    dimensions: (self.width, self.height),
+                    scale: self.scale,
+                    working: working.destination.clone(),
+                },
+                engine,
+            )?;
+            self.conversion_clipped |= paint.conversion_clipped;
+            Ok(effect::Paint::Surface(paint.surface))
+        })?;
+        if spatial {
+            for _ in 0..3 {
+                self.release();
+            }
+        }
+        self.release();
+        self.release();
+        Ok(result)
+    }
+    fn release(&mut self) {
+        self.live_bytes -= u64::from(self.width) * u64::from(self.height) * self.pixel_bytes();
+    }
+    fn empty(&mut self) -> Result<SceneSurface> {
+        self.reserve()?;
+        if let Some(working) = self.working {
+            Ok(SceneSurface::Working(crate::blend::LinearSurface::new(
+                self.width,
+                self.height,
+                working.destination.space(),
+            )?))
+        } else {
+            Ok(SceneSurface::Byte(RgbaImage::new(self.width, self.height)))
+        }
+    }
+    fn siblings(&mut self, nodes: &[Value], parent: kurbo::Affine) -> Result<SceneSurface> {
         self.siblings_with_backdrop(nodes, parent, None)
     }
 
@@ -1103,8 +1460,8 @@ impl Renderer<'_> {
         &mut self,
         nodes: &[Value],
         parent: kurbo::Affine,
-        backdrop: Option<RgbaImage>,
-    ) -> Result<RgbaImage> {
+        backdrop: Option<SceneSurface>,
+    ) -> Result<SceneSurface> {
         // Scope references select the visible alpha contribution of earlier siblings.
         // Keep only queried coverage, not a full RGBA surface for every scene node.
         let wanted: HashSet<&str> = nodes
@@ -1112,16 +1469,17 @@ impl Renderer<'_> {
             .filter(|n| n["kind"] == "adjustment")
             .flat_map(scope_ids)
             .collect();
-        let mut coverage: HashMap<&str, Vec<u8>> = HashMap::new();
+        let mut coverage: HashMap<&str, Coverage> = HashMap::new();
         let mut result = match backdrop {
             Some(surface) => surface,
             None => self.empty()?,
         };
-        self.live_bytes += u64::from(self.width) * u64::from(self.height);
+        self.live_bytes += u64::from(self.width) * u64::from(self.height) * self.coverage_bytes();
+        self.peak_live_bytes = self.peak_live_bytes.max(self.live_bytes);
         if self.live_bytes > MAX_TEMP_BYTES {
             bail!("[limit-exceeded] clipping coverage budget exceeded")
         }
-        let mut clip_alpha: Option<Vec<u8>> = None;
+        let mut clip_alpha: Option<Coverage> = None;
         let any_clipping = nodes.iter().any(|node| node.get("clipping").is_some());
         for node in nodes {
             if node.get("visible").and_then(Value::as_bool) == Some(false) {
@@ -1134,6 +1492,44 @@ impl Renderer<'_> {
                 if !node["enabled"].as_bool().unwrap_or(false) {
                     continue;
                 }
+                if let SceneSurface::Working(surface) = &mut result {
+                    self.reserve()?; // atomic adjustment output
+                    let mask = self.mask(node, parent)?;
+                    let ids = scope_ids(node);
+                    let scopes: Vec<&[f64]> = ids
+                        .iter()
+                        .filter_map(|id| match coverage.get(id) {
+                            Some(Coverage::Working(values)) => Some(values.as_slice()),
+                            _ => None,
+                        })
+                        .collect();
+                    self.pixel_work = self
+                        .pixel_work
+                        .checked_add(
+                            scopes.len() as u64 * u64::from(self.width) * u64::from(self.height),
+                        )
+                        .context("adjustment scope work overflow")?;
+                    if self.pixel_work > MAX_PIXEL_WORK {
+                        bail!("[limit-exceeded] scoped adjustment pixel-work budget exceeded")
+                    }
+                    adjustment::apply(
+                        surface,
+                        node,
+                        &scopes,
+                        mask.as_deref(),
+                        self.blend_context
+                            .context("working blend context missing")?,
+                    )
+                    .with_context(|| {
+                        format!("adjustment {} ({})", node["id"], node["adjustment"])
+                    })?;
+                    if mask.is_some() {
+                        self.release();
+                    }
+                    self.release();
+                    continue;
+                }
+                let result = result.byte_mut("adjustments")?;
                 let kind = node["adjustment"].as_str().unwrap();
                 let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
                 let mode = node["blend_mode"].as_str().unwrap();
@@ -1143,7 +1539,7 @@ impl Renderer<'_> {
                     && node.get("mask").is_none()
                     && mode == "normal"
                 {
-                    adjust(&mut result, kind, &node["params"], opacity)?;
+                    adjust(result, kind, &node["params"], opacity)?;
                 } else {
                     let ids = scope_ids(node);
                     let mask = self.mask(node, parent)?;
@@ -1155,14 +1551,15 @@ impl Renderer<'_> {
                         Some((0, 0, canvas_w, canvas_h))
                     } else {
                         coverage_bounds(
-                            ids.iter().filter_map(|id| coverage.get(id)),
+                            ids.iter()
+                                .filter_map(|id| coverage.get(id).and_then(Coverage::bytes)),
                             canvas_w,
                             canvas_h,
                         )
                     };
                     if let Some((x0, y0, rw, rh)) = region {
                         let mut adjusted =
-                            image::imageops::crop_imm(&result, x0, y0, rw, rh).to_image();
+                            image::imageops::crop_imm(result, x0, y0, rw, rh).to_image();
                         adjust(&mut adjusted, kind, &node["params"], 1.0)?;
                         let space = node["blend_space"].as_str().unwrap_or("srgb");
                         for ry in 0..rh {
@@ -1173,7 +1570,7 @@ impl Renderer<'_> {
                                     255
                                 } else {
                                     ids.iter()
-                                        .filter_map(|id| coverage.get(id))
+                                        .filter_map(|id| coverage.get(id).and_then(Coverage::bytes))
                                         .map(|mask| u32::from(mask[index]))
                                         .sum()
                                 };
@@ -1246,37 +1643,88 @@ impl Renderer<'_> {
                 if self.pixel_work > MAX_PIXEL_WORK {
                     bail!("[limit-exceeded] fill pixel-work budget exceeded")
                 }
-                crate::fill::render(
-                    self.raw,
-                    node,
-                    self.document,
-                    render_parent,
-                    self.width,
-                    self.height,
-                    self.scale,
-                )?
+                let fill = crate::fill::resolved(self.raw, &node["fill"])?;
+                let intent = crate::color::gradient::setting(self.raw, fill)?
+                    .map(|(_, intent)| intent)
+                    .or(self.working.map(|setting| setting.intent));
+                let engine = if let Some(intent) = intent {
+                    Some(crate::color::gradient::engine(
+                        self.gradient_profiles,
+                        &mut self.gradient_engines,
+                        intent,
+                    )?)
+                } else {
+                    None
+                };
+                if let Some(working) = self.working {
+                    let result = crate::fill::render_linear_prepared(
+                        self.raw,
+                        node,
+                        self.document,
+                        render_parent,
+                        &crate::fill::LinearFillOptions {
+                            dimensions: (self.width, self.height),
+                            scale: self.scale,
+                            working: working.destination.clone(),
+                        },
+                        engine.unwrap(),
+                    )?;
+                    self.conversion_clipped |= result.conversion_clipped;
+                    SceneSurface::Working(result.surface)
+                } else {
+                    SceneSurface::Byte(crate::fill::render(
+                        self.raw,
+                        node,
+                        self.document,
+                        render_parent,
+                        (self.width, self.height),
+                        self.scale,
+                        engine,
+                    )?)
+                }
             } else {
-                // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
-                self.reserve()?;
-                let mut content = node.clone();
-                if matches!(content["kind"].as_str(), Some("image" | "raster" | "photo")) {
-                    content["opacity"] = json!(1.0);
-                    content["blend_mode"] = json!("normal");
+                let raster_source =
+                    matches!(node["kind"].as_str(), Some("image" | "raster" | "photo"));
+                let vector_source = matches!(
+                    node["kind"].as_str(),
+                    Some("path" | "rect" | "ellipse" | "line" | "text")
+                );
+                if self.working.is_some() && !raster_source && !vector_source {
+                    bail!("[unsupported-capability] float scene rendering for node {} ({}) is not implemented",node["id"],node["kind"])
                 }
-                if content
-                    .get("mask")
-                    .is_some_and(|m| m.get("resource").is_some())
-                {
-                    content.as_object_mut().unwrap().remove("mask");
+                if self.working.is_some() && vector_source {
+                    self.vector_surface(node, render_parent)?
+                } else {
+                    // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
+                    self.reserve()?;
+                    let mut content = node.clone();
+                    if matches!(content["kind"].as_str(), Some("image" | "raster" | "photo")) {
+                        content["opacity"] = json!(1.0);
+                        content["blend_mode"] = json!("normal");
+                    }
+                    if content
+                        .get("mask")
+                        .is_some_and(|m| m.get("resource").is_some())
+                    {
+                        content.as_object_mut().unwrap().remove("mask");
+                    }
+                    if self.working.is_some() {
+                        self.reserve_byte_scratch()?;
+                    }
+                    let fragment = crate::image::fragment_svg(
+                        self.raw,
+                        self.page,
+                        self.document,
+                        &content,
+                        render_parent,
+                    )?;
+                    let bytes = crate::render::scene_to_rgba_proxy(&fragment, self.scale)?;
+                    if self.working.is_some() {
+                        self.srgb8_surface(bytes)?
+                    } else {
+                        SceneSurface::Byte(bytes)
+                    }
                 }
-                let fragment = crate::image::fragment_svg(
-                    self.raw,
-                    self.page,
-                    self.document,
-                    &content,
-                    render_parent,
-                )?;
-                crate::render::scene_to_rgba_proxy(&fragment, self.scale)?
             };
             if let Some(stack) = node
                 .get("transforms")
@@ -1284,7 +1732,12 @@ impl Renderer<'_> {
                 .filter(|s| !s.is_empty())
                 .filter(|_| direct_affine.is_none())
             {
-                self.reserve()?;
+                self.reserve()?; // warped result
+                                 // Float resampling also holds an encoded sRGB copy of the source.
+                let encoded = matches!(surface, SceneSurface::Working(_));
+                if encoded {
+                    self.reserve()?;
+                }
                 let mut masks = Vec::with_capacity(stack.len());
                 for op in stack {
                     masks.push(self.mask(op, kurbo::Affine::IDENTITY)?);
@@ -1294,8 +1747,26 @@ impl Renderer<'_> {
                 if self.pixel_work > MAX_PIXEL_WORK {
                     bail!("[limit-exceeded] transform pixel-work budget exceeded")
                 }
-                surface = crate::transform::warp(&surface, stack, &masks, self.scale)?;
+                match &mut surface {
+                    SceneSurface::Byte(pixels) => {
+                        *pixels = crate::transform::warp(pixels, stack, &masks, self.scale)?;
+                    }
+                    SceneSurface::Working(pixels) => {
+                        let context = self
+                            .blend_context
+                            .context("working blend context missing")?;
+                        *pixels = crate::transform::warp_working(
+                            pixels, stack, &masks, self.scale, context,
+                        )
+                        .with_context(|| {
+                            format!("float scene transform resampling for node {}", node["id"])
+                        })?;
+                    }
+                }
                 for _ in masks.iter().flatten() {
+                    self.release();
+                }
+                if encoded {
                     self.release();
                 }
                 self.release();
@@ -1304,73 +1775,92 @@ impl Renderer<'_> {
             // (glows, shadows, strokes) follow the masked shape instead of being
             // clipped away by a second mask pass.
             if let Some(mask) = self.mask(node, parent)? {
-                for (pixel, alpha) in surface.pixels_mut().zip(mask) {
-                    pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha) + 127) / 255) as u8;
-                    if pixel[3] == 0 {
-                        *pixel = Rgba([0, 0, 0, 0]);
-                    }
-                }
+                let coverage = match &surface {
+                    SceneSurface::Byte(_) => Coverage::Byte(mask),
+                    SceneSurface::Working(_) => Coverage::Working(
+                        mask.into_iter()
+                            .map(|alpha| f64::from(alpha) / 255.0)
+                            .collect(),
+                    ),
+                };
+                surface.clip(Some(&coverage))?;
                 self.release();
             }
             let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
             if node.get("effects").is_some() || node.get("content_opacity").is_some() {
-                // Effects run on the content's bounds plus the effect reach, never the
-                // whole canvas; the budget below follows that region.
-                let (cx, cy, cw, ch) =
-                    crate::effects::region(self.raw, node, &surface, self.scale)?;
-                if cw > 0 && ch > 0 {
-                    let pixels = u64::from(cw) * u64::from(ch);
-                    // Conservative bound includes the image engine's f64 blur planes.
-                    for _ in 0..32 {
-                        self.reserve_pixels(pixels)?;
-                    }
-                    self.pixel_work +=
-                        crate::effects::stack(self.raw, node)?.len() as u64 * pixels * 32;
-                    if self.pixel_work > MAX_PIXEL_WORK {
-                        bail!("[limit-exceeded] effect pixel-work budget exceeded")
-                    }
-                    let full = (cw, ch) == surface.dimensions();
-                    let source = if full {
-                        surface.clone()
-                    } else {
-                        image::imageops::crop_imm(&surface, cx, cy, cw, ch).to_image()
-                    };
-                    let applied =
-                        crate::effects::apply(self.raw, node, &source, self.document, self.scale)?;
-                    if full {
-                        surface = applied;
-                    } else {
-                        surface = RgbaImage::new(surface.width(), surface.height());
-                        image::imageops::replace(
-                            &mut surface,
-                            &applied,
-                            i64::from(cx),
-                            i64::from(cy),
+                if self.working.is_some() {
+                    if crate::effects::stack(self.raw, node)?
+                        .iter()
+                        .any(|op| op["enabled"] == true)
+                    {
+                        let SceneSurface::Working(source) = &surface else {
+                            unreachable!("working effect target")
+                        };
+                        surface = SceneSurface::Working(
+                            self.working_effects(node, source).with_context(|| {
+                                format!("float scene effects for node {}", node["id"])
+                            })?,
                         );
+                    } else {
+                        surface.opacity(node["content_opacity"].as_f64().unwrap_or(1.0))?;
                     }
-                    for _ in 0..32 {
-                        self.live_bytes -= pixels * 4;
+                } else {
+                    let surface = surface.byte_mut("effects")?;
+                    // Effects run on the content's bounds plus the effect reach, never the
+                    // whole canvas; the budget below follows that region.
+                    let (cx, cy, cw, ch) =
+                        crate::effects::region(self.raw, node, surface, self.scale)?;
+                    if cw > 0 && ch > 0 {
+                        let pixels = u64::from(cw) * u64::from(ch);
+                        // Conservative bound includes the image engine's f64 blur planes.
+                        for _ in 0..32 {
+                            self.reserve_pixels(pixels)?;
+                        }
+                        self.pixel_work +=
+                            crate::effects::stack(self.raw, node)?.len() as u64 * pixels * 32;
+                        if self.pixel_work > MAX_PIXEL_WORK {
+                            bail!("[limit-exceeded] effect pixel-work budget exceeded")
+                        }
+                        let full = (cw, ch) == surface.dimensions();
+                        let source = if full {
+                            surface.clone()
+                        } else {
+                            image::imageops::crop_imm(surface, cx, cy, cw, ch).to_image()
+                        };
+                        let applied = crate::effects::apply(
+                            self.raw,
+                            node,
+                            &source,
+                            self.document,
+                            self.scale,
+                            self.gradient_profiles,
+                            &mut self.gradient_engines,
+                        )?;
+                        if full {
+                            *surface = applied;
+                        } else {
+                            *surface = RgbaImage::new(surface.width(), surface.height());
+                            image::imageops::replace(
+                                surface,
+                                &applied,
+                                i64::from(cx),
+                                i64::from(cy),
+                            );
+                        }
+                        for _ in 0..32 {
+                            self.live_bytes -= pixels * 4;
+                        }
                     }
                 }
             }
-            for pixel in surface.pixels_mut() {
-                pixel[3] = round(f64::from(pixel[3]) * opacity);
-            }
+            surface.opacity(opacity)?;
             if node.get("clipping").is_some() {
-                for (index, pixel) in surface.pixels_mut().enumerate() {
-                    let alpha = clip_alpha.as_ref().map_or(0, |a| a[index]);
-                    pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha) + 127) / 255) as u8;
-                    if pixel[3] == 0 {
-                        *pixel = Rgba([0, 0, 0, 0]);
-                    }
-                }
+                surface.clip(clip_alpha.as_ref())?;
             } else if any_clipping {
-                clip_alpha = Some(surface.pixels().map(|p| p[3]).collect());
+                clip_alpha = Some(surface.alpha());
             }
             for mask in coverage.values_mut() {
-                for (alpha, pixel) in mask.iter_mut().zip(surface.pixels()) {
-                    *alpha = ((u32::from(*alpha) * u32::from(255 - pixel[3]) + 127) / 255) as u8;
-                }
+                mask.occlude(&surface);
             }
             self.pixel_work +=
                 coverage.len() as u64 * u64::from(self.width) * u64::from(self.height);
@@ -1379,28 +1869,32 @@ impl Renderer<'_> {
             }
             let id = node["id"].as_str().unwrap();
             if wanted.contains(id) {
-                let size = u64::from(self.width) * u64::from(self.height);
+                let size = u64::from(self.width) * u64::from(self.height) * self.coverage_bytes();
                 self.live_bytes += size;
+                self.peak_live_bytes = self.peak_live_bytes.max(self.live_bytes);
                 if self.live_bytes > MAX_TEMP_BYTES {
                     bail!("[limit-exceeded] adjustment scope coverage exceeds temporary surface budget")
                 }
-                coverage.insert(id, surface.pixels().map(|p| p[3]).collect());
+                coverage.insert(id, surface.alpha());
             }
             if let Some(passed) = passed {
                 result = passed;
                 self.release();
             } else {
-                crate::blend::over(
-                    &mut result,
+                result.over(
                     &surface,
                     node["blend_mode"].as_str().unwrap_or("normal"),
                     node["blend_space"].as_str().unwrap_or("srgb"),
+                    self.blend_context,
                 )?;
             }
             self.release();
         }
-        self.live_bytes -= coverage.len() as u64 * u64::from(self.width) * u64::from(self.height);
-        self.live_bytes -= u64::from(self.width) * u64::from(self.height);
+        self.live_bytes -= coverage.len() as u64
+            * u64::from(self.width)
+            * u64::from(self.height)
+            * self.coverage_bytes();
+        self.live_bytes -= u64::from(self.width) * u64::from(self.height) * self.coverage_bytes();
         Ok(result)
     }
 
@@ -1583,6 +2077,11 @@ pub fn node_pixels(
     if !is_document(raw) || !(0.1..=8.0).contains(&scale) {
         bail!("node rendering requires v6 and scale .1..8")
     }
+    let scope = crate::color::scene::Scope::Node { page: page_id, id };
+    let mut resolved = crate::scene::with_resolved_tokens(raw)?;
+    crate::color::scene::preview_scope(&mut resolved, document, scope)?;
+    let raw = &resolved;
+    let gradient_profiles = crate::color::gradient::profiles(raw, document, scope)?;
     let pages = raw["pages"].as_array().unwrap();
     let page = match page_id {
         Some(id) => pages
@@ -1638,8 +2137,16 @@ pub fn node_pixels(
                 height,
                 live_bytes: 0,
                 pixel_work: 0,
+                peak_live_bytes: 0,
+                working: None,
+                blend_context: None,
+                conversion_clipped: false,
+                gradient_profiles: &gradient_profiles,
+                gradient_engines: Vec::new(),
             };
-            return renderer.siblings(std::slice::from_ref(node), parent);
+            return renderer
+                .siblings(std::slice::from_ref(node), parent)?
+                .into_byte();
         }
     }
     bail!("node not found: {id}")
@@ -1655,6 +2162,24 @@ pub fn mask_coverage(
     if !is_document(raw) {
         bail!("mask analysis requires version 6")
     }
+    let scope = crate::color::scene::Scope::Mask {
+        page: page_id,
+        name,
+    };
+    let original_digest = raw["masks"][name]
+        .as_str()
+        .or_else(|| raw["mask_resources"].get(name).map(|_| name))
+        .context("mask missing")?;
+    let mut resolved = crate::scene::with_resolved_tokens(raw)?;
+    let replacements = crate::color::scene::preview_scope(&mut resolved, document, scope)?;
+    let identity = crate::color::scene::remap_identity(original_digest, &replacements);
+    let name = identity.as_str();
+    let scope = crate::color::scene::Scope::Mask {
+        page: page_id,
+        name,
+    };
+    let raw = &resolved;
+    let gradient_profiles = crate::color::gradient::profiles(raw, document, scope)?;
     let pages = raw["pages"].as_array().unwrap();
     let page = match page_id {
         Some(id) => pages
@@ -1690,6 +2215,12 @@ pub fn mask_coverage(
         height: height as u32,
         live_bytes: 0,
         pixel_work: 0,
+        peak_live_bytes: 0,
+        working: None,
+        blend_context: None,
+        conversion_clipped: false,
+        gradient_profiles: &gradient_profiles,
+        gradient_engines: Vec::new(),
     };
     let node = json!({"kind":"rect","id":"mask-analysis","mask":{"resource":digest,"invert":false,"linked":false,"density":1,"feather":0,"transform":[1,0,0,1,0,0]}});
     renderer
@@ -1723,12 +2254,85 @@ fn render_with(
     scale: f32,
     with_background: bool,
 ) -> Result<RgbaImage> {
+    render_scene(raw, document, page_id, scale, with_background, false)?
+        .surface
+        .into_byte()
+}
+
+struct SceneRender {
+    surface: SceneSurface,
+    working: Option<crate::color::roles::Setting>,
+    conversion_clipped: bool,
+    peak_temporary_bytes: u64,
+    pixel_work: u64,
+}
+
+/// Developing float scene rendering. Unsupported content fails explicitly;
+/// callers receive unencoded working pixels and conversion diagnostics.
+pub struct WorkingRender {
+    pub surface: crate::blend::LinearSurface,
+    pub working_space: crate::color::value::Destination,
+    pub intent: crate::color::icc::Intent,
+    pub conversion_clipped: bool,
+    pub peak_temporary_bytes: u64,
+    pub pixel_work: u64,
+}
+pub fn render_working(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    scale: f32,
+    with_background: bool,
+) -> Result<WorkingRender> {
+    let rendered = render_scene(raw, document, page_id, scale, with_background, true)?;
+    let working = rendered.working.context("working scene setting missing")?;
+    match rendered.surface {
+        SceneSurface::Working(surface) => Ok(WorkingRender {
+            surface,
+            working_space: working.destination,
+            intent: working.intent,
+            conversion_clipped: rendered.conversion_clipped,
+            peak_temporary_bytes: rendered.peak_temporary_bytes,
+            pixel_work: rendered.pixel_work,
+        }),
+        SceneSurface::Byte(_) => unreachable!("working scene target"),
+    }
+}
+
+fn render_scene(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    scale: f32,
+    with_background: bool,
+    working: bool,
+) -> Result<SceneRender> {
     crate::scene::validate(raw)?;
     if !is_document(raw) {
         bail!("compositing requires document version 6")
     }
-    let resolved = crate::scene::with_resolved_tokens(raw)?;
-    let raw = &resolved;
+    let working_setting = if working {
+        let setting = crate::color::roles::effective(raw, crate::color::roles::Role::Working)?;
+        if !setting.destination.is_linear_rgb() {
+            bail!("[unsupported-capability] float scene rendering requires a named linear RGB working role")
+        }
+        Some(setting)
+    } else {
+        None
+    };
+    let blend_context = working_setting
+        .as_ref()
+        .map(|setting| crate::blend::LegacyBlendContext::new(setting.destination.space()))
+        .transpose()?;
+    let mut resolved = if working {
+        None
+    } else {
+        Some(crate::scene::with_resolved_tokens(raw)?)
+    };
+    if let Some(resolved) = resolved.as_mut() {
+        crate::color::scene::preview(resolved, document, page_id)?;
+    }
+    let raw = resolved.as_ref().unwrap_or(raw);
     if !(1.0 / 16384.0..=8.0).contains(&scale) {
         bail!("composite scale must be in 1/16384..=8")
     }
@@ -1751,6 +2355,35 @@ fn render_with(
     }
     let w = (width as f64 * f64::from(scale)).round().max(1.0) as u32;
     let h = (height as f64 * f64::from(scale)).round().max(1.0) as u32;
+    let scope = crate::color::scene::Scope::Page {
+        page: page_id,
+        visible_only: true,
+    };
+    let gradient_profiles = if working {
+        let colors = crate::color::scene::slots(raw, scope)?;
+        let destinations = crate::color::scene::destinations(raw, scope)?;
+        crate::color::value::ProfileSet::load(
+            raw,
+            document,
+            colors
+                .iter()
+                .filter_map(|slot| slot.color.destination().profile())
+                .chain(
+                    destinations
+                        .iter()
+                        .filter_map(|slot| slot.destination.profile()),
+                ),
+        )?
+    } else {
+        crate::color::gradient::profiles(
+            raw,
+            document,
+            crate::color::scene::Scope::Page {
+                page: page_id,
+                visible_only: true,
+            },
+        )?
+    };
     let mut renderer = Renderer {
         raw,
         page,
@@ -1760,16 +2393,51 @@ fn render_with(
         height: h,
         live_bytes: 0,
         pixel_work: 0,
+        peak_live_bytes: 0,
+        working: working_setting.as_ref(),
+        blend_context: blend_context.as_ref(),
+        conversion_clipped: false,
+        gradient_profiles: &gradient_profiles,
+        gradient_engines: Vec::new(),
     };
     renderer.reserve()?;
     let background = json!({"kind":"rect","id":"composite-background","x":0,"y":0,"width":width,"height":height,
         "style":{"fill":{"fallback":page["canvas"]["background"]}}});
-    let mut result = if with_background {
+    let mut result = if let Some(working) = working_setting.as_ref() {
+        if with_background {
+            let node = json!({"kind":"fill","id":"working-background","x":0,"y":0,"width":width,"height":height,"fill":{"kind":"solid","color":page["canvas"]["background"]}});
+            let engine = crate::color::gradient::engine(
+                &gradient_profiles,
+                &mut renderer.gradient_engines,
+                working.intent,
+            )?;
+            let fill = crate::fill::render_linear_prepared(
+                raw,
+                &node,
+                document,
+                kurbo::Affine::IDENTITY,
+                &crate::fill::LinearFillOptions {
+                    dimensions: (w, h),
+                    scale,
+                    working: working.destination.clone(),
+                },
+                engine,
+            )?;
+            renderer.conversion_clipped |= fill.conversion_clipped;
+            SceneSurface::Working(fill.surface)
+        } else {
+            SceneSurface::Working(crate::blend::LinearSurface::new(
+                w,
+                h,
+                working.destination.space(),
+            )?)
+        }
+    } else if with_background {
         let fragment =
             crate::image::fragment_svg(raw, page, document, &background, kurbo::Affine::IDENTITY)?;
-        crate::render::scene_to_rgba_proxy(&fragment, scale)?
+        SceneSurface::Byte(crate::render::scene_to_rgba_proxy(&fragment, scale)?)
     } else {
-        RgbaImage::new(w, h)
+        SceneSurface::Byte(RgbaImage::new(w, h))
     };
     for layer in page["layers"].as_array().unwrap() {
         if layer.get("visible").and_then(Value::as_bool) == Some(false) {
@@ -1777,10 +2445,20 @@ fn render_with(
         }
         let surface =
             renderer.siblings(layer["nodes"].as_array().unwrap(), kurbo::Affine::IDENTITY)?;
-        over(&mut result, &surface);
+        result.over(&surface, "normal", "srgb", blend_context.as_ref())?;
         renderer.release();
     }
-    Ok(result)
+    let conversion_clipped = renderer.conversion_clipped;
+    let peak_temporary_bytes = renderer.peak_live_bytes;
+    let pixel_work = renderer.pixel_work;
+    drop(renderer);
+    Ok(SceneRender {
+        surface: result,
+        working: working_setting,
+        conversion_clipped,
+        peak_temporary_bytes,
+        pixel_work,
+    })
 }
 
 /// Visible text lines of one page in canvas coordinates (group and node
@@ -1791,7 +2469,8 @@ pub fn text_lines(
     page_id: Option<&str>,
 ) -> Result<Vec<crate::image::TextLine>> {
     crate::scene::validate(raw)?;
-    let resolved = crate::scene::with_resolved_tokens(raw)?;
+    let mut resolved = crate::scene::with_resolved_tokens(raw)?;
+    crate::color::scene::preview(&mut resolved, document, page_id)?;
     let raw = &resolved;
     let pages = raw["pages"].as_array().context("document has no pages")?;
     let page = match page_id {

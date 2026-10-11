@@ -85,9 +85,11 @@ Output bytes must be identical across cold and warm runs.
 The editor requests approximate previews with `/api/render/svg?max_edge=N`
 (16–4096). Proxies reduce embedded pixel detail only; exports never use them.
 
-Release binaries are gated by `scripts/check-binary-size.sh` at 24,000,000 bytes in
-CI and for every release target. The Windows release build measured 14,630,400
-bytes at the time of writing; record the per-target sizes in the release notes.
+Release binaries are gated by `scripts/check-binary-size.sh` at 30,000,000 bytes in
+CI and for every release target. The gate was raised from 24,000,000 bytes on
+2026-10-10, by owner decision, when the developing v0.12 color engine took the
+Windows release build to 24,247,808 bytes. Record the per-target sizes in the
+release notes.
 
 ## Raster paint benchmarks (v0.10)
 
@@ -162,3 +164,74 @@ Memory grows with the size of the photo being developed, not with the size of
 the shoot: 100 photos peak lower than a single 24 MP develop. Batch export is the
 long pole of a large shoot at about 1 s per 2 MP photo, and a cached preview turns
 a full develop into a file read.
+
+## Developing v0.12 working-color precision
+
+On 2026-10-10, the shared byte blend kernel was extracted for reuse by bounded
+float linear RGB surfaces. Ordinary scene exports still use the byte renderer;
+this comparison qualifies that extraction, not completed float scene rendering.
+Both builds were optimized on Windows 11, Intel Core i9-11900H (8 cores/16
+threads), rustc 1.85.1, LLVM 19.1.7, `x86_64-pc-windows-msvc`.
+
+The comparison ran three alternating invocations per binary after tests and
+compilation finished, using:
+
+```sh
+pentool benchmark --composite --source-size 256 --clipped 16 --stack-depth 8 --blur-radius 32 --repetitions 3 --json
+```
+
+Each invocation produced one cold and three warm samples (12 per binary).
+Every sample produced the same PNG SHA-256:
+`3ae354e380b34064e7edebd8368281efb6929cb58d3dee85cb395acf43d48055`.
+
+| Build | Median | Range | Peak resident range | Binary bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Native gradient checkpoint | 662.7 ms | 614.2–747.9 ms | 27.2–40.9 MB | 24,236,032 |
+| Shared byte/float blend kernel | 620.4 ms | 543.9–664.8 ms | 27.3–27.6 MB | 24,236,032 |
+
+The overlapping ranges do not establish a general speedup. The measured median
+ratio was 0.936; output bytes and binary size were unchanged. These are local
+development observations, not hosted or cross-platform qualification.
+The Windows binaries exceeded the 24,000,000-byte release gate in force at the
+time; the gate is now 30,000,000 bytes (see above).
+
+Exact binary fingerprints:
+
+- Before: `3719748c3963287b0ef09496368f544b1ad348a463e917c6c79b963c77cf9b23`.
+- After: `2edf2cfdc39af6954381542f98df417dedc4c74059a56c1f3cc5d1fecdba5aa0`.
+
+Float surfaces separately enforce a 256 MiB backing-allocation limit, finite
+signed RGB, normalized coverage, matching dimensions and working primaries,
+and validation before mutating a destination. Scene integration must account
+for their actual backing capacity and aggregate live scratch; the current byte
+renderer budget must not be reused as if a float pixel occupied four bytes.
+
+### Shared fill sampling targets
+
+On the same Windows/Rust machine, the existing fill geometry loop was extended
+with a float working-color target. An optimized before/after comparison exported
+the pinned `print-v8-gradient.pen` at scale 8 (512x384), including its linear RGB,
+Lab and authored CMYK ramps. Five alternating invocations per binary followed
+one warm-up invocation per binary, after compilation and tests finished:
+
+```sh
+pentool export docs/fixtures/print-v8-gradient.pen OUTPUT.png --scale 8 --json
+```
+
+| Build | Median CLI export | Range | Binary bytes |
+| --- | ---: | ---: | ---: |
+| Float surface foundation | 390.8 ms | 333.7–423.0 ms | 24,236,032 |
+| Shared byte/float fill loop | 385.1 ms | 365.4–400.5 ms | 24,247,808 |
+
+These end-to-end timings include startup, validation, rendering, PNG encoding
+and file writing. Their overlapping ranges do not establish a speedup. Every
+output, including warm-ups, had PNG SHA-256
+`d3d37d5c84b9d85fce710d597b926f6ff020d1d93e19712b0015dc5dd070e287`.
+This checks the existing export path, not completed float scene performance.
+The binary increased by 11,776 bytes. It exceeded the 24,000,000-byte gate in
+force at the time and is within the current 30,000,000-byte gate.
+
+Binary SHA-256 before:
+`2edf2cfdc39af6954381542f98df417dedc4c74059a56c1f3cc5d1fecdba5aa0`;
+after:
+`6624e3e04c073919cd5cfbee480366ebf98565653354f1626d15a4b48f076c73`.

@@ -222,6 +222,21 @@
         <div class="section-head"><button id="compositeBefore">Before</button><button id="compositeAfter">After</button><button id="compositeCancel">Cancel preview</button></div>
         <p>Previews are approximate, bounded proxies. Export uses the shared Rust renderer.</p>
       </section>
+      <section class="agent-card" id="printPanel">
+        <h2>Print preflight</h2>
+        <p id="printStatus" role="status" aria-live="polite">Run preflight to check the output profile, bleed, resolution and transparency.</p>
+        <label>Minimum ppi <input id="printMinPpi" type="number" min="1" max="2400" value="150"></label>
+        <label>Minimum bleed (inches) <input id="printMinBleed" type="number" min="0" max="4" step="0.0625" value="0.125"></label>
+        <button id="printRun">Run preflight</button>
+        <ul id="printIssues" class="import-result"></ul>
+        <pre id="printGeometry" class="import-result">Trim, bleed and PDF boxes appear here.</pre>
+        <h3>Plates and proof</h3>
+        <p id="printViewStatus" role="status" aria-live="polite">Load plates to inspect each ink separately.</p>
+        <button id="printPlates">Load plates</button>
+        <label>Plate <select id="printPlate" disabled></select></label>
+        <button id="printProof">Soft proof</button>
+        <img id="printImage" alt="Selected plate or soft proof" hidden style="max-width:100%">
+      </section>
       <section class="agent-card" id="rasterPanel">
         <h2>Raster canvas</h2>
         <p id="rasterStatus" role="status" aria-live="polite">Open a v6 document with a raster layer.</p>
@@ -333,5 +348,6 @@
   <script src="/composite-panel.js"></script>
   <script src="/raster-panel.js"></script>
   <script src="/photo-panel.js"></script>
+  <script src="/print-panel.js"></script>
 </body>
 </html>

@@ -333,15 +333,24 @@ pub fn edit(
     Ok(result)
 }
 
-fn sample(image: &RgbaImage, x: f64, y: f64) -> Rgba<u8> {
+/// Premultiplied bilinear sample at pixel-center coordinates. `pixel` returns
+/// straight channels and alpha in 0..1; the result is straight channels and
+/// accumulated alpha, or `None` outside the image or where coverage is zero.
+fn bilinear(
+    width: u32,
+    height: u32,
+    x: f64,
+    y: f64,
+    pixel: impl Fn(u32, u32) -> [f64; 4],
+) -> Option<([f64; 3], f64)> {
     if !x.is_finite()
         || !y.is_finite()
         || x < -1.0
         || y < -1.0
-        || x > f64::from(image.width())
-        || y > f64::from(image.height())
+        || x > f64::from(width)
+        || y > f64::from(height)
     {
-        return Rgba([0, 0, 0, 0]);
+        return None;
     }
     let (ix, iy) = (x.floor() as i64, y.floor() as i64);
     let (fx, fy) = (x - x.floor(), y - y.floor());
@@ -353,24 +362,38 @@ fn sample(image: &RgbaImage, x: f64, y: f64) -> Rgba<u8> {
         (1, 1, fx * fy),
     ] {
         let (px, py) = (ix + dx, iy + dy);
-        if px < 0 || py < 0 || px >= i64::from(image.width()) || py >= i64::from(image.height()) {
+        if px < 0 || py < 0 || px >= i64::from(width) || py >= i64::from(height) {
             continue;
         }
-        let p = image.get_pixel(px as u32, py as u32);
-        let a = f64::from(p[3]) / 255.0;
+        let p = pixel(px as u32, py as u32);
         for i in 0..3 {
-            sum[i] += w * f64::from(p[i]) * a;
+            sum[i] += w * p[i] * p[3];
         }
-        sum[3] += w * a;
+        sum[3] += w * p[3];
     }
     if sum[3] == 0.0 {
-        return Rgba([0, 0, 0, 0]);
+        return None;
     }
+    Some(([sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3]], sum[3]))
+}
+
+fn sample(image: &RgbaImage, x: f64, y: f64) -> Rgba<u8> {
+    let Some((color, alpha)) = bilinear(image.width(), image.height(), x, y, |x, y| {
+        let p = image.get_pixel(x, y);
+        [
+            f64::from(p[0]),
+            f64::from(p[1]),
+            f64::from(p[2]),
+            f64::from(p[3]) / 255.0,
+        ]
+    }) else {
+        return Rgba([0, 0, 0, 0]);
+    };
     let mut out = [0; 4];
     for i in 0..3 {
-        out[i] = (sum[i] / sum[3] + 0.5).floor().clamp(0.0, 255.0) as u8;
+        out[i] = (color[i] + 0.5).floor().clamp(0.0, 255.0) as u8;
     }
-    out[3] = (sum[3] * 255.0 + 0.5).floor().clamp(0.0, 255.0) as u8;
+    out[3] = (alpha * 255.0 + 0.5).floor().clamp(0.0, 255.0) as u8;
     Rgba(out)
 }
 
@@ -477,53 +500,66 @@ pub fn metadata(
     *raw = candidate;
     Ok(json!({"node":id,"transform":op_id,"settings":settings}))
 }
-pub(crate) fn warp(
-    source: &RgbaImage,
-    stack: &[Value],
-    masks: &[Option<Vec<u8>>],
-    scale: f32,
-) -> Result<RgbaImage> {
-    let mut inverse_stack = Vec::new();
-    // Unmasked fully enabled matrices combine algebraically before sampling.
-    let mut combined = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
-    if stack.iter().all(|op| {
-        op.get("mask").is_none() && op.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) == 1.0
-    }) {
-        for op in stack {
-            if op["enabled"] == true {
-                combined = mul(matrix(&op["matrix"])?, combined);
+/// Output-to-source mapping of an ordered transform stack, shared by the byte
+/// and float warps so both sample exactly the same source positions.
+/// One inverse step: matrix, scale term and optional coverage mask.
+type InverseStep<'a> = ([f64; 9], f64, Option<&'a Vec<u8>>);
+struct Inverse<'a> {
+    steps: Vec<InverseStep<'a>>,
+    scale: f64,
+    width: u32,
+    height: u32,
+}
+impl<'a> Inverse<'a> {
+    fn new(
+        stack: &[Value],
+        masks: &'a [Option<Vec<u8>>],
+        scale: f32,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
+        let mut steps = Vec::new();
+        // Unmasked fully enabled matrices combine algebraically before sampling.
+        let mut combined = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        if stack.iter().all(|op| {
+            op.get("mask").is_none()
+                && op.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) == 1.0
+        }) {
+            for op in stack {
+                if op["enabled"] == true {
+                    combined = mul(matrix(&op["matrix"])?, combined);
+                }
+            }
+            steps.push((inverse(combined)?, 1.0, None));
+        } else {
+            for (i, op) in stack.iter().enumerate().rev() {
+                if op["enabled"] == true {
+                    steps.push((
+                        inverse(matrix(&op["matrix"])?)?,
+                        num(op, "opacity", 1.0)?,
+                        masks[i].as_ref(),
+                    ));
+                }
             }
         }
-        inverse_stack.push((inverse(combined)?, 1.0, None));
-    } else {
-        for (i, op) in stack.iter().enumerate().rev() {
-            if op["enabled"] == true {
-                inverse_stack.push((
-                    inverse(matrix(&op["matrix"])?)?,
-                    num(op, "opacity", 1.0)?,
-                    masks[i].as_ref(),
-                ));
-            }
-        }
+        Ok(Self {
+            steps,
+            scale: f64::from(scale),
+            width,
+            height,
+        })
     }
-    let mut out = RgbaImage::new(source.width(), source.height());
-    let scale = f64::from(scale);
-    for (x, y, pixel) in out.enumerate_pixels_mut() {
-        if x == 0 {
-            crate::composite::check_cancelled()?;
-        }
+    /// Source sampling coordinates (pixel-center origin) for output pixel x, y.
+    fn locate(&self, x: u32, y: u32) -> (f64, f64) {
+        let scale = self.scale;
         let (mut px, mut py) = ((f64::from(x) + 0.5) / scale, (f64::from(y) + 0.5) / scale);
-        for (m, opacity, mask) in &inverse_stack {
+        for (m, opacity, mask) in &self.steps {
             let coverage = mask.map_or(1.0, |mask| {
                 let (x, y) = ((px * scale).floor() as i64, (py * scale).floor() as i64);
-                if x < 0
-                    || y < 0
-                    || x >= i64::from(source.width())
-                    || y >= i64::from(source.height())
-                {
+                if x < 0 || y < 0 || x >= i64::from(self.width) || y >= i64::from(self.height) {
                     0.0
                 } else {
-                    f64::from(mask[(y as u32 * source.width() + x as u32) as usize]) / 255.0
+                    f64::from(mask[(y as u32 * self.width + x as u32) as usize]) / 255.0
                 }
             });
             let factor = opacity * coverage;
@@ -540,7 +576,104 @@ pub(crate) fn warp(
             px += (nx - px) * factor;
             py += (ny - py) * factor;
         }
-        *pixel = sample(source, px * scale - 0.5, py * scale - 0.5);
+        (px * scale - 0.5, py * scale - 0.5)
+    }
+}
+
+pub(crate) fn warp(
+    source: &RgbaImage,
+    stack: &[Value],
+    masks: &[Option<Vec<u8>>],
+    scale: f32,
+) -> Result<RgbaImage> {
+    let inverse = Inverse::new(stack, masks, scale, source.width(), source.height())?;
+    let mut out = RgbaImage::new(source.width(), source.height());
+    for (x, y, pixel) in out.enumerate_pixels_mut() {
+        if x == 0 {
+            crate::composite::check_cancelled()?;
+        }
+        let (sx, sy) = inverse.locate(x, y);
+        *pixel = sample(source, sx, sy);
     }
     Ok(out)
+}
+
+/// Float counterpart of [`warp`]: the same source positions and premultiplied
+/// bilinear kernel over encoded sRGB coordinates, as in the released byte
+/// resampler, but color and alpha are never quantized and extended working
+/// channels survive. The caller owns the result only after every row succeeds.
+pub(crate) fn warp_working(
+    source: &crate::blend::LinearSurface,
+    stack: &[Value],
+    masks: &[Option<Vec<u8>>],
+    scale: f32,
+    context: &crate::blend::LegacyBlendContext,
+) -> Result<crate::blend::LinearSurface> {
+    let (width, height) = source.dimensions();
+    let inverse = Inverse::new(stack, masks, scale, width, height)?;
+    let mut encoded = Vec::new();
+    encoded.try_reserve_exact(source.pixels().len())?;
+    for (index, pixel) in source.pixels().iter().enumerate() {
+        if index % width as usize == 0 {
+            crate::composite::check_cancelled()?;
+        }
+        encoded.push(context.coordinates(*pixel, "srgb"));
+    }
+    let mut pixels = Vec::new();
+    pixels.try_reserve_exact(encoded.len())?;
+    for y in 0..height {
+        crate::composite::check_cancelled()?;
+        for x in 0..width {
+            let (sx, sy) = inverse.locate(x, y);
+            let sampled = bilinear(width, height, sx, sy, |x, y| {
+                encoded[(y * width + x) as usize]
+            });
+            pixels.push(sampled.map_or([0.0; 4], |(color, alpha)| {
+                context.working_coordinates(
+                    [color[0], color[1], color[2], alpha.clamp(0.0, 1.0)],
+                    "srgb",
+                )
+            }));
+        }
+    }
+    crate::blend::LinearSurface::from_pixels(width, height, source.space(), pixels)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blend::{LegacyBlendContext, LinearSurface};
+
+    #[test]
+    fn float_warp_cancels_at_every_checkpoint_without_mutating_the_source() {
+        let mut pixels = vec![[0.0; 4]; 16];
+        pixels[5] = [0.2, 0.3, 1.4, 0.6];
+        pixels[6] = [-0.05, 0.5, 0.1, 0.25];
+        let source = LinearSurface::from_pixels(4, 4, "srgb:linear", pixels).unwrap();
+        let before = source.clone();
+        let stack = [
+            json!({"id":"t","kind":"matrix","enabled":true,"opacity":0.7,
+            "matrix":[1,0.2,0.3,0,1,0.1,0.05,0,1]}),
+        ];
+        let masks = [None];
+        let context = LegacyBlendContext::new("srgb:linear").unwrap();
+        let complete = warp_working(&source, &stack, &masks, 1.0, &context).unwrap();
+        // Extended working channels survive resampling.
+        assert!(complete.pixels().iter().any(|p| p[2] > 1.0));
+        assert!(complete.pixels().iter().any(|p| p[0] < 0.0));
+        let mut cancelled = 0;
+        for at in 1.. {
+            let (result, reached) = crate::composite::cancel_at_check(at, || {
+                warp_working(&source, &stack, &masks, 1.0, &context)
+            });
+            assert_eq!(source, before);
+            if !reached {
+                assert_eq!(result.unwrap(), complete);
+                break;
+            }
+            assert!(result.unwrap_err().to_string().contains("cancelled"));
+            cancelled += 1;
+        }
+        assert_eq!(cancelled, 8, "one checkpoint per input and output row");
+    }
 }

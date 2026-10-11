@@ -4,3 +4,5 @@
 examples/raster-paint-showcase.pen -text
 # Photography conformance fixtures are pinned by SHA-256 in photo-conformance.json.
 docs/fixtures/photo-* -text
+# Print conformance fixtures and manifest are pinned byte-for-byte.
+docs/fixtures/print-* -text

@@ -1,0 +1,812 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/pen-v8.json",
+  "title": "Pentool document v8 (professional color, developing contract)",
+  "description": "Developing v8 catalog, explicit conversion roles and native scene paints/gradients with legacy-sRGB migration. Native gradients interpolate explicit device, RGB or physical Lab channels before sRGB8 preview conversion. Production compositing/proof rendering, raster interpretation, inks and print delivery remain under development. Rust additionally validates all supported slots, profile paths, channel/header agreement, hashes, limits and containment.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "name",
+    "pages",
+    "image_assets",
+    "compositing",
+    "color_management"
+  ],
+  "properties": {
+    "format": {
+      "const": "pentool"
+    },
+    "version": {
+      "const": 8
+    },
+    "name": {
+      "type": "string"
+    },
+    "fonts": {
+      "type": "array"
+    },
+    "styles": {
+      "type": "object",
+      "additionalProperties": {
+        "if": {
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "fill"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/fillDefinition"
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "array"
+    },
+    "masks": {
+      "$ref": "pen-format-v6.schema.json#/properties/masks"
+    },
+    "mask_resources": {
+      "$ref": "pen-format-v6.schema.json#/properties/mask_resources"
+    },
+    "image_assets": {
+      "$ref": "pen-format-v5.schema.json#/properties/image_assets"
+    },
+    "compositing": {
+      "$ref": "pen-format-v6.schema.json#/properties/compositing"
+    },
+    "photography": {
+      "$ref": "pen-format-v7.schema.json#/$defs/photography"
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": {
+        "$ref": "#/$defs/page"
+      }
+    },
+    "color_management": {
+      "$ref": "#/$defs/colorManagement"
+    },
+    "print_recipes": {
+      "description": "Named print recipes (see docs/professional-color-v1.md); selected with --recipe @NAME.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["version", "name"],
+        "properties": {
+          "version": { "const": 1 },
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$" }
+        }
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "alias": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "profileText": {
+      "type": "object",
+      "required": [
+        "text",
+        "language",
+        "country"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "language": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-z]{2}$"
+            }
+          ]
+        },
+        "country": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "description",
+        "copyright",
+        "manufacturer",
+        "model"
+      ],
+      "properties": {
+        "description": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/profileText"
+            }
+          ]
+        },
+        "copyright": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/profileText"
+            }
+          ]
+        },
+        "manufacturer": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/profileText"
+            }
+          ]
+        },
+        "model": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/profileText"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "storage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "encoding",
+            "data"
+          ],
+          "properties": {
+            "kind": {
+              "const": "embedded"
+            },
+            "encoding": {
+              "const": "base64"
+            },
+            "data": {
+              "type": "string",
+              "maxLength": 22369624,
+              "contentEncoding": "base64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "external"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\:\\u0000]).+$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "byte_length",
+        "icc_version",
+        "class",
+        "color_space",
+        "connection_space",
+        "metadata",
+        "storage",
+        "redistribution"
+      ],
+      "properties": {
+        "byte_length": {
+          "type": "integer",
+          "minimum": 132,
+          "maximum": 16777216
+        },
+        "icc_version": {
+          "type": "string",
+          "pattern": "^[24]\\.[0-9]\\.[0-9]$"
+        },
+        "class": {
+          "enum": [
+            "scnr",
+            "mntr",
+            "prtr",
+            "link",
+            "spac",
+            "abst",
+            "nmcl"
+          ]
+        },
+        "color_space": {
+          "enum": [
+            "RGB ",
+            "GRAY",
+            "CMYK",
+            "XYZ ",
+            "Lab "
+          ]
+        },
+        "connection_space": {
+          "enum": [
+            "RGB ",
+            "GRAY",
+            "CMYK",
+            "XYZ ",
+            "Lab "
+          ]
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        },
+        "storage": {
+          "$ref": "#/$defs/storage"
+        },
+        "redistribution": {
+          "enum": [
+            "allowed",
+            "restricted",
+            "unknown"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "additionalProperties": false
+    },
+    "colorManagement": {
+      "type": "object",
+      "required": [
+        "engine",
+        "legacy_rgb",
+        "working_space",
+        "profiles",
+        "aliases"
+      ],
+      "properties": {
+        "engine": {
+          "const": 1
+        },
+        "legacy_rgb": {
+          "const": "srgb"
+        },
+        "working_space": {
+          "const": "srgb:linear"
+        },
+        "profiles": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "$ref": "#/$defs/digest"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/profile"
+          }
+        },
+        "aliases": {
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": {
+            "$ref": "#/$defs/alias"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/digest"
+          }
+        },
+        "inks": {
+          "$ref": "#/$defs/spotInkLibrary"
+        },
+        "roles": {
+          "type": "object",
+          "maxProperties": 4,
+          "properties": {
+            "working": {
+              "$ref": "#/$defs/roleSetting"
+            },
+            "proof": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/roleSetting"
+                },
+                {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "space": {
+                          "enum": [
+                            "icc-rgb",
+                            "icc-gray",
+                            "icc-cmyk"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "display": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/roleSetting"
+                },
+                {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "space": {
+                          "not": {
+                            "enum": [
+                              "lab-d50",
+                              "icc-gray",
+                              "icc-cmyk"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "output": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/roleSetting"
+                },
+                {
+                  "properties": {
+                    "destination": {
+                      "properties": {
+                        "space": {
+                          "not": {
+                            "const": "lab-d50"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "spotInkLibrary": {
+      "type": "object",
+      "required": ["schema", "inks"],
+      "properties": {
+        "schema": { "const": 1 },
+        "inks": {
+          "type": "object",
+          "maxProperties": 512,
+          "propertyNames": { "$ref": "#/$defs/alias" },
+          "additionalProperties": { "$ref": "#/$defs/spotInk" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "spotInk": {
+      "type": "object",
+      "required": ["id", "name", "alternate", "provenance", "redistribution"],
+      "properties": {
+        "id": { "$ref": "#/$defs/alias" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "aliases": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/alias" }
+        },
+        "alternate": { "$ref": "color-value-v1.schema.json" },
+        "provenance": { "$ref": "#/$defs/inkProvenance" },
+        "redistribution": { "enum": ["allowed", "restricted", "unknown"] }
+      },
+      "additionalProperties": false
+    },
+    "inkProvenance": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "publisher": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "license": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      },
+      "additionalProperties": false
+    },
+    "roleSetting": {
+      "type": "object",
+      "required": [
+        "destination",
+        "intent"
+      ],
+      "properties": {
+        "destination": {
+          "$ref": "color-value-v1.schema.json#/$defs/destination"
+        },
+        "intent": {
+          "enum": [
+            "perceptual",
+            "relative-colorimetric",
+            "saturation",
+            "absolute-colorimetric"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "nativeColor": {
+      "$ref": "color-value-v1.schema.json"
+    },
+    "page": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "canvas",
+        "layers"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "canvas": {
+          "type": "object",
+          "required": [
+            "width",
+            "height",
+            "background"
+          ],
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "background": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/nativeColor"
+                }
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/layer"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "layer": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "nodes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "group": {
+      "allOf": [
+        {
+          "$ref": "pen-format-v6.schema.json#/$defs/base"
+        },
+        {
+          "required": [
+            "children"
+          ],
+          "properties": {
+            "kind": {
+              "const": "group"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/node"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fillDefinition": {
+      "type": "object",
+      "anyOf": [
+        {
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "required": [
+            "ref",
+            "fallback"
+          ]
+        }
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fallback": {
+          "$ref": "#/$defs/fillDefinition"
+        },
+        "kind": {
+          "enum": [
+            "solid",
+            "linear",
+            "radial",
+            "conic",
+            "pattern"
+          ]
+        },
+        "space": {
+          "oneOf": [
+            {
+              "enum": [
+                "srgb",
+                "linear"
+              ]
+            },
+            {
+              "$ref": "color-value-v1.schema.json#/$defs/destination"
+            }
+          ]
+        },
+        "spread": {
+          "enum": [
+            "pad",
+            "repeat",
+            "reflect"
+          ]
+        },
+        "stops": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "position",
+              "color"
+            ],
+            "properties": {
+              "position": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "color": {}
+            }
+          }
+        },
+        "asset": {
+          "$ref": "pen-format-v5.schema.json#/$defs/digest"
+        },
+        "intent": {
+          "enum": [
+            "perceptual",
+            "relative-colorimetric",
+            "saturation",
+            "absolute-colorimetric"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "space"
+            ],
+            "properties": {
+              "space": {
+                "type": "object"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "intent",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "linear",
+                  "radial",
+                  "conic"
+                ]
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "intent"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "fillNode": {
+      "allOf": [
+        {
+          "$ref": "pen-format-v6.schema.json#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height",
+            "fill"
+          ],
+          "properties": {
+            "kind": {
+              "const": "fill"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "fill": {
+              "$ref": "#/$defs/fillDefinition"
+            }
+          }
+        }
+      ]
+    },
+    "instance": {
+      "allOf": [
+        {
+          "$ref": "pen-format-v6.schema.json#/$defs/base"
+        },
+        {
+          "required": [
+            "component",
+            "fallback"
+          ],
+          "properties": {
+            "kind": {
+              "const": "instance"
+            },
+            "component": {
+              "type": "string"
+            },
+            "fallback": {
+              "$ref": "#/$defs/node"
+            },
+            "overrides": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    },
+    "node": {
+      "anyOf": [
+        {
+          "$ref": "pen-format-v7.schema.json#/$defs/node"
+        },
+        {
+          "$ref": "#/$defs/group"
+        },
+        {
+          "$ref": "#/$defs/fillNode"
+        },
+        {
+          "$ref": "#/$defs/instance"
+        }
+      ]
+    }
+  }
+}

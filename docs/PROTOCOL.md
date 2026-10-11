@@ -7,6 +7,32 @@ object storage, mirrors, or a searchable hosted catalog.
 
 ## Principles
 
+### Development v8 catalog compatibility
+
+The developing [professional color contract](professional-color-v1.md) and
+[v8 schema](pen-format-v8.schema.json) add a profile catalog through explicit
+CLI migration. The browser accepts v8 scenes using the existing scene operations
+and Rust validation. Existing revision guards and transaction history apply;
+profile import alone does not change rendering. Native vector/background, fill,
+effect and immutable vector mask paints validate in Rust and render through the
+shared sRGB8 preview; their stored channels remain unchanged. Profile catalog and
+paint assignment/conversion commands are currently CLI operations, with the same
+revision guards and history. Persistent mask paint edits replace content identities
+and their references atomically. Optional working/proof/display/output role
+targets and intents are validated by Rust and consumed by CLI sample evaluation
+and explicit paint conversion. Assignment pins ICC identities; profile removal
+and downgrade refuse retained role dependencies. Read-only CLI native channel
+interpolation uses the shared Rust evaluator with explicit space, intent and
+separate alpha. Explicit v8 native fill gradients and gradient overlays now use
+the same sampler in Rust before preview conversion; their space/intent can be
+edited through existing fill operations. Legacy string-space gradients retain
+their released interpolation. Interpolation destinations are profile dependencies
+for removal, downgrade and package verification. Node and mask analysis resolve
+their scoped native dependencies through the same preview planner.
+Packaging checks the required role paths, including settings written directly
+in JSON. Production compositing,
+proof rendering and print editor controls remain under development.
+
 ### Development v6 editor API
 
 The v6 development renderer and operation contract is specified in
@@ -20,6 +46,16 @@ One successful batch produces one document history entry.
 optional `query`, `samples` (pixel coordinate pairs) and `compare`. It returns
 read-only `analysis` and optional `comparison`; no client color math is trusted.
 `GET /api/composite/dependencies` reports actual linked-source status offline.
+
+`GET /api/color/preflight` (`page`, `min_ppi`, `min_bleed_inches`) runs the print
+preflight on the shared document and returns the report plus the resolved
+`production` geometry (or `null`). It is read only and never changes the file.
+
+`GET /api/color/plates` (`page`, `scale`) separates the shared document and lists each
+plate's average and maximum coverage; adding `plate=ID` returns that plate as a
+grayscale PNG (white is no ink). `GET /api/color/proof` (`page`) returns the
+output-profile soft-proof image as a PNG. Both are bounded (about one million
+pixels), read only, and answer 400 with `error` for unsupported pages or roles.
 
 `POST /api/render/svg` and `/api/render/png` accept optional `page`, `max_edge`
 (v6: 1..4096) and `job` query parameters. V6 proxy sizing bounds the output canvas,
@@ -181,6 +217,21 @@ Archive entries are ordered lexicographically, use `/` separators, fixed metadat
 and deterministic compression settings. Manifest maps are ordered by key. The
 package hash is SHA-256 over the complete archive bytes. Rebuilding identical
 normalized input must produce identical bytes.
+
+V8 asset entries can include an `icc_profiles` audit array. Each record contains
+the original profile `digest`, `byte_length`, `icc_version`, `class`,
+`color_space`, `connection_space`, declared `redistribution`, optional-source
+value (`source`, null when absent), and sorted document-local `aliases`.
+Every ICC catalog entry must be embedded and declare `allowed` redistribution.
+Verification derives the array from the validated document and requires exact
+agreement. Omitted arrays mean empty, preserving legacy manifests. `color profile
+collect` prepares embedded dependencies; its private `--local-only` option does
+not relax packaging's redistribution gate. Manifest-only and discovered assets
+are both checked, and packaging archives their exact validated bytes.
+Asset discovery skips private `.pentool` history/cache trees. Explicit file
+references into those trees and preview paths colliding with assets, the manifest,
+or the license are rejected. Included file paths must resolve within the package
+root; discovery errors fail packaging instead of omitting an inaccessible asset.
 
 ## Registry protocol
 

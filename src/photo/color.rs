@@ -273,6 +273,12 @@ pub fn xyz((x, y): Xy) -> [f64; 3] {
 
 /// Bradford chromatic adaptation from one white to another, in XYZ.
 pub fn bradford(from: Xy, to: Xy) -> Matrix {
+    bradford_xyz(xyz(from), xyz(to))
+}
+
+/// Bradford adaptation using physical XYZ whites with Y = 1. ICC's fixed-point
+/// D50 white must not be replaced by the photography contract's rounded xy D50.
+pub fn bradford_xyz(from: [f64; 3], to: [f64; 3]) -> Matrix {
     const B: Matrix = [
         [0.8951, 0.2664, -0.1614],
         [-0.7502, 1.7135, 0.0367],
@@ -281,8 +287,8 @@ pub fn bradford(from: Xy, to: Xy) -> Matrix {
     if from == to {
         return identity();
     }
-    let source = apply(&B, xyz(from));
-    let target = apply(&B, xyz(to));
+    let source = apply(&B, from);
+    let target = apply(&B, to);
     let mut scale = identity();
     for i in 0..3 {
         scale[i][i] = target[i] / source[i];

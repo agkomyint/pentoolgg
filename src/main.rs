@@ -199,7 +199,7 @@ struct FillArgs {
     /// Hex color, RGBA JSON, or token reference JSON for solid fills.
     #[arg(long)]
     color: Option<String>,
-    /// Gradient/pattern settings as a JSON object.
+    /// Gradient/pattern JSON. Native v8 gradient space objects require an explicit intent.
     #[arg(long)]
     params: Option<String>,
     #[arg(long)]
@@ -1530,7 +1530,403 @@ enum PhotoProfileAction {
 }
 
 #[derive(Subcommand)]
+enum ColorAction {
+    /// Interpolate two samples in explicit native channels, with separate alpha.
+    Interpolate {
+        input: PathBuf,
+        /// Starting native color JSON.
+        #[arg(long)]
+        from: String,
+        /// Ending native color JSON.
+        #[arg(long)]
+        to: String,
+        /// Interpolation destination JSON with space and optional profile.
+        #[arg(long)]
+        space: String,
+        /// Position in [0,1].
+        #[arg(long)]
+        position: f64,
+        #[arg(long, default_value="relative-colorimetric", value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+        intent: String,
+    },
+    /// Configure explicit document color roles or evaluate their target conversions.
+    Role {
+        #[command(subcommand)]
+        action: ColorRoleAction,
+    },
+    /// Assign or convert stored vector/background/fill/effect paint samples.
+    Paints {
+        #[command(subcommand)]
+        action: ColorPaintAction,
+    },
+    /// Evaluate native color channels and optionally convert a sample, read only.
+    Evaluate {
+        input: PathBuf,
+        /// Native color JSON with space, channels, optional profile and alpha.
+        #[arg(long)]
+        color: String,
+        /// Destination JSON with space and optional profile.
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value="relative-colorimetric", value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+        intent: String,
+    },
+    /// Inspect ICC files and manage original profiles in v8 documents.
+    Profile {
+        #[command(subcommand)]
+        action: ColorProfileAction,
+    },
+    /// Show or edit page production geometry: trim, bleed, slug, safe zone, marks.
+    Production {
+        #[command(subcommand)]
+        action: ProductionAction,
+    },
+    /// Write deterministic ink plates (C,M,Y,K, then spot IDs) with knockout and
+    /// overprint semantics. Read only; refuses unsupported transparency.
+    Separate {
+        input: PathBuf,
+        /// Empty or new directory for plate-NN-*.png and separations.json.
+        #[arg(long)]
+        out: PathBuf,
+        /// CMYK destination JSON; defaults to the document output role.
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+        intent: Option<String>,
+        /// Render scale, 0.1 to 8 (default 1 or the recipe's scale).
+        #[arg(long)]
+        scale: Option<f32>,
+        /// Plate PNG bit depth (8 or 16; default 8 or the recipe's plate_bits).
+        #[arg(long, value_parser = clap::value_parser!(u8).range(8..=16))]
+        bits: Option<u8>,
+        /// Print recipe JSON file, or @NAME for a recipe in the document's print_recipes, supplying intent, profile and plate_bits; flags override it.
+        #[arg(long)]
+        recipe: Option<PathBuf>,
+        /// Automatic trap width in document units (spreads lighter ink under
+        /// darker neighbors, at most 8 device pixels); overrides the recipe.
+        #[arg(long)]
+        auto_trap: Option<f64>,
+        /// Also write composite-preview.png (plates read through the output
+        /// profile to the display role, spot alternates multiplied) and report it.
+        #[arg(long)]
+        composite: bool,
+    },
+    /// Build a production package directory: PDF/X draft, plates, preflight
+    /// report, verified profiles, source document and digest manifest. Refuses
+    /// when preflight finds errors; a failed build leaves no directory.
+    Package {
+        input: PathBuf,
+        /// New package directory.
+        #[arg(long)]
+        out: PathBuf,
+        /// Print recipe JSON file, or @NAME for a recipe in the document's print_recipes, supplying intent, ppi and thresholds.
+        #[arg(long)]
+        recipe: Option<PathBuf>,
+        /// CMYK destination JSON; defaults to the document output role.
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+        intent: Option<String>,
+    },
+    /// Re-hash every file listed by a package manifest, offline.
+    PackageVerify { directory: PathBuf },
+    /// Structured print preflight: output profile, geometry, bleed, resolution,
+    /// transparency and unsupported-construct issues. Read only.
+    Preflight {
+        input: PathBuf,
+        /// Minimum nominal image resolution in ppi (default 150).
+        #[arg(long)]
+        min_ppi: Option<f64>,
+        /// Minimum bleed on every side in inches (default 0.125).
+        #[arg(long)]
+        min_bleed_inches: Option<f64>,
+        /// Bleed-coverage render scale (0.1-8, default 1); 0 skips the measurement.
+        #[arg(long)]
+        bleed_scale: Option<f32>,
+        /// Maximum total ink (C+M+Y+K) in percent, 100-400; unchecked when absent.
+        #[arg(long)]
+        max_total_ink: Option<f64>,
+        /// Print recipe JSON file, or @NAME for a recipe in the document's print_recipes, supplying thresholds; flags override it.
+        #[arg(long)]
+        recipe: Option<PathBuf>,
+    },
+    /// Export the selected page as a flattened CMYK PDF/X-4 draft with an output
+    /// intent and TrimBox/BleedBox from the page production geometry. The report
+    /// states that independent conformance validation has not been run.
+    Pdfx {
+        input: PathBuf,
+        /// New output PDF path; existing files are never replaced.
+        output: PathBuf,
+        /// CMYK destination JSON; defaults to the document output role.
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+        intent: Option<String>,
+        /// Raster resolution, 36 to 1200 ppi (default 300).
+        #[arg(long)]
+        ppi: Option<f64>,
+        /// Print recipe JSON file, or @NAME for a recipe in the document's print_recipes, supplying intent and resolution; flags override it.
+        #[arg(long)]
+        recipe: Option<PathBuf>,
+        #[arg(long)]
+        title: Option<String>,
+        /// Creation date YYYY-MM-DDTHH:MM:SSZ (default SOURCE_DATE_EPOCH or the epoch).
+        #[arg(long)]
+        created: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProductionAction {
+    /// Resolve the selected page's boxes, PDF boxes in points and marks.
+    Show {
+        input: PathBuf,
+        /// Also measure painted alpha in each bleed band at this scale (0.1-8).
+        #[arg(long)]
+        coverage_scale: Option<f32>,
+        /// Enforce PDF/X box rules (TrimBox and ArtBox are exclusive).
+        #[arg(long)]
+        pdfx: bool,
+    },
+    /// Replace the selected page's production object with the given JSON.
+    Set {
+        input: PathBuf,
+        /// Production object, e.g. '{"trim":{...},"bleed":9}'.
+        #[arg(long)]
+        geometry: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Remove the selected page's production object.
+    Clear {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+}
+
+#[derive(Args)]
+struct ColorPaintOptions {
+    input: PathBuf,
+    /// Rendering intent (default: relative-colorimetric, or the selected role's intent).
+    #[arg(long, value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+    intent: Option<String>,
+    /// Include shared styles/components; their users on other pages can change.
+    #[arg(long)]
+    include_shared: bool,
+    #[arg(long)]
+    all_pages: bool,
+    #[arg(long, default_value_t = 0)]
+    offset: usize,
+    /// Maximum emitted changes; every matching paint is still planned.
+    #[arg(long, default_value_t = 100)]
+    limit: usize,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    if_revision: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum ColorPaintAction {
+    /// Reinterpret existing channel numbers; channel count must be unchanged.
+    Assign {
+        #[command(flatten)]
+        options: ColorPaintOptions,
+        /// Destination JSON with space and optional profile.
+        #[arg(long)]
+        to: String,
+    },
+    /// Convert through physical D50 PCS and the selected ICC intent paths.
+    Convert {
+        #[command(flatten)]
+        options: ColorPaintOptions,
+        #[arg(
+            long,
+            required_unless_present_any = ["legacy_srgb", "role"],
+            conflicts_with_all = ["legacy_srgb", "role"]
+        )]
+        to: Option<String>,
+        /// Explicitly quantize converted samples to legacy sRGB8 hex paints.
+        #[arg(long, conflicts_with_all=["to","role"])]
+        legacy_srgb: bool,
+        /// Use an effective working/proof/display/output target and its stored intent.
+        #[arg(long, conflicts_with_all=["to","legacy_srgb","intent"],value_parser=["working","proof","display","output"])]
+        role: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ColorRoleAction {
+    /// Assign a verified role target without changing stored paint samples.
+    Assign {
+        input: PathBuf,
+        #[arg(value_parser=["working","proof","display","output"])]
+        role: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long,default_value="relative-colorimetric",value_parser=["perceptual","relative-colorimetric","saturation","absolute-colorimetric"])]
+        intent: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Clear one explicit setting; profiles and stored paints are retained.
+    Clear {
+        input: PathBuf,
+        #[arg(value_parser=["working","proof","display","output"])]
+        role: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// List all four roles, including implicit working/display defaults.
+    List { input: PathBuf },
+    /// Convert a native sample through the selected role and its intent, read only.
+    Evaluate {
+        input: PathBuf,
+        #[arg(value_parser=["working","proof","display","output"])]
+        role: String,
+        #[arg(long)]
+        color: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ColorProfileAction {
+    /// Embed every verified ICC catalog dependency in one transaction.
+    Collect {
+        input: PathBuf,
+        /// Permit restricted/unknown policies for a private copy; packaging still refuses them.
+        #[arg(long)]
+        local_only: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Remove an unused profile identity and all its aliases, without deleting source files.
+    Remove {
+        input: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Import original ICC bytes into an explicitly migrated v8 document.
+    Import {
+        input: PathBuf,
+        file: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long,default_value="unknown",value_parser=["allowed","restricted","unknown"])]
+        redistribution: String,
+        #[arg(long)]
+        source: Option<String>,
+        /// Store a verified existing document-relative file instead of embedding.
+        #[arg(long)]
+        external: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// List compact document profile records and aliases.
+    List {
+        input: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// Resolve, hash-verify and inspect a document profile offline.
+    Show {
+        input: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// Embed the verified original bytes of a catalog profile atomically.
+    Embed {
+        input: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Inspect bounded metadata, paginated tags and executable capabilities.
+    Inspect {
+        file: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// Validate a requested ICC path; this does not certify profile conformance.
+    Validate {
+        file: PathBuf,
+        #[arg(long, default_value = "device-to-pcs", value_parser = ["device-to-pcs", "pcs-to-device", "device-link"])]
+        direction: String,
+        #[arg(long, default_value = "relative-colorimetric", value_parser = ["perceptual", "relative-colorimetric", "saturation", "absolute-colorimetric"])]
+        intent: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum InspectAction {
+    /// Read-only CMYK ink analysis of visible paint samples on one page.
+    Ink {
+        input: PathBuf,
+        /// Optional verified output-class CMYK catalog profile; otherwise use the output role.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Intent for --profile (otherwise the assigned output role's intent).
+        #[arg(long, requires = "profile", value_parser = ["perceptual", "relative-colorimetric", "saturation", "absolute-colorimetric"])]
+        intent: Option<String>,
+        /// Maximum total area coverage, C+M+Y+K, in percent.
+        #[arg(long)]
+        tac_limit: f64,
+        /// Text smaller than this point size is checked for multiple plates.
+        #[arg(long)]
+        small_text_points: f64,
+        /// Physical document scale used to convert stored text sizes to points.
+        #[arg(long)]
+        units_per_inch: f64,
+        /// Maximum source Lab chroma for a neutral sample (CIE76).
+        #[arg(long, default_value_t = 2.0)]
+        neutral_chroma: f64,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// Read-only document inspection reports.
+    Inspect {
+        #[command(subcommand)]
+        action: InspectAction,
+    },
+    /// Professional color management and local ICC profile discovery.
+    Color {
+        #[command(subcommand)]
+        action: ColorAction,
+    },
     /// Import, place, inspect, and edit raster images.
     Image {
         #[command(subcommand)]
@@ -1835,7 +2231,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate between compatible v3, v4, v5, v6, and v7 document formats.
+    /// Explicitly migrate between compatible v3 through v8 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -3090,6 +3486,72 @@ async fn run() -> Result<()> {
         port: 4711,
         no_cache: false,
     }) {
+        Command::Inspect {
+            action:
+                InspectAction::Ink {
+                    input,
+                    profile,
+                    intent,
+                    tac_limit,
+                    small_text_points,
+                    units_per_inch,
+                    neutral_chroma,
+                    offset,
+                    limit,
+                },
+        } => {
+            use pentool::color::{ink, roles};
+            if !(1..=256).contains(&limit) {
+                bail!("[invalid-input] ink report limit must be in 1..=256");
+            }
+            if !tac_limit.is_finite() || !(0.0..=400.0).contains(&tac_limit) {
+                bail!("[invalid-input] ink TAC limit must be finite and in [0,400] percent");
+            }
+            if !small_text_points.is_finite()
+                || small_text_points <= 0.0
+                || small_text_points > 1000.0
+            {
+                bail!("[invalid-input] small-text threshold must be finite and in (0,1000] points");
+            }
+            if !units_per_inch.is_finite() || units_per_inch <= 0.0 || units_per_inch > 1_000_000.0
+            {
+                bail!("[invalid-input] document units per inch must be finite and in (0,1000000]");
+            }
+            if !neutral_chroma.is_finite() || !(0.0..=150.0).contains(&neutral_chroma) {
+                bail!(
+                    "[invalid-input] neutral CIE76 chroma threshold must be finite and in [0,150]"
+                );
+            }
+            let (mut raw, _) = read_color_document(&input, None)?;
+            if let Some(profile) = profile {
+                let intent = intent
+                    .as_deref()
+                    .unwrap_or("relative-colorimetric")
+                    .parse()?;
+                roles::assign(
+                    &mut raw,
+                    &input,
+                    roles::Role::Output,
+                    &serde_json::json!({"space":"icc-cmyk","profile":profile}),
+                    intent,
+                )?;
+            }
+            let report = ink::analyze_page(
+                &raw,
+                &input,
+                selected_page,
+                ink::Thresholds {
+                    tac_percent: tac_limit,
+                    small_text_points,
+                    units_per_inch,
+                    neutral_chroma,
+                },
+                offset,
+                limit,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
         Command::Raw { action } => match action {
             RawAction::Add {
                 input,
@@ -3308,6 +3770,775 @@ async fn run() -> Result<()> {
                 Ok(())
             }
         },
+        Command::Color {
+            action: ColorAction::Paints { action },
+        } => {
+            use pentool::color::{
+                editing::{Operation, Options, Target},
+                value::Destination,
+            };
+            let (options, operation, to, role) = match action {
+                ColorPaintAction::Assign { options, to } => {
+                    (options, Operation::Assign, Some(to), None)
+                }
+                ColorPaintAction::Convert {
+                    options, to, role, ..
+                } => (options, Operation::Convert, to, role),
+            };
+            if !(1..=256).contains(&options.limit) {
+                bail!("[invalid-input] paint change limit must be 1..=256");
+            }
+            let mut intent = options
+                .intent
+                .as_deref()
+                .unwrap_or("relative-colorimetric")
+                .parse()?;
+            let mut target = if let Some(to) = to {
+                if to.len() > 256 {
+                    bail!("[limit-exceeded] paint destination JSON exceeds 256 bytes");
+                }
+                Target::Native(Destination::parse(
+                    &serde_json::from_str(&to).context("invalid paint destination JSON")?,
+                )?)
+            } else {
+                Target::LegacySrgb
+            };
+            let (raw, revision) =
+                read_color_document(&options.input, options.if_revision.as_deref())?;
+            if let Some(role) = role.as_deref() {
+                let setting = pentool::color::roles::effective(&raw, role.parse()?)?;
+                target = Target::Native(setting.destination);
+                intent = setting.intent;
+            }
+            let mut plan = pentool::color::editing::plan(
+                &raw,
+                &options.input,
+                &Options {
+                    operation,
+                    target,
+                    intent,
+                    page: selected_page,
+                    all_pages: options.all_pages,
+                    include_shared: options.include_shared,
+                    offset: options.offset,
+                    limit: options.limit,
+                },
+            )?;
+            if let Some(role) = role {
+                plan.report["role"] = serde_json::json!(role);
+            }
+            let change = transaction::commit_value(
+                &options.input,
+                match operation {
+                    Operation::Assign => "color-paints-assign",
+                    Operation::Convert => "color-paints-convert",
+                },
+                options.dry_run,
+                Some(&revision),
+                &plan.document,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"change":change,"result":plan.report})
+                )?
+            );
+            Ok(())
+        }
+        Command::Color {
+            action: ColorAction::Role { action },
+        } => {
+            use pentool::color::roles;
+            if selected_page.is_some() {
+                bail!("[invalid-input] document color roles have no page scope; --page is not applicable");
+            }
+            let result = match action {
+                ColorRoleAction::Assign {
+                    input,
+                    role,
+                    to,
+                    intent,
+                    dry_run,
+                    if_revision,
+                } => {
+                    if to.len() > 256 {
+                        bail!("[limit-exceeded] role destination JSON exceeds 256 bytes");
+                    }
+                    let destination: serde_json::Value =
+                        serde_json::from_str(&to).context("invalid role destination JSON")?;
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    let result = roles::assign(
+                        &mut raw,
+                        &input,
+                        role.parse()?,
+                        &destination,
+                        intent.parse()?,
+                    )?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "color-role-assign",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    serde_json::json!({"change":change,"result":result})
+                }
+                ColorRoleAction::Clear {
+                    input,
+                    role,
+                    dry_run,
+                    if_revision,
+                } => {
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    let result = roles::clear(&mut raw, role.parse()?)?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "color-role-clear",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    serde_json::json!({"change":change,"result":result})
+                }
+                ColorRoleAction::List { input } => {
+                    let (raw, _) = read_color_document(&input, None)?;
+                    roles::list(&raw)?
+                }
+                ColorRoleAction::Evaluate { input, role, color } => {
+                    if color.len() > 4096 {
+                        bail!("[limit-exceeded] native color JSON exceeds 4096 bytes");
+                    }
+                    let color: serde_json::Value =
+                        serde_json::from_str(&color).context("invalid native color JSON")?;
+                    let (raw, _) = read_color_document(&input, None)?;
+                    roles::evaluate(&raw, &input, role.parse()?, &color)?
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Color {
+            action:
+                ColorAction::Interpolate {
+                    input,
+                    from,
+                    to,
+                    space,
+                    position,
+                    intent,
+                },
+        } => {
+            if selected_page.is_some() {
+                bail!("[invalid-input] color interpolation has no page scope; --page is not applicable");
+            }
+            if from.len() > 4096 || to.len() > 4096 || space.len() > 256 {
+                bail!("[limit-exceeded] color JSON is limited to 4096 bytes and interpolation destination JSON to 256 bytes");
+            }
+            if !position.is_finite() || !(0.0..=1.0).contains(&position) {
+                bail!("[invalid-input] color interpolation position must be finite and in [0,1]");
+            }
+            let from: serde_json::Value =
+                serde_json::from_str(&from).context("invalid starting native color JSON")?;
+            let to: serde_json::Value =
+                serde_json::from_str(&to).context("invalid ending native color JSON")?;
+            let space: serde_json::Value =
+                serde_json::from_str(&space).context("invalid interpolation destination JSON")?;
+            let (raw, _) = read_color_document(&input, None)?;
+            let result = pentool::color::value::interpolate(
+                &raw,
+                &input,
+                &from,
+                &to,
+                &space,
+                position,
+                intent.parse()?,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Color {
+            action:
+                ColorAction::Evaluate {
+                    input,
+                    color,
+                    to,
+                    intent,
+                },
+        } => {
+            if selected_page.is_some() {
+                bail!("[invalid-input] color sample evaluation has no page scope; --page is not applicable");
+            }
+            if color.len() > 4096 || to.as_ref().is_some_and(|value| value.len() > 256) {
+                bail!("[limit-exceeded] color JSON is limited to 4096 bytes and destination JSON to 256 bytes");
+            }
+            let color: serde_json::Value =
+                serde_json::from_str(&color).context("invalid native color JSON")?;
+            let destination: Option<serde_json::Value> = to
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .context("invalid color destination JSON")?;
+            let raw: serde_json::Value = serde_json::from_slice(&pentool::resource::read_bounded(
+                &input,
+                pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
+            )?)?;
+            let result = pentool::color::value::evaluate(
+                &raw,
+                &input,
+                &color,
+                destination.as_ref(),
+                intent.parse()?,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Color {
+            action: ColorAction::Production { action },
+        } => {
+            use pentool::color::production;
+            let page_index = |raw: &serde_json::Value| -> Result<usize> {
+                let pages = raw["pages"].as_array().context("pages missing")?;
+                match selected_page {
+                    Some(id) => pages
+                        .iter()
+                        .position(|p| p["id"] == id)
+                        .with_context(|| format!("[missing-resource] page not found: {id}")),
+                    None => Ok(0),
+                }
+            };
+            match action {
+                ProductionAction::Show {
+                    input,
+                    coverage_scale,
+                    pdfx,
+                } => {
+                    let (raw, _) = read_color_document(&input, None)?;
+                    pentool::scene::validate(&raw)?;
+                    let index = page_index(&raw)?;
+                    let page = &raw["pages"][index];
+                    let geometry = production::resolve(page, pdfx)?.with_context(|| {
+                        format!(
+                            "[missing-resource] page {} has no production geometry; use `color production set`",
+                            page["id"]
+                        )
+                    })?;
+                    let mut out = serde_json::json!({"page":page["id"],"geometry":geometry.json()});
+                    if let Some(scale) = coverage_scale {
+                        if !(0.1..=8.0).contains(&scale) {
+                            bail!("[invalid-input] coverage scale must be in 0.1..8");
+                        }
+                        out["bleed_coverage"] =
+                            production::bleed_coverage(&raw, &input, page["id"].as_str(), scale)?;
+                    }
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                    Ok(())
+                }
+                ProductionAction::Set {
+                    input,
+                    geometry: json,
+                    dry_run,
+                    if_revision,
+                } => {
+                    if json.len() > 4096 {
+                        bail!("[limit-exceeded] production JSON is limited to 4096 bytes");
+                    }
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    ensure_v8_production(&raw)?;
+                    let index = page_index(&raw)?;
+                    raw["pages"][index]["production"] =
+                        serde_json::from_str(&json).context("invalid production JSON")?;
+                    let geometry = production::resolve(&raw["pages"][index], false)?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "production-set",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &serde_json::json!({"change":change,"geometry":geometry.map(|g| g.json())})
+                        )?
+                    );
+                    Ok(())
+                }
+                ProductionAction::Clear {
+                    input,
+                    dry_run,
+                    if_revision,
+                } => {
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    ensure_v8_production(&raw)?;
+                    let index = page_index(&raw)?;
+                    let removed = raw["pages"][index]
+                        .as_object_mut()
+                        .and_then(|page| page.remove("production"))
+                        .is_some();
+                    if !removed {
+                        bail!("[missing-resource] the selected page has no production geometry");
+                    }
+                    let change = transaction::commit_value(
+                        &input,
+                        "production-clear",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({"change":change}))?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        Command::Color {
+            action:
+                ColorAction::Separate {
+                    input,
+                    out,
+                    to,
+                    intent,
+                    scale,
+                    bits,
+                    recipe,
+                    auto_trap,
+                    composite,
+                },
+        } => {
+            use pentool::color::{
+                icc::Intent, recipe as print_recipe, separation, value::Destination,
+            };
+            if to.as_ref().is_some_and(|value| value.len() > 256) {
+                bail!("[limit-exceeded] destination JSON is limited to 256 bytes");
+            }
+            let (raw, _) = read_color_document(&input, None)?;
+            let recipe = recipe
+                .as_deref()
+                .map(|spec| print_recipe::resolve(spec, &raw))
+                .transpose()?;
+            let bits = bits
+                .or_else(|| recipe.as_ref().and_then(|r| r.plate_bits))
+                .unwrap_or(8);
+            let destination = to
+                .as_deref()
+                .map(|value| -> Result<Destination> {
+                    Destination::parse(
+                        &serde_json::from_str(value).context("invalid color destination JSON")?,
+                    )
+                })
+                .transpose()?;
+            let destination = destination.or_else(|| recipe.as_ref().and_then(|r| r.destination()));
+            let intent = intent
+                .as_deref()
+                .map(str::parse::<Intent>)
+                .transpose()?
+                .or_else(|| recipe.as_ref().and_then(|r| r.intent));
+            if destination.is_some() && intent.is_none() {
+                bail!("[invalid-input] an explicit destination needs --intent");
+            }
+            let result = separation::separate(
+                &raw,
+                &input,
+                selected_page,
+                &separation::Options {
+                    destination,
+                    intent,
+                    scale: scale
+                        .or_else(|| recipe.as_ref().and_then(|r| r.scale))
+                        .unwrap_or(1.0),
+                    auto_trap: auto_trap.or_else(|| recipe.as_ref().and_then(|r| r.auto_trap)),
+                },
+            )?;
+            let preview = if composite {
+                Some(result.composite_preview(&raw, &input)?)
+            } else {
+                None
+            };
+            let mut report = result.write_with_depth(&out, bits)?;
+            if let Some((png, preview_report)) = preview {
+                let path = out.join("composite-preview.png");
+                use std::io::Write as _;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut file| file.write_all(&png))
+                    .with_context(|| format!("writing {}", path.display()))?;
+                report["composite_preview"] = serde_json::json!({
+                    "file":"composite-preview.png","report":preview_report});
+            }
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+        Command::Color {
+            action: ColorAction::PackageVerify { directory },
+        } => {
+            let report = pentool::color::bundle::verify(&directory)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if report["ok"] != serde_json::json!(true) {
+                bail!("[invalid-input] package verification failed");
+            }
+            Ok(())
+        }
+        Command::Color {
+            action:
+                ColorAction::Package {
+                    input,
+                    out,
+                    recipe,
+                    to,
+                    intent,
+                },
+        } => {
+            use pentool::color::{
+                bundle, icc::Intent, pdfx, preflight, recipe as print_recipe, value::Destination,
+            };
+            if to.as_ref().is_some_and(|value| value.len() > 256) {
+                bail!("[limit-exceeded] destination JSON is limited to 256 bytes");
+            }
+            let source = pentool::resource::read_bounded(
+                &input,
+                pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
+            )?;
+            let (raw, _) = read_color_document(&input, None)?;
+            let recipe = recipe
+                .as_deref()
+                .map(|spec| print_recipe::resolve(spec, &raw))
+                .transpose()?;
+            let destination = to
+                .as_deref()
+                .map(|value| -> Result<Destination> {
+                    Destination::parse(
+                        &serde_json::from_str(value).context("invalid color destination JSON")?,
+                    )
+                })
+                .transpose()?;
+            let destination = destination.or_else(|| recipe.as_ref().and_then(|r| r.destination()));
+            let intent = intent
+                .as_deref()
+                .map(str::parse::<Intent>)
+                .transpose()?
+                .or_else(|| recipe.as_ref().and_then(|r| r.intent));
+            if destination.is_some() && intent.is_none() {
+                bail!("[invalid-input] an explicit destination needs --intent");
+            }
+            let defaults = preflight::Options::default();
+            let manifest = bundle::build(
+                &raw,
+                &input,
+                &source,
+                selected_page,
+                &out,
+                &bundle::Options {
+                    pdfx: pdfx::Options {
+                        compress: recipe.as_ref().and_then(|r| r.compress).unwrap_or(true),
+                        destination,
+                        intent,
+                        ppi: recipe
+                            .as_ref()
+                            .and_then(|r| r.ppi)
+                            .unwrap_or(pdfx::DEFAULT_PPI),
+                        ..Default::default()
+                    },
+                    preflight: preflight::Options {
+                        min_ppi: recipe
+                            .as_ref()
+                            .and_then(|r| r.min_ppi)
+                            .unwrap_or(defaults.min_ppi),
+                        min_bleed_inches: recipe
+                            .as_ref()
+                            .and_then(|r| r.min_bleed_inches)
+                            .unwrap_or(defaults.min_bleed_inches),
+                        bleed_scale: Some(
+                            recipe
+                                .as_ref()
+                                .and_then(|r| r.bleed_scale)
+                                .filter(|s| *s > 0.0)
+                                .unwrap_or(1.0),
+                        ),
+                        max_total_ink: recipe.as_ref().and_then(|r| r.max_total_ink),
+                        allowed_spots: recipe.as_ref().and_then(|r| r.allowed_spots.clone()),
+                        k_only_text: recipe.as_ref().is_some_and(|r| r.k_only_text),
+                        require_marks: recipe.as_ref().is_some_and(|r| r.require_marks),
+                        reject_spot_flattening: recipe
+                            .as_ref()
+                            .is_some_and(|r| r.reject_spot_flattening),
+                    },
+                    separation_scale: recipe.as_ref().and_then(|r| r.scale).unwrap_or(1.0),
+                    auto_trap: recipe.as_ref().and_then(|r| r.auto_trap),
+                    plate_bits: recipe.as_ref().and_then(|r| r.plate_bits).unwrap_or(8),
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
+            Ok(())
+        }
+        Command::Color {
+            action:
+                ColorAction::Preflight {
+                    input,
+                    min_ppi,
+                    min_bleed_inches,
+                    bleed_scale,
+                    max_total_ink,
+                    recipe,
+                },
+        } => {
+            use pentool::color::{preflight, recipe as print_recipe};
+            let (raw, _) = read_color_document(&input, None)?;
+            let recipe = recipe
+                .as_deref()
+                .map(|spec| print_recipe::resolve(spec, &raw))
+                .transpose()?;
+            let defaults = preflight::Options::default();
+            let bleed_scale = bleed_scale
+                .or_else(|| recipe.as_ref().and_then(|r| r.bleed_scale))
+                .unwrap_or(1.0);
+            let report = preflight::run(
+                &raw,
+                &input,
+                selected_page,
+                &preflight::Options {
+                    min_ppi: min_ppi
+                        .or_else(|| recipe.as_ref().and_then(|r| r.min_ppi))
+                        .unwrap_or(defaults.min_ppi),
+                    min_bleed_inches: min_bleed_inches
+                        .or_else(|| recipe.as_ref().and_then(|r| r.min_bleed_inches))
+                        .unwrap_or(defaults.min_bleed_inches),
+                    bleed_scale: (bleed_scale > 0.0).then_some(bleed_scale),
+                    max_total_ink: max_total_ink
+                        .or_else(|| recipe.as_ref().and_then(|r| r.max_total_ink)),
+                    allowed_spots: recipe.as_ref().and_then(|r| r.allowed_spots.clone()),
+                    k_only_text: recipe.as_ref().is_some_and(|r| r.k_only_text),
+                    require_marks: recipe.as_ref().is_some_and(|r| r.require_marks),
+                    reject_spot_flattening: recipe
+                        .as_ref()
+                        .is_some_and(|r| r.reject_spot_flattening),
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+        Command::Color {
+            action:
+                ColorAction::Pdfx {
+                    input,
+                    output,
+                    to,
+                    intent,
+                    ppi,
+                    recipe,
+                    title,
+                    created,
+                },
+        } => {
+            use pentool::color::{icc::Intent, pdfx, recipe as print_recipe, value::Destination};
+            if to.as_ref().is_some_and(|value| value.len() > 256) {
+                bail!("[limit-exceeded] destination JSON is limited to 256 bytes");
+            }
+            let (raw, _) = read_color_document(&input, None)?;
+            let destination = to
+                .as_deref()
+                .map(|value| -> Result<Destination> {
+                    Destination::parse(
+                        &serde_json::from_str(value).context("invalid color destination JSON")?,
+                    )
+                })
+                .transpose()?;
+            let recipe = recipe
+                .as_deref()
+                .map(|spec| print_recipe::resolve(spec, &raw))
+                .transpose()?;
+            let destination = destination.or_else(|| recipe.as_ref().and_then(|r| r.destination()));
+            let intent = intent
+                .as_deref()
+                .map(str::parse::<Intent>)
+                .transpose()?
+                .or_else(|| recipe.as_ref().and_then(|r| r.intent));
+            if destination.is_some() && intent.is_none() {
+                bail!("[invalid-input] an explicit destination needs --intent");
+            }
+            let ppi = ppi
+                .or_else(|| recipe.as_ref().and_then(|r| r.ppi))
+                .unwrap_or(pdfx::DEFAULT_PPI);
+            let report = pdfx::export(
+                &raw,
+                &input,
+                selected_page,
+                &output,
+                &pdfx::Options {
+                    compress: recipe.as_ref().and_then(|r| r.compress).unwrap_or(true),
+                    destination,
+                    intent,
+                    ppi,
+                    title,
+                    created,
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+        Command::Color {
+            action: ColorAction::Profile { action },
+        } => {
+            use pentool::color::{
+                catalog,
+                icc::{Direction, Intent},
+                profile,
+            };
+            if selected_page.is_some() {
+                bail!("[invalid-input] profile file/catalog operations have no page scope; --page is not applicable");
+            }
+            let read = |input: &Path| -> Result<serde_json::Value> {
+                serde_json::from_slice(&pentool::resource::read_bounded(
+                    input,
+                    catalog::MAX_CATALOG_DOCUMENT_BYTES,
+                )?)
+                .context("invalid .pen document")
+            };
+            let result = match action {
+                ColorProfileAction::Collect {
+                    input,
+                    local_only,
+                    dry_run,
+                    if_revision,
+                } => {
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    let result = catalog::collect(&mut raw, &input, local_only)?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "color-profile-collect",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    serde_json::json!({"change":change,"result":result})
+                }
+                ColorProfileAction::Remove {
+                    input,
+                    name,
+                    dry_run,
+                    if_revision,
+                } => {
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    let result = catalog::remove(&mut raw, &name)?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "color-profile-remove",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    serde_json::json!({"change":change,"result":result})
+                }
+                ColorProfileAction::Import {
+                    input,
+                    file,
+                    name,
+                    redistribution,
+                    source,
+                    external,
+                    dry_run,
+                    if_revision,
+                } => {
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    let result = catalog::import(
+                        &mut raw,
+                        &input,
+                        &profile::read_file(&file)?,
+                        &name,
+                        &redistribution,
+                        source.as_deref(),
+                        external.as_deref(),
+                    )?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "color-profile-import",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    serde_json::json!({"change":change,"result":result})
+                }
+                ColorProfileAction::List {
+                    input,
+                    offset,
+                    limit,
+                } => {
+                    if !(1..=256).contains(&limit) {
+                        bail!("[invalid-input] profile limit must be 1..=256");
+                    }
+                    catalog::list(&read(&input)?, offset, limit)?
+                }
+                ColorProfileAction::Show {
+                    input,
+                    name,
+                    offset,
+                    limit,
+                } => {
+                    if !(1..=profile::MAX_TAG_LIMIT).contains(&limit) {
+                        bail!(
+                            "[invalid-input] ICC tag limit must be 1..={}",
+                            profile::MAX_TAG_LIMIT
+                        );
+                    }
+                    let (identity, bytes) = catalog::load(&read(&input)?, &input, &name)?;
+                    serde_json::json!({"profile":identity,"inspection":profile::inspect(&bytes,offset,limit)?})
+                }
+                ColorProfileAction::Embed {
+                    input,
+                    name,
+                    dry_run,
+                    if_revision,
+                } => {
+                    let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
+                    let result = catalog::embed(&mut raw, &input, &name)?;
+                    let change = transaction::commit_value(
+                        &input,
+                        "color-profile-embed",
+                        dry_run,
+                        Some(&revision),
+                        &raw,
+                    )?;
+                    serde_json::json!({"change":change,"result":result})
+                }
+                ColorProfileAction::Inspect {
+                    file,
+                    offset,
+                    limit,
+                } => {
+                    // Reject invalid output limits before opening or parsing input.
+                    if !(1..=profile::MAX_TAG_LIMIT).contains(&limit) {
+                        bail!(
+                            "[invalid-input] ICC tag limit must be 1..={}",
+                            profile::MAX_TAG_LIMIT
+                        );
+                    }
+                    serde_json::to_value(profile::inspect(
+                        &profile::read_file(&file)?,
+                        offset,
+                        limit,
+                    )?)?
+                }
+                ColorProfileAction::Validate {
+                    file,
+                    direction,
+                    intent,
+                } => {
+                    let direction = match direction.as_str() {
+                        "device-to-pcs" => Some(Direction::DeviceToPcs),
+                        "pcs-to-device" => Some(Direction::PcsToDevice),
+                        "device-link" => None,
+                        _ => unreachable!("clap validates direction"),
+                    };
+                    let intent = intent.parse::<Intent>()?;
+                    profile::validate(&profile::read_file(&file)?, direction, intent)?
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
         Command::Photo { action } => match action {
             PhotoAction::Profile {
                 action:
@@ -6249,15 +7480,25 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
         } => {
-            if !matches!(target, 3..=7) {
-                anyhow::bail!("migration target must be 3, 4, 5, 6, or 7")
+            if selected_page.is_some() {
+                bail!("[invalid-input] format migration affects the entire document; --page is not applicable");
             }
-            let before =
-                fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
+            if !matches!(target, 3..=8) {
+                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, or 8")
+            }
+            let before = if u64::from(target) == pentool::color::VERSION {
+                pentool::resource::read_bounded(
+                    &input,
+                    pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
+                )?
+            } else {
+                fs::read(&input).with_context(|| format!("could not read {}", input.display()))?
+            };
             let raw: serde_json::Value =
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
+                8 => pentool::color::catalog::migrate(raw)?,
                 7 => pentool::photo::catalog::migrate(raw)?,
                 6 => composite::migrate(raw)?,
                 5 => scene::migrate_to_v5(raw)?,
@@ -7719,6 +8960,29 @@ fn write_image_export(
         _ => anyhow::bail!("output must end in .png, .svg or .pdf"),
     };
     editing::atomic_write(output, &bytes)
+}
+
+fn ensure_v8_production(raw: &serde_json::Value) -> Result<()> {
+    if raw["version"] != pentool::color::VERSION {
+        bail!(
+            "[unsupported-version] production geometry requires a version {} document; run `migrate` first",
+            pentool::color::VERSION
+        );
+    }
+    Ok(())
+}
+
+fn read_color_document(path: &Path, expected: Option<&str>) -> Result<(serde_json::Value, String)> {
+    let bytes =
+        pentool::resource::read_bounded(path, pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES)?;
+    let revision = transaction::revision(&bytes);
+    if expected.is_some_and(|expected| expected != revision) {
+        bail!("revision mismatch: expected {expected:?}, current {revision}");
+    }
+    Ok((
+        serde_json::from_slice(&bytes).context("invalid .pen document")?,
+        revision,
+    ))
 }
 
 fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {

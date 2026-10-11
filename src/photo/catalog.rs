@@ -854,6 +854,9 @@ fn is_empty_catalog(catalog: &Value) -> bool {
 /// `migrate --target 7`: the v6 migration followed by `version: 7`. No catalog is
 /// added; the first photo command creates it.
 pub fn migrate(raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+        return crate::color::catalog::downgrade(raw);
+    }
     if raw.get("version").and_then(Value::as_u64) == Some(VERSION) {
         crate::scene::validate(&raw)?;
         return Ok(raw);
@@ -867,6 +870,9 @@ pub fn migrate(raw: Value) -> Result<Value> {
 /// `migrate --target 6`: only a document without photo nodes and with no (or an
 /// empty) catalog can be represented by version 6.
 pub fn downgrade(mut raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+        raw = crate::color::catalog::downgrade(raw)?;
+    }
     crate::scene::validate(&raw)?;
     if let Some(node) = photo_nodes(&raw).first() {
         bail!(
@@ -920,7 +926,8 @@ pub fn raw_import_defaults(camera_profile: Value) -> Value {
 /// absent), and whether it was upgraded.
 fn with_catalog(raw: &Value) -> Result<(Value, bool)> {
     let version = raw.get("version").and_then(Value::as_u64);
-    let mut document = if version == Some(VERSION) {
+    let current = matches!(version, Some(VERSION | crate::color::VERSION));
+    let mut document = if current {
         crate::scene::validate(raw)?;
         raw.clone()
     } else {
@@ -944,7 +951,7 @@ fn with_catalog(raw: &Value) -> Result<(Value, bool)> {
         .context("[malformed-resource] photography must be an object")?
         .entry("profiles")
         .or_insert_with(|| json!({}));
-    Ok((document, version != Some(VERSION)))
+    Ok((document, !current))
 }
 
 /// `photo profile add`: verify and store a DNG camera profile (`.dcp`) in

@@ -592,7 +592,12 @@ fn box_pass(
     out
 }
 
-fn blur_planes(pixels: &[[f64; 4]], width: u32, height: u32, sigma: f64) -> Vec<[f64; 4]> {
+pub(crate) fn blur_planes(
+    pixels: &[[f64; 4]],
+    width: u32,
+    height: u32,
+    sigma: f64,
+) -> Vec<[f64; 4]> {
     let (w, h) = (width as usize, height as usize);
     let mut data: Vec<f64> = pixels.iter().flatten().copied().collect();
     if sigma > 0.0 {

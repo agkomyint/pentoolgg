@@ -51,7 +51,13 @@ The current planned sequence is:
 4. `docs/roadmap/v0.9.0/TASKS.md`: BYOK image models;
 5. `docs/roadmap/v0.10.0/TASKS.md`: pixel editing and retouching;
 6. `docs/roadmap/v0.11.0/TASKS.md`: photography and RAW development;
-7. `docs/roadmap/v0.12.0/TASKS.md`: color management and print production.
+7. `docs/roadmap/v0.12.0/TASKS.md`: color management and print production;
+8. `docs/roadmap/v0.13.0/TASKS.md`: agent-directed realistic painting;
+9. `docs/roadmap/v0.14.0/TASKS.md`: keyframe animation and lean video export
+   (PNG sequence, GIF, MP4/H.264 with Pentool's own encoders);
+10. `docs/roadmap/v0.15.0/TASKS.md`: audio and complete multimedia documents;
+11. `docs/roadmap/v0.16.0/TASKS.md`: professional page layout at InDesign
+    parity, `.penbook` books, and IDML interchange.
 
 v0.7.1 shipped as the bug-fix release for v0.7.0 (`docs/roadmap/v0.7.0/bug.md`).
 Roadmap folder numbers are planned milestones, not reserved release numbers; the
@@ -101,6 +107,9 @@ Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
 - `src/asset.rs`, `src/instance.rs`, `src/library.rs`, and `src/package.rs`: reusable
   assets and packages.
 - `web/`: browser UI shipped inside the binary.
+- `web-ui/`: TypeScript source (Vite, React, Tailwind, shadcn-style) of Pentool Studio;
+  `bun run build` refreshes the committed, embedded `web/studio.html`. See
+  `docs/studio.md`.
 - `tests/`: integration and rendering regression coverage.
 - `docs/fixtures/`: normative, tracked fixtures. Keep them minimal and intentional.
 - `examples/`: user-facing examples and their expected rendered outputs.

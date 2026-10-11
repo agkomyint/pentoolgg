@@ -1,0 +1,119 @@
+{
+  "color_management": {
+    "aliases": {
+      "rgb-probe": "sha256:54ee63ae0d372ed6d011f1e69e11c5bf6bc9480c6a62b1ddeb59e3ba6ada7d3e"
+    },
+    "engine": 1,
+    "legacy_rgb": "srgb",
+    "profiles": {
+      "sha256:54ee63ae0d372ed6d011f1e69e11c5bf6bc9480c6a62b1ddeb59e3ba6ada7d3e": {
+        "byte_length": 560,
+        "class": "mntr",
+        "color_space": "RGB ",
+        "connection_space": "XYZ ",
+        "icc_version": "4.4.0",
+        "metadata": {
+          "copyright": {
+            "country": "US",
+            "language": "en",
+            "text": "Authored by Pentool; CC0-1.0"
+          },
+          "description": {
+            "country": "US",
+            "language": "en",
+            "text": "Pentool linear RGB numerical probe; not a press condition"
+          },
+          "manufacturer": null,
+          "model": null
+        },
+        "redistribution": "allowed",
+        "storage": {
+          "data": "AAACMAAAAAAEQAAAbW50clJHQiBYWVogB+oAAQABAAAAAAAAYWNzcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAPbWAAEAAAAA0y0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJZGVzYwAAAPAAAACOY3BydAAAAYAAAABUd3RwdAAAAdQAAAAUclhZWgAAAegAAAAUZ1hZWgAAAfwAAAAUYlhZWgAAAhAAAAAUclRSQwAAAiQAAAAMZ1RSQwAAAiQAAAAMYlRSQwAAAiQAAAAMbWx1YwAAAAAAAAABAAAADGVuVVMAAAByAAAAHABQAGUAbgB0AG8AbwBsACAAbABpAG4AZQBhAHIAIABSAEcAQgAgAG4AdQBtAGUAcgBpAGMAYQBsACAAcAByAG8AYgBlADsAIABuAG8AdAAgAGEAIABwAHIAZQBzAHMAIABjAG8AbgBkAGkAdABpAG8AbgAAbWx1YwAAAAAAAAABAAAADGVuVVMAAAA4AAAAHABBAHUAdABoAG8AcgBlAGQAIABiAHkAIABQAGUAbgB0AG8AbwBsADsAIABDAEMAMAAtADEALgAwWFlaIAAAAAAAAPbWAAEAAAAA0y1YWVogAAAAAAAAb6AAADj1AAADkFhZWiAAAAAAAABilwAAt4cAABjaWFlaIAAAAAAAACSeAAAPhAAAtsNjdXJ2AAAAAAAAAAA=",
+          "encoding": "base64",
+          "kind": "embedded"
+        }
+      }
+    },
+    "roles": {
+      "display": {
+        "destination": {
+          "profile": "sha256:54ee63ae0d372ed6d011f1e69e11c5bf6bc9480c6a62b1ddeb59e3ba6ada7d3e",
+          "space": "icc-rgb"
+        },
+        "intent": "relative-colorimetric"
+      },
+      "output": {
+        "destination": {
+          "space": "srgb"
+        },
+        "intent": "relative-colorimetric"
+      },
+      "working": {
+        "destination": {
+          "space": "display-p3:linear"
+        },
+        "intent": "relative-colorimetric"
+      }
+    },
+    "working_space": "srgb:linear"
+  },
+  "components": [],
+  "compositing": {
+    "color_space": "srgb8",
+    "engine": 1
+  },
+  "fonts": [],
+  "format": "pentool",
+  "image_assets": {},
+  "name": "Professional role targets",
+  "pages": [
+    {
+      "canvas": {
+        "background": {
+          "channels": [
+            100,
+            0,
+            0
+          ],
+          "space": "lab-d50"
+        },
+        "height": 48,
+        "width": 64
+      },
+      "id": "page-1",
+      "layers": [
+        {
+          "id": "art",
+          "locked": false,
+          "name": "Artwork",
+          "nodes": [
+            {
+              "height": 32,
+              "id": "color-card",
+              "kind": "rect",
+              "style": {
+                "fill": {
+                  "fallback": {
+                    "channels": [
+                      0.2,
+                      0.4,
+                      0.6
+                    ],
+                    "space": "srgb"
+                  }
+                }
+              },
+              "width": 48,
+              "x": 8,
+              "y": 8
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Page 1"
+    }
+  ],
+  "styles": {},
+  "version": 8
+}

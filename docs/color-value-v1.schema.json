@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/color-value-v1.json",
+  "title": "Pentool native color sample, engine 1",
+  "description": "Shared native sample and scene-paint grammar. Rust additionally checks finite physical Lab conversion, original ICC bytes, header/channel agreement and supported intent paths. Lab channels are physical D50 L*, a*, b*, retaining extended finite values.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "space",
+        "channels"
+      ],
+      "properties": {
+        "space": {
+          "enum": [
+            "srgb",
+            "display-p3",
+            "adobe-rgb-1998",
+            "prophoto",
+            "rec2020",
+            "srgb:linear",
+            "display-p3:linear",
+            "adobe-rgb-1998:linear",
+            "prophoto:linear",
+            "rec2020:linear"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "space",
+        "channels"
+      ],
+      "properties": {
+        "space": {
+          "enum": [
+            "lab-d50"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "space",
+        "channels",
+        "profile"
+      ],
+      "properties": {
+        "space": {
+          "enum": [
+            "icc-rgb"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "profile": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^(profile:)?([A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-f]{64})$"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "space",
+        "channels",
+        "profile"
+      ],
+      "properties": {
+        "space": {
+          "enum": [
+            "icc-gray"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "profile": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^(profile:)?([A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-f]{64})$"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "space",
+        "channels",
+        "profile"
+      ],
+      "properties": {
+        "space": {
+          "enum": [
+            "icc-cmyk"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "alpha": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "profile": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^(profile:)?([A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-f]{64})$"
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "destination": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "space"
+          ],
+          "properties": {
+            "space": {
+              "enum": [
+                "srgb",
+                "display-p3",
+                "adobe-rgb-1998",
+                "prophoto",
+                "rec2020",
+                "srgb:linear",
+                "display-p3:linear",
+                "adobe-rgb-1998:linear",
+                "prophoto:linear",
+                "rec2020:linear"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "space"
+          ],
+          "properties": {
+            "space": {
+              "enum": [
+                "lab-d50"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "space",
+            "profile"
+          ],
+          "properties": {
+            "space": {
+              "enum": [
+                "icc-rgb"
+              ]
+            },
+            "profile": {
+              "type": "string",
+              "maxLength": 80,
+              "pattern": "^(profile:)?([A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-f]{64})$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "space",
+            "profile"
+          ],
+          "properties": {
+            "space": {
+              "enum": [
+                "icc-gray"
+              ]
+            },
+            "profile": {
+              "type": "string",
+              "maxLength": 80,
+              "pattern": "^(profile:)?([A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-f]{64})$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "space",
+            "profile"
+          ],
+          "properties": {
+            "space": {
+              "enum": [
+                "icc-cmyk"
+              ]
+            },
+            "profile": {
+              "type": "string",
+              "maxLength": 80,
+              "pattern": "^(profile:)?([A-Za-z0-9][A-Za-z0-9._-]{0,63}|sha256:[0-9a-f]{64})$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

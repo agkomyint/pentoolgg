@@ -1,0 +1,567 @@
+{
+  "format": "pentool-print-conformance",
+  "version": 1,
+  "specification": "docs/professional-color-v1.md",
+  "note": "Authored probes plus one unmodified real press profile; references identify CMM and precision.",
+  "fixtures": [
+    {
+      "file": "print-rgb-linear-v2.icc",
+      "sha256": "851f8e0a07a5d9ca8762d112d24b6a0420a86edce1dc8d5fc9046a92ba7bf629",
+      "expect": "ok",
+      "license": "CC0-1.0",
+      "item": 2,
+      "description": "Authored RGB matrix/identity-TRC probe with shared curve bytes",
+      "vectors": [
+        {
+          "device": [
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            1,
+            1
+          ],
+          "xyz": [
+            0.9641876220703125,
+            1.0,
+            0.8249053955078125
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            0,
+            0
+          ],
+          "xyz": [
+            0.43603515625,
+            0.2224884033203125,
+            0.013916015625
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            1,
+            0
+          ],
+          "xyz": [
+            0.3851165771484375,
+            0.7169036865234375,
+            0.097076416015625
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            0,
+            1
+          ],
+          "xyz": [
+            0.143035888671875,
+            0.06060791015625,
+            0.7139129638671875
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0.25,
+            0.5,
+            0.75
+          ],
+          "xyz": [
+            0.408843994140625,
+            0.4595298767089844,
+            0.5874519348144531
+          ],
+          "tolerance": 1e-12
+        }
+      ]
+    },
+    {
+      "file": "print-rgb-linear-v4.icc",
+      "sha256": "54ee63ae0d372ed6d011f1e69e11c5bf6bc9480c6a62b1ddeb59e3ba6ada7d3e",
+      "expect": "ok",
+      "license": "CC0-1.0",
+      "item": 2,
+      "description": "Authored RGB matrix/identity-TRC probe with shared curve bytes",
+      "vectors": [
+        {
+          "device": [
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            1,
+            1
+          ],
+          "xyz": [
+            0.9641876220703125,
+            1.0,
+            0.8249053955078125
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            0,
+            0
+          ],
+          "xyz": [
+            0.43603515625,
+            0.2224884033203125,
+            0.013916015625
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            1,
+            0
+          ],
+          "xyz": [
+            0.3851165771484375,
+            0.7169036865234375,
+            0.097076416015625
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            0,
+            1
+          ],
+          "xyz": [
+            0.143035888671875,
+            0.06060791015625,
+            0.7139129638671875
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0.25,
+            0.5,
+            0.75
+          ],
+          "xyz": [
+            0.408843994140625,
+            0.4595298767089844,
+            0.5874519348144531
+          ],
+          "tolerance": 1e-12
+        }
+      ]
+    },
+    {
+      "file": "print-cmyk-lut16-v2.icc",
+      "sha256": "9fb9ad2400fd9dfb1375b9a81d117e1088712b6c3fa44a3bc667cd6ff38c9de1",
+      "expect": "ok",
+      "license": "CC0-1.0",
+      "item": 2,
+      "executor": "lut",
+      "tag": "A2B0",
+      "description": "Authored CMYK input LUT probe; all four axes affect Lab; not a press condition",
+      "vectors": [
+        {
+          "device": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.964202880859375,
+            1.0,
+            0.8249053955078125
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "xyz": [
+            0.010857116575341583,
+            0.01126019927016278,
+            0.00928859913245041
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.3005548695139344,
+            0.5236738225993275,
+            0.7436730287439849
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "xyz": [
+            0.7857007256961672,
+            0.5236738225993275,
+            0.7436730287439849
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            0,
+            1,
+            0
+          ],
+          "xyz": [
+            0.5049278083809129,
+            0.5236738225993275,
+            0.09471208365697381
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "xyz": [
+            0.5049278083809129,
+            0.5236738225993275,
+            0.4319813617483863
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0.1,
+            0.3,
+            0.7,
+            0.4
+          ],
+          "xyz": [
+            0.38230759972154926,
+            0.3564788369148233,
+            0.1365349775351318
+          ],
+          "tolerance": 1e-12
+        }
+      ]
+    },
+    {
+      "file": "print-cmyk-lut16-v4.icc",
+      "sha256": "2f8706493dcd87d4a9c32a8525406d6133db8d916576b8ca8ef3ff0c50e52684",
+      "expect": "ok",
+      "license": "CC0-1.0",
+      "item": 2,
+      "executor": "lut",
+      "tag": "A2B0",
+      "description": "Authored CMYK input LUT probe; all four axes affect Lab; not a press condition",
+      "vectors": [
+        {
+          "device": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.964202880859375,
+            1.0,
+            0.8249053955078125
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.2727962515761941,
+            0.48278104370822905,
+            0.6950023087579279
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "xyz": [
+            0.7325586930352085,
+            0.48278104370822905,
+            0.6950023087579279
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            0,
+            1,
+            0
+          ],
+          "xyz": [
+            0.4654988731677703,
+            0.48278104370822905,
+            0.08266333786756068
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "xyz": [
+            0.4654988731677703,
+            0.48278104370822905,
+            0.3982486878038112
+          ],
+          "tolerance": 1e-12
+        },
+        {
+          "device": [
+            0.1,
+            0.3,
+            0.7,
+            0.4
+          ],
+          "xyz": [
+            0.33402672009279716,
+            0.30990958077924474,
+            0.1138099918853756
+          ],
+          "tolerance": 1e-12
+        }
+      ]
+    },
+    {
+      "file": "print-cmyk-mab-v4.icc",
+      "sha256": "b5cb828d774d21bfb537686496f9a43e46522fb97de9c98c43e19d38a9862a0f",
+      "expect": "ok",
+      "license": "CC0-1.0",
+      "item": 2,
+      "executor": "lut",
+      "tag": "A2B0",
+      "description": "Authored CMYK input LUT probe; all four axes affect Lab; not a press condition",
+      "vectors": [
+        {
+          "device": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.964202880859375,
+            1.0,
+            0.8249053955078125
+          ],
+          "tolerance": 3e-05
+        },
+        {
+          "device": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "xyz": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 3e-05
+        },
+        {
+          "device": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "xyz": [
+            0.2727962515761941,
+            0.48278104370822905,
+            0.6950023087579279
+          ],
+          "tolerance": 3e-05
+        },
+        {
+          "device": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "xyz": [
+            0.7325586930352085,
+            0.48278104370822905,
+            0.6950023087579279
+          ],
+          "tolerance": 3e-05
+        },
+        {
+          "device": [
+            0,
+            0,
+            1,
+            0
+          ],
+          "xyz": [
+            0.4654988731677703,
+            0.48278104370822905,
+            0.08266333786756068
+          ],
+          "tolerance": 3e-05
+        },
+        {
+          "device": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "xyz": [
+            0.4654988731677703,
+            0.48278104370822905,
+            0.3982486878038112
+          ],
+          "tolerance": 3e-05
+        },
+        {
+          "device": [
+            0.1,
+            0.3,
+            0.7,
+            0.4
+          ],
+          "xyz": [
+            0.33402672009279716,
+            0.30990958077924474,
+            0.1138099918853756
+          ],
+          "tolerance": 3e-05
+        }
+      ]
+    },
+    {
+      "file": "print-CGATS21_CRPC7.icc",
+      "sha256": "2b186e6dadc38883138ccd30203b2870fb71db6451d3a5d24f9590cfabd26689",
+      "expect": "ok",
+      "item": 2,
+      "executor": "press",
+      "license": "Idealliance/X-Rite: unaltered sharing; permission required for sale",
+      "source": "https://registry.color.org/profile-registry/CGATS21_CRPC7",
+      "reference_file": "print-press-vectors.json",
+      "description": "Original real CMYK printing condition; see docs/print-profile-provenance.md"
+    }
+  ],
+  "documents": [
+    {
+      "file": "print-v8.pen",
+      "version": 8,
+      "sha256": "89166723bda77dafbc5146d2bc8f69fb43b3eadacdc905f5f14a8f169a94fa7c",
+      "description": "Explicit legacy-sRGB v8 catalog foundation; no assigned profile"
+    },
+    {
+      "file": "print-v8-native.pen",
+      "version": 8,
+      "sha256": "1746ef11385e739ac7086825155714cf622c76f2ecd0447401cf00850fca3f19",
+      "description": "Native sRGB vector paint and physical D50 Lab background"
+    },
+    {
+      "file": "print-v8-roles.pen",
+      "version": 8,
+      "sha256": "5547da031dfb2b6757d87561a74658505d5f9a9c839c6d9799ab46c1c7bbb823",
+      "description": "Explicit working/display/output targets; embedded authored RGB monitor probe; proof remains unconfigured"
+    },
+    {
+      "file": "print-v8-gradient.pen",
+      "version": 8,
+      "sha256": "600112af3d0acba03c2cf4b2ac692c70e9cda87c40b5a97fd156043fe320a595",
+      "description": "Native linear RGB, physical Lab and authored four-channel CMYK interpolation ramps; not a printing condition"
+    }
+  ],
+  "previews": [
+    {
+      "document": "print-v8-gradient.pen",
+      "encoding": "rgba8",
+      "width": 64,
+      "height": 48,
+      "sha256": "8300fcd42c767788b69baf96fa5da77bc845e4b41d5f928aa25912dd5be986c9",
+      "description": "Intentional engine-1 preview golden: top linear RGB gray ramp, middle physical Lab gray ramp, bottom authored CMYK neutral ramp. Native channels interpolate before appearance; all pixels are opaque. Not a proof or plate fixture."
+    }
+  ],
+  "references": [
+    {
+      "file": "print-press-vectors.json",
+      "sha256": "b997bd80c89186895963c52d346a7d389a7bd3083c944a99fb4ee5a75008e3dc"
+    }
+  ]
+}
