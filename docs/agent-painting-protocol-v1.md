@@ -116,6 +116,30 @@ parameters. Bilinear interpolation renormalizes with integer square-root math; a
 zero result is undefined. A committed operation pins `field_hash` and does not
 depend on a disposable cache.
 
+## Color sampling and palettes (engine 1 implementation)
+
+`pentool paint-palette FILE <action>` implements the palette rules above.
+
+- Scopes: `page`, `node:ID`, `layer:ID`, `group:ID`, optionally cropped with
+  `--rect x,y,w,h` and weighted by a selection `--query`. Pixels come from the
+  authoritative renderer; `source_hash` is SHA-256 over the cropped RGBA bytes and
+  coverage plane with the dimensions.
+- Point sampling returns the weighted mean of a square of radius `0..64`; fully
+  transparent or unselected samples report `empty: true`, never an invented color.
+- Roles: `dominant` ranks 5-bit-per-channel bins by alpha*coverage weight (ties by
+  bin key) and reports each bin's pixel mean; `median` is weighted median cut
+  (heaviest box, widest channel, ties by channel order); `shadow` (luma <= 85),
+  `midtone` (86..170) and `highlight` (>= 171) use the protocol luma and then rank
+  dominant bins; `edge` ranks the pixels whose edge score is at least 96.
+- `mix` is linear per channel in sRGB8 with the amount quantized to thousandths and
+  rounded half up. `vary` draws one SplitMix64 value per R, G, B in that order for
+  each output color and maps it to `[-amount, amount]` with a modulus, clamping
+  to 0..255.
+- Stored palettes live under `paint_palettes` (at most 256 palettes of 1-256
+  colors). `palette_hash` is SHA-256 over `pentool-palette-v1
+` and the RGBA
+  bytes; a stored hash that does not match its colors is a validation error.
+
 ## Comparison metrics
 
 Comparison inputs are immutable, equally sized, bounded RGBA8 crops produced by

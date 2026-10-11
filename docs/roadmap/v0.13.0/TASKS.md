@@ -63,7 +63,7 @@ commits as one history entry and must be reviewable before execution.
   Compilation emits the existing canonical raster samples and reports both the
   compact source and generated sample/dab counts.
 
-- [ ] **3. Add color sampling, mixing, and portable palettes.** Sample a point,
+- [x] **3. Add color sampling, mixing, and portable palettes.** Sample a point,
   bounded region, selection, layer, or composite through the authoritative
   renderer. Extract deterministic dominant, median, highlight, midtone, shadow,
   and edge palettes. Add explicit color interpolation/mixing and bounded seeded

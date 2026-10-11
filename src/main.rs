@@ -2365,6 +2365,16 @@ enum Command {
     Selection(Box<SelectionArgs>),
     /// Inspect composite histograms, samples, palettes, and before/after pixels.
     Analyze(Box<AnalyzeArgs>),
+    /// Sample colors and manage portable palettes (v0.13.0 agent painting).
+    PaintPalette {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::paint_palette::PaletteAction,
+    },
     /// Maintain verified linked sources and collect portable projects offline.
     Linked(Box<LinkedArgs>),
     /// Save data-only appearance presets or copy/paste named appearances.
@@ -8093,6 +8103,18 @@ async fn run() -> Result<()> {
         Command::Analyze(args) => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
             let query: Option<serde_json::Value> = args
+        Command::PaintPalette {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::paint_palette::run(
+            &input,
+            selected_page,
+            dry_run,
+            if_revision.as_deref(),
+            action,
+        ),
                 .query
                 .as_deref()
                 .map(serde_json::from_str)

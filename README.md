@@ -755,6 +755,25 @@ Line, quadratic, cubic, and arc segments are supported. Dry run, revision guards
 locks, bounded compilation, history, replay, batch, and the shared raster API use
 the same planner. See [the raster-paint contract](docs/raster-paint-v1.md).
 
+### Color sampling and portable palettes
+
+Sample through the authoritative renderer, extract deterministic palettes, mix
+colors and generate seeded variations. Named palettes are readable document data
+under `paint_palettes` with scope, color space, algorithm version and source hash:
+
+```sh
+pentool paint-palette portrait.pen sample --scope node:paint --x 40 --y 12
+pentool paint-palette portrait.pen extract --scope node:paint --role shadow   --count 4 --save skin-shadows
+pentool paint-palette portrait.pen mix '#8B5A3C' '#f1d3b8' --amount 0.25
+pentool paint-palette portrait.pen vary '#8B5A3C' --seed 7 --amount 10 --count 6
+pentool paint-palette portrait.pen list
+```
+
+Roles are `dominant`, `median`, `highlight`, `midtone`, `shadow` and `edge`.
+Read-only actions reject `--dry-run`; saving and removing use the shared
+transaction. See the "Color sampling and palettes" section of
+[the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

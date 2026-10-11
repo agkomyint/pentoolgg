@@ -27,6 +27,7 @@ pub mod linked;
 pub mod mask;
 pub mod package;
 pub mod page;
+pub mod paint_palette;
 pub mod pdf;
 pub mod photo;
 pub mod preset;

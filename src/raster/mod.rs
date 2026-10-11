@@ -34,6 +34,7 @@ mod heal;
 mod input;
 mod layer;
 mod math;
+pub use math::splitmix64;
 mod pixels;
 mod preset;
 mod recovery;
