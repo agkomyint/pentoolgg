@@ -4,8 +4,22 @@ on:
     tags: ['v*']
 permissions:
   contents: write
+  actions: read
 jobs:
+  verify-ci:
+    # The test suite is not repeated here: the tagged commit must already have a
+    # successful run of the CI workflow.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a passing CI run for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}&status=success" -q '.total_count')
+          echo "successful CI runs for ${{ github.sha }}: $count"
+          [ "$count" -ge 1 ] || { echo "tag a commit that has passed CI" >&2; exit 1; }
   build:
+    needs: verify-ci
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +45,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - run: cargo test --all-targets --locked --target ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Smoke test CLI rendering
         run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/eye.pen smoke.png

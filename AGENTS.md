@@ -230,7 +230,9 @@ work to obtain a clean tree.
 CI must pass formatting, Clippy with warnings denied, and all locked tests on Linux,
 Windows, and macOS. Release tags trigger three artifact builds (Linux x64, Windows x64, Apple
 Silicon macOS) and create a draft
-GitHub release. Before tagging:
+GitHub release. The release workflow does not rerun the test suite: it first
+requires a successful CI run for the tagged commit, then builds the release
+binaries and smoke-tests them. Before tagging:
 
 1. choose a new semantic version; never move or reuse a published tag;
 2. update both `Cargo.toml` and the `pentool` package entry in `Cargo.lock`;
