@@ -41,6 +41,7 @@ pub mod shaping;
 pub mod spreads;
 pub mod stories;
 pub mod style;
+pub mod styles;
 pub mod text;
 pub mod transaction;
 pub mod transform;

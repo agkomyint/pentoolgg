@@ -2100,6 +2100,16 @@ enum Command {
         #[command(subcommand)]
         action: pentool::layout_cli::ParentAction,
     },
+    /// Version 9 layout styles: paragraph, character, object, table and cell styles.
+    LayoutStyle {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::styles::StyleAction,
+    },
     /// Version 9 sections: numbering styles, prefixes, start numbers.
     Section {
         input: PathBuf,
@@ -6606,6 +6616,12 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
             action,
+        Command::LayoutStyle {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_style(&input, dry_run, if_revision.as_deref(), action),
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
             if !scene::is_scene_document(&raw) {

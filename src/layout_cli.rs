@@ -252,6 +252,23 @@ pub fn run_spread(
     finish(input, "spread", dry_run, revision, &raw, result)
 }
 
+pub fn run_layout_style(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    action: crate::styles::StyleAction,
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let (result, read_only) = crate::styles::run_style(&mut raw, action)?;
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    // Reflow bounds and story validity are enforced by the shared validators.
+    spreads::validate(&raw, spreads::VERSION)?;
+    finish(input, "layout-style", dry_run, revision, &raw, result)
+}
+
 pub fn run_parent(
     input: &Path,
     dry_run: bool,

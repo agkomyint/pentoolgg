@@ -212,6 +212,18 @@ and documentation.
 
   Style changes reflow every affected story in a bounded way.
 
+  *Progress:* the style core (`src/styles.rs`, `pentool layout-style`) is
+  implemented and covered by `tests/v0140_styles.rs`: the five style kinds with
+  per-kind property validation, `based_on` chains (depth <= 16, cycle and
+  missing-base errors), next styles, groups, resolution, a dependency/usage
+  report, create/set/remove (with `--reassign`), redefine from overrides,
+  clearing overrides, and import with `rename`/`skip`/`replace` policies from a
+  version 9 `.pen`; contract in `docs/layout-v1.md` section 5.7. Still open
+  before this box is ticked: nested, line and GREP (bounded regex) style
+  evaluation, lists (levels, restart, continuation), IDML style import,
+  shortcuts, and wiring style resolution into frame composition so a change
+  recomposes the affected stories.
+
 - [ ] **7. Add grids, guides and alignment.**
   - A baseline grid per document and per frame, with align-to-grid modes.
   - Ruler guides, margin and column guides, layout grids, and smart guides with

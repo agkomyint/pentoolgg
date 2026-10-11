@@ -389,6 +389,23 @@ recomposes **exactly** the stories (and tables, TOCs, indexes) that reference
 the style through the resolution chain, found through a dependency index, in a
 bounded transaction; `undo` restores the original bytes.
 
+### 5.7 Implementation notes (task 6)
+
+`pentool layout-style FILE <action>` (`list`, `show`, `create`, `set`, `remove`,
+`usage`, `check`, `redefine`, `clear-overrides`, `import`) edits
+`layout.styles.<kind>.<id>`. Every mutation validates the whole document in
+memory and commits through the shared transaction; `--dry-run` and
+`--if-revision` behave as for the other layout commands. Properties are
+`--set key=json`. Unsupported properties, unknown `based_on`/`next` targets,
+cycles and chains deeper than 16 are errors that name the style. `show`
+returns the definition, the `based_on` chain and the resolved properties;
+`usage` lists derived styles, `next` links and referencing stories. `remove`
+refuses a style that is in use unless `--reassign STYLE` names a replacement;
+derived styles otherwise fall back to the removed style's own base. `import`
+remaps `based_on`/`next` within the imported set.
+
+Not yet implemented: nested/line/GREP evaluation, lists, IDML import.
+
 ## 6. Composition: algorithm and determinism
 
 ### 6.1 Numeric model

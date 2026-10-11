@@ -171,6 +171,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
     for page in page_list {
         validate_page_layout(page, &parent_ids)?;
     }
+    crate::styles::validate(raw)?;
     crate::stories::validate(raw)?;
     Ok(())
 }
