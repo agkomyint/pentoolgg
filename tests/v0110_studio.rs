@@ -718,7 +718,11 @@ fn serve_exposes_the_studio_with_revision_guarded_edits() {
     let page = client.get(&base).send().unwrap().text().unwrap();
     assert!(page.contains("Pentool Studio") && page.contains("id=\"root\""));
     assert_eq!(
-        client.get(format!("{base}/classic")).send().unwrap().status(),
+        client
+            .get(format!("{base}/classic"))
+            .send()
+            .unwrap()
+            .status(),
         404,
         "the classic editor is retired"
     );
