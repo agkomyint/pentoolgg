@@ -5955,7 +5955,7 @@ async fn run() -> Result<()> {
                         offset,
                         limit
                     }
-                ))?
+                )?)?
             );
             Ok(())
         }

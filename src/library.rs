@@ -311,7 +311,10 @@ pub struct SearchOptions<'a> {
     pub offset: usize,
     pub limit: usize,
 }
-pub fn search(index: &AssetIndex, options: &SearchOptions<'_>) -> Value {
+pub fn search(index: &AssetIndex, options: &SearchOptions<'_>) -> Result<Value> {
+    if options.limit == 0 {
+        bail!("[invalid-input] --limit must be at least 1")
+    }
     let q = options.query.unwrap_or("").to_ascii_lowercase();
     let mut scored: Vec<(u8, &IndexedAsset)> = index
         .assets
@@ -360,7 +363,9 @@ pub fn search(index: &AssetIndex, options: &SearchOptions<'_>) -> Value {
         .take(options.limit.min(500))
         .map(|(_, a)| a)
         .collect::<Vec<_>>();
-    json!({"matches":total,"returned":items.len(),"offset":options.offset,"limit":options.limit.min(500),"has_more":options.offset+items.len()<total,"assets":items})
+    Ok(
+        json!({"matches":total,"returned":items.len(),"offset":options.offset,"limit":options.limit.min(500),"has_more":options.offset+items.len()<total,"assets":items}),
+    )
 }
 pub fn resolve<'a>(index: &'a AssetIndex, spec: &str) -> Result<&'a IndexedAsset> {
     let mut found = index
@@ -461,7 +466,8 @@ mod tests {
                 offset: 0,
                 limit: 20,
             },
-        );
+        )
+        .unwrap();
         assert_eq!(result["returned"], 20);
         assert_eq!(result["assets"][0]["id"], "icons/item-09900");
     }
