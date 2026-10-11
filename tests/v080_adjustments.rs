@@ -281,3 +281,23 @@ fn cli_adjustments_use_one_guarded_history_entry_and_export_all_formats() {
     assert_eq!(std::fs::read(&file).unwrap(), committed);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn adjustment_add_collision_names_existing_node_kind() {
+    let mut raw: Value =
+        serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+    raw = composite::migrate(raw).unwrap();
+    let err = composite::edit(
+        &mut raw,
+        None,
+        "add",
+        "card",
+        &serde_json::json!({"adjustment":"invert"}),
+    )
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("node ID card already exists as a group node"),
+        "unexpected error: {message}"
+    );
+}
