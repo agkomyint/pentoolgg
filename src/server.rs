@@ -39,6 +39,8 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/", get(|| async { Html(STUDIO) }))
         .route("/studio", get(|| async { Html(STUDIO) }))
         .route("/api/raster", post(raster_command))
+        .route("/api/paint/plan", post(paint_plan_command))
+        .route("/api/paint/score", post(paint_score_command))
         .route("/api/image/bake", post(image_bake))
         .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
@@ -373,6 +375,62 @@ struct RasterRequest {
 /// document and a compact result out. Nothing is written unless it validates.
 async fn raster_command(Json(body): Json<RasterRequest>) -> Response {
     match raster_apply(body) {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaintPlanRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    plan: serde_json::Value,
+    /// Preview only: the report is identical to a commit but no document is returned.
+    #[serde(default)]
+    dry_run: bool,
+    /// Refuse unless the canonical plan hashes to this value (`[plan-changed]`).
+    expect_plan_hash: Option<String>,
+}
+
+/// Stateless plan execution. A preview and a commit share one planner, so the
+/// report a reviewer sees is exactly what the commit returns.
+async fn paint_plan_command(Json(body): Json<PaintPlanRequest>) -> Response {
+    match paint_plan_apply(body) {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+fn paint_plan_apply(body: PaintPlanRequest) -> Result<serde_json::Value> {
+    if let Some(expected) = &body.expect_plan_hash {
+        let actual = crate::paint_plan::validate_template(&body.plan)?;
+        anyhow::ensure!(
+            &actual == expected,
+            "[plan-changed] the plan hashes to {actual}, not the expected {expected}; review the plan again. The document was not changed"
+        );
+    }
+    let mut raw = body.document;
+    crate::transaction::validate_value(&raw)?;
+    let result = crate::paint_plan::execute(&mut raw, body.page.as_deref(), &body.plan)?;
+    crate::transaction::validate_value(&raw)?;
+    if body.dry_run {
+        Ok(serde_json::json!({"result": result, "dry_run": true}))
+    } else {
+        Ok(serde_json::json!({"result": result, "dry_run": false, "document": raw}))
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaintScoreRequest {
+    before: serde_json::Value,
+    after: serde_json::Value,
+    layer: String,
+    goal: serde_json::Value,
+}
+
+/// Read-only before/after scoring of one layer against a goal.
+async fn paint_score_command(Json(body): Json<PaintScoreRequest>) -> Response {
+    match crate::paint_score::score(&body.before, &body.after, &body.layer, &body.goal) {
         Ok(value) => Json(value).into_response(),
         Err(e) => problem(e),
     }
@@ -1600,6 +1658,34 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paint_plan_endpoint_previews_and_commits_the_same_report() {
+        use serde_json::json;
+        let mut raw = crate::scene::new_document(64, 64);
+        crate::raster::add(&mut raw, None, None, "p", 0.0, 0.0, 64, 64).unwrap();
+        let plan = json!({
+            "schema": 1, "engine": 1, "id": "ui",
+            "passes": [{"id": "a", "target": "p", "action": "stroke-path",
+                        "args": {"path": "M4 10 L60 10", "color": "#336699",
+                                 "brush": {"size": 8, "hardness": 1}}}]
+        });
+        let request = |dry_run: bool, hash: Option<String>| super::PaintPlanRequest {
+            document: raw.clone(),
+            page: None,
+            plan: plan.clone(),
+            dry_run,
+            expect_plan_hash: hash,
+        };
+        let preview = super::paint_plan_apply(request(true, None)).unwrap();
+        assert!(preview.get("document").is_none());
+        let hash = preview["result"]["plan_hash"].as_str().unwrap().to_owned();
+        let commit = super::paint_plan_apply(request(false, Some(hash))).unwrap();
+        assert_eq!(preview["result"], commit["result"]);
+        assert_ne!(commit["document"], raw);
+        let stale = super::paint_plan_apply(request(false, Some("sha256:0".into())));
+        assert!(stale.unwrap_err().to_string().contains("plan-changed"));
+    }
+
     #[test]
     fn raster_endpoint_adds_a_page_sized_paint_layer_to_a_new_document() {
         let raw = crate::scene::new_document(64, 48);

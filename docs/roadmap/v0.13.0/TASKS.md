@@ -136,7 +136,7 @@ commits as one history entry and must be reviewable before execution.
   masks preserve existing override semantics. History, undo/redo, dry run, locks,
   page selection, revision guards, and unknown fields behave like other mutations.
 
-- [ ] **13. Build editor-native review and authoring controls.** Add path/pressure
+- [x] **13. Build editor-native review and authoring controls.** Add path/pressure
   editors, palette sampling, protected regions, field visualization, material
   controls, pass ordering, crop previews, reference comparison, metric overlays,
   and exact disclosure of generated work. Preview may be approximate; commit must

@@ -47,4 +47,17 @@ navigator) workspaces use the same `/api/photo/*` and `/api/raster` endpoints as
 Known limits: hit-testing is bounding-box based; during a drag only the
 selection box moves and the rendered preview updates on release; there is no
 in-browser PDF export (use `pentool export x.pen x.pdf`); Layout is a
-"coming soon" placeholder and Paint has no agent-directed painting yet (0.13).
+"coming soon" placeholder.
+
+### Paint plan authoring (0.13)
+
+The Paint workspace's "Plan passes" section authors an ordered paint plan: path or
+pressure-sample editors, color, brush size and hardness, per-pass regions,
+protected regions and palettes, and pass ordering. An overlay shows regions,
+protected areas and the changed bounds returned by each pass (amber when a
+measured warning applies). "Preview plan" and "Commit" both call
+`POST /api/paint/plan`, so the report is the authoritative Rust output, never a
+browser estimate; commit is one undoable step guarded by the plan hash.
+"Score preview against goal" calls `POST /api/paint/score`. Plans appear as
+normal editable passes, not a chat surface, and the panel states that every pass is
+generated work and which warnings are measured versus heuristic.

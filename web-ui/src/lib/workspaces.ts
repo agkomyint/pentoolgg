@@ -21,6 +21,6 @@ export const workspaces: Workspace[] = [
   { id: "composite", label: "Composite", icon: Layers, status: "partial", since: "0.8", summary: "Blend modes, effects and compositing.", planned: ["Blend mode picker", "Effects stack", "Dependency report"] },
   { id: "photo", label: "Photo", icon: Camera, status: "available", since: "0.11", summary: "Catalog, culling, RAW development, masks, crop and copy/sync.", planned: [] },
   { id: "print", label: "Print", icon: Printer, status: "partial", since: "0.12", summary: "Color roles, preflight, plates and soft proof.", planned: [] },
-  { id: "paint", label: "Paint", icon: Brush, status: "partial", since: "0.10", summary: "Raster brush, clone, heal, selections and quick mask. Agent-directed painting is planned for 0.13.", planned: ["Stroke plan viewer", "Palette and color mixing", "Region comparison", "Revision scoring"] },
+  { id: "paint", label: "Paint", icon: Brush, status: "partial", since: "0.10", summary: "Raster brush, clone, heal, selections and quick mask. Plan passes with protected regions, preview, commit and scoring (0.13).", planned: [] },
   { id: "layout", label: "Layout", icon: Newspaper, status: "planned", since: "0.14", summary: "Page layout, styles, books and IDML.", planned: ["Spreads and parents", "Threaded text frames", "Paragraph and character styles", "Books and IDML interchange"] },
 ];

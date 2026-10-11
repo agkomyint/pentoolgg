@@ -354,6 +354,15 @@ limit and header changes.
 Package manifests carry a `paint_assets` table (`section`, `id`, `hash`) per asset;
 `pack`, `collect` and `verify` recompute it and reject a mismatch.
 
+## Studio endpoints (engine 1 implementation)
+
+`POST /api/paint/plan` takes `{document, page?, plan, dry_run?, expect_plan_hash?}`
+and returns `{result, dry_run, document?}`; `result` is byte-identical to
+`paint-plan`. `dry_run` omits the document. A stale `expect_plan_hash` is
+`[plan-changed]` and nothing is returned. `POST /api/paint/score` takes
+`{before, after, layer, goal}` and returns the `paint-score` report. Both are
+stateless and read nothing from disk.
+
 ## Material paint modes (engine 1 implementation)
 
 A brush may carry a `media` object (`brush.media`, valid with blend `normal`
