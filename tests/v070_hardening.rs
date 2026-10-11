@@ -293,8 +293,8 @@ fn browser_endpoints_use_shared_services_and_label_preview_status() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     assert!(ready, "server did not start");
-    let script = client.get(format!("{base}/image-panel.js")).send().unwrap();
-    assert!(script.status().is_success());
+    let page = client.get(&base).send().unwrap();
+    assert!(page.status().is_success());
 
     let shared: Value = client
         .get(format!("{base}/api/document"))

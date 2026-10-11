@@ -47,15 +47,8 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
         }),
         "server did not start"
     );
-    let page = client
-        .get(format!("{base}/classic"))
-        .send()
-        .unwrap()
-        .text()
-        .unwrap();
     let root = client.get(&base).send().unwrap().text().unwrap();
     assert!(root.contains("Pentool Studio") && root.contains("id=\"root\""));
-    assert!(page.contains("id=\"printPanel\"") && page.contains("/print-panel.js"));
     let studio = client
         .get(format!("{base}/studio"))
         .send()
@@ -63,29 +56,6 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
         .text()
         .unwrap();
     assert!(studio.contains("Pentool Studio") && studio.contains("id=\"root\""));
-    assert!(page.contains("id=\"printPlates\"") && page.contains("id=\"printProof\""));
-    assert!(page.contains("id=\"printGuides\"") && page.contains("id=\"printGuidesToggle\""));
-    assert!(page.contains("id=\"printBpc\""));
-    assert!(
-        page.contains("id=\"printOverprintToggle\"")
-            && page.contains("id=\"printGamut\"")
-            && page.contains("id=\"printPdfx\"")
-    );
-    assert!(client
-        .get(format!("{base}/print-panel.js"))
-        .send()
-        .unwrap()
-        .status()
-        .is_success());
-    // The panel publishes resolved guides and the editor canvas draws them.
-    for script in ["print-panel.js", "app.js"] {
-        let response = client.get(format!("{base}/{script}")).send().unwrap();
-        assert!(response.status().is_success(), "{script}");
-        assert!(
-            response.text().unwrap().contains("pentool-print-guides"),
-            "{script}"
-        );
-    }
     let response = client
         .get(format!("{base}/api/color/preflight?min_ppi=200"))
         .send()

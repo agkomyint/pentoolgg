@@ -468,7 +468,7 @@ left byte-for-byte unchanged. `--dry-run` runs the same planner and writes nothi
 
 ## Editor canvas
 
-`pentool serve` embeds a **Raster canvas** panel (`web/raster-panel.js`) for v6 documents.
+`pentool serve` embeds a **Paint** workspace in Pentool Studio (`web-ui/src/workspaces/RasterStage.tsx`) for v6 documents.
 It never edits pixels itself: on pointer release it sends one request to the stateless
 `POST /api/raster` endpoint, `{document, page?, id, action, args}`, and gets back
 `{document, result}` or a `{error}` problem. The document is validated before it is

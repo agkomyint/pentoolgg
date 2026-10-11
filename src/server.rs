@@ -24,14 +24,6 @@ struct Shared {
     no_cache: bool,
 }
 
-const INDEX: &str = include_str!("../web/index.html");
-const APP_JS: &str = include_str!("../web/app.js");
-const STYLE: &str = include_str!("../web/style.css");
-const IMAGE_PANEL_JS: &str = include_str!("../web/image-panel.js");
-const COMPOSITE_PANEL_JS: &str = include_str!("../web/composite-panel.js");
-const RASTER_PANEL_JS: &str = include_str!("../web/raster-panel.js");
-const PHOTO_PANEL_JS: &str = include_str!("../web/photo-panel.js");
-const PRINT_PANEL_JS: &str = include_str!("../web/print-panel.js");
 /// Built from `web-ui/` (`bun run build`); committed so cargo needs no Node or Bun.
 const STUDIO: &str = include_str!("../web/studio.html");
 
@@ -46,39 +38,14 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
     let app = Router::new()
         .route("/", get(|| async { Html(STUDIO) }))
         .route("/studio", get(|| async { Html(STUDIO) }))
-        .route("/classic", get(|| async { Html(INDEX) }))
-        .route(
-            "/app.js",
-            get(|| async { asset(APP_JS, "text/javascript; charset=utf-8") }),
-        )
-        .route(
-            "/raster-panel.js",
-            get(|| async { asset(RASTER_PANEL_JS, "text/javascript; charset=utf-8") }),
-        )
         .route("/api/raster", post(raster_command))
-        .route(
-            "/image-panel.js",
-            get(|| async { asset(IMAGE_PANEL_JS, "text/javascript; charset=utf-8") }),
-        )
         .route("/api/image/bake", post(image_bake))
         .route("/api/image/add", post(image_add))
-        .route(
-            "/composite-panel.js",
-            get(|| async { asset(COMPOSITE_PANEL_JS, "text/javascript; charset=utf-8") }),
-        )
-        .route(
-            "/print-panel.js",
-            get(|| async { asset(PRINT_PANEL_JS, "text/javascript; charset=utf-8") }),
-        )
         .route("/api/color/preflight", get(color_preflight))
         .route("/api/color/plates", get(color_plates))
         .route("/api/color/proof", get(color_proof))
         .route("/api/color/gamut", get(color_gamut))
         .route("/api/color/pdfx", get(color_pdfx))
-        .route(
-            "/photo-panel.js",
-            get(|| async { asset(PHOTO_PANEL_JS, "text/javascript; charset=utf-8") }),
-        )
         .route("/api/photo/catalog", get(photo_catalog))
         .route("/api/photo/detail", get(photo_detail))
         .route("/api/photo/preview", post(photo_preview))
@@ -86,10 +53,6 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/composite/analyze", post(composite_analyze))
         .route("/api/composite/dependencies", get(composite_dependencies))
         .route("/api/composite/cancel", post(composite_cancel))
-        .route(
-            "/style.css",
-            get(|| async { asset(STYLE, "text/css; charset=utf-8") }),
-        )
         .route(
             "/api/health",
             get(|| async {
@@ -1271,17 +1234,6 @@ fn revision(value: &serde_json::Value) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     value.to_string().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
-}
-
-fn asset(body: &'static str, kind: &'static str) -> Response {
-    (
-        [
-            (header::CONTENT_TYPE, kind),
-            (header::CACHE_CONTROL, "no-cache"),
-        ],
-        body,
-    )
-        .into_response()
 }
 
 #[derive(serde::Deserialize, Default)]

@@ -2,8 +2,8 @@
 
 `web-ui/` is the TypeScript source of the new browser UI: Vite, React 18,
 Tailwind CSS 4 and shadcn-style components (Radix primitives, `cva`), with
-Zustand for state. It is served at `/` (and `/studio`). The previous editor remains at `/classic`
-until the photo and raster panels are ported.
+Zustand for state. It is served at `/` (and `/studio`) and is the only browser editor; the earlier
+vanilla-JS editor (`/classic`) was retired once its photo and raster panels were ported.
 
 ## Product properties
 
@@ -40,8 +40,11 @@ raw node JSON, a scene-batch console, Images (operations stack), Composite
 plates, soft proof), New/Open/Save (shared file or `.pen` download), PNG/SVG
 export, dark mode.
 
-Not yet ported (use `/classic`): photo catalog/develop panel and raster panel.
+Photo (catalog grid, loupe, compare, culling keys, histogram and clipping overlays, develop sliders,
+white balance, crop, radial/linear/brush masks, copy/sync, variants, snapshots, keywords) and Paint
+(raster brush, eraser, clone, heal, quick mask, marquee/lasso/wand selections, rulers, guides, snap,
+navigator) workspaces use the same `/api/photo/*` and `/api/raster` endpoints as before.
 Known limits: hit-testing is bounding-box based; during a drag only the
 selection box moves and the rendered preview updates on release; there is no
-in-browser PDF export (use `pentool export x.pen x.pdf`); Paint and Layout
-workspaces are "coming soon" placeholders.
+in-browser PDF export (use `pentool export x.pen x.pdf`); Layout is a
+"coming soon" placeholder and Paint has no agent-directed painting yet (0.13).
