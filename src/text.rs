@@ -89,6 +89,20 @@ fn ink() -> String {
     "#111827".into()
 }
 
+/// Reject text that can never survive serialization: over the size limit or
+/// carrying XML-incompatible control characters. Mirrors the legacy
+/// `Text::validate` rule so v4 writers fail the same way export does.
+pub fn validate_content(content: &str) -> Result<()> {
+    if content.len() > 1_000_000
+        || content.chars().any(|c| {
+            c < ' ' && !matches!(c, '\n' | '\r' | '\t') || c == '\u{fffe}' || c == '\u{ffff}'
+        })
+    {
+        bail!("text exceeds size limit or contains invalid XML characters")
+    }
+    Ok(())
+}
+
 pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
     let layer_id = match &action {
         TextAction::Put { layer, .. }
@@ -280,6 +294,24 @@ pub fn font(doc: &mut Document, action: FontAction) -> Result<()> {
             }
             *doc = updated;
             Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_content_rejects_xml_incompatible_characters() {
+        validate_content("plain text\nwith newline\ttab").unwrap();
+        validate_content("unicode héllo 🎨 ok").unwrap();
+        for bad in ["a\x01b", "a\u{fffe}b", "a\u{ffff}b"] {
+            let err = validate_content(bad).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid XML characters"),
+                "unexpected error for {bad:?}: {err}"
+            );
         }
     }
 }
