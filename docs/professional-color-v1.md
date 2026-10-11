@@ -819,7 +819,7 @@ structural check only proves xref/trailer consistency.
 the selected page and prints `{ok, errors, warnings, issues[]}`. Each issue has a
 stable `code`, `severity` (`error` blocks production, `warning` needs review),
 `node`, `message` and `fix`. It is read only (`mutated: false`) and caps output at
-500 issues, reporting `issues_omitted`.
+500 issues, reporting `issues_omitted`. The report also lists up to 500 `overprint_nodes` (`id`, `kind`, and top-level `x`, `y`, `width`, `height`) that the print view highlights.
 
 Checks: output role present, ICC CMYK, catalog profile loadable, `prtr` class and
 v4-or-older (`output-role-missing`, `output-not-cmyk`, `output-profile-*`);

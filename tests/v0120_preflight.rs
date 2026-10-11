@@ -130,6 +130,18 @@ fn transparency_text_and_spot_use_are_warned() {
         found.contains(&"overprint-not-in-pdfx".to_owned()),
         "{found:?}"
     );
+    let report = run(&raw);
+    let listed = report["overprint_nodes"].as_array().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0]["id"],
+        raw["pages"][0]["layers"][0]["nodes"][0]["id"]
+    );
+    assert!(listed[0]["width"].as_f64().unwrap() > 0.0);
+    assert!(run(&doc())["overprint_nodes"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

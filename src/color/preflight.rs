@@ -52,6 +52,8 @@ impl Default for Options {
 struct Issues {
     list: Vec<Value>,
     dropped: usize,
+    /// Nodes that declare overprint, for the print view overlay.
+    overprint: Vec<Value>,
 }
 
 impl Issues {
@@ -76,6 +78,13 @@ fn walk(nodes: &[Value], raw: &Value, upi: f64, options: &Options, out: &mut Iss
         }
         let id = node["id"].as_str();
         let kind = node["kind"].as_str().unwrap_or_default();
+        if node["style"]["overprint"].is_object() && out.overprint.len() < MAX_ISSUES {
+            // Child coordinates are group relative, so only top-level nodes carry bounds.
+            let bounds = |key: &str| node[key].as_f64().filter(|_| depth == 0);
+            out.overprint
+                .push(json!({"id":id,"kind":kind,"x":bounds("x"),"y":bounds("y"),
+                "width":bounds("width"),"height":bounds("height")}));
+        }
         if kind == "text" {
             out.add(
                 "warning",
@@ -287,6 +296,7 @@ pub fn run(
     let mut out = Issues {
         list: Vec::new(),
         dropped: 0,
+        overprint: Vec::new(),
     };
 
     match roles::effective(raw, Role::Output) {
@@ -471,6 +481,7 @@ pub fn run(
         "warnings": out.list.len() - errors,
         "issues": out.list,
         "issues_omitted": out.dropped,
+        "overprint_nodes": out.overprint,
         "min_ppi": options.min_ppi,
         "max_total_ink": options.max_total_ink,
         "allowed_spots": options.allowed_spots,

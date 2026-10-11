@@ -5,6 +5,7 @@
   const list = $('printIssues');
   let busy = false;
   let production = null;
+  let overprintNodes = [];
   const guides = $('printGuides');
   const NS = 'http://www.w3.org/2000/svg';
   // Draw the resolved media, bleed, trim and safe rectangles over the plate or
@@ -17,6 +18,20 @@
     if (!on) return;
     guides.setAttribute('viewBox', `0 0 ${production.canvas.width} ${production.canvas.height}`);
     guides.setAttribute('preserveAspectRatio', 'none');
+    if ($('printOverprintToggle').checked) {
+      for (const node of overprintNodes) {
+        if (node.width == null || node.height == null) continue;
+        const rect = document.createElementNS(NS, 'rect');
+        rect.setAttribute('x', node.x); rect.setAttribute('y', node.y);
+        rect.setAttribute('width', node.width); rect.setAttribute('height', node.height);
+        rect.setAttribute('fill', '#f59e0b'); rect.setAttribute('fill-opacity', '0.35');
+        rect.setAttribute('stroke', '#b45309'); rect.setAttribute('vector-effect', 'non-scaling-stroke');
+        const title = document.createElementNS(NS, 'title');
+        title.textContent = `overprint: ${node.id}`;
+        rect.append(title);
+        guides.append(rect);
+      }
+    }
     for (const [name, color, dash] of [['media', '#888888', ''], ['bleed', '#e11d48', '4 3'], ['trim', '#2563eb', ''], ['safe', '#16a34a', '2 2']]) {
       const box = production[name];
       if (!box) continue;
@@ -33,6 +48,7 @@
     }
   }
   $('printGuidesToggle').onchange = drawGuides;
+  $('printOverprintToggle').onchange = drawGuides;
   function show(report) {
     list.replaceChildren(...report.issues.map(issue => {
       const item = document.createElement('li');
@@ -51,6 +67,7 @@
       ? `Ready: ${report.warnings} warning(s), no blocking errors.`
       : `Blocked: ${report.errors} error(s) and ${report.warnings} warning(s).`;
     production = report.production || null;
+    overprintNodes = report.overprint_nodes || [];
     drawGuides();
     $('printGeometry').textContent = report.production
       ? JSON.stringify(report.production, null, 2)

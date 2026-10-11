@@ -356,7 +356,8 @@ remain at the shared ICC, catalog, role, package and performance foundations.
   plate viewer and soft-proof button in the panel, and clicking a preflight
   issue dispatches `pentool-select-node` to select the object. The plate/proof view overlays
   the resolved media, bleed, trim and safe rectangles as SVG guides with a toggle
-  (served markup asserted in the UI test). Overprint and gamut overlays, canvas
+  (served markup asserted in the UI test). Overprinting objects are highlighted on the print view from the preflight report's
+  `overprint_nodes` (top-level bounds; nested nodes are listed without bounds). Gamut overlays, canvas
   (not just plate-view) bleed overlays, proof setup and export controls
   remain open; there is no browser-level interaction test (endpoints and the
   served panel are tested; the DOM wiring is only syntax-checked).

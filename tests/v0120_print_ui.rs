@@ -65,6 +65,7 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
     assert!(studio.contains("Pentool Studio") && studio.contains("id=\"root\""));
     assert!(page.contains("id=\"printPlates\"") && page.contains("id=\"printProof\""));
     assert!(page.contains("id=\"printGuides\"") && page.contains("id=\"printGuidesToggle\""));
+    assert!(page.contains("id=\"printOverprintToggle\""));
     assert!(client
         .get(format!("{base}/print-panel.js"))
         .send()
