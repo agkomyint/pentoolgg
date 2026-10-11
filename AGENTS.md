@@ -58,7 +58,20 @@ The current planned sequence is:
    (PNG sequence, GIF, MP4/H.264 with Pentool's own encoders);
 10. `docs/roadmap/v0.15.0/TASKS.md`: audio and complete multimedia documents;
 11. `docs/roadmap/v0.16.0/TASKS.md`: professional page layout at InDesign
-    parity, `.penbook` books, and IDML interchange.
+    parity, `.penbook` books, and IDML interchange;
+12. `docs/roadmap/v0.17.0/TASKS.md`: static 3D objects (import, light, render);
+13. `docs/roadmap/v0.18.0/TASKS.md`: 3D in layouts and mockups;
+14. `docs/roadmap/v0.19.0/TASKS.md`: 3D animation on the timeline;
+15. `docs/roadmap/v0.20.0/TASKS.md`: design interchange (SVG, PDF, PSD, Figma,
+    Sketch);
+16. `docs/roadmap/v0.21.0/TASKS.md`: scripting and extension API;
+17. `docs/roadmap/v0.22.0/TASKS.md`: design systems, brand kits, templates;
+18. `docs/roadmap/v0.23.0/TASKS.md`: web and UX output;
+19. `docs/roadmap/v0.24.0/TASKS.md`: collaboration;
+20. `docs/roadmap/v0.25.0/TASKS.md`: self-hostable hosted service.
+
+GPU work uses `wgpu` as an optional `gpu` Cargo feature. The deterministic CPU
+renderer stays normative; goldens and digests come only from the CPU path.
 
 v0.7.1 shipped as the bug-fix release for v0.7.0 (`docs/roadmap/v0.7.0/bug.md`).
 Roadmap folder numbers are planned milestones, not reserved release numbers; the
