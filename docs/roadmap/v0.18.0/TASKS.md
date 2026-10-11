@@ -40,6 +40,15 @@ print and packaging.
   (task 1). Built-in templates: folding carton (tuck-end, straight-tuck,
   reverse-tuck), sleeve, mailer box, cylinder/tube, pouch and bottle label wrap.
   Paperboard thickness and glue flaps are modeled so panels meet correctly.
+- [ ] **5a. One data model, two synced views.** The dieline is the source of
+  truth; panel ID ↔ 3D face ↔ dieline region is a single mapping in the `.pen`.
+  Each panel's UVs are its rectangle on the dieline, so the artwork is one flat
+  texture the folded model samples. Picking is exact: the 3D viewport renders an
+  ID buffer, so clicking a face selects and highlights the matching 2D panel and
+  selecting a 2D panel highlights its face. Edits in either view update the
+  other. Dielines are parametric (L × W × H, board thickness) and carry bleed,
+  safe-zone and glue-flap regions that preflight checks (text or logos outside
+  the safe zone, artwork short of bleed).
 - [ ] **6. Packaging output:** artwork exports back to the flat dieline sheet
   with correct bleed, spot colors for cut and crease (separations), and PDF/X
   draft; `pentool pack` CLI to build, fold-preview and export from a template
@@ -65,3 +74,7 @@ print and packaging.
 - Automatic dieline generation from arbitrary 3D meshes (unfolding); only
   parametric templates and imported dielines ship first.
 - Structural engineering checks (compression strength, material yield).
+- Non-developable (doubly curved) packaging that cannot unfold flat without
+  distortion; cylinders, cones and tubes (developable) are in scope.
+- DXF/ArtiosCAD/Esko dieline import ships with interchange (v0.20.0); the first
+  release imports SVG dielines with labeled panels and fold lines.
