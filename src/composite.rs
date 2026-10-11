@@ -364,7 +364,10 @@ pub fn validate_settings(kind: &str, params: &Value) -> Result<()> {
         .as_object()
         .context("[invalid-adjustment] params must be an object")?;
     if !ADJUSTMENTS.contains(&kind) {
-        bail!("[unsupported-capability] unknown adjustment {kind}")
+        bail!(
+            "[unsupported-capability] unknown adjustment {kind}; valid kinds: {}",
+            ADJUSTMENTS.join(", ")
+        )
     }
     if matches!(
         kind,

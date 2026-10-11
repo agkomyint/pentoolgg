@@ -281,3 +281,17 @@ fn cli_adjustments_use_one_guarded_history_entry_and_export_all_formats() {
     assert_eq!(std::fs::read(&file).unwrap(), committed);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn unknown_adjustment_kind_lists_valid_kinds() {
+    let err = composite::validate_settings("bogus", &serde_json::json!({})).unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown adjustment bogus"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("exposure") && message.contains("invert") && message.contains("threshold"),
+        "unexpected error: {message}"
+    );
+}
