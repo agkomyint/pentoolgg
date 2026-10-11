@@ -131,6 +131,10 @@
   };
   $('printPlate').onchange = event => showImage(`/api/color/plates?plate=${encodeURIComponent(event.target.value)}`, `Plate ${event.target.value}`);
   const proofUrl = base => ($('printIntent').value ? `${base}?intent=${encodeURIComponent($('printIntent').value)}` : base);
+  $('printIntent').onchange = () => {
+    const intent = $('printIntent').value;
+    $('printPdfx').href = `/api/color/pdfx?ppi=300${intent ? `&intent=${encodeURIComponent(intent)}` : ''}`;
+  };
   $('printProof').onclick = () => showImage(proofUrl('/api/color/proof'), 'Soft proof');
   $('printGamut').onclick = () => showImage(proofUrl('/api/color/gamut'), 'Gamut warning (red = outside the output profile)');
 })();

@@ -74,6 +74,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/color/plates", get(color_plates))
         .route("/api/color/proof", get(color_proof))
         .route("/api/color/gamut", get(color_gamut))
+        .route("/api/color/pdfx", get(color_pdfx))
         .route(
             "/photo-panel.js",
             get(|| async { asset(PHOTO_PANEL_JS, "text/javascript; charset=utf-8") }),
@@ -654,6 +655,52 @@ async fn color_proof(
         let proof =
             crate::color::proofimage::render_intent(&raw, &file, q.page.as_deref(), intent)?;
         Ok(png_response(proof.png))
+    })();
+    result.unwrap_or_else(problem)
+}
+
+#[derive(serde::Deserialize)]
+struct PdfxQuery {
+    page: Option<String>,
+    ppi: Option<f64>,
+    intent: Option<String>,
+    compress: Option<bool>,
+    title: Option<String>,
+}
+
+/// Flattened CMYK PDF/X-4 draft as a download. Read only: the document is not
+/// touched and nothing is written next to it. Not a conformance claim.
+async fn color_pdfx(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PdfxQuery>,
+) -> Response {
+    let result = (|| -> Result<Response> {
+        let (file, raw) = shared_document(&state)?;
+        let defaults = crate::color::pdfx::Options::default();
+        let built = crate::color::pdfx::build(
+            &raw,
+            &file,
+            q.page.as_deref(),
+            &crate::color::pdfx::Options {
+                intent: proof_intent(q.intent.as_deref())?,
+                ppi: q.ppi.unwrap_or(defaults.ppi),
+                title: q.title,
+                compress: q.compress.unwrap_or(true),
+                ..defaults
+            },
+        )?;
+        Ok((
+            [
+                (header::CONTENT_TYPE, "application/pdf"),
+                (header::CACHE_CONTROL, "no-cache"),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"pentool-pdfx-draft.pdf\"",
+                ),
+            ],
+            built.bytes,
+        )
+            .into_response())
     })();
     result.unwrap_or_else(problem)
 }

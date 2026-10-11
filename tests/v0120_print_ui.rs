@@ -65,7 +65,11 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
     assert!(studio.contains("Pentool Studio") && studio.contains("id=\"root\""));
     assert!(page.contains("id=\"printPlates\"") && page.contains("id=\"printProof\""));
     assert!(page.contains("id=\"printGuides\"") && page.contains("id=\"printGuidesToggle\""));
-    assert!(page.contains("id=\"printOverprintToggle\"") && page.contains("id=\"printGamut\""));
+    assert!(
+        page.contains("id=\"printOverprintToggle\"")
+            && page.contains("id=\"printGamut\"")
+            && page.contains("id=\"printPdfx\"")
+    );
     assert!(client
         .get(format!("{base}/print-panel.js"))
         .send()
@@ -112,6 +116,8 @@ fn plate_and_proof_views_are_served_read_only() {
         None,
     )
     .unwrap();
+    raw["pages"][0]["production"] = json!({"units_per_inch":72,
+        "trim":{"x":20,"y":10,"width":160,"height":80},"bleed":5});
     raw["color_management"]["roles"] = json!({"output":{
         "destination":{"space":"icc-cmyk","profile":"press"},"intent":"relative-colorimetric"}});
     raw["pages"][0]["layers"][0]["nodes"] = json!([{"kind":"rect","id":"paint","x":0,"y":0,
@@ -188,6 +194,20 @@ fn plate_and_proof_views_are_served_read_only() {
         .send()
         .unwrap();
     assert_eq!(by_intent.status(), 200);
+    let pdf = client
+        .get(format!("{base}/api/color/pdfx?ppi=72"))
+        .send()
+        .unwrap();
+    assert_eq!(pdf.status(), 200, "{}", pdf.text().unwrap());
+    assert_eq!(pdf.headers()["content-type"], "application/pdf");
+    let body = pdf.bytes().unwrap();
+    assert!(body.starts_with(b"%PDF-1."));
+    pentool::color::pdfx::verify_structure(&body).unwrap();
+    let too_fine = client
+        .get(format!("{base}/api/color/pdfx?ppi=5000"))
+        .send()
+        .unwrap();
+    assert_eq!(too_fine.status(), 400);
     let bad_intent = client
         .get(format!("{base}/api/color/proof?intent=sparkly"))
         .send()
