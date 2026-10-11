@@ -47,6 +47,9 @@ pub fn edit_canvas(
 ) -> Result<()> {
     validate(raw)?;
     if let Some(name) = name {
+        if name.trim().is_empty() {
+            bail!("document name cannot be empty");
+        }
         raw["name"] = json!(name);
     }
     let canvas = page_mut(raw, page_id)?
@@ -2253,6 +2256,9 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             json!({"operation":"add","page":id})
         }
         PageAction::Rename { id, name } => {
+            if name.trim().is_empty() {
+                bail!("page name cannot be empty");
+            }
             let index = index_of(pages, &id)?;
             pages[index]["name"] = json!(name);
             json!({"operation":"rename","page":id})
@@ -3330,6 +3336,29 @@ mod tests {
         let shapes = inspect_paginated_v4(&raw, None, None, Some("path"), None, 0, 10).unwrap();
         assert_eq!(shapes["matches"], 1);
         assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
+    }
+
+    #[test]
+    fn renaming_a_page_to_an_empty_name_is_rejected() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = apply_page(
+            &mut raw,
+            crate::page::PageAction::Rename {
+                id: "page-1".into(),
+                name: "".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page name cannot be empty"),
+            "unexpected error: {err}"
+        );
+        let err = edit_canvas(&mut raw, None, None, None, None, Some("")).unwrap_err();
+        assert!(
+            err.to_string().contains("document name cannot be empty"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
