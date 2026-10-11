@@ -810,6 +810,20 @@ Fields come from contours, gradients, distance transforms, structure tensors,
 guides or supplied vectors; strokes are seeded, collision-aware and pin the field
 hash in the journal. See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Material paint modes
+
+```sh
+pentool paint-media list
+pentool paint-media describe '{"kind":"impasto","light":45,"scale":4}'
+pentool raster art.pen stroke-path paint --path "M4 32 L60 32" --color "#c05030"   --brush '{"size":14,"media":{"kind":"watercolor-wash","wetness":0.8,"wet_length":120}}'
+```
+
+Ten documented recipes (glaze, dry-brush, bristle, impasto, palette-knife,
+watercolor-wash, charcoal, pencil, canvas-grain, paper-grain) with light
+direction, tonal zones, preserve-luminance/chroma, pickup/deposit and wetness
+lifetime. Procedural grain is canvas-fixed and integer-only, so strokes replay
+exactly. See [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

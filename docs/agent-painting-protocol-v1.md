@@ -262,6 +262,36 @@ forbidden: failure, cancellation, stale revision, changed dependency, lock, or
 budget exhaustion leaves the original document byte-for-byte unchanged and creates
 no history entry, tiles, cache authority, or orphan resources.
 
+## Material paint modes (engine 1 implementation)
+
+A brush may carry a `media` object (`brush.media`, valid with blend `normal`
+only). It selects one documented, bounded pixel recipe; there is no external
+texture file, so the "texture assets" are procedural functions of
+`(x, y, seed, scale)` and the recipe is content-addressed by
+`pentool paint-media describe` (`digest` = sha256 over the algorithm version, the
+canonical parameters and a 64x64 grain sample). Journaled brushes carry the
+canonical form including `"algorithm": 1`; an unknown algorithm fails with
+`[unsupported-capability]` instead of replaying differently.
+
+Kinds: `glaze`, `dry-brush`, `bristle`, `impasto`, `palette-knife`,
+`watercolor-wash`, `charcoal`, `pencil`, `canvas-grain`, `paper-grain`.
+Parameters a kind does not read are rejected with `[invalid-brush]`, never ignored.
+
+Common: `strength` (0-1), `zones` (any of `shadow`, `midtone`, `highlight`, weighted
+by destination luma: shadow below 128 ramping out, highlight above), `preserve_luminance`,
+`preserve_chroma` (0-1, pull the result's value / chroma toward the destination),
+`pickup` (destination colour mixed into the deposit), `deposit` (scales alpha),
+`seed`, `vary` (mix the stroke seed into the grain). Per kind: `scale` (grain
+cell, whole px), `direction` (bristle lines), `light` (degrees; relief is lit when
+the surface rises toward it), `wetness`, `wet_length` (px over which wetness
+decays to 0, measured along the stroke) and `edge` (pooling / ridge strength).
+
+Math: per touched pixel the dab coverage and a canvas-fixed grain value give an
+alpha; zones, deposit, kind colour (multiply for glaze/wash, relief light for
+impasto/knife), pickup and preserve controls then run in integer arithmetic. Grain
+is a splitmix-style integer hash and integer value noise, so results are identical
+on every platform and replay exactly (`raster verify --replay`).
+
 ## Cancellation
 
 Cancellation is cooperative and checked before and after each of these bounded

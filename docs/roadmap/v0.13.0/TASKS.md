@@ -91,7 +91,7 @@ commits as one history entry and must be reviewable before execution.
   are inspectable, cacheable derived data; committed strokes pin the exact field
   digest. This enables hair, fur, grass, fabric, wood, and form-following hatching.
 
-- [ ] **7. Add lighting- and material-aware paint modes.** Define deterministic
+- [x] **7. Add lighting- and material-aware paint modes.** Define deterministic
   glaze, dry-brush, bristle, impasto-like, palette-knife, watercolor-wash,
   charcoal, pencil, canvas-grain, and paper-grain behavior without pretending to
   simulate unbounded physical media. Support explicit light direction, shadow /

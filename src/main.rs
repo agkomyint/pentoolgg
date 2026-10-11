@@ -2381,6 +2381,11 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_fields::FieldAction,
     },
+    /// List material paint modes and canonicalise a media spec (v0.13.0 agent painting).
+    PaintMedia {
+        #[command(subcommand)]
+        action: pentool::paint_media::MediaAction,
+    },
     /// Resolve and preview region painting constraints (v0.13.0 agent painting).
     PaintConstraints {
         input: PathBuf,
@@ -8211,6 +8216,7 @@ async fn run() -> Result<()> {
             action,
         ),
         Command::PaintFields { input, action } => pentool::paint_fields::run(&input, action),
+        Command::PaintMedia { action } => pentool::paint_media::run(action),
         Command::PaintConstraints { input, action } => {
             pentool::paint_constraints::run(&input, action)
         }
