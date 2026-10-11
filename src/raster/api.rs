@@ -76,6 +76,27 @@ pub fn apply(
                 },
             )?
         }
+        "stroke-field" => {
+            let brush = super::Brush::parse(&super::resolve_preset(
+                raw,
+                &if args["brush"].is_null() { json!({}) } else { args["brush"].clone() },
+                args["preset"].as_str(),
+            )?)?;
+            super::fields::paint_field(
+                raw,
+                page,
+                id,
+                super::fields::FieldRequest {
+                    field: args["field"].clone(),
+                    params: args["params"].clone(),
+                    brush,
+                    color: super::parse_color(&text("color", "#000000"))?,
+                    blend: super::Blend::parse(&text("blend", "normal"))?,
+                    seed: args["seed"].as_u64().unwrap_or(0),
+                    constraints: args["constraints"].clone(),
+                },
+            )?
+        }
         "stroke" | "quickmask" | "clone" | "heal" => {
             let normalized = super::normalize_input(&args["samples"])?;
             let input_summary = normalized.summary();

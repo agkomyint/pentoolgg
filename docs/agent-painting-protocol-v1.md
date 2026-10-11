@@ -166,6 +166,37 @@ and journal entry carry `mask_hash`, `spec_hash`, `allowed_pixels`, and, for
 `[empty-constraint]` and leaves the document unchanged. `follow` and a rotation
 curve are mutually exclusive.
 
+## Stroke fields (engine 1 implementation)
+
+`pentool paint-fields FILE preview ID --field JSON [--params JSON]` builds a field
+and reports `field_hash`, `defined_cells`, up to `--max-vectors` vectors
+`[x,y,vx,vy]` (divided by 32767), and, with `--params`, the stroke plan
+(`strokes`, `samples`, `bounds`). `pentool raster FILE stroke-field ID --field
+JSON --params JSON` paints that exact plan; preview and commit share one planner.
+
+Field methods: `contour`, `gradient` (integer Sobel on alpha-weighted luma),
+`distance` (3-4 chamfer transform of alpha >= 128; `along` contour|gradient),
+`tensor` (smoothed structure tensor, `radius` 1-8, follows the contour),
+`vanishing` (`point`), `radial` (`center`, tangents), `angle` (`degrees`) and
+`vectors` (`points` `[x,y,degrees]`, nearest anchor wins, lowest index on ties).
+`cell` is 1-64 px and `rect` bounds the field; at most 1,048,576 cells.
+Distance and tensor fields require at most 16,777,216 layer pixels. Fields are
+undirected orientations: interpolation sign-aligns neighbours and a stroke picks
+the sign that continues its heading.
+
+Stroke rules (`params`, unknown keys rejected): `spacing` (seed lattice px, 1-256,
+default 8), `jitter` 0-1, `length` px, `length_jitter` 0-1, `step` 0.5-16 px,
+`curvature` max degrees turned per step, `overlap` 0-1, `taper` 0-0.5 (pressure
+ramps over that fraction at each end; enables pressure size), `collision`
+`stop|skip|allow`, `min_length`. Seeds consume four SplitMix64 values per lattice
+point in row-major order whether used or not, so plans are stable under
+unrelated parameter changes of other points. Occupancy uses cells of
+`size * (1 - overlap)` px. A plan has at most 512 strokes of 512 samples;
+exceeding that is `limit-exceeded` and leaves the document unchanged. Region
+`constraints` (without `follow`) bound seeds and walking. Each committed
+stroke's journal entry carries `field: {algorithm, field_hash, method}`; the
+field cache is disposable and never trusted over the hash.
+
 ## Comparison metrics
 
 Comparison inputs are immutable, equally sized, bounded RGBA8 crops produced by

@@ -30,6 +30,7 @@ mod api;
 mod clone;
 mod compose;
 pub mod constraints;
+pub mod fields;
 mod flood;
 mod heal;
 mod input;

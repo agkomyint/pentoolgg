@@ -310,7 +310,7 @@ fn weighted_luma(p: [u8; 4]) -> i32 {
     (luma(p) * i32::from(p[3]) + 127) / 255
 }
 
-fn sobel(surface: &Surface, x: i64, y: i64) -> (i32, i32) {
+pub(super) fn sobel(surface: &Surface, x: i64, y: i64) -> (i32, i32) {
     let at = |dx: i64, dy: i64| {
         let px = (x + dx).clamp(0, i64::from(surface.width) - 1) as u32;
         let py = (y + dy).clamp(0, i64::from(surface.height) - 1) as u32;

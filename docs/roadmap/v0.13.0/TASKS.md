@@ -84,7 +84,7 @@ commits as one history entry and must be reviewable before execution.
   The exact resolved constraint mask/field is previewable, hashed, journaled, and
   evaluated consistently across tiles without seams or boundary double-application.
 
-- [ ] **6. Add deterministic stroke fields.** Generate bounded direction fields
+- [x] **6. Add deterministic stroke fields.** Generate bounded direction fields
   from contours, gradients, distance transforms, structure tensors, perspective
   guides, or supplied vectors. Paint seeded strokes through a field with explicit
   density, length, curvature, overlap, jitter, taper, and collision rules. Fields

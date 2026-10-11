@@ -799,6 +799,17 @@ pentool paint-constraints portrait.pen preview paint --spec '{"opaque_clip":true
 Constraints (`inside`, `avoid`, `opaque_clip`, `barriers`, `reach_from`, `follow`)
 resolve to one hashed, previewable mask; see [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Stroke fields
+
+```sh
+pentool paint-fields grass.pen preview paint --field '{"method":"tensor","cell":4}'   --params '{"spacing":6,"length":30,"collision":"stop"}'
+pentool raster grass.pen stroke-field paint --field '{"method":"radial","center":[128,128],"cell":8}'   --params '{"spacing":10,"length":60,"taper":0.3}' --brush '{"size":3}' --color '#2f6b2f' --seed 7
+```
+
+Fields come from contours, gradients, distance transforms, structure tensors,
+guides or supplied vectors; strokes are seeded, collision-aware and pin the field
+hash in the journal. See [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

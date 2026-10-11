@@ -2375,6 +2375,12 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_palette::PaletteAction,
     },
+    /// Build and preview stroke fields and their stroke plans (v0.13.0 agent painting).
+    PaintFields {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: pentool::paint_fields::FieldAction,
+    },
     /// Resolve and preview region painting constraints (v0.13.0 agent painting).
     PaintConstraints {
         input: PathBuf,
@@ -3279,6 +3285,32 @@ enum RasterAction {
         seed: u64,
         /// Region constraints JSON (inside, avoid, opaque_clip, barriers, reach_from,
         /// follow), or @file.json. See docs/agent-painting-protocol-v1.md.
+        #[arg(long)]
+        constraints: Option<String>,
+    },
+    /// Paint seeded strokes through a deterministic direction field (hair, grass,
+    /// fabric, form-following hatching). The field hash is pinned in the journal.
+    StrokeField {
+        id: String,
+        /// Field JSON: {"method":"contour|gradient|distance|tensor|vanishing|radial|angle|vectors",
+        /// "cell":8,"rect":[x,y,w,h],...} or @file.json.
+        #[arg(long)]
+        field: String,
+        /// Stroke rules JSON: spacing, jitter, length, length_jitter, step, curvature,
+        /// overlap, taper, collision (stop|skip|allow), min_length; or @file.json.
+        #[arg(long, default_value = "{}")]
+        params: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long, default_value = "#000000")]
+        color: String,
+        #[arg(long, default_value = "normal")]
+        blend: String,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Region constraints JSON (see stroke-path); `follow` is not allowed here.
         #[arg(long)]
         constraints: Option<String>,
     },
@@ -7261,6 +7293,48 @@ async fn run() -> Result<()> {
                     result["input"] = input_summary;
                     ("raster-stroke", result)
                 }
+                RasterAction::StrokeField {
+                    id,
+                    field,
+                    params,
+                    brush,
+                    preset,
+                    color,
+                    blend,
+                    seed,
+                    constraints,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                if fs::metadata(path)?.len() > 4 << 20 {
+                                    bail!("[limit-exceeded] {path} is larger than 4 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let request = raster::fields::FieldRequest {
+                        field: read(&field)?,
+                        params: read(&params)?,
+                        brush: raster::Brush::parse(&raster::resolve_preset(
+                            &raw,
+                            &read(&brush)?,
+                            preset.as_deref(),
+                        )?)?,
+                        color: raster::parse_color(&color)?,
+                        blend: raster::Blend::parse(&blend)?,
+                        seed,
+                        constraints: match &constraints {
+                            Some(text) => read(text)?,
+                            None => serde_json::Value::Null,
+                        },
+                    };
+                    let result = raster::fields::paint_field(&mut raw, page, &id, request)?;
+                    ("raster-stroke-field", result)
+                }
                 RasterAction::StrokePath {
                     id,
                     path,
@@ -8136,6 +8210,7 @@ async fn run() -> Result<()> {
             if_revision.as_deref(),
             action,
         ),
+        Command::PaintFields { input, action } => pentool::paint_fields::run(&input, action),
         Command::PaintConstraints { input, action } => {
             pentool::paint_constraints::run(&input, action)
         }
