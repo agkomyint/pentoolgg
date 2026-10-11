@@ -28,8 +28,29 @@ pub struct Proof {
 /// by more than this many 8-bit steps in any channel.
 pub const GAMUT_CHANNEL_THRESHOLD: i32 = 12;
 
+/// Proof-setup controls layered over the output role.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Setup {
+    /// Replace the output role's rendering intent for the proof only.
+    pub intent: Option<Intent>,
+    /// Scale PCS values so the output profile's darkest printable black lands on
+    /// display black (linear XYZ black point compensation).
+    pub black_point_compensation: bool,
+}
+
 pub fn render(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Proof> {
-    render_with(raw, document, page_id, false, None)
+    render_with(raw, document, page_id, false, Setup::default())
+}
+
+/// Soft proof or gamut warning under explicit proof-setup controls.
+pub fn render_setup(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    gamut: bool,
+    setup: Setup,
+) -> Result<Proof> {
+    render_with(raw, document, page_id, gamut, setup)
 }
 
 /// Soft proof under a proof-setup rendering intent instead of the output role's.
@@ -39,7 +60,16 @@ pub fn render_intent(
     page_id: Option<&str>,
     intent: Option<Intent>,
 ) -> Result<Proof> {
-    render_with(raw, document, page_id, false, intent)
+    render_with(
+        raw,
+        document,
+        page_id,
+        false,
+        Setup {
+            intent,
+            ..Setup::default()
+        },
+    )
 }
 
 /// Gamut warning image: the page in muted display colors with every pixel the
@@ -47,7 +77,7 @@ pub fn render_intent(
 /// authored (display role) with its soft proof, so it is a numeric round-trip
 /// check, not a contract proof.
 pub fn gamut(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Proof> {
-    render_with(raw, document, page_id, true, None)
+    render_with(raw, document, page_id, true, Setup::default())
 }
 
 /// Gamut warning under a proof-setup rendering intent.
@@ -57,7 +87,16 @@ pub fn gamut_intent(
     page_id: Option<&str>,
     intent: Option<Intent>,
 ) -> Result<Proof> {
-    render_with(raw, document, page_id, true, intent)
+    render_with(
+        raw,
+        document,
+        page_id,
+        true,
+        Setup {
+            intent,
+            ..Setup::default()
+        },
+    )
 }
 
 fn render_with(
@@ -65,7 +104,7 @@ fn render_with(
     document: &Path,
     page_id: Option<&str>,
     gamut: bool,
-    intent_override: Option<Intent>,
+    setup: Setup,
 ) -> Result<Proof> {
     ensure!(
         raw["version"] == super::VERSION,
@@ -73,7 +112,7 @@ fn render_with(
         super::VERSION
     );
     let mut output_role = roles::effective(raw, Role::Output)?;
-    if let Some(intent) = intent_override {
+    if let Some(intent) = setup.intent {
         output_role.intent = intent;
     }
     ensure!(
@@ -121,6 +160,21 @@ fn render_with(
     let display_set = ProfileSet::load(raw, document, display.destination.profile())?;
     let mut display_engine = Evaluator::new(&display_set, display.intent)?;
 
+    // Darkest of K-only and full rich black in the output profile, as D50 XYZ.
+    let black = if setup.black_point_compensation {
+        let mut darkest: Option<[f64; 3]> = None;
+        for channels in [[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]] {
+            let source = NativeColor::parse(&json!({
+                "space":"icc-cmyk","profile":reference,"channels":channels}))?;
+            let (xyz, _) = source_engine.to_xyz(&source)?;
+            if darkest.is_none_or(|best| xyz[1] < best[1]) {
+                darkest = Some(xyz);
+            }
+        }
+        darkest
+    } else {
+        None
+    };
     let mut cache: HashMap<[u16; 4], [u8; 3]> = HashMap::new();
     let mut rgb = Vec::with_capacity(image.samples.len() / 4 * 3);
     let mut clipped = 0u64;
@@ -133,7 +187,15 @@ fn render_with(
                 let channels: Vec<f64> = key.iter().map(|v| f64::from(*v) / 255.0).collect();
                 let source = NativeColor::parse(&json!({
                     "space":"icc-cmyk","profile":reference,"channels":channels}))?;
-                let (xyz, _) = source_engine.to_xyz(&source)?;
+                let (mut xyz, _) = source_engine.to_xyz(&source)?;
+                if let Some(black) = black {
+                    for i in 0..3 {
+                        let span = pcs::D50[i] - black[i];
+                        if span > 1e-6 {
+                            xyz[i] = (xyz[i] - black[i]) * pcs::D50[i] / span;
+                        }
+                    }
+                }
                 let lab = pcs::xyz_to_lab(xyz)?;
                 let appearance =
                     NativeColor::parse(&json!({"space":"lab-d50","channels":lab,"alpha":1.0}))?;
@@ -216,7 +278,14 @@ fn render_with(
             "gamut_warning_pixels": gamut.then_some(flagged),
             "gamut_warning_method": gamut.then_some("display-vs-soft-proof-round-trip-difference"),
             "gamut_warning_channel_threshold": gamut.then_some(GAMUT_CHANNEL_THRESHOLD),
-            "paper_simulation":false,
+            "paper_simulation": intent == Intent::AbsoluteColorimetric,
+            "paper_simulation_method": if intent == Intent::AbsoluteColorimetric {
+                "icc-absolute-media-white-scaling"
+            } else {
+                "unavailable-with-selected-intent"
+            },
+            "black_point_compensation": setup.black_point_compensation,
+            "black_point_xyz_d50": black,
             "spectral_paper_or_ink_model":false,
         }),
     })

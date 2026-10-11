@@ -65,6 +65,7 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
     assert!(studio.contains("Pentool Studio") && studio.contains("id=\"root\""));
     assert!(page.contains("id=\"printPlates\"") && page.contains("id=\"printProof\""));
     assert!(page.contains("id=\"printGuides\"") && page.contains("id=\"printGuidesToggle\""));
+    assert!(page.contains("id=\"printBpc\""));
     assert!(
         page.contains("id=\"printOverprintToggle\"")
             && page.contains("id=\"printGamut\"")
@@ -212,6 +213,36 @@ fn plate_and_proof_views_are_served_read_only() {
     let body = pdf.bytes().unwrap();
     assert!(body.starts_with(b"%PDF-1."));
     pentool::color::pdfx::verify_structure(&body).unwrap();
+    let compensated = client
+        .get(format!("{base}/api/color/proof?bpc=true"))
+        .send()
+        .unwrap();
+    assert_eq!(compensated.status(), 200);
+    assert_eq!(&compensated.bytes().unwrap()[1..4], b"PNG");
+    let setup = |intent, bpc| {
+        pentool::color::proofimage::render_setup(
+            &raw,
+            &document,
+            None,
+            false,
+            pentool::color::proofimage::Setup {
+                intent,
+                black_point_compensation: bpc,
+            },
+        )
+        .unwrap()
+        .report
+    };
+    let plain = setup(None, false);
+    assert_eq!(plain["black_point_compensation"], false);
+    assert_eq!(plain["paper_simulation"], false);
+    let report = setup(
+        Some(pentool::color::icc::Intent::AbsoluteColorimetric),
+        true,
+    );
+    assert_eq!(report["black_point_compensation"], true);
+    assert_eq!(report["paper_simulation"], true);
+    assert!(report["black_point_xyz_d50"].is_array(), "{report}");
     let too_fine = client
         .get(format!("{base}/api/color/pdfx?ppi=5000"))
         .send()

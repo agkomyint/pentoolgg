@@ -136,7 +136,13 @@
     }
   };
   $('printPlate').onchange = event => showImage(`/api/color/plates?plate=${encodeURIComponent(event.target.value)}`, `Plate ${event.target.value}`);
-  const proofUrl = base => ($('printIntent').value ? `${base}?intent=${encodeURIComponent($('printIntent').value)}` : base);
+  const proofUrl = base => {
+    const query = new URLSearchParams();
+    if ($('printIntent').value) query.set('intent', $('printIntent').value);
+    if ($('printBpc').checked) query.set('bpc', 'true');
+    const text = query.toString();
+    return text ? `${base}?${text}` : base;
+  };
   $('printIntent').onchange = () => {
     const intent = $('printIntent').value;
     $('printPdfx').href = `/api/color/pdfx?ppi=300${intent ? `&intent=${encodeURIComponent(intent)}` : ''}`;

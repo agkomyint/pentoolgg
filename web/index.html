@@ -238,6 +238,7 @@
         <button id="printGamut">Gamut warning</button>
         <a id="printPdfx" class="button" href="/api/color/pdfx?ppi=300" download="pentool-pdfx-draft.pdf">Download PDF/X-4 draft (flattened CMYK, no conformance claim)</a>
         <label>Proof intent <select id="printIntent"><option value="">Output role</option><option>perceptual</option><option>relative-colorimetric</option><option>saturation</option><option>absolute-colorimetric</option></select></label>
+        <label><input id="printBpc" type="checkbox"> Black point compensation (absolute-colorimetric intent simulates paper white)</label>
         <label><input id="printGuidesToggle" type="checkbox" checked> Show media, bleed, trim and safe guides</label>
         <label><input id="printOverprintToggle" type="checkbox" checked> Highlight overprinting objects</label>
         <div id="printStage" style="position:relative;display:inline-block;max-width:100%">

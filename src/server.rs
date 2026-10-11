@@ -525,6 +525,8 @@ struct PlateQuery {
     scale: Option<f32>,
     /// Proof-setup rendering intent for `/api/color/proof` and `/api/color/gamut`.
     intent: Option<String>,
+    /// Black point compensation for the soft proof and gamut views.
+    bpc: Option<bool>,
 }
 
 /// Parse a proof-setup intent name; absent means the output role's own intent.
@@ -652,8 +654,16 @@ async fn color_proof(
     let result = (|| -> Result<Response> {
         let (file, raw) = shared_document(&state)?;
         let intent = proof_intent(q.intent.as_deref())?;
-        let proof =
-            crate::color::proofimage::render_intent(&raw, &file, q.page.as_deref(), intent)?;
+        let proof = crate::color::proofimage::render_setup(
+            &raw,
+            &file,
+            q.page.as_deref(),
+            false,
+            crate::color::proofimage::Setup {
+                intent,
+                black_point_compensation: q.bpc.unwrap_or(false),
+            },
+        )?;
         Ok(png_response(proof.png))
     })();
     result.unwrap_or_else(problem)
@@ -712,7 +722,16 @@ async fn color_gamut(
     let result = (|| -> Result<Response> {
         let (file, raw) = shared_document(&state)?;
         let intent = proof_intent(q.intent.as_deref())?;
-        let proof = crate::color::proofimage::gamut_intent(&raw, &file, q.page.as_deref(), intent)?;
+        let proof = crate::color::proofimage::render_setup(
+            &raw,
+            &file,
+            q.page.as_deref(),
+            true,
+            crate::color::proofimage::Setup {
+                intent,
+                black_point_compensation: q.bpc.unwrap_or(false),
+            },
+        )?;
         Ok(png_response(proof.png))
     })();
     result.unwrap_or_else(problem)
