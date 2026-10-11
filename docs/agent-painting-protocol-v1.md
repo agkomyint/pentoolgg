@@ -140,6 +140,32 @@ depend on a disposable cache.
 ` and the RGBA
   bytes; a stored hash that does not match its colors is a validation error.
 
+## Region constraints (engine 1 implementation)
+
+`pentool raster FILE stroke-path ID --constraints JSON` (and the `constraints`
+request field) confine a semantic stroke to a resolved coverage mask.
+`pentool paint-constraints FILE preview ID --spec JSON [--out mask.png]` resolves
+the same spec read-only. Spec keys (unknown keys are rejected):
+
+- `inside`: list of `"active"` / `"saved:NAME"`; the mask is their intersection.
+- `avoid`: same sources; their coverage is subtracted.
+- `opaque_clip`: `true` (or 1..255 minimum alpha) keeps only existing pixels.
+- `barriers`: `{kind:color,color,tolerance<=1020}`, `{kind:alpha,min,max}`,
+  `{kind:luma,min,max}` or `{kind:edge,threshold 1..2040}` (Sobel on
+  alpha-weighted luma); matching pixels are excluded.
+- `reach_from`: `[x,y]` seed points; only 4-connected paintable pixels reachable
+  from a seed remain, so barriers stop flood-like painting.
+- `follow`: `"contour"`, `"gradient"` or `{"angle":degrees}` sets the brush angle
+  per path segment from an integer Sobel field (integer CORDIC atan2).
+
+An existing active selection is intersected with the mask and restored (not
+altered) afterwards. All arithmetic is integer; the mask is a single plane over
+the layer so tile boundaries cannot cause seams or double application. The result
+and journal entry carry `mask_hash`, `spec_hash`, `allowed_pixels`, and, for
+`follow`, the field digest. A mask with no paintable pixel fails with
+`[empty-constraint]` and leaves the document unchanged. `follow` and a rotation
+curve are mutually exclusive.
+
 ## Comparison metrics
 
 Comparison inputs are immutable, equally sized, bounded RGBA8 crops produced by

@@ -183,6 +183,8 @@ pub struct PathRequest {
     pub blend: Blend,
     pub seed: u64,
     pub curves: Value,
+    /// Region constraints (`Value::Null` for none); see `raster::constraints`.
+    pub constraints: Value,
 }
 
 struct Curves {
@@ -340,7 +342,16 @@ pub fn paint_path(
             .map_or(1.0, |curve| curve.at(lengths[index] / total)),
         ..Sample::default()
     };
-    let compiled_strokes = if curves.changes_style() {
+    let spec = if request.constraints.is_null() {
+        None
+    } else {
+        Some(constraints::Spec::parse(&request.constraints)?)
+    };
+    let follow = spec.as_ref().and_then(|s| s.follow);
+    if follow.is_some() && curves.rotation.is_some() {
+        bail!("[invalid-request] constraints.follow and a rotation curve both set the brush angle; use one")
+    }
+    let compiled_strokes = if curves.changes_style() || follow.is_some() {
         points.len() - 1
     } else {
         1
@@ -349,6 +360,24 @@ pub fn paint_path(
         bail!("[limit-exceeded] property curves compile to {compiled_strokes} strokes; increase flatness or split the path (maximum {MAX_COMPILED_STROKES})")
     }
     let mut next = raw.clone();
+    let mut resolved_summary = Value::Null;
+    let mut previous_active = None;
+    let mut guide = None;
+    if let Some(spec) = &spec {
+        let resolved = constraints::resolve(&next, id, spec)?;
+        resolved_summary = resolved.summary.clone();
+        if follow.is_some() {
+            let node = all_rasters(&next)
+                .into_iter()
+                .find(|node| node["id"] == id)
+                .context("[not-found] raster layer disappeared")?;
+            guide = Some(Surface::load(&next, node)?);
+        }
+        if resolved.plane.iter().all(|c| *c == 0) {
+            bail!("[empty-constraint] the constraints leave no paintable pixel; relax inside/avoid/barriers (mask {})", resolved.summary["mask_hash"])
+        }
+        previous_active = Some(constraints::install(&mut next, id, &resolved)?);
+    }
     let mut dabs = 0_u64;
     let mut results = Vec::with_capacity(compiled_strokes);
     for index in 0..compiled_strokes {
@@ -373,6 +402,12 @@ pub fn paint_path(
         }
         if let Some(curve) = &curves.rotation {
             brush.angle = curve.at(u)
+        }
+        if let (Some(follow), Some(surface)) = (follow, &guide) {
+            let mid = points[start].midpoint(points[end]);
+            if let Some(milli) = constraints::follow_angle_milli(surface, follow, mid.x, mid.y) {
+                brush.angle = milli as f64 / 1000.0;
+            }
         }
         let color = curves
             .color
@@ -399,8 +434,12 @@ pub fn paint_path(
         dabs += result["dabs"].as_u64().unwrap_or(0);
         results.push(result);
     }
+    if let Some(previous) = previous_active {
+        constraints::restore_active(&mut next, id, previous);
+    }
     *raw = next;
     Ok(json!({
+        "constraints": resolved_summary,
         "source": {"path": request.path, "segments": source_segments, "flatness": request.flatness},
         "generated": {"points": points.len(), "samples": if compiled_strokes == 1 { points.len() } else { compiled_strokes * 2 }, "strokes": compiled_strokes, "dabs": dabs},
         "strokes": results.iter().filter_map(|result| result["stroke"].as_str()).collect::<Vec<_>>()

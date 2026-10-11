@@ -77,7 +77,7 @@ commits as one history entry and must be reviewable before execution.
   compact JSON with heat-map artifacts available only when requested. Metrics are
   guidance, not a claim of perceptual equivalence or artistic quality.
 
-- [ ] **5. Add region-aware painting constraints.** Allow painting inside or
+- [x] **5. Add region-aware painting constraints.** Allow painting inside or
   outside active/saved selections, avoiding protected selections, clipping to
   opaque pixels, and stopping at bounded color, alpha, luminance, or detected-edge
   barriers. Add `follow contour`, `follow gradient`, and explicit direction modes.

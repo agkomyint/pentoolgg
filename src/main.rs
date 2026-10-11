@@ -2375,6 +2375,12 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_palette::PaletteAction,
     },
+    /// Resolve and preview region painting constraints (v0.13.0 agent painting).
+    PaintConstraints {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: pentool::paint_constraints::ConstraintAction,
+    },
     /// Bounded region previews and structural comparison (v0.13.0 agent painting).
     PaintReview {
         input: PathBuf,
@@ -3271,6 +3277,10 @@ enum RasterAction {
         blend: String,
         #[arg(long, default_value_t = 0)]
         seed: u64,
+        /// Region constraints JSON (inside, avoid, opaque_clip, barriers, reach_from,
+        /// follow), or @file.json. See docs/agent-painting-protocol-v1.md.
+        #[arg(long)]
+        constraints: Option<String>,
     },
     /// Choose where clone strokes on a layer copy from (resets the aligned anchor).
     CloneSource {
@@ -7261,6 +7271,7 @@ async fn run() -> Result<()> {
                     color,
                     blend,
                     seed,
+                    constraints,
                 } => {
                     let read = |text: &str| -> Result<serde_json::Value> {
                         let body = match text.strip_prefix('@') {
@@ -7287,6 +7298,10 @@ async fn run() -> Result<()> {
                         blend: raster::Blend::parse(&blend)?,
                         seed,
                         curves: read(&curves)?,
+                        constraints: match &constraints {
+                            Some(text) => read(text)?,
+                            None => serde_json::Value::Null,
+                        },
                     };
                     let result = raster::paint_path(&mut raw, page, &id, request)?;
                     ("raster-stroke-path", result)
@@ -8121,6 +8136,9 @@ async fn run() -> Result<()> {
             if_revision.as_deref(),
             action,
         ),
+        Command::PaintConstraints { input, action } => {
+            pentool::paint_constraints::run(&input, action)
+        }
         Command::PaintReview { input, action } => {
             pentool::paint_review::run(&input, selected_page, action)
         }

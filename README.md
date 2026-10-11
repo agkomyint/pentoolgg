@@ -787,6 +787,18 @@ Metrics (`color_mae`, `value_mae`, `edge_disagreement`, `silhouette_iou`,
 decimal, with `changed_bounds`; they are guidance, not a quality score. Both
 actions are read-only. See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Region-aware painting constraints
+
+```sh
+pentool raster portrait.pen select-marquee paint --rect 0 0 32 64
+pentool raster portrait.pen select-save paint left
+pentool raster portrait.pen stroke-path paint --path "M4 32 L60 32" --color "#ff0000"   --constraints '{"inside":["saved:left"],"follow":"contour"}'
+pentool paint-constraints portrait.pen preview paint --spec '{"opaque_clip":true,"follow":"gradient"}' --out mask.png
+```
+
+Constraints (`inside`, `avoid`, `opaque_clip`, `barriers`, `reach_from`, `follow`)
+resolve to one hashed, previewable mask; see [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

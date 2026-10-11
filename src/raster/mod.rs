@@ -29,6 +29,7 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
 mod api;
 mod clone;
 mod compose;
+pub mod constraints;
 mod flood;
 mod heal;
 mod input;

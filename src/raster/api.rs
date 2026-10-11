@@ -72,6 +72,7 @@ pub fn apply(
                     blend: super::Blend::parse(&text("blend", "normal"))?,
                     seed: args["seed"].as_u64().unwrap_or(0),
                     curves: if args["curves"].is_null() { json!({}) } else { args["curves"].clone() },
+                    constraints: args["constraints"].clone(),
                 },
             )?
         }
