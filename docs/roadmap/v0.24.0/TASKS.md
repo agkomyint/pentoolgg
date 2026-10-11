@@ -18,6 +18,19 @@ the single binary, readable `.pen` files and atomic history.
   limits are checked before work starts.
 - Comments and presence data are separate from the scene graph and never change
   rendering or export.
+- Humans and agents are both first-class collaborators (human-human,
+  human-agent, agent-agent). Every operation records an **actor** with a kind
+  (`human` | `agent`), a stable ID, a display name and, for agents, the model or
+  tool name and the human who directed it.
+- A document carries **contribution stats** derived from the operation log:
+  per actor, the share of operations, objects created, objects modified,
+  properties changed, and net content authored, with human and agent totals.
+  Stats are computed deterministically from the log, never self-reported, and
+  surviving content is attributed (an object an agent created and a human later
+  restyled shows both contributions).
+- Attribution is honest and bounded: it is stored compactly in the document
+  (a bounded summary plus the hidden history), cannot be forged by a peer, and
+  is exported only when the user chooses, since it can identify people.
 
 ## Must ship, in order
 
@@ -27,6 +40,11 @@ the single binary, readable `.pen` files and atomic history.
   and a property-based convergence test.
 - [ ] **3. Local-network sync** between instances (`serve --collab`), with
   authentication tokens and explicit peers.
+- [ ] **3a. Actor identity and contribution stats:** actor kinds in every
+  operation, `pentool stats DOC [--by actor|kind|page] [--json]` reporting
+  percent share of work for humans versus agents, a stats panel in the editor,
+  and tests that stats are deterministic, survive history compaction and
+  cannot be forged by a peer.
 - [ ] **4. Comments, mentions and review states** stored outside the scene.
 - [ ] **5. Presence and cursors,** best-effort and non-persistent.
 - [ ] **6. Permissions** (viewer, commenter, editor) enforced by the server.
