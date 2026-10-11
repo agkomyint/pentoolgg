@@ -363,7 +363,7 @@ export function RasterStage() {
   if (!layer) {
     return (
       <main className="flex min-w-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground">
-        No raster layers on this page (needs a v6 document). Create one with <code className="mx-1">pentool raster doc.pen add</code>.
+        No paint layer on this page yet. Use "Add paint layer" in the right panel to start painting.
       </main>
     );
   }

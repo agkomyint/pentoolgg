@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { usePaint, type RasterTool } from "./rasterStore";
 import { useRasterLayers } from "./RasterStage";
 import { useStudio } from "@/store";
-import { postJson, type Doc } from "@/lib/api";
+import { api, postJson, type Doc } from "@/lib/api";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
 const TOOLS: [RasterTool, string][] = [
@@ -32,8 +32,36 @@ export function RasterPanel() {
   const layers = useRasterLayers();
   const layer = layers.find((n) => n.id === p.layerId) ?? layers[0];
 
+  const addLayer = async () => {
+    const { doc, pageId, replaceDoc, notify } = useStudio.getState();
+    if (!doc || p.busy) return;
+    p.set({ busy: true });
+    try {
+      // Raster layers need format v6 or newer; upgrade first when the document is older.
+      let source: Doc = doc;
+      if (source.version < 6) source = (await api.migrate(source, 6)).document;
+      const id = `paint-${Date.now().toString(36)}`;
+      const body = await postJson<{ document: Doc }>("/api/raster", { document: source, page: pageId, id, action: "add", args: {} });
+      replaceDoc(body.document);
+      p.set({ layerId: id, status: "Paint layer added. Pick a tool and paint on the preview." });
+      notify("Added a paint layer. Save to keep it.");
+    } catch (e) {
+      p.set({ status: e instanceof Error ? e.message : "Could not add a paint layer." });
+    } finally {
+      p.set({ busy: false });
+    }
+  };
+
   if (!layers.length) {
-    return <p className="p-3 text-xs text-muted-foreground">No raster layers on this page. Raster painting needs a v6 document; create a layer with <code>pentool raster doc.pen add</code>.</p>;
+    return (
+      <div className="space-y-2 p-3 text-xs">
+        <p className="text-muted-foreground">This page has no paint layer yet. A paint layer holds pixels and is sized to the page.</p>
+        <Button size="sm" disabled={p.busy} onClick={() => void addLayer()}>
+          Add paint layer
+        </Button>
+        {p.status && <p className="text-muted-foreground">{p.status}</p>}
+      </div>
+    );
   }
   const clearSelection = async () => {
     const { doc, pageId, replaceDoc } = useStudio.getState();

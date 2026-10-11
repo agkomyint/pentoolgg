@@ -380,6 +380,50 @@ async fn raster_command(Json(body): Json<RasterRequest>) -> Response {
 
 fn raster_apply(body: RasterRequest) -> Result<serde_json::Value> {
     let mut raw = body.document;
+    if body.action == "add" {
+        // Creating the layer is not a pixel operation, so it has no existing id to apply to.
+        let canvas_side = |side: &str| -> u32 {
+            raw["pages"]
+                .as_array()
+                .and_then(|pages| match body.page.as_deref() {
+                    Some(wanted) => pages.iter().find(|p| p["id"] == wanted),
+                    None => pages.first(),
+                })
+                .and_then(|page| page["canvas"][side].as_u64())
+                .unwrap_or(1200) as u32
+        };
+        let arg = |name: &str, fallback: u32| -> u32 {
+            body.args
+                .get(name)
+                .and_then(serde_json::Value::as_u64)
+                .map_or(fallback, |value| value as u32)
+        };
+        let width = arg("width", canvas_side("width"));
+        let height = arg("height", canvas_side("height"));
+        let x = body
+            .args
+            .get("x")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let y = body
+            .args
+            .get("y")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        let layer = body.args.get("layer").and_then(serde_json::Value::as_str);
+        let result = crate::raster::add(
+            &mut raw,
+            body.page.as_deref(),
+            layer,
+            &body.id,
+            x,
+            y,
+            width,
+            height,
+        )?;
+        crate::transaction::validate_value(&raw)?;
+        return Ok(serde_json::json!({"document": raw, "result": result}));
+    }
     let result = crate::raster::apply(
         &mut raw,
         body.page.as_deref(),
@@ -1556,6 +1600,24 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn raster_endpoint_adds_a_page_sized_paint_layer_to_a_new_document() {
+        let raw = crate::scene::new_document(64, 48);
+        let value = super::raster_apply(super::RasterRequest {
+            document: raw,
+            page: None,
+            id: "paint-1".into(),
+            action: "add".into(),
+            args: serde_json::Value::Null,
+        })
+        .unwrap();
+        let document = &value["document"];
+        assert!(document["version"].as_u64().unwrap() >= 6);
+        let info = crate::raster::info(&mut document.clone(), None, "paint-1").unwrap();
+        assert_eq!(info["width"], 64);
+        assert_eq!(info["height"], 48);
+    }
+
     #[test]
     fn raster_endpoint_paints_selects_and_rejects_without_mutation() {
         use serde_json::json;
