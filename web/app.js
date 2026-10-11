@@ -7,6 +7,8 @@
   let geometryBusy=false,jobController=null;
   $('cancelJob').onclick=()=>jobController?.abort();
   let editGeometry=null, geometryDrag=null;
+  let printGuides=null;
+  document.addEventListener('pentool-print-guides',event=>{printGuides=event.detail||null;render();});
   const allObjects=l=>{const objects=[...(l.paths||[]),...(l.texts||[])];const visit=n=>{objects.push(n);for(const child of n.children||[])visit(child)};for(const node of l.nodes||[])visit(node);return objects};
   const activePage=()=>doc.version>=3?(doc.pages.find(p=>p.id===pageId)||doc.pages[0]):{id:'page-1',name:'Page 1',canvas:doc.canvas,layers:doc.layers};
   const pageLayers=()=>activePage().layers;
@@ -92,6 +94,7 @@
         shape('rect',{x:p.x-size,y:p.y-size,width:size*2,height:size*2,fill:i===draft.length-1?'#2563eb':'white',stroke:'#2563eb','stroke-width':1/scale});
       });svg.append(overlay);
     }
+    if(printGuides){const g=document.createElementNS(ns,'g');g.setAttribute('pointer-events','none');for(const [name,color,dash] of [['media','#888888',''],['bleed','#e11d48','4 3'],['trim','#2563eb',''],['safe','#16a34a','2 2']]){const b=printGuides[name];if(!b)continue;const r=document.createElementNS(ns,'rect');for(const [k,v] of Object.entries({x:b.x,y:b.y,width:b.width,height:b.height,fill:'none',stroke:color,'stroke-width':1/scale}))r.setAttribute(k,v);if(dash)r.setAttribute('stroke-dasharray',dash.split(' ').map(n=>n/scale).join(' '));g.append(r);}svg.append(g);}
     svg.style.cursor=tool==='pen'?'crosshair':tool==='hand'?'grab':'default';
     if(editGeometry?.id===selected&&tool==='select'){
       const size=5/scale;

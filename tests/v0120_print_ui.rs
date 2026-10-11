@@ -76,6 +76,15 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
         .unwrap()
         .status()
         .is_success());
+    // The panel publishes resolved guides and the editor canvas draws them.
+    for script in ["print-panel.js", "app.js"] {
+        let response = client.get(format!("{base}/{script}")).send().unwrap();
+        assert!(response.status().is_success(), "{script}");
+        assert!(
+            response.text().unwrap().contains("pentool-print-guides"),
+            "{script}"
+        );
+    }
     let response = client
         .get(format!("{base}/api/color/preflight?min_ppi=200"))
         .send()

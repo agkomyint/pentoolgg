@@ -47,7 +47,12 @@
       guides.append(rect);
     }
   }
-  $('printGuidesToggle').onchange = drawGuides;
+  // The editor canvas draws the same resolved boxes, so bleed is visible while editing.
+  function publishGuides() {
+    const detail = $('printGuidesToggle').checked && production ? { media: production.media, bleed: production.bleed, trim: production.trim, safe: production.safe } : null;
+    document.dispatchEvent(new CustomEvent('pentool-print-guides', { detail }));
+  }
+  $('printGuidesToggle').onchange = () => { drawGuides(); publishGuides(); };
   $('printOverprintToggle').onchange = drawGuides;
   function show(report) {
     list.replaceChildren(...report.issues.map(issue => {
@@ -68,6 +73,7 @@
       : `Blocked: ${report.errors} error(s) and ${report.warnings} warning(s).`;
     production = report.production || null;
     overprintNodes = report.overprint_nodes || [];
+    publishGuides();
     drawGuides();
     $('printGeometry').textContent = report.production
       ? JSON.stringify(report.production, null, 2)
