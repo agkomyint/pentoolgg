@@ -15,7 +15,7 @@ until the photo and raster panels are ported.
   document logic in the browser.
 - Workspaces map to the roadmap (`web-ui/src/lib/workspaces.ts`): Design,
   Images (0.7), Composite (0.8), Photo (0.11), Print (0.12), Paint (0.13),
-  Motion (0.14), Audio (0.15), Layout (0.16). A workspace whose format or CLI is
+  Layout (0.16). A workspace whose format or CLI is
   not implemented says so and lists what the roadmap promises; it has no
   controls that cannot work.
 
@@ -43,5 +43,5 @@ export, dark mode.
 Not yet ported (use `/classic`): photo catalog/develop panel and raster panel.
 Known limits: hit-testing is bounding-box based; during a drag only the
 selection box moves and the rendered preview updates on release; there is no
-in-browser PDF export (use `pentool export x.pen x.pdf`); Paint, Motion, Audio
-and Layout workspaces are "coming soon" placeholders.
+in-browser PDF export (use `pentool export x.pen x.pdf`); Paint and Layout
+workspaces are "coming soon" placeholders.

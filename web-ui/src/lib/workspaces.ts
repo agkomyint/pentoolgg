@@ -1,7 +1,7 @@
 // One entry per product area. `since` ties each workspace to the roadmap so the
 // shell shows what exists now and what each future milestone adds.
 import type { LucideIcon } from "lucide-react";
-import { AudioLines, Brush, Camera, Film, Image, Layers, Newspaper, PenTool, Printer } from "lucide-react";
+import { Brush, Camera, Image, Layers, Newspaper, PenTool, Printer } from "lucide-react";
 
 export type Status = "available" | "partial" | "planned";
 export type Workspace = {
@@ -22,7 +22,5 @@ export const workspaces: Workspace[] = [
   { id: "photo", label: "Photo", icon: Camera, status: "partial", since: "0.11", summary: "Catalog, RAW development and photo edits.", planned: ["Catalog browser", "Develop panel", "Batch export"] },
   { id: "print", label: "Print", icon: Printer, status: "partial", since: "0.12", summary: "Color roles, preflight, plates and soft proof.", planned: [] },
   { id: "paint", label: "Paint", icon: Brush, status: "planned", since: "0.13", summary: "Agent-directed realistic painting.", planned: ["Stroke plan viewer", "Palette and color mixing", "Region comparison", "Revision scoring"] },
-  { id: "motion", label: "Motion", icon: Film, status: "planned", since: "0.14", summary: "Keyframe timeline and video export.", planned: ["Timeline with keyframes", "Easing curves", "PNG, GIF and MP4 export queue"] },
-  { id: "audio", label: "Audio", icon: AudioLines, status: "planned", since: "0.15", summary: "Audio tracks, mixer and captions.", planned: ["Waveform tracks", "Markers and captions", "Mixer", "Audio-driven animation"] },
   { id: "layout", label: "Layout", icon: Newspaper, status: "planned", since: "0.16", summary: "Page layout, styles, books and IDML.", planned: ["Spreads and parents", "Threaded text frames", "Paragraph and character styles", "Books and IDML interchange"] },
 ];

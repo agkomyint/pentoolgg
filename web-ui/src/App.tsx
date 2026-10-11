@@ -73,17 +73,6 @@ function Inspector() {
   );
 }
 
-function BottomDock() {
-  const { workspaceId } = useStudio();
-  if (workspaceId !== "motion" && workspaceId !== "audio") return null;
-  return (
-    <div className="h-36 shrink-0 border-t bg-card p-3 text-xs text-muted-foreground">
-      <strong className="text-foreground">Timeline</strong> — keyframes (v0.14) and audio tracks (v0.15) will dock
-      here. The document format for the timeline is not implemented yet.
-    </div>
-  );
-}
-
 export default function App() {
   const s = useStudio();
   const openInput = useRef<HTMLInputElement>(null);
@@ -221,7 +210,6 @@ export default function App() {
             <main className="flex min-w-0 flex-1 flex-col">
               <Canvas />
               <ToolHint />
-              <BottomDock />
             </main>
             <Inspector />
           </div>
