@@ -2281,10 +2281,10 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             json!({"operation":"move","page":id,"index":index})
         }
         PageAction::Remove { id } => {
+            let index = index_of(pages, &id)?;
             if pages.len() == 1 {
                 bail!("cannot remove the last page")
             }
-            let index = index_of(pages, &id)?;
             pages.remove(index);
             let active = pages[index.min(pages.len() - 1)]["id"]
                 .as_str()
@@ -3293,6 +3293,34 @@ mod tests {
         assert_eq!(result["ungrouped_children"], 2);
         assert!(find_node(&raw["pages"][0], "card-2").is_none());
         validate(&raw).unwrap();
+    }
+
+    #[test]
+    fn removing_a_missing_page_reports_not_found_before_last_page_guard() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = apply_page(
+            &mut raw,
+            crate::page::PageAction::Remove {
+                id: "nosuch".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page not found: nosuch"),
+            "unexpected error: {err}"
+        );
+        let err = apply_page(
+            &mut raw,
+            crate::page::PageAction::Remove {
+                id: "page-1".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("cannot remove the last page"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
