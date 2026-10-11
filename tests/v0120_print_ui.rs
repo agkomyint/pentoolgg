@@ -183,6 +183,16 @@ fn plate_and_proof_views_are_served_read_only() {
         .send()
         .unwrap();
     assert_eq!(gamut.headers()["content-type"], "image/png");
+    let by_intent = client
+        .get(format!("{base}/api/color/proof?intent=perceptual"))
+        .send()
+        .unwrap();
+    assert_eq!(by_intent.status(), 200);
+    let bad_intent = client
+        .get(format!("{base}/api/color/proof?intent=sparkly"))
+        .send()
+        .unwrap();
+    assert_eq!(bad_intent.status(), 400);
     assert_eq!(&gamut.bytes().unwrap()[1..4], b"PNG");
     assert_eq!(std::fs::read(&document).unwrap(), bytes);
     let _ = std::fs::remove_dir_all(&dir);

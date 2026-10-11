@@ -29,7 +29,17 @@ pub struct Proof {
 pub const GAMUT_CHANNEL_THRESHOLD: i32 = 12;
 
 pub fn render(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Proof> {
-    render_with(raw, document, page_id, false)
+    render_with(raw, document, page_id, false, None)
+}
+
+/// Soft proof under a proof-setup rendering intent instead of the output role's.
+pub fn render_intent(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    intent: Option<Intent>,
+) -> Result<Proof> {
+    render_with(raw, document, page_id, false, intent)
 }
 
 /// Gamut warning image: the page in muted display colors with every pixel the
@@ -37,16 +47,35 @@ pub fn render(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Pro
 /// authored (display role) with its soft proof, so it is a numeric round-trip
 /// check, not a contract proof.
 pub fn gamut(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Proof> {
-    render_with(raw, document, page_id, true)
+    render_with(raw, document, page_id, true, None)
 }
 
-fn render_with(raw: &Value, document: &Path, page_id: Option<&str>, gamut: bool) -> Result<Proof> {
+/// Gamut warning under a proof-setup rendering intent.
+pub fn gamut_intent(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    intent: Option<Intent>,
+) -> Result<Proof> {
+    render_with(raw, document, page_id, true, intent)
+}
+
+fn render_with(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    gamut: bool,
+    intent_override: Option<Intent>,
+) -> Result<Proof> {
     ensure!(
         raw["version"] == super::VERSION,
         "[unsupported-version] proof images require a version {} document",
         super::VERSION
     );
-    let output_role = roles::effective(raw, Role::Output)?;
+    let mut output_role = roles::effective(raw, Role::Output)?;
+    if let Some(intent) = intent_override {
+        output_role.intent = intent;
+    }
     ensure!(
         output_role.destination.space() == "icc-cmyk",
         "[unsupported-capability] proof images simulate an ICC CMYK output role, not {}",

@@ -522,6 +522,23 @@ struct PlateQuery {
     page: Option<String>,
     plate: Option<String>,
     scale: Option<f32>,
+    /// Proof-setup rendering intent for `/api/color/proof` and `/api/color/gamut`.
+    intent: Option<String>,
+}
+
+/// Parse a proof-setup intent name; absent means the output role's own intent.
+fn proof_intent(name: Option<&str>) -> Result<Option<crate::color::icc::Intent>> {
+    use crate::color::icc::Intent;
+    Ok(match name {
+        None => None,
+        Some("perceptual") => Some(Intent::Perceptual),
+        Some("relative-colorimetric") => Some(Intent::RelativeColorimetric),
+        Some("saturation") => Some(Intent::Saturation),
+        Some("absolute-colorimetric") => Some(Intent::AbsoluteColorimetric),
+        Some(other) => anyhow::bail!(
+            "[invalid-input] unknown intent {other}; use perceptual, relative-colorimetric, saturation or absolute-colorimetric"
+        ),
+    })
 }
 
 /// Bounded working raster for print views: at most ~1M pixels unless a smaller
@@ -633,7 +650,9 @@ async fn color_proof(
 ) -> Response {
     let result = (|| -> Result<Response> {
         let (file, raw) = shared_document(&state)?;
-        let proof = crate::color::proofimage::render(&raw, &file, q.page.as_deref())?;
+        let intent = proof_intent(q.intent.as_deref())?;
+        let proof =
+            crate::color::proofimage::render_intent(&raw, &file, q.page.as_deref(), intent)?;
         Ok(png_response(proof.png))
     })();
     result.unwrap_or_else(problem)
@@ -645,7 +664,8 @@ async fn color_gamut(
 ) -> Response {
     let result = (|| -> Result<Response> {
         let (file, raw) = shared_document(&state)?;
-        let proof = crate::color::proofimage::gamut(&raw, &file, q.page.as_deref())?;
+        let intent = proof_intent(q.intent.as_deref())?;
+        let proof = crate::color::proofimage::gamut_intent(&raw, &file, q.page.as_deref(), intent)?;
         Ok(png_response(proof.png))
     })();
     result.unwrap_or_else(problem)

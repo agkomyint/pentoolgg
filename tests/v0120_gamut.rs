@@ -1,5 +1,5 @@
 //! Gamut warning image: out-of-gamut artwork is red, in-gamut artwork is muted.
-use pentool::color::{catalog, proofimage};
+use pentool::color::{catalog, icc::Intent, proofimage};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -47,4 +47,19 @@ fn saturated_green_is_flagged_and_neutral_gray_is_not() {
     assert_ne!(picture.get_pixel(3 * w / 4, h / 2).0, [220, 38, 38]);
     let plain = proofimage::render(&raw, Path::new(DOCUMENT), None).unwrap();
     assert!(plain.report["gamut_warning_pixels"].is_null());
+}
+
+#[test]
+fn proof_setup_intent_overrides_the_role_and_is_reported() {
+    let raw = doc();
+    let relative = proofimage::render(&raw, Path::new(DOCUMENT), None).unwrap();
+    assert_eq!(relative.report["intent"], "relative-colorimetric");
+    let perceptual =
+        proofimage::render_intent(&raw, Path::new(DOCUMENT), None, Some(Intent::Perceptual))
+            .unwrap();
+    assert_eq!(perceptual.report["intent"], "perceptual");
+    let flagged =
+        proofimage::gamut_intent(&raw, Path::new(DOCUMENT), None, Some(Intent::Perceptual))
+            .unwrap();
+    assert_eq!(flagged.report["intent"], "perceptual");
 }
