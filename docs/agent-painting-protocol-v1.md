@@ -284,6 +284,26 @@ radius. A stroke field may reference a guide with
 guides become a `vanishing` field, horizon an `angle 0` field, gesture and custom
 guides a `vectors` field from their segments.
 
+## Diagnostics and revision scoring (engine 1 implementation)
+
+Every `paint-plan` pass report carries `diagnostics`: `measured` facts and
+`warnings`, each tagged `basis: measured|heuristic`. Optional pass fields `region`
+(`[x,y,w,h]`, where the edit should land), `protect` (up to 64 rectangles that must
+not change) and `palette` (`#rrggbb` list) enable the matching measurements. Measured:
+`changed_pixels`, `changed_tiles`, `changed_bounds`, `coverage` (of the layer),
+`value_range` (luma of changed painted pixels), mean colour before/after, up to five
+`dominant_colors`, `palette_drift` (mean RGB distance to the nearest palette colour),
+`edge_spill_pixels` and `protected_violations`. Warnings: `no-change`,
+`protected-region-violation`, `edge-spill` (measured) and `flat-values`,
+`large-change` (heuristic suggestions).
+
+`pentool paint-score BEFORE.pen AFTER.pen --layer ID --goal JSON|@file` scores two
+revisions against a declared goal (`region`, `palette`, `value_range`, `coverage`,
+`reference_layer`, `protect`). Each declared criterion yields a 0-1 score; the
+composite is their equal-weight mean and `assessment.trend` (`improved`, `unchanged`,
+`worse`, +/-0.02) is explicitly `basis: heuristic`. The command is read-only and
+reports `applied: false`; it never accepts, reverts or continues a plan.
+
 ## Paint plans (engine 1 implementation)
 
 `pentool paint-plan DOC PLAN.json [--dry-run] [--if-revision REV]

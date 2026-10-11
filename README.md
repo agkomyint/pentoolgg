@@ -824,6 +824,17 @@ direction, tonal zones, preserve-luminance/chroma, pickup/deposit and wetness
 lifetime. Procedural grain is canvas-fixed and integer-only, so strokes replay
 exactly. See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Diagnostics and scoring
+
+```sh
+pentool paint-score before.pen after.pen --layer paint --goal '{"coverage":[0.2,0.5],"palette":["#204080"]}'
+```
+
+Plan passes report measured changed bounds, coverage, value range, palette drift,
+edge spill and protected-region violations, plus warnings labelled measured or
+heuristic. `paint-score` compares two revisions against a goal and never accepts or
+reverts anything.
+
 ### Composition guides
 
 ```sh

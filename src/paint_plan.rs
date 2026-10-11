@@ -107,6 +107,8 @@ struct Pass {
     action: String,
     args: Value,
     description: Option<String>,
+    /// Optional measured-diagnostics inputs: region, protect, palette.
+    diagnostics: Map<String, Value>,
 }
 
 struct Plan {
@@ -210,7 +212,16 @@ impl Plan {
                 .with_context(|| format!("[invalid-request] {what} must be an object"))?;
             reject_unknown(
                 object,
-                &["id", "target", "action", "args", "description"],
+                &[
+                    "id",
+                    "target",
+                    "action",
+                    "args",
+                    "description",
+                    "region",
+                    "protect",
+                    "palette",
+                ],
                 &what,
             )?;
             let pass_id = id_field(object, "id", &what)?;
@@ -238,12 +249,21 @@ impl Plan {
                 Some(Value::String(text)) if text.len() <= 1024 => Some(text.clone()),
                 Some(_) => bail!("[invalid-request] pass {pass_id}: description must be a string of at most 1024 bytes"),
             };
+            let mut diagnostics = Map::new();
+            for key in ["region", "protect", "palette"] {
+                if let Some(v) = object.get(key).filter(|v| !v.is_null()) {
+                    diagnostics.insert(key.to_owned(), v.clone());
+                }
+            }
+            crate::paint_score::parse_options(&diagnostics)
+                .with_context(|| format!("pass {pass_id}"))?;
             parsed.push(Pass {
                 id: pass_id,
                 target,
                 action: action.to_owned(),
                 args,
                 description,
+                diagnostics,
             });
         }
         Ok(Self {
@@ -270,6 +290,7 @@ impl Plan {
                 "action": p.action,
                 "args": p.args,
                 "description": p.description,
+                "diagnostics": p.diagnostics,
             })).collect::<Vec<_>>(),
         })
     }
@@ -344,6 +365,11 @@ pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result
             .with_context(|| fail("failed"))?;
         let after = raster::layer_surface(&next, &pass.target)?;
         let (changed, changed_tiles, bounds) = diff(&before, &after);
+        let diagnostics = crate::paint_score::diagnose(
+            &before,
+            &after,
+            &crate::paint_score::parse_options(&pass.diagnostics)?,
+        );
         // stroke-path nests dabs under "generated" and lists "strokes"; stroke-field
         // reports "dabs" and "stroke_ids"; a plain stroke reports "dabs" and "stroke".
         let pass_dabs = result["dabs"]
@@ -387,6 +413,7 @@ pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result
             "changed_tiles": changed_tiles,
             "changed_bounds": bounds,
             "tile_map_sha256": after.tile_map_hash(),
+            "diagnostics": diagnostics,
             "result": result,
         }));
     }

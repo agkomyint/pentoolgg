@@ -35,6 +35,7 @@ pub mod paint_media;
 pub mod paint_palette;
 pub mod paint_plan;
 pub mod paint_review;
+pub mod paint_score;
 pub mod pdf;
 pub mod photo;
 pub mod preset;

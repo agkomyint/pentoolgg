@@ -2392,6 +2392,8 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_constraints::ConstraintAction,
     },
+    /// Score two revisions of a layer against a goal (v0.13.0 agent painting).
+    PaintScore(Box<pentool::paint_score::ScoreArgs>),
     /// Reusable composition and form guides (v0.13.0 agent painting).
     PaintGuide {
         input: PathBuf,
@@ -8234,6 +8236,7 @@ async fn run() -> Result<()> {
         Command::PaintConstraints { input, action } => {
             pentool::paint_constraints::run(&input, action)
         }
+        Command::PaintScore(args) => pentool::paint_score::run(*args),
         Command::PaintGuide {
             input,
             dry_run,

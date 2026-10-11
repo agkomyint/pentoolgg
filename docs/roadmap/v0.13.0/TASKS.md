@@ -122,7 +122,7 @@ commits as one history entry and must be reviewable before execution.
   document data, can be hidden or explicitly included in proof exports, and never
   silently change pixels when edited.
 
-- [ ] **11. Add agent-focused diagnostics and revision scoring.** Mutation
+- [x] **11. Add agent-focused diagnostics and revision scoring.** Mutation
   results report changed bounds, coverage, value range, palette delta, edge spill,
   protected-region violations, stroke/dab/tile counts, comparison deltas, and
   actionable warnings. Diagnostics distinguish measured facts from heuristic
