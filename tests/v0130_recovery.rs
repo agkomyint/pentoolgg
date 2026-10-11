@@ -46,6 +46,8 @@ fn load(path: &Path) -> Value {
 }
 
 fn commit_plan(path: &Path, id: &str) -> anyhow::Result<transaction::ChangeSummary> {
+    // Every document read goes through recovery first, as the CLI readers do.
+    pentool::editing::recover_interrupted_write(path)?;
     let bytes = std::fs::read(path)?;
     let mut raw: Value = serde_json::from_slice(&bytes)?;
     paint_plan::execute(&mut raw, None, &plan(id))?;
@@ -151,4 +153,74 @@ fn a_resource_failure_rolls_the_whole_bundle_back() {
         !dir.0.join("assets").join("a.bin").exists(),
         "a staged resource survived a failed bundle"
     );
+}
+
+#[test]
+fn a_write_killed_between_the_two_renames_is_restored_automatically() {
+    let dir = Scratch::new("midrename");
+    let file = dir.file();
+    let original = write_document(&file);
+    // State after `rename(file, previous)` and before `rename(temp, file)`.
+    let previous = dir.0.join(".doc.pen.pentool-old-424242");
+    std::fs::rename(&file, &previous).unwrap();
+    std::fs::write(dir.0.join(".doc.pen.pentool-tmp-424242"), b"{\"half").unwrap();
+    assert!(!file.exists());
+    // An unreadable older copy must not be preferred over the valid one.
+    std::fs::write(dir.0.join(".doc.pen.pentool-old-1"), b"not json").unwrap();
+    let restored = pentool::editing::recover_interrupted_write(&file).unwrap();
+    assert_eq!(restored.as_deref(), Some(previous.as_path()));
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+    // A present document is never replaced.
+    assert!(pentool::editing::recover_interrupted_write(&file)
+        .unwrap()
+        .is_none());
+
+    // The write path repairs on its own: kill the write again, then write.
+    std::fs::rename(&file, &previous).unwrap();
+    pentool::editing::atomic_write(&file, &original).unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+    std::fs::rename(&file, &previous).unwrap();
+    commit_plan(&file, "after-kill").unwrap();
+    assert!(file.exists());
+    transaction::validate_value(&load(&file)).unwrap();
+    assert_ne!(std::fs::read(&file).unwrap(), original);
+}
+
+#[test]
+fn plan_and_resource_budgets_refuse_before_any_write() {
+    let dir = Scratch::new("budgets");
+    let file = dir.file();
+    let original = write_document(&file);
+    let tight = |limits: Value| {
+        let mut p = plan("budget");
+        p["limits"] = limits;
+        p
+    };
+    for limits in [
+        json!({"max_dabs": 1}),
+        json!({"max_changed_pixels": 1}),
+        json!({"max_tiles": 0}),
+    ] {
+        let mut raw = load(&file);
+        let err = paint_plan::execute(&mut raw, None, &tight(limits.clone())).unwrap_err();
+        assert!(format!("{err:#}").contains("limit"), "{limits}: {err:#}");
+        assert_eq!(raw, load(&file), "{limits}: working copy changed");
+    }
+    // A plan file past the byte budget is refused unread.
+    let huge = json!({"schema": 1, "engine": 1, "id": "x", "pad": "a".repeat(9 << 20),
+                      "passes": []});
+    assert!(paint_plan::validate_template(&huge).is_err());
+    // A staged resource past the byte budget is refused before the document or
+    // any sibling is written.
+    let mut raw = load(&file);
+    paint_plan::execute(&mut raw, None, &plan("res")).unwrap();
+    let resources = vec![(
+        PathBuf::from("assets/big.bin"),
+        vec![0u8; pentool::resource::MAX_RESOURCE_BYTES + 1],
+    )];
+    assert!(
+        transaction::commit_bundle(&file, "paint-plan", false, None, &raw, &resources).is_err()
+    );
+    assert!(!dir.0.join("assets").exists());
+    assert_eq!(std::fs::read(&file).unwrap(), original);
 }

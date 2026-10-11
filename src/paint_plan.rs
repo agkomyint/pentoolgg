@@ -488,6 +488,7 @@ pub fn run(args: PlanArgs, selected_page: Option<&str>) -> Result<()> {
             "[plan-changed] the plan hashes to {actual}, not the expected {expected}; review the plan again. The document was not changed"
         );
     }
+    crate::editing::recover_interrupted_write(&input)?;
     let mut raw: Value = serde_json::from_slice(
         &std::fs::read(&input)
             .with_context(|| format!("[missing-resource] cannot read {}", input.display()))?,

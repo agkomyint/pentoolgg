@@ -9377,6 +9377,7 @@ fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
 }
 
 fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    editing::recover_interrupted_write(path)?;
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     select_page(&mut doc, page)?;
@@ -9384,6 +9385,7 @@ fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Docum
 }
 
 fn read_render_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    editing::recover_interrupted_write(path)?;
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let raw: serde_json::Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     let flattened = if scene::is_scene_document(&raw) {

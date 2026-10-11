@@ -34,6 +34,7 @@ pub fn commit_bundle(
     resources: &[(PathBuf, Vec<u8>)],
 ) -> Result<ChangeSummary> {
     validate_value(value)?;
+    crate::editing::recover_interrupted_write(path)?;
     let before = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     reject_new_violations(&before, value)?;
     let current = revision(&before);
@@ -110,6 +111,7 @@ pub fn commit_bytes(
 ) -> Result<ChangeSummary> {
     let value: Value = serde_json::from_slice(after).context("invalid serialized document")?;
     validate_value(&value)?;
+    crate::editing::recover_interrupted_write(path)?;
     let before = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     reject_new_violations(&before, &value)?;
     if !operation.starts_with("instance-") {

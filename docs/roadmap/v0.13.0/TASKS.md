@@ -151,17 +151,17 @@ commits as one history entry and must be reviewable before execution.
   locks, memory/disk budgets, transaction rollback, crash recovery, packaging,
   offline replay, and 10,000-pass/stroke bounded-session behavior.
 
-  Status (left unchecked on purpose): covered locally are plan, tile and
-  canonicalization goldens (computed on Windows only), fuzzing of plans, palette
-  colors, reference images and field specs, hostile dimensions, locks, stale
-  revisions, rollback, cancellation at every plan checkpoint, leftover temp-file
-  and history recovery (`tests/v0130_recovery.rs`), packaging, and the 10,048-stroke
-  run (`cargo test --release --test v0130_conformance -- --ignored`, passed in 35 s
-  on Windows). Still open:
-  Linux and Apple Silicon confirmation of the goldens (CI is the authority),
-  automatic repair of an `atomic_write` killed between its two renames (history
-  restore is the supported path), and memory/disk budget tests beyond the plan
-  limits. Tick this item only after a green CI matrix.
+  Status (left unchecked on purpose): implemented and passing locally on Windows
+  are plan, tile and canonicalization goldens, fuzzing of plans, palette colors,
+  reference images and field specs, hostile dimensions, locks, stale revisions,
+  rollback, cancellation at every plan checkpoint, automatic recovery of a write
+  killed between `atomic_write`'s renames, leftover temp files, history restore,
+  plan/dab/pixel/tile and staged-resource byte budgets, packaging, and the
+  10,048-stroke run (`cargo test --release --test v0130_conformance -- --ignored`,
+  35 s). The only open evidence is cross-platform: the digests in
+  `tests/v0130_conformance.rs` run in the existing CI matrix (Linux, Windows,
+  Apple Silicon) on the next push, and AGENTS.md requires that green run before
+  this box is ticked. Pushing is the maintainer's call, so no CI run exists yet.
 
 ## CLI direction
 

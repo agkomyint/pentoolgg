@@ -403,13 +403,16 @@ from a killed writer, stale revisions, failed and invalid commits (byte-identica
 document, no history entry), history undo/redo/restore of a committed plan, and the
 rollback of a bundle whose resource write fails.
 
-Known limits of the recovery claim: a process killed between the two renames of
-`atomic_write` leaves the previous copy as `.NAME.pentool-old-PID` and no `NAME`;
-the data is intact but is not restored automatically, and a history revision
-(`pentool history restore`) is the supported way back. The pinned digests in
-`tests/v0130_conformance.rs` were computed on Windows; they use only integer
-arithmetic, but Linux and Apple Silicon confirmation comes from the CI matrix and
-must not be assumed from this note.
+Recovery from a write killed between the two renames of `atomic_write` is
+automatic: when the document is missing and a valid `.NAME.pentool-old-PID` copy
+exists, `editing::recover_interrupted_write` moves the newest one back before any
+read or write (CLI readers, the transaction layer and `paint-plan` all call it). A
+present document is never replaced. Budgets (plan passes, dabs, changed pixels,
+tiles, plan bytes, staged resource bytes) are refused before anything is written.
+
+The pinned digests in `tests/v0130_conformance.rs` were computed on Windows; they
+use only integer arithmetic and run unchanged in the CI matrix, which is the
+cross-platform authority until a green run exists.
 
 ## Material paint modes (engine 1 implementation)
 
