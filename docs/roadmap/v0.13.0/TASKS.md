@@ -100,7 +100,7 @@ commits as one history entry and must be reviewable before execution.
   Algorithms and texture assets are versioned, bounded, content-addressed, and
   replayable; marketing names must not obscure the documented pixel math.
 
-- [ ] **8. Add compact visual analysis for agents.** Report major contours,
+- [x] **8. Add compact visual analysis for agents.** Report major contours,
   silhouettes, value zones, dominant colors, focal candidates, gradient direction,
   texture frequency, coverage gaps, clipping, and suggested stroke orientation for
   an explicit bounded scope. Return polylines, regions, histograms, and summaries,

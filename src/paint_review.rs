@@ -39,7 +39,7 @@ pub fn parse_background(text: &str) -> Result<[u8; 3]> {
     Ok([c[0], c[1], c[2]])
 }
 
-fn hash_image(image: &RgbaImage) -> String {
+pub(crate) fn hash_image(image: &RgbaImage) -> String {
     let mut h = Sha256::new();
     h.update(format!("pentool-crop-v1\n{}x{}\n", image.width(), image.height()).as_bytes());
     h.update(image.as_raw());
@@ -273,7 +273,7 @@ fn luma(p: [u8; 4]) -> i64 {
     (54 * i64::from(p[0]) + 183 * i64::from(p[1]) + 19 * i64::from(p[2]) + 128) >> 8
 }
 
-fn ratio(numerator: u64, denominator: u64) -> Value {
+pub(crate) fn ratio(numerator: u64, denominator: u64) -> Value {
     if denominator == 0 {
         return json!({"numerator": numerator, "denominator": 0, "value": Value::Null});
     }
@@ -300,7 +300,7 @@ fn edge_pixels(l: &[i64], w: usize, h: usize) -> Vec<bool> {
     out
 }
 
-fn texture_bins(l: &[i64], w: usize, h: usize) -> [u64; 6] {
+pub(crate) fn texture_bins(l: &[i64], w: usize, h: usize) -> [u64; 6] {
     let at = |x: i64, y: i64| {
         l[(y.clamp(0, h as i64 - 1) as usize) * w + x.clamp(0, w as i64 - 1) as usize]
     };

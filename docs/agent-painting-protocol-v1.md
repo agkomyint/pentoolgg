@@ -292,6 +292,27 @@ impasto/knife), pickup and preserve controls then run in integer arithmetic. Gra
 is a splitmix-style integer hash and integer value noise, so results are identical
 on every platform and replay exactly (`raster verify --replay`).
 
+## Visual analysis (engine 1 implementation)
+
+`pentool paint-analyze DOC [--page ID] --scope page|node:ID|layer:ID|group:ID
+[--rect x,y,w,h | --selection JSON] [--features LIST] [--max-edge N]` is read-only
+and never dumps pixels. The scope is rendered, cropped, reduced to at most
+`--max-edge` (default 256, max 1024) pixels with the integer box filter, and
+analysed with integer arithmetic only. Every response carries `algorithm`,
+`renderer`, `page`, `scope`, `revision` (document revision), `origin`, `source` and
+`analysis` sizes, `source_hash` and `analysis_hash`. Coordinates are scope pixels.
+
+Features (`--features`, default all): `contours` (thinned Sobel edges, chained and
+Douglas-Peucker simplified into polylines with bounds/strength), `silhouettes`
+(connected opaque regions), `values` (2-8 luma zones with share, bounds, mean and a
+16-bin histogram), `palette` (dominant colours, 4-bit bins), `texture` (Laplacian
+bins and a smooth/moderate/busy label), `orientation` (gradient histogram,
+`suggested_stroke_degrees` perpendicular to the dominant gradient, plus a 4x4 grid of
+per-cell suggestions), `focal` (top 8 of an 8x8 grid by edge density and contrast),
+`gaps` (coverage and empty regions) and `clipping` (shadow/highlight clipping shares).
+List features page with `matches`, `returned`, `offset`, `limit` (default 50, max
+500) and `has_more` exactly describing the emitted items.
+
 ## Cancellation
 
 Cancellation is cooperative and checked before and after each of these bounded

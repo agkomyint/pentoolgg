@@ -2392,6 +2392,8 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_constraints::ConstraintAction,
     },
+    /// Compact, paginated visual analysis of a bounded scope (v0.13.0 agent painting).
+    PaintAnalyze(Box<pentool::paint_analysis::AnalyzeArgs>),
     /// Bounded region previews and structural comparison (v0.13.0 agent painting).
     PaintReview {
         input: PathBuf,
@@ -8220,6 +8222,7 @@ async fn run() -> Result<()> {
         Command::PaintConstraints { input, action } => {
             pentool::paint_constraints::run(&input, action)
         }
+        Command::PaintAnalyze(args) => pentool::paint_analysis::run(*args, selected_page),
         Command::PaintReview { input, action } => {
             pentool::paint_review::run(&input, selected_page, action)
         }

@@ -824,6 +824,17 @@ direction, tonal zones, preserve-luminance/chroma, pickup/deposit and wetness
 lifetime. Procedural grain is canvas-fixed and integer-only, so strokes replay
 exactly. See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Visual analysis
+
+```sh
+pentool paint-analyze portrait.pen --scope node:paint --rect 300,200,400,400   --features contours,values,palette,orientation --values 5 --colors 8
+```
+
+Returns contour polylines, value zones, dominant colors, texture frequency,
+gradient/stroke orientation, focal candidates, coverage gaps and clipping for a
+bounded scope, tagged with renderer, revision and hashes, and paginated. It is
+read-only. See [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source
