@@ -2375,6 +2375,12 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_palette::PaletteAction,
     },
+    /// Bounded region previews and structural comparison (v0.13.0 agent painting).
+    PaintReview {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: pentool::paint_review::ReviewAction,
+    },
     /// Maintain verified linked sources and collect portable projects offline.
     Linked(Box<LinkedArgs>),
     /// Save data-only appearance presets or copy/paste named appearances.
@@ -6626,6 +6632,12 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_spread(&input, dry_run, if_revision.as_deref(), action),
+        Command::LayoutStyle {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_style(&input, dry_run, if_revision.as_deref(), action),
         Command::Parent {
             input,
             dry_run,
@@ -6649,12 +6661,6 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
             action,
-        Command::LayoutStyle {
-            input,
-            dry_run,
-            if_revision,
-            action,
-        } => pentool::layout_cli::run_layout_style(&input, dry_run, if_revision.as_deref(), action),
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
             if !scene::is_scene_document(&raw) {
@@ -7453,7 +7459,10 @@ async fn run() -> Result<()> {
                     if_revision.as_deref(),
                     &raw,
                 )?;
-                println!("{}", serde_json::json!({"change": change, "result": result}));
+                println!(
+                    "{}",
+                    serde_json::json!({"change": change, "result": result})
+                );
                 Ok(())
             } else {
                 editing::edit_page_options(
@@ -8100,9 +8109,6 @@ async fn run() -> Result<()> {
             );
             Ok(())
         }
-        Command::Analyze(args) => {
-            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
-            let query: Option<serde_json::Value> = args
         Command::PaintPalette {
             input,
             dry_run,
@@ -8115,6 +8121,12 @@ async fn run() -> Result<()> {
             if_revision.as_deref(),
             action,
         ),
+        Command::PaintReview { input, action } => {
+            pentool::paint_review::run(&input, selected_page, action)
+        }
+        Command::Analyze(args) => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
+            let query: Option<serde_json::Value> = args
                 .query
                 .as_deref()
                 .map(serde_json::from_str)

@@ -171,6 +171,24 @@ as a grayscale PNG and are subject to the preview pixel and artifact byte limits
 Metric output is evidence about these formulas only; it is not a beauty, identity,
 style-fidelity, or perceptual-equivalence score.
 
+### Region previews and comparison (engine 1 implementation)
+
+`pentool paint-review FILE preview` renders `page`, `node:ID`, `layer:ID` or
+`group:ID` at scale 1, optionally crops to `--rect x,y,w,h` or to the bounds of a
+`--selection` query (pixels outside the selection are cleared), box-filters it
+(premultiplied) to at most `--max-edge` (default 1024) and `--max-pixels`
+(default 4,194,304), optionally composites over `--background`, and writes a PNG
+only when `--out` is given. Node scopes are page-canvas sized, so rectangles are
+page pixels. Output names the source hash (`sha256:` of the RGBA crop) so a
+preview is tied to the exact pixels it came from.
+
+`pentool paint-review FILE compare` measures the same crop against exactly one
+immutable reference (`--reference-image` PNG/JPEG/WebP, or `--reference-document`
+with optional `--reference-scope`), both composited over `--background`
+(default `#ffffff`). It reports the six metrics above plus `changed_bounds`
+(`[x,y,w,h]` of differing pixels, or `null`). `--heatmap out.png` is the only way
+a heat map is produced. Neither action mutates a document.
+
 ## Plans and atomic execution
 
 Planning performs all parsing, validation, name resolution, hashing, estimation,

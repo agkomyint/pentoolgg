@@ -774,6 +774,19 @@ Read-only actions reject `--dry-run`; saving and removing use the shared
 transaction. See the "Color sampling and palettes" section of
 [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Region previews and structural comparison
+
+```sh
+pentool paint-review portrait.pen preview --scope node:paint --rect 0,0,128,128 --max-edge 256 --out look.png
+pentool paint-review portrait.pen compare --scope node:paint --reference-image study.png --heatmap diff.png
+pentool paint-review portrait.pen compare --scope page --reference-document earlier.pen
+```
+
+Metrics (`color_mae`, `value_mae`, `edge_disagreement`, `silhouette_iou`,
+`structure_mae`, `texture_frequency_mae`) are exact integer ratios plus a six-place
+decimal, with `changed_bounds`; they are guidance, not a quality score. Both
+actions are read-only. See [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

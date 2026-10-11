@@ -70,7 +70,7 @@ commits as one history entry and must be reviewable before execution.
   variation per stroke or dab. Store named palettes as readable document data;
   preserve source scope, color space, algorithm version, and source hash.
 
-- [ ] **4. Add fast region previews and structural comparison.** Export a crop,
+- [x] **4. Add fast region previews and structural comparison.** Export a crop,
   node, layer, selection, or changed bounds with `max-edge` and pixel budgets.
   Compare a rendered region with an immutable reference using documented color,
   value, edge, silhouette, structure, and texture-frequency metrics. Results are
