@@ -1021,7 +1021,9 @@ pub fn apply_page(raw: &mut Value, action: PageAction) -> Result<Value> {
             let index = page_index(raw, &id)?;
             let frames_report = crate::stories::detach_page_frames(raw, &id, drop_story)?;
             stories_reflowed = frames_report["rethreaded"].as_array().map_or(0, Vec::len)
-                + frames_report["stories_dropped"].as_array().map_or(0, Vec::len);
+                + frames_report["stories_dropped"]
+                    .as_array()
+                    .map_or(0, Vec::len);
             let successor = pages(raw).get(index + 1).map(|p| page_id(p).to_string());
             raw["pages"]
                 .as_array_mut()

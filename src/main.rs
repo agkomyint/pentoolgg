@@ -7304,6 +7304,10 @@ async fn run() -> Result<()> {
                     println!("{}", pentool::shaping::run_shape(&raw, args)?);
                     return Ok(());
                 }
+                text::TextAction::Compose(args) => {
+                    println!("{}", pentool::compose::run_compose(&raw, args)?);
+                    return Ok(());
+                }
                 text::TextAction::FontReport => {
                     println!("{}", pentool::shaping::font_report(&raw)?);
                     return Ok(());

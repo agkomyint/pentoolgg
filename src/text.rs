@@ -93,8 +93,53 @@ pub enum TextAction {
     },
     /// Shape text with the OpenType engine and report glyphs, runs and breaks as JSON.
     Shape(ShapeArgs),
+    /// Compose paragraphs into lines (Knuth-Plass or single-line) and report them as JSON.
+    Compose(ComposeArgs),
     /// Report the fonts the document requests and how each resolves (disclosing substitution).
     FontReport,
+}
+
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
+pub struct ComposeArgs {
+    /// Text to compose; paragraphs are separated by newlines.
+    #[arg(long, conflicts_with = "story")]
+    pub text: Option<String>,
+    /// Compose the paragraphs of this story (version 9 documents).
+    #[arg(long)]
+    pub story: Option<String>,
+    /// Column width in points.
+    #[arg(long)]
+    pub width: f64,
+    /// Paragraph style from `layout.styles.paragraph` (based_on chains are followed).
+    #[arg(long)]
+    pub style: Option<String>,
+    /// Override the style's font family.
+    #[arg(long)]
+    pub font: Option<String>,
+    #[arg(long, default_value_t = 400)]
+    pub weight: u16,
+    #[arg(long)]
+    pub italic: bool,
+    /// Override the style's size in points.
+    #[arg(long)]
+    pub size: Option<f64>,
+    /// Override alignment: left, center, right, justify, justify-last-center, justify-last-right, justify-last-all.
+    #[arg(long)]
+    pub align: Option<String>,
+    /// Override hyphenation (true/false).
+    #[arg(long)]
+    pub hyphenate: Option<bool>,
+    /// Override composer: paragraph or single-line.
+    #[arg(long)]
+    pub composer: Option<String>,
+    /// Override the BCP 47 language.
+    #[arg(long)]
+    pub language: Option<String>,
+    #[arg(long, default_value_t = 0)]
+    pub offset: usize,
+    /// Maximum line rows returned.
+    #[arg(long, default_value_t = 100)]
+    pub limit: usize,
 }
 
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
@@ -164,6 +209,7 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
         TextAction::Story { .. }
             | TextAction::Frame { .. }
             | TextAction::Shape { .. }
+            | TextAction::Compose { .. }
             | TextAction::FontReport
     ) {
         bail!("[unsupported-version] stories and frames need a version 9 document; run `pentool migrate --target 9` first");
@@ -175,6 +221,7 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
         TextAction::Story { .. }
         | TextAction::Frame { .. }
         | TextAction::Shape { .. }
+        | TextAction::Compose { .. }
         | TextAction::FontReport => unreachable!("rejected above"),
     };
     let layer_index = doc
@@ -293,6 +340,7 @@ pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
         TextAction::Story { .. }
         | TextAction::Frame { .. }
         | TextAction::Shape { .. }
+        | TextAction::Compose { .. }
         | TextAction::FontReport => unreachable!("rejected above"),
     }
     updated.version = updated.version.max(2);

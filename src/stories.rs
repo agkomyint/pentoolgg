@@ -462,7 +462,7 @@ struct Paragraph {
     leading: f64,
 }
 
-fn paragraph_style<'a>(raw: &'a Value, name: &str) -> Vec<&'a Value> {
+pub(crate) fn paragraph_style<'a>(raw: &'a Value, name: &str) -> Vec<&'a Value> {
     let styles = raw
         .get("layout")
         .and_then(|l| l.get("styles"))

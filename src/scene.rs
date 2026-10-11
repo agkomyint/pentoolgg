@@ -2122,7 +2122,11 @@ pub fn apply_text(
         TextAction::Put { layer, .. }
         | TextAction::Set { layer, .. }
         | TextAction::Remove { layer, .. } => layer.clone(),
-        TextAction::Story { .. } | TextAction::Frame { .. } | TextAction::Shape { .. } | TextAction::FontReport => unreachable!("handled above"),
+        TextAction::Story { .. }
+        | TextAction::Frame { .. }
+        | TextAction::Shape { .. }
+        | TextAction::Compose { .. }
+        | TextAction::FontReport => unreachable!("handled above"),
     };
     ensure_layer_unlocked(page, &layer_id)?;
     match action {
@@ -2214,7 +2218,11 @@ pub fn apply_text(
                 bail!("text not found in layer {layer_id}: {id}")
             }
         }
-        TextAction::Story { .. } | TextAction::Frame { .. } | TextAction::Shape { .. } | TextAction::FontReport => unreachable!("handled above"),
+        TextAction::Story { .. }
+        | TextAction::Frame { .. }
+        | TextAction::Shape { .. }
+        | TextAction::Compose { .. }
+        | TextAction::FontReport => unreachable!("handled above"),
     }
     validate(raw)
 }
@@ -3576,7 +3584,9 @@ pub fn inspect_paginated_v4(
     });
     if version >= crate::spreads::VERSION {
         let stories = crate::stories::summary(raw);
-        if stories["stories"].as_u64().unwrap_or(0) > 0 || stories["frames"].as_u64().unwrap_or(0) > 0 {
+        if stories["stories"].as_u64().unwrap_or(0) > 0
+            || stories["frames"].as_u64().unwrap_or(0) > 0
+        {
             result["stories"] = stories;
         }
     }

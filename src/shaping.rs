@@ -786,7 +786,7 @@ pub fn font_report(raw: &Value) -> Result<Value> {
     }))
 }
 
-fn story_text(raw: &Value, id: &str) -> Result<String> {
+pub fn story_text(raw: &Value, id: &str) -> Result<String> {
     let version = raw.get("version").and_then(Value::as_u64).unwrap_or(0);
     if version < 9 {
         bail!("[unsupported-version] --story needs a version 9 document; run `pentool migrate --target 9` first");

@@ -190,6 +190,16 @@ and documentation.
 
   Golden tests pin line breaks across the IDML corpus.
 
+  *Progress:* the composer (`src/compose.rs`: Knuth-Plass total-fit and
+  single-line breaking, Liang hyphenation from bundled patterns, justification
+  across word/letter/glyph scaling, indents, drop caps, balanced ragged lines,
+  optical margins, hanging punctuation, widow/orphan/keep arithmetic) and
+  `text compose` are implemented and covered by `tests/v0140_compose.rs`;
+  contract in `docs/layout-v1.md` section 6.9. Still open before this box is
+  ticked: tab stops with leaders, span and split columns, last-line indent
+  edge cases, goldens across the IDML corpus, wiring the composer into frames
+  (replacing the estimator), and cross-platform CI evidence.
+
 - [ ] **6. Add styles.**
   - Paragraph, character, object, table and cell styles, with `based_on`
     inheritance, a next style, style groups, and the shortcuts, clearing and

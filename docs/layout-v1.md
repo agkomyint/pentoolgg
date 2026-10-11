@@ -523,6 +523,35 @@ script runs via `unicode-script` and subsetting via `subsetter`.
   Devanagari, Thai and CJK text shapes and orders correctly when a covering
   font is embedded.
 
+### 6.9 Implementation notes (task 5)
+
+- `src/compose.rs` (`compose::ENGINE = 1`) implements the composer and
+  `pentool text DOC compose --text T | --story ID --width PT [--style NAME]`
+  (read-only; overrides `--font --size --align --hyphenate --composer
+  --language`; lines are paginated with `matches/returned/offset/limit/has_more`).
+- Total-fit breaking runs in integer LU with exact rational adjustment
+  ratios (`badness = min(10000, floor(100 * |r|^3))`). Passes: 1 without
+  hyphenation (tolerance 1000), 2 with hyphenation, 3 emergency (overfull lines
+  carry a fixed 10^12 demerit penalty so they are used only when unavoidable).
+  Ragged alignments receive 30 % of the measure as implicit slack so short
+  lines are not scored as defects. Ties resolve to lowest demerits, then fewest
+  lines, then earliest node.
+- Justification spends word spacing first, then letter spacing, then glyph
+  scaling; the per-line result is reported as `word_spacing_pct`,
+  `letter_spacing_lu` and `glyph_scale_pct`. `justify` aligns the last line left;
+  `justify-last-center|right|all` are supported.
+- Hyphenation uses the bundled Liang patterns (`assets/hyphenation`, see
+  `docs/hyphenation-sources.md`), the en-US exception list, and user
+  dictionaries from `layout.hyphenation.exceptions`. An unbundled language is
+  disclosed as `summary.hyphenation_unavailable`.
+- Drop caps (`drop_cap {lines, chars}`), indents, balanced ragged lines
+  (`balance`), optical margin alignment and hanging punctuation
+  (small per-glyph table) and the pure `split_lines` widow/orphan/keep helper
+  are implemented and unit tested.
+- Not yet implemented: tab stops with leaders, span/split columns, replacing
+  the task 3 overset estimator with the composer, and rendering of composed
+  frames.
+
 ## 7. Grids and guides
 
 - A **baseline grid** is `{start, increment, relative_to: page|margin, color}`
