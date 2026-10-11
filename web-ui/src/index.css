@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.2 0 0);
+  --card: oklch(1 0 0);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --border: oklch(0.9 0 0);
+  --primary: oklch(0.45 0.18 265);
+  --primary-foreground: oklch(0.99 0 0);
+  --accent: oklch(0.95 0.02 265);
+  --destructive: oklch(0.55 0.22 27);
+  --warning: oklch(0.7 0.15 75);
+  --success: oklch(0.6 0.15 150);
+  --canvas: oklch(0.93 0 0);
+}
+.dark {
+  --background: oklch(0.17 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.2 0 0);
+  --muted: oklch(0.25 0 0);
+  --muted-foreground: oklch(0.7 0 0);
+  --border: oklch(0.32 0 0);
+  --primary: oklch(0.7 0.14 265);
+  --primary-foreground: oklch(0.15 0 0);
+  --accent: oklch(0.28 0.04 265);
+  --destructive: oklch(0.65 0.2 27);
+  --canvas: oklch(0.13 0 0);
+}
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-canvas: var(--canvas);
+}
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: 13px/1.45 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+* { border-color: var(--border); }

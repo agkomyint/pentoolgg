@@ -716,7 +716,7 @@ fn serve_exposes_the_studio_with_revision_guarded_edits() {
     });
     assert!(ready, "server did not start");
     let page = client
-        .get(format!("{base}/"))
+        .get(format!("{base}/classic"))
         .send()
         .unwrap()
         .text()
