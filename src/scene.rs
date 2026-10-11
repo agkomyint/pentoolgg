@@ -1188,13 +1188,16 @@ pub fn put_text_box(
     input: TextBoxInput,
 ) -> Result<Value> {
     validate(raw)?;
-    if input.size <= 0.0
-        || !input.size.is_finite()
-        || input.width.is_some_and(|v| v <= 0.0 || !v.is_finite())
+    if input.width.is_some_and(|v| v <= 0.0 || !v.is_finite())
         || input.height.is_some_and(|v| v <= 0.0 || !v.is_finite())
     {
-        bail!("text box dimensions and font size must be finite and positive")
+        bail!("text box dimensions must be finite and positive")
     }
+    crate::text::validate_typography(
+        Some(input.size),
+        Some(input.weight as f64),
+        Some(input.line_height),
+    )?;
     let max_chars = input
         .width
         .map(|width| (width / (input.size * 0.6)).floor().max(1.0) as usize);
@@ -1636,6 +1639,14 @@ pub fn apply_batch_at(
                         bail!("node ID already exists: {id} (set mode replace or pass --upsert to replace it)")
                     }
                     let mut node = operation.clone();
+                    if kind == "put-text" {
+                        let number = |key: &str| node.get(key).and_then(Value::as_f64);
+                        crate::text::validate_typography(
+                            number("font_size").or(number("size")),
+                            number("font_weight").or(number("weight")),
+                            number("line_height"),
+                        )?;
+                    }
                     let object = node.as_object_mut().unwrap();
                     object.remove("type");
                     object.remove("mode");
@@ -2128,9 +2139,7 @@ pub fn apply_text(
             line_height,
             ..
         } => {
-            if !size.is_finite() || size <= 0.0 {
-                bail!("font size must be finite and positive")
-            }
+            crate::text::validate_typography(Some(size), Some(weight as f64), Some(line_height))?;
             let align = serde_json::to_value(align)?;
             let replacement = json!({"kind":"text","id":id,"content":content,"x":x,"y":y,"font_family":font,"font_size":size,"font_weight":weight,"italic":italic,"align":align,"letter_spacing":letter_spacing,"line_height":line_height,"style":{"fill":{"fallback":fill}}});
             let nodes = layer_nodes_mut(page, &layer_id)?;
@@ -2161,9 +2170,7 @@ pub fn apply_text(
             line_height,
             ..
         } => {
-            if size.is_some_and(|v| !v.is_finite() || v <= 0.0) {
-                bail!("font size must be finite and positive")
-            }
+            crate::text::validate_typography(size, weight.map(|w| w as f64), line_height)?;
             let nodes = layer_nodes_mut(page, &layer_id)?;
             let node = find_node_in_mut(nodes, &id)
                 .with_context(|| format!("text not found in layer {layer_id}: {id}"))?;
@@ -3330,6 +3337,37 @@ mod tests {
         let shapes = inspect_paginated_v4(&raw, None, None, Some("path"), None, 0, 10).unwrap();
         assert_eq!(shapes["matches"], 1);
         assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
+    }
+
+    #[test]
+    fn text_put_rejects_out_of_range_weight() {
+        use crate::document::TextAlign;
+        use crate::text::TextAction;
+        let mut raw = new_document(320, 240);
+        let err = apply_text(
+            &mut raw,
+            None,
+            TextAction::Put {
+                id: "heavy".into(),
+                layer: "layer-1".into(),
+                content: "hi".into(),
+                x: 5.0,
+                y: 5.0,
+                font: "Atkinson Hyperlegible".into(),
+                size: 16.0,
+                weight: 9999,
+                italic: false,
+                fill: "#111827".into(),
+                align: TextAlign::Left,
+                letter_spacing: 0.0,
+                line_height: 1.2,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("font weight"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
