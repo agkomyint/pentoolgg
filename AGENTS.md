@@ -75,6 +75,13 @@ audio dependencies or timeline features without an explicit new decision.
 GPU work uses `wgpu` as an optional `gpu` Cargo feature. The deterministic CPU
 renderer stays normative; goldens and digests come only from the CPU path.
 
+`docs/roadmap/architecture/TASKS.md` is a cross-cutting milestone (shared core
+crate that also compiles to WASM, `/api/v1` with `serve --no-ui`, live canvas
+and brush). Its first task is a measured WASM spike; do not start the crate
+split or the live canvas before that decision record exists. `pentool serve`
+is the authoritative backend and Studio (`web-ui/`) is the only browser UI; the
+earlier Classic editor was retired.
+
 v0.7.1 shipped as the bug-fix release for v0.7.0 (`docs/roadmap/v0.7.0/bug.md`).
 Roadmap folder numbers are planned milestones, not reserved release numbers; the
 actual version is chosen at release time under the versioning policy below.
