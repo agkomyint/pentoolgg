@@ -35,7 +35,9 @@ type State = {
   edit: (label: string, mutate: Mutator) => void;
   /** Replace the whole document with a server-produced one (one undo step). */
   replaceDoc: (doc: Doc, label?: string) => void;
-  newDoc: () => void;
+  newDoc: () => Promise<void>;
+  /** Upgrade the open document to a newer format version (undoable, not saved until Save). */
+  upgradeDoc: (target?: number) => Promise<void>;
   openDoc: (doc: Doc) => void;
   save: () => Promise<void>;
   undo: () => void;
@@ -63,6 +65,8 @@ function initialDark(): boolean {
 }
 
 const HISTORY_LIMIT = 100;
+/** Newest `.pen` format the server can migrate to (`pentool migrate --target 8`). */
+export const LATEST_FORMAT = 8;
 
 function blankDoc(): Doc {
   return {
@@ -149,11 +153,31 @@ export const useStudio = create<State>((set, get) => {
       if (!doc) return;
       adopt(next, { past: [...past, JSON.stringify(doc)].slice(-HISTORY_LIMIT), future: [], dirty: true });
     },
-    newDoc() {
-      const doc = blankDoc();
+    async newDoc() {
+      let doc = blankDoc();
+      let note = "New document. Use Save to download it as .pen.";
+      try {
+        // Start at the newest format so images, compositing, photo and print work without a manual upgrade.
+        const upgraded = await api.migrate(doc, LATEST_FORMAT);
+        doc = upgraded.document;
+        note = `New document (format v${upgraded.to_version}). Use Save to download it as .pen.`;
+      } catch {
+        // server unreachable: fall back to the base scene format
+      }
       set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, pageId: undefined, layerId: undefined });
       adopt(doc, { base: clone(doc) });
-      get().notify("New document. Use Save to download it as .pen.");
+      get().notify(note);
+    },
+    async upgradeDoc(target = LATEST_FORMAT) {
+      const { doc } = get();
+      if (!doc) return;
+      try {
+        const upgraded = await api.migrate(doc, target);
+        get().replaceDoc(upgraded.document);
+        get().notify(`Upgraded to format v${upgraded.to_version}. Save to keep it; Undo reverts.`);
+      } catch (error) {
+        get().notify(error instanceof Error ? error.message : "Could not upgrade the document.", true);
+      }
     },
     openDoc(doc) {
       set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, pageId: undefined, layerId: undefined });

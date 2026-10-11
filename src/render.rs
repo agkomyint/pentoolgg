@@ -298,6 +298,69 @@ pub fn to_png(doc: &Document, scale: f32) -> Result<Vec<u8>> {
     Ok(to_png_profiled(doc, scale)?.bytes)
 }
 
+const PNG_CACHE_ENTRIES: usize = 64;
+const PNG_CACHE_BYTES: usize = 128 * 1024 * 1024;
+const PNG_CACHE_MAX_ENTRY: usize = 24 * 1024 * 1024;
+
+struct PngCache {
+    entries: std::collections::HashMap<[u8; 32], std::sync::Arc<Vec<u8>>>,
+    order: std::collections::VecDeque<[u8; 32]>,
+    bytes: usize,
+}
+
+static PNG_CACHE: std::sync::Mutex<Option<PngCache>> = std::sync::Mutex::new(None);
+
+/// Digest of everything that determines the rendered pixels: the canonical
+/// document JSON and the scale. The renderer is deterministic, so equal keys
+/// give byte-identical PNGs.
+fn png_cache_key(doc: &Document, scale: f32) -> Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"pentool-png-v1");
+    hasher.update(scale.to_bits().to_le_bytes());
+    hasher.update(serde_json::to_vec(doc).context("could not hash document")?);
+    Ok(hasher.finalize().into())
+}
+
+/// `to_png` for interactive previews: an identical request is answered from a
+/// bounded in-memory cache. Returns `(bytes, cache_hit)`. Exports and
+/// benchmarks keep calling `to_png` so their timings stay honest.
+pub fn to_png_cached(doc: &Document, scale: f32) -> Result<(Vec<u8>, bool)> {
+    if !(0.1..=8.0).contains(&scale) {
+        bail!("scale must be between 0.1 and 8");
+    }
+    doc.validate().map_err(anyhow::Error::msg)?;
+    let key = png_cache_key(doc, scale)?;
+    if let Some(cache) = PNG_CACHE.lock().unwrap().as_ref() {
+        if let Some(hit) = cache.entries.get(&key) {
+            return Ok((hit.as_ref().clone(), true));
+        }
+    }
+    let bytes = to_png_profiled_validated(doc, scale)?.bytes;
+    if bytes.len() <= PNG_CACHE_MAX_ENTRY {
+        let mut guard = PNG_CACHE.lock().unwrap();
+        let cache = guard.get_or_insert_with(|| PngCache {
+            entries: Default::default(),
+            order: Default::default(),
+            bytes: 0,
+        });
+        if let std::collections::hash_map::Entry::Vacant(slot) = cache.entries.entry(key) {
+            cache.bytes += bytes.len();
+            slot.insert(std::sync::Arc::new(bytes.clone()));
+            cache.order.push_back(key);
+            while cache.order.len() > PNG_CACHE_ENTRIES || cache.bytes > PNG_CACHE_BYTES {
+                let Some(old) = cache.order.pop_front() else {
+                    break;
+                };
+                if let Some(gone) = cache.entries.remove(&old) {
+                    cache.bytes -= gone.len();
+                }
+            }
+        }
+    }
+    Ok((bytes, false))
+}
+
 pub fn svg_to_png(svg: &str, canvas_width: u32, canvas_height: u32, scale: f32) -> Result<Vec<u8>> {
     if !(0.1..=8.0).contains(&scale) {
         bail!("scale must be between 0.1 and 8")
@@ -551,5 +614,27 @@ mod tests {
         assert!(error.downcast_ref::<RenderLimitError>().is_some());
         assert_eq!(fs::read(&path).unwrap(), b"existing");
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn cached_png_matches_export_and_hits_on_repeat() {
+        let doc = crate::benchmark::generate(3, 60, false);
+        let direct = to_png(&doc, 1.0).unwrap();
+        let (first, _) = to_png_cached(&doc, 1.0).unwrap();
+        let (second, hit) = to_png_cached(&doc, 1.0).unwrap();
+        assert_eq!(first, direct);
+        assert_eq!(second, direct);
+        assert!(hit, "an identical request must be served from the cache");
+        let (other, hit) = to_png_cached(&doc, 2.0).unwrap();
+        assert!(!hit);
+        assert_ne!(other.len(), direct.len());
+    }
+
+    #[test]
+    fn cached_png_rejects_invalid_documents_without_caching() {
+        let mut doc = Document::new(10, 10);
+        doc.format = "not-pentool".into();
+        assert!(to_png_cached(&doc, 1.0).is_err());
+        assert!(to_png_cached(&Document::new(10, 10), 0.01).is_err());
     }
 }

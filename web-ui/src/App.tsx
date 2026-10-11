@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Download, FilePlus2, FolderOpen, Moon, Redo2, RefreshCw, Save, Sun, Undo2 } from "lucide-react";
-import { useStudio } from "@/store";
+import { LATEST_FORMAT, useStudio } from "@/store";
 import { workspaces } from "@/lib/workspaces";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -141,6 +141,21 @@ export default function App() {
           <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-card px-3">
             <strong>Pentool Studio</strong>
             {s.version && <Badge>v{s.version}</Badge>}
+            {s.doc && (
+              <Tip label={s.doc.version < LATEST_FORMAT ? `Document format v${s.doc.version}. Upgrade to v${LATEST_FORMAT} for images, compositing, photo and print.` : `Document format v${s.doc.version} (latest)`}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  disabled={s.doc.version >= LATEST_FORMAT || s.busy}
+                  onClick={() => {
+                    if (window.confirm(`Upgrade this document to format v${LATEST_FORMAT}? Tools older than this release cannot open it. Undo reverts until you save.`)) void s.upgradeDoc();
+                  }}
+                >
+                  {s.doc.version >= LATEST_FORMAT ? `Format v${s.doc.version}` : `Format v${s.doc.version} · Upgrade`}
+                </Button>
+              </Tip>
+            )}
             <span className="text-xs text-muted-foreground">
               {String(s.doc?.name ?? "")}
               {s.dirty ? " â€¢" : ""}

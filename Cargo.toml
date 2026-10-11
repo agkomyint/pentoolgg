@@ -43,3 +43,13 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 lto = true
 codegen-units = 1
 strip = true
+
+# Local testing only (`cargo build --profile fast`): same optimization level as
+# release, but parallel codegen and incremental builds. Release artifacts keep
+# the `release` profile above.
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = false

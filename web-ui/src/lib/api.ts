@@ -69,6 +69,8 @@ export type PlateListing = {
 export const api = {
   health: () => getJson<{ ok: boolean; version: string }>("/api/health"),
   document: () => getJson<{ revision: string; document: Doc }>("/api/document"),
+  migrate: (document: Doc, target: number) =>
+    postJson<{ document: Doc; from_version: number; to_version: number }>("/api/migrate", { document, target }),
   undo: () => postJson<unknown>("/api/undo", {}),
   redo: () => postJson<unknown>("/api/redo", {}),
   async renderPng(doc: Doc, page: string | undefined, maxEdge: number): Promise<Blob> {

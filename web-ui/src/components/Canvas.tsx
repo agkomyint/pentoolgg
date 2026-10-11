@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minus, Plus } from "lucide-react";
 import { api } from "@/lib/api";
+import { dragLayers } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -86,6 +87,12 @@ export function Canvas() {
   const scroller = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const token = useRef(0);
+  // While an object is dragged, the page is shown as two server-rendered
+  // layers (backdrop without the object, object alone) so the object follows
+  // the pointer instantly. `rest` keeps the final offset until the real render lands.
+  const [sprite, setSprite] = useState<{ backdrop: string; object: string; id: string } | null>(null);
+  const [rest, setRest] = useState<Point | null>(null);
+  const spriteToken = useRef(0);
   const spaceDown = useRef(false);
 
   const page = pageOf(doc, pageId);
@@ -105,6 +112,34 @@ export function Canvas() {
     return () => ro.disconnect();
   }, []);
 
+  const clearSprite = useCallback(() => {
+    spriteToken.current += 1;
+    setRest(null);
+    setSprite((old) => {
+      if (old) {
+        URL.revokeObjectURL(old.backdrop);
+        URL.revokeObjectURL(old.object);
+      }
+      return null;
+    });
+  }, []);
+
+  const startSprite = useCallback(
+    (id: string) => {
+      if (!doc) return;
+      const mine = ++spriteToken.current;
+      const parts = dragLayers(doc, pageId, id);
+      const edge = 2048;
+      void Promise.all([api.renderPng(parts.backdrop, pageId, edge), api.renderPng(parts.sprite, pageId, edge)])
+        .then(([backdrop, object]) => {
+          if (mine !== spriteToken.current) return;
+          setSprite({ backdrop: URL.createObjectURL(backdrop), object: URL.createObjectURL(object), id });
+        })
+        .catch(() => undefined);
+    },
+    [doc, pageId],
+  );
+
   // Rust render, debounced so a drag-heavy session does not queue renders.
   useEffect(() => {
     const shown = preview ?? doc;
@@ -120,6 +155,7 @@ export function Canvas() {
             if (old) URL.revokeObjectURL(old);
             return URL.createObjectURL(blob);
           });
+          if (!drag.current) clearSprite();
         })
         .catch((error: unknown) => {
           if (mine === token.current) notify(error instanceof Error ? error.message : "Preview failed.", true);
@@ -127,7 +163,7 @@ export function Canvas() {
         .finally(() => {
           if (mine === token.current) setLoading(false);
         });
-    }, preview ? 40 : 120);
+    }, preview ? 40 : 30);
     return () => window.clearTimeout(timer);
   }, [doc, preview, pageId, view.kind, notify]);
 
@@ -175,11 +211,16 @@ export function Canvas() {
       const handle = target.dataset.handle as Handle | undefined;
       if (handle && found && selectedBox) {
         drag.current = { mode: "resize", start: p, id: found.node.id, handle, box: selectedBox };
+        clearSprite();
         return;
       }
       const hit = hitTest(page, p.x, p.y);
       s.select(hit ? hit.node.id : null);
-      if (hit) drag.current = { mode: "move", start: p, id: hit.node.id };
+      if (hit) {
+        drag.current = { mode: "move", start: p, id: hit.node.id };
+        clearSprite();
+        startSprite(hit.node.id);
+      }
       return;
     }
     if (tool === "text") {
@@ -263,7 +304,12 @@ export function Canvas() {
       const dx = p.x - d.start.x;
       const dy = p.y - d.start.y;
       setLive(null);
-      if (Math.hypot(dx, dy) * scale >= 2) commitMove(d.id, dx, dy);
+      if (Math.hypot(dx, dy) * scale >= 2) {
+        setRest({ x: dx, y: dy });
+        commitMove(d.id, dx, dy);
+      } else {
+        clearSprite();
+      }
     } else if (d.mode === "resize") {
       const m = live;
       setLive(null);
@@ -431,9 +477,20 @@ export function Canvas() {
           ) : (
             <div className="relative shrink-0 shadow-lg" style={{ width: W, height: H, background: "#fff" }}>
               {src ? (
-                <img src={src} alt="Page preview" className="absolute inset-0 block h-full w-full" draggable={false} />
+                <img src={sprite ? sprite.backdrop : src} alt="Page preview" className="absolute inset-0 block h-full w-full" draggable={false} />
               ) : (
                 <p className="absolute inset-0 grid place-items-center text-muted-foreground">{loading ? "Rendering..." : "No preview yet."}</p>
+              )}
+              {sprite && (
+                <img
+                  src={sprite.object}
+                  alt=""
+                  className="pointer-events-none absolute inset-0 block h-full w-full"
+                  style={{
+                    transform: `translate(${((live ? live[4] : (rest?.x ?? 0)) * scale).toFixed(2)}px, ${((live ? live[5] : (rest?.y ?? 0)) * scale).toFixed(2)}px)`,
+                  }}
+                  draggable={false}
+                />
               )}
               <svg
                 ref={svg}
@@ -445,6 +502,7 @@ export function Canvas() {
                 onPointerUp={onPointerUp}
                 onPointerCancel={() => {
                   drag.current = null;
+                  clearSprite();
                   setLive(null);
                   setGhost(null);
                 }}

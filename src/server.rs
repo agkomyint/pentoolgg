@@ -1,5 +1,5 @@
 use crate::{document::Document, image, render};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use axum::{
     body::Body,
     extract::{DefaultBodyLimit, State},
@@ -40,6 +40,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/studio", get(|| async { Html(STUDIO) }))
         .route("/api/raster", post(raster_command))
         .route("/api/image/bake", post(image_bake))
+        .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
         .route("/api/color/preflight", get(color_preflight))
         .route("/api/color/plates", get(color_plates))
@@ -887,6 +888,51 @@ fn plan_image_add(
     Ok(serde_json::to_value(added)?)
 }
 
+#[derive(serde::Deserialize)]
+struct MigrateRequest {
+    document: serde_json::Value,
+    target: u64,
+}
+
+/// Upgrades an in-memory document to a newer format version with the same
+/// migrations as `pentool migrate`; nothing is written to disk.
+async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let from = body
+            .document
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .context("[invalid-input] the document has no version")?;
+        if !(4..=crate::color::VERSION).contains(&body.target) {
+            bail!(
+                "[invalid-input] migration target must be between 4 and {}",
+                crate::color::VERSION
+            );
+        }
+        if body.target <= from {
+            bail!(
+                "[invalid-input] the document is already format v{from}; choose a newer target than v{from}"
+            );
+        }
+        let migrated = match body.target {
+            8 => crate::color::catalog::migrate(body.document)?,
+            7 => crate::photo::catalog::migrate(body.document)?,
+            6 => crate::composite::migrate(body.document)?,
+            5 => crate::scene::migrate_to_v5(body.document)?,
+            _ => crate::scene::migrate_to_v4(body.document)?,
+        };
+        Ok(serde_json::json!({
+            "document": migrated,
+            "from_version": from,
+            "to_version": body.target,
+        }))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 async fn image_add(State(state): State<Shared>, Json(mut body): Json<AddImageRequest>) -> Response {
     if let Some(mut raw) = body.document.take() {
         body.revision = revision(&raw);
@@ -1406,7 +1452,7 @@ async fn render_png(
                 return Err(anyhow::Error::msg(error));
             }
         }
-        render::to_png(&doc, 1.0)
+        render::to_png_cached(&doc, 1.0).map(|(bytes, _)| bytes)
     })();
     match result {
         Ok(bytes) => binary(bytes, "image/png", "artwork.png"),
