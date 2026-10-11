@@ -14,10 +14,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
             binary: pentool
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            archive: tar.gz
-            binary: pentool
           - os: macos-15
             target: aarch64-apple-darwin
             archive: tar.gz

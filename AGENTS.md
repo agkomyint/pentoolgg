@@ -16,7 +16,8 @@ Protect these product properties in every change:
 - readable, editable, versioned `.pen` JSON;
 - deterministic behavior and stable object identifiers;
 - atomic, recoverable document mutations;
-- cross-platform behavior on Linux, Windows, Intel macOS, and Apple Silicon;
+- cross-platform behavior on Linux, Windows, and Apple Silicon macOS (Intel
+  macOS is no longer built or tested as of the release after v0.12.0);
 - bounded work and compact machine-readable output for large documents;
 - backward compatibility unless an explicit migration says otherwise.
 
@@ -227,7 +228,8 @@ Do not commit generated binaries or local history. Do not rewrite or delete user
 work to obtain a clean tree.
 
 CI must pass formatting, Clippy with warnings denied, and all locked tests on Linux,
-Windows, and macOS. Release tags trigger four artifact builds and create a draft
+Windows, and macOS. Release tags trigger three artifact builds (Linux x64, Windows x64, Apple
+Silicon macOS) and create a draft
 GitHub release. Before tagging:
 
 1. choose a new semantic version; never move or reuse a published tag;
