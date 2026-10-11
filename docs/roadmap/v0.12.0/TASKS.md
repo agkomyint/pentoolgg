@@ -363,10 +363,14 @@ remain at the shared ICC, catalog, role, package and performance foundations.
   inputs, transform vectors, plates, fonts, rollback, and all release targets.
   In progress: `docs/performance.md` records a same-machine optimized comparison
   of the shared blend kernel with identical output hashes and unchanged binary
-  size. Float scene and plate performance, hosted cross-platform evidence and
-  qualification against the 30,000,000-byte release gate (raised from
-  24,000,000 on 2026-10-10) remain open; the current local Windows build is
-  24,247,808 bytes after the shared fill loop.
+  size. Float scene and plate performance and reference-RIP evidence remain open.
+  Hosted CI run 38122650721 on `c4500ca` passed the test matrix on Ubuntu, Windows,
+  Intel macOS and Apple Silicon macOS plus the policy, web, fuzz-smoke and
+  binary-size jobs; the hosted Linux release build is 19,898,976 bytes against the
+  30,000,000-byte gate (raised from 24,000,000 on 2026-10-10). The same run on the
+  preceding commit caught a package staging-directory race that is now fixed with a
+  regression test. The per-target release artifacts have not been built or
+  size-checked, so the gate is proven only for the Linux CI build.
   `tests/v0120_hostile_print.rs` covers oversized pages refused before render,
   truncated/corrupted PDF structures, and hostile recipes and package manifests
   (traversal, absolute, backslash, oversized), plus truncated and byte-flipped
