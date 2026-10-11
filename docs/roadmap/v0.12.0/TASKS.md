@@ -371,8 +371,10 @@ remain at the shared ICC, catalog, role, package and performance foundations.
   preceding commit caught a package staging-directory race that is now fixed with a
   regression test. The CI `binary-size` job now builds the release binary and
   applies the 30,000,000-byte gate on Ubuntu, Intel macOS, Apple Silicon macOS and
-  Windows; per-target sizes are not recorded until that run completes, and the
-  packaged release archives still have not been built.
+  Windows. Hosted run 38124875427 on `87ad041` passed all four with release binaries of
+  15,905,920 (Apple Silicon macOS), 19,092,352 (Intel macOS), 19,921,824 (Linux) and
+  25,197,568 bytes (Windows) against the 30,000,000-byte gate; the packaged release
+  archives still have not been built.
   `tests/v0120_hostile_print.rs` covers oversized pages refused before render,
   truncated/corrupted PDF structures, and hostile recipes and package manifests
   (traversal, absolute, backslash, oversized), plus truncated and byte-flipped
