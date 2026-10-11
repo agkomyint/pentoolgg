@@ -30,6 +30,9 @@ pub fn apply(
         Operation::List => Ok(raw.get("styles").cloned().unwrap_or_else(|| json!({}))),
         Operation::Set => {
             let name = required(name, "style name")?;
+            if name.trim().is_empty() {
+                bail!("style name cannot be empty")
+            }
             let kind = required(token_type, "--type")?;
             if !(matches!(
                 kind,
@@ -43,7 +46,15 @@ pub fn apply(
                 bail!("unsupported style type: {kind}")
             }
             let value = required(value, "--value")?;
-            raw["styles"][name] = json!({"type":kind,"value":parse_value(value)});
+            let parsed = parse_value(value);
+            if kind == "color" {
+                if let Some(color) = parsed.as_str() {
+                    if !crate::scene::is_valid_color(color) {
+                        bail!("style color value {color:?} is not a color; use none, #RGB, #RGBA, #RRGGBB or #RRGGBBAA")
+                    }
+                }
+            }
+            raw["styles"][name] = json!({"type":kind,"value":parsed});
             validate_aliases(&raw["styles"])?;
             Ok(json!({"style":name,"type":kind,"value":parse_value(value)}))
         }
@@ -54,6 +65,9 @@ pub fn apply(
         Operation::Rename => {
             let name = required(name, "style name")?;
             let to = required(to, "--to")?;
+            if to.trim().is_empty() {
+                bail!("style name cannot be empty")
+            }
             let styles = raw["styles"]
                 .as_object_mut()
                 .context("styles must be an object")?;
