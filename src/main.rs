@@ -2392,6 +2392,8 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_constraints::ConstraintAction,
     },
+    /// Run a declarative, atomic multi-pass paint plan (v0.13.0 agent painting).
+    PaintPlan(Box<pentool::paint_plan::PlanArgs>),
     /// Compact, paginated visual analysis of a bounded scope (v0.13.0 agent painting).
     PaintAnalyze(Box<pentool::paint_analysis::AnalyzeArgs>),
     /// Bounded region previews and structural comparison (v0.13.0 agent painting).
@@ -8222,6 +8224,7 @@ async fn run() -> Result<()> {
         Command::PaintConstraints { input, action } => {
             pentool::paint_constraints::run(&input, action)
         }
+        Command::PaintPlan(args) => pentool::paint_plan::run(*args, selected_page),
         Command::PaintAnalyze(args) => pentool::paint_analysis::run(*args, selected_page),
         Command::PaintReview { input, action } => {
             pentool::paint_review::run(&input, selected_page, action)

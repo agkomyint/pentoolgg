@@ -262,6 +262,30 @@ forbidden: failure, cancellation, stale revision, changed dependency, lock, or
 budget exhaustion leaves the original document byte-for-byte unchanged and creates
 no history entry, tiles, cache authority, or orphan resources.
 
+## Paint plans (engine 1 implementation)
+
+`pentool paint-plan DOC PLAN.json [--dry-run] [--if-revision REV]
+[--expect-plan-hash sha256:...]` runs an ordered, atomic plan. Authoring form:
+`{"schema":1,"engine":1,"id","page"?,"description"?,"limits"?,"passes":[{"id",
+"target","action","args"?,"description"?}]}`. `action` is one of `stroke`,
+`stroke-path`, `stroke-field`, `fill`, `clear`, `clone`, `heal` and `args` is exactly
+what the matching `raster` command / `POST /api/raster` accepts (brush, preset,
+palette colour, constraints, field, seed, curves), so a pass can do nothing the
+single command could not. Unknown fields, duplicate pass ids, other actions, an
+unsupported schema or engine and more than 64 passes fail with `[invalid-request]`,
+`[unsupported-capability]` or `[limit-exceeded]` before any pixel work.
+
+`limits` may only lower the hard limits (`max_passes` 64, `max_dabs` 4,000,000,
+`max_changed_pixels` 67,108,864, `max_tiles` 4,096). Every pass runs on a clone;
+its report lists `strokes`, `dabs`, `changed_pixels`, `changed_tiles`,
+`changed_bounds` (`[x0,y0,x1,y1)` or `null`), the layer `tile_map_sha256` and the
+action result. Exceeding a limit, any failing pass, a stale `--if-revision` or a
+mismatched `--expect-plan-hash` (`[plan-changed]`) leaves the document
+byte-for-byte unchanged. Success is one transaction and one history entry, so one
+`undo` removes the whole plan. The dry-run result equals the commit result;
+`plan_hash` covers the canonical plan and `commit.if_revision` is the revision a
+commit must pass back.
+
 ## Material paint modes (engine 1 implementation)
 
 A brush may carry a `media` object (`brush.media`, valid with blend `normal`

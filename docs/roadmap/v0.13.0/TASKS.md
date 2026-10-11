@@ -107,7 +107,7 @@ commits as one history entry and must be reviewable before execution.
   never an unbounded pixel dump. Analysis is read-only, paginated, deterministic,
   and tagged with renderer, algorithm, page, scope, revision, and source hashes.
 
-- [ ] **9. Add declarative multi-pass paint plans.** Define a data-only plan with
+- [x] **9. Add declarative multi-pass paint plans.** Define a data-only plan with
   ordered passes such as underpainting, local color, form shadows, highlights,
   edge work, texture, and cleanup. Each pass names its scope, palette, brush,
   constraints, path or field source, blend, opacity, seed, and budget. Planning

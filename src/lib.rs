@@ -32,6 +32,7 @@ pub mod paint_constraints;
 pub mod paint_fields;
 pub mod paint_media;
 pub mod paint_palette;
+pub mod paint_plan;
 pub mod paint_review;
 pub mod pdf;
 pub mod photo;

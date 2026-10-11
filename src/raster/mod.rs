@@ -1565,6 +1565,20 @@ pub fn add(
     Ok(json!({"id":id,"width":width,"height":height,"tile_size":TILE,"tiles":0}))
 }
 
+/// The current pixels of raster layer `id`, for diffing before and after an edit.
+pub fn layer_surface(raw: &Value, id: &str) -> Result<Surface> {
+    let node = all_rasters(raw)
+        .into_iter()
+        .find(|node| node["id"] == id)
+        .ok_or_else(|| {
+            bad(
+                "not-found",
+                format!("raster layer {id} was not found; list nodes with `pentool tree DOCUMENT --kind raster`"),
+            )
+        })?;
+    Surface::load(raw, node)
+}
+
 pub fn info(raw: &Value, page: Option<&str>, id: &str) -> Result<Value> {
     let mut copy = raw.clone();
     let node = locate(&mut copy, page, id)?.clone();

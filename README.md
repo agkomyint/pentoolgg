@@ -824,6 +824,17 @@ direction, tonal zones, preserve-luminance/chroma, pickup/deposit and wetness
 lifetime. Procedural grain is canvas-fixed and integer-only, so strokes replay
 exactly. See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Paint plans
+
+```sh
+pentool paint-plan portrait.pen plan.json --dry-run
+pentool paint-plan portrait.pen plan.json --if-revision REV --expect-plan-hash sha256:...
+```
+
+Runs an ordered list of stroke/field/fill passes as one atomic transaction with
+per-pass changed bounds, dab and tile counts, enforced limits and one undo entry.
+See [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Visual analysis
 
 ```sh
