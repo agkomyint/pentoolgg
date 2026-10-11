@@ -2392,6 +2392,16 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_constraints::ConstraintAction,
     },
+    /// Reusable composition and form guides (v0.13.0 agent painting).
+    PaintGuide {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::paint_guide::GuideAction,
+    },
     /// Run a declarative, atomic multi-pass paint plan (v0.13.0 agent painting).
     PaintPlan(Box<pentool::paint_plan::PlanArgs>),
     /// Compact, paginated visual analysis of a bounded scope (v0.13.0 agent painting).
@@ -8224,6 +8234,12 @@ async fn run() -> Result<()> {
         Command::PaintConstraints { input, action } => {
             pentool::paint_constraints::run(&input, action)
         }
+        Command::PaintGuide {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::paint_guide::run(&input, dry_run, if_revision.as_deref(), action),
         Command::PaintPlan(args) => pentool::paint_plan::run(*args, selected_page),
         Command::PaintAnalyze(args) => pentool::paint_analysis::run(*args, selected_page),
         Command::PaintReview { input, action } => {

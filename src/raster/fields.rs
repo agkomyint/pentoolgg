@@ -824,7 +824,7 @@ fn mask_for(raw: &Value, id: &str, constraints: &Value) -> Result<Option<constra
 
 /// Plan only: the generated strokes' count, samples and bounds.
 pub fn plan_report(raw: &Value, id: &str, request: &FieldRequest) -> Result<Value> {
-    let spec = FieldSpec::parse(&request.field)?;
+    let spec = FieldSpec::parse(&crate::paint_guide::resolve_field(raw, &request.field)?)?;
     let params = Params::parse(&request.params)?;
     let field = build(raw, id, &spec)?;
     let mask = mask_for(raw, id, &request.constraints)?;
@@ -860,7 +860,7 @@ pub fn paint_field(
     id: &str,
     request: FieldRequest,
 ) -> Result<Value> {
-    let spec = FieldSpec::parse(&request.field)?;
+    let spec = FieldSpec::parse(&crate::paint_guide::resolve_field(raw, &request.field)?)?;
     let params = Params::parse(&request.params)?;
     let field = build(raw, id, &spec)?;
     let mask = mask_for(raw, id, &request.constraints)?;

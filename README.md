@@ -824,6 +824,18 @@ direction, tonal zones, preserve-luminance/chroma, pickup/deposit and wetness
 lifetime. Procedural grain is canvas-fixed and integer-only, so strokes replay
 exactly. See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Composition guides
+
+```sh
+pentool paint-guide portrait.pen add thirds --kind thirds --params '{"rect":[0,0,1200,1600]}'
+pentool paint-guide portrait.pen snap thirds --point 410,805 --radius 20
+```
+
+Thirds, golden ratio, symmetry, horizon, perspective, vanishing point, gesture,
+proportion, value-map and custom guides are stored as document data, never export
+unless you ask for an SVG proof, and never change pixels. Stroke fields can use a
+guide with `{"method":"guide","guide":"ID"}`.
+
 ### Paint plans
 
 ```sh

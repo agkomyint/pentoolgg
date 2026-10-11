@@ -262,6 +262,28 @@ forbidden: failure, cancellation, stale revision, changed dependency, lock, or
 budget exhaustion leaves the original document byte-for-byte unchanged and creates
 no history entry, tiles, cache authority, or orphan resources.
 
+## Composition and form guides (engine 1 implementation)
+
+Guides are ordinary document data in the top-level `paint_guides` map, keyed by a
+stable id (`[A-Za-z0-9][A-Za-z0-9._-]*`, at most 256 per document). A record holds
+`kind`, validated `params`, `label`, `visible`, `proof`, `algorithm` and
+`guide_hash` (sha256 over algorithm, kind and params). Kinds: `thirds`, `golden`,
+`symmetry`, `horizon`, `perspective`, `vanishing-point`, `gesture`, `proportion`
+(`figure-8`, `figure-7.5`, `face`), `value-map` and `custom`. Unknown parameters
+fail with `[invalid-request]`. Geometry (lines `[x1,y1,x2,y2]` and anchor points,
+rounded to 1/1000) is derived deterministically and never stored.
+
+`pentool paint-guide DOC add|set|remove|list|show|snap|proof` manages them. Adding,
+editing, hiding and removing a guide changes guide data only and never a raster
+tile (`pixels_changed: false`). Guides do not render or export. `proof --out F.svg
+--width W --height H` writes the guides marked `--proof` (or `--ids`, visible ones
+unless `--include-hidden`) as an SVG overlay. `snap --id --point x,y --radius R`
+returns the nearest anchor point, else the nearest point on a line, within the
+radius. A stroke field may reference a guide with
+`{"method":"guide","guide":"ID","cell"?,"rect"?}`: vanishing-point and perspective
+guides become a `vanishing` field, horizon an `angle 0` field, gesture and custom
+guides a `vectors` field from their segments.
+
 ## Paint plans (engine 1 implementation)
 
 `pentool paint-plan DOC PLAN.json [--dry-run] [--if-revision REV]

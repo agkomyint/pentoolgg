@@ -115,7 +115,7 @@ commits as one history entry and must be reviewable before execution.
   changed bounds, and makes no mutation. Commit is atomic, revision-guarded, and
   one undo entry. Partial success is forbidden.
 
-- [ ] **10. Add reusable composition and form guides.** Provide non-exporting
+- [x] **10. Add reusable composition and form guides.** Provide non-exporting
   thirds, golden-ratio, symmetry, horizon, perspective, vanishing-point, gesture,
   face/body proportion, value-map, and custom guide primitives. Snapping and
   stroke fields may reference guides by stable ID. Guides remain ordinary safe

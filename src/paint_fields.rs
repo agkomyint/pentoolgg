@@ -65,7 +65,7 @@ pub fn run(input: &PathBuf, action: FieldAction) -> Result<()> {
         seed,
         max_vectors,
     } = action;
-    let field_json = read_json(&field)?;
+    let field_json = crate::paint_guide::resolve_field(&raw, &read_json(&field)?)?;
     let built = fields::build(&raw, &id, &FieldSpec::parse(&field_json)?)?;
     let mut samples = Vec::new();
     let mut defined = 0_u64;
