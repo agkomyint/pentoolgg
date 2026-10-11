@@ -157,8 +157,8 @@ pub fn diagnose(before: &Surface, after: &Surface, options: &Options) -> Value {
                     let l = luma(pb);
                     lo = lo.min(l);
                     hi = hi.max(l);
-                    for i in 0..3 {
-                        sums.1[i] += u64::from(pb[i]);
+                    for (sum, v) in sums.1.iter_mut().zip(pb) {
+                        *sum += u64::from(v);
                     }
                     *bins
                         .entry(
@@ -171,18 +171,17 @@ pub fn diagnose(before: &Surface, after: &Surface, options: &Options) -> Value {
                         drift += nearest(&options.palette, pb);
                     }
                 }
-                for i in 0..3 {
-                    sums.0[i] += u64::from(pa[i]);
+                for (sum, v) in sums.0.iter_mut().zip(pa) {
+                    *sum += u64::from(v);
                 }
             }
         }
     }
     let painted: u64 = bins.values().sum();
     let mean = |s: &[u64; 3], n: u64| -> Value {
-        if n == 0 {
-            Value::Null
-        } else {
-            json!([s[0] / n, s[1] / n, s[2] / n])
+        match n {
+            0 => Value::Null,
+            n => json!([s[0] / n, s[1] / n, s[2] / n]),
         }
     };
     let mut top: Vec<(u16, u64)> = bins.into_iter().collect();

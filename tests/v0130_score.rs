@@ -94,7 +94,13 @@ fn plan_passes_report_measured_diagnostics_and_warnings() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|w| format!("{}:{}", w["basis"].as_str().unwrap(), w["code"].as_str().unwrap()))
+            .map(|w| {
+                format!(
+                    "{}:{}",
+                    w["basis"].as_str().unwrap(),
+                    w["code"].as_str().unwrap()
+                )
+            })
             .collect()
     };
     assert!(codes(&passes[0]).contains(&"measured:protected-region-violation".to_string()));
@@ -111,8 +117,16 @@ fn scoring_compares_revisions_without_changing_anything() {
     let after = ws.0.join("after.pen").to_string_lossy().into_owned();
     fs::copy(&before, &after).unwrap();
     ok(&[
-        "raster", &after, "stroke-path", "paint", "--path", "M2 32 L62 32", "--brush",
-        r#"{"size":20,"hardness":1,"spacing":0.1}"#, "--color", "#204080",
+        "raster",
+        &after,
+        "stroke-path",
+        "paint",
+        "--path",
+        "M2 32 L62 32",
+        "--brush",
+        r#"{"size":20,"hardness":1,"spacing":0.1}"#,
+        "--color",
+        "#204080",
     ]);
     let (b, a) = (fs::read(&before).unwrap(), fs::read(&after).unwrap());
     let goal = ws.file(
@@ -126,21 +140,46 @@ fn scoring_compares_revisions_without_changing_anything() {
     );
     let goal_arg = format!("@{goal}");
     let r = ok(&[
-        "paint-score", &before, &after, "--layer", "paint", "--goal", &goal_arg,
+        "paint-score",
+        &before,
+        &after,
+        "--layer",
+        "paint",
+        "--goal",
+        &goal_arg,
     ]);
     assert_eq!(r["applied"], false);
     assert_eq!(r["assessment"]["basis"], "heuristic");
     assert_eq!(r["assessment"]["trend"], "improved", "{r}");
     assert!(r["after"]["score"].as_f64().unwrap() > r["before"]["score"].as_f64().unwrap());
-    assert!(r["diagnostics"]["measured"]["changed_pixels"].as_u64().unwrap() > 0);
+    assert!(
+        r["diagnostics"]["measured"]["changed_pixels"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     // Reverse direction is worse; scoring is deterministic and read-only.
     let back = ok(&[
-        "paint-score", &after, &before, "--layer", "paint", "--goal", &goal_arg,
+        "paint-score",
+        &after,
+        &before,
+        "--layer",
+        "paint",
+        "--goal",
+        &goal_arg,
     ]);
     assert_eq!(back["assessment"]["trend"], "worse");
     assert_eq!(
         r,
-        ok(&["paint-score", &before, &after, "--layer", "paint", "--goal", &goal_arg])
+        ok(&[
+            "paint-score",
+            &before,
+            &after,
+            "--layer",
+            "paint",
+            "--goal",
+            &goal_arg
+        ])
     );
     assert_eq!(b, fs::read(&before).unwrap());
     assert_eq!(a, fs::read(&after).unwrap());
@@ -157,7 +196,15 @@ fn bad_goals_and_regions_are_rejected() {
         (r#"{"coverage":[0,1],"zzz":1}"#, "unknown goal field"),
         (r#"{"coverage":[0,1],"region":[0,0,0,4]}"#, "region"),
     ] {
-        let err = fails(&["paint-score", &doc, &doc, "--layer", "paint", "--goal", goal]);
+        let err = fails(&[
+            "paint-score",
+            &doc,
+            &doc,
+            "--layer",
+            "paint",
+            "--goal",
+            goal,
+        ]);
         assert!(err.contains(needle), "{goal}: {err}");
     }
     let plan = json!({
