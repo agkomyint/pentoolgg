@@ -1,7 +1,7 @@
 use pentool::{
     agent, ai, asset, benchmark, composite, diff, document, editing, fonts, geometry, history,
-    image, import, instance, layout, library, package, page, pdf, raster, render, replace, scene,
-    server, style, text, transaction,
+    image, import, instance, json, layout, library, package, page, pdf, raster, render, replace,
+    scene, server, style, text, transaction,
 };
 
 use anyhow::{bail, Context, Result};
@@ -6458,6 +6458,7 @@ async fn run() -> Result<()> {
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let operation_bytes = fs::read(&operations)
                 .with_context(|| format!("could not read {}", operations.display()))?;
+            json::reject_duplicate_keys(&operation_bytes)?;
             let changes = if scene::is_scene_document(&raw) {
                 let mut actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
                 if upsert {
