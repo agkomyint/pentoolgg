@@ -73,6 +73,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/color/preflight", get(color_preflight))
         .route("/api/color/plates", get(color_plates))
         .route("/api/color/proof", get(color_proof))
+        .route("/api/color/gamut", get(color_gamut))
         .route(
             "/photo-panel.js",
             get(|| async { asset(PHOTO_PANEL_JS, "text/javascript; charset=utf-8") }),
@@ -633,6 +634,18 @@ async fn color_proof(
     let result = (|| -> Result<Response> {
         let (file, raw) = shared_document(&state)?;
         let proof = crate::color::proofimage::render(&raw, &file, q.page.as_deref())?;
+        Ok(png_response(proof.png))
+    })();
+    result.unwrap_or_else(problem)
+}
+
+async fn color_gamut(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<PlateQuery>,
+) -> Response {
+    let result = (|| -> Result<Response> {
+        let (file, raw) = shared_document(&state)?;
+        let proof = crate::color::proofimage::gamut(&raw, &file, q.page.as_deref())?;
         Ok(png_response(proof.png))
     })();
     result.unwrap_or_else(problem)

@@ -65,7 +65,7 @@ fn print_panel_and_preflight_endpoint_are_served_read_only() {
     assert!(studio.contains("Pentool Studio") && studio.contains("id=\"root\""));
     assert!(page.contains("id=\"printPlates\"") && page.contains("id=\"printProof\""));
     assert!(page.contains("id=\"printGuides\"") && page.contains("id=\"printGuidesToggle\""));
-    assert!(page.contains("id=\"printOverprintToggle\""));
+    assert!(page.contains("id=\"printOverprintToggle\"") && page.contains("id=\"printGamut\""));
     assert!(client
         .get(format!("{base}/print-panel.js"))
         .send()
@@ -178,6 +178,12 @@ fn plate_and_proof_views_are_served_read_only() {
         .unwrap();
     assert_eq!(proof.headers()["content-type"], "image/png");
     assert_eq!(&proof.bytes().unwrap()[1..4], b"PNG");
+    let gamut = client
+        .get(format!("{base}/api/color/gamut"))
+        .send()
+        .unwrap();
+    assert_eq!(gamut.headers()["content-type"], "image/png");
+    assert_eq!(&gamut.bytes().unwrap()[1..4], b"PNG");
     assert_eq!(std::fs::read(&document).unwrap(), bytes);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -24,7 +24,23 @@ pub struct Proof {
     pub report: Value,
 }
 
+/// A pixel is flagged when the artwork's display color and its soft proof differ
+/// by more than this many 8-bit steps in any channel.
+pub const GAMUT_CHANNEL_THRESHOLD: i32 = 12;
+
 pub fn render(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Proof> {
+    render_with(raw, document, page_id, false)
+}
+
+/// Gamut warning image: the page in muted display colors with every pixel the
+/// output profile cannot reproduce shown in red. It compares the artwork as
+/// authored (display role) with its soft proof, so it is a numeric round-trip
+/// check, not a contract proof.
+pub fn gamut(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Proof> {
+    render_with(raw, document, page_id, true)
+}
+
+fn render_with(raw: &Value, document: &Path, page_id: Option<&str>, gamut: bool) -> Result<Proof> {
     ensure!(
         raw["version"] == super::VERSION,
         "[unsupported-version] proof images require a version {} document",
@@ -114,6 +130,39 @@ pub fn render(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Pro
         };
         rgb.extend_from_slice(&value);
     }
+    let mut flagged = 0u64;
+    if gamut {
+        let source = output::render(
+            raw,
+            document,
+            page_id,
+            scale,
+            &output::Options {
+                destination: Some(display.destination.clone()),
+                intent: Some(display.intent),
+                depth: Depth::Eight,
+                alpha: Alpha::FlattenOnWhite,
+            },
+        )?;
+        ensure!(
+            source.channels == 3 && source.samples.len() == rgb.len(),
+            "[internal] gamut source is not an RGB raster of the proof size"
+        );
+        for (shown, authored) in rgb.chunks_exact_mut(3).zip(source.samples.chunks_exact(3)) {
+            let outside = shown
+                .iter()
+                .zip(authored)
+                .any(|(a, b)| (i32::from(*a) - i32::from(*b)).abs() > GAMUT_CHANNEL_THRESHOLD);
+            if outside {
+                flagged += 1;
+                shown.copy_from_slice(&[220, 38, 38]);
+            } else {
+                for (channel, value) in shown.iter_mut().zip(authored) {
+                    *channel = (u32::from(*value) * 2 / 5 + 153) as u8;
+                }
+            }
+        }
+    }
     let buffer = image::RgbImage::from_raw(image.width, image.height, rgb)
         .context("[internal] proof buffer size")?;
     let mut png = Vec::new();
@@ -135,6 +184,9 @@ pub fn render(raw: &Value, document: &Path, page_id: Option<&str>) -> Result<Pro
             "intent":intent,
             "display":display.destination.json(),
             "method":"output-profile-device-to-pcs-to-display",
+            "gamut_warning_pixels": gamut.then_some(flagged),
+            "gamut_warning_method": gamut.then_some("display-vs-soft-proof-round-trip-difference"),
+            "gamut_warning_channel_threshold": gamut.then_some(GAMUT_CHANNEL_THRESHOLD),
             "paper_simulation":false,
             "spectral_paper_or_ink_model":false,
         }),

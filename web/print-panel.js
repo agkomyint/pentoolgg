@@ -131,4 +131,5 @@
   };
   $('printPlate').onchange = event => showImage(`/api/color/plates?plate=${encodeURIComponent(event.target.value)}`, `Plate ${event.target.value}`);
   $('printProof').onclick = () => showImage('/api/color/proof', 'Soft proof');
+  $('printGamut').onclick = () => showImage('/api/color/gamut', 'Gamut warning (red = outside the output profile)');
 })();

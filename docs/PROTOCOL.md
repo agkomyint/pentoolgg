@@ -54,7 +54,7 @@ preflight on the shared document and returns the report plus the resolved
 `GET /api/color/plates` (`page`, `scale`) separates the shared document and lists each
 plate's average and maximum coverage; adding `plate=ID` returns that plate as a
 grayscale PNG (white is no ink). `GET /api/color/proof` (`page`) returns the
-output-profile soft-proof image as a PNG. Both are bounded (about one million
+output-profile soft-proof image as a PNG; `GET /api/color/gamut` (`page`) returns the same page with pixels the output profile cannot reproduce shown in red. All are bounded (about one million
 pixels), read only, and answer 400 with `error` for unsupported pages or roles.
 
 `POST /api/render/svg` and `/api/render/png` accept optional `page`, `max_edge`
