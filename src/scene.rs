@@ -1155,6 +1155,14 @@ pub enum TextAnchor {
     Center,
     Bottom,
 }
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextVerticalAlign {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum TextOverflow {
     Visible,

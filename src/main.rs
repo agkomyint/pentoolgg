@@ -395,10 +395,10 @@ struct TextBoxArgs {
     weight: u16,
     #[arg(long, default_value = "#111827")]
     fill: String,
-    #[arg(long, default_value = "left")]
-    align: String,
-    #[arg(long, default_value = "top")]
-    vertical_align: String,
+    #[arg(long, value_enum, default_value = "left")]
+    align: document::TextAlign,
+    #[arg(long, value_enum, default_value = "top")]
+    vertical_align: scene::TextVerticalAlign,
     #[arg(long, default_value_t = 1.2)]
     line_height: f64,
     #[arg(long, value_enum, default_value = "baseline")]
@@ -8691,8 +8691,8 @@ async fn run() -> Result<()> {
                     size: args.size,
                     weight: args.weight,
                     fill: args.fill,
-                    align: args.align,
-                    vertical_align: args.vertical_align,
+                    align: format!("{:?}", args.align).to_lowercase(),
+                    vertical_align: format!("{:?}", args.vertical_align).to_lowercase(),
                     line_height: args.line_height,
                     anchor: args.anchor,
                     overflow: args.overflow,
