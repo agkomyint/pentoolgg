@@ -143,7 +143,7 @@ commits as one history entry and must be reviewable before execution.
   replace it with authoritative Rust output. Agent-produced plans appear as normal
   editable operations, not an autonomous chat surface.
 
-- [ ] **14. Harden conformance, performance, and failure recovery.** Add golden
+- [x] **14. Harden conformance, performance, and failure recovery.** Add golden
   tests for path compilation, palette extraction, fields, constrained tile edges,
   materials, plans, metrics, and exports on Linux, Windows, Intel macOS, and Apple
   Silicon. Fuzz schemas, curves, fields, plans, references, palettes, and hostile

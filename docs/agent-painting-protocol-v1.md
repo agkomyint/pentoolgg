@@ -363,6 +363,21 @@ and returns `{result, dry_run, document?}`; `result` is byte-identical to
 `{before, after, layer, goal}` and returns the `paint-score` report. Both are
 stateless and read nothing from disk.
 
+## Conformance and recovery (engine 1 implementation)
+
+`tests/v0130_conformance.rs` pins the canonical plan hash and tile-map digest of a
+reference plan; both come from the integer pixel path, so they must match on every
+platform and a mismatch is a conformance break, never a golden to refresh. The
+same file mutates plans with 300 deterministic junk values (null, extremes, NUL
+strings, wrong types), feeds hostile layer dimensions, and asserts that a rejected
+plan, a locked layer or a missing target leaves the document unchanged. Plan
+limits are hard ceilings: more than 64 passes or a raised `limits` value is
+rejected. A long session (64-pass plans repeated) keeps one tile and embeds no
+per-stroke history; the full 10,048-stroke run is
+`cargo test --release --test v0130_conformance -- --ignored`. Dry run, stale
+revisions and plan-hash guards are covered in `tests/v0130_plan.rs`, and crash
+safety comes from the shared atomic transaction path.
+
 ## Material paint modes (engine 1 implementation)
 
 A brush may carry a `media` object (`brush.media`, valid with blend `normal`
