@@ -127,6 +127,38 @@ Override rules reuse the v0.6.24 component-override contract:
   `primary: true` is set on the parent frame; a primary frame is the auto-flow
   target (section 4.4) and is overridable like any item.
 
+#### Implementation contract (v0.14.0 task 2)
+
+Shipped in `src/spreads.rs`; the commands are `pentool spread`, `parent`,
+`section`, `override` and the extended `page` command. These choices refine the
+sketch above and are the normative behavior:
+
+- A parent stores its items in `layers` (page-shaped layers with `nodes`). A
+  node may carry `parent_page` naming one of the parent's `pages` entries; it
+  then shows only on the page at that position in the spread (clamped to the
+  last parent page). Without `parent_page` it shows on every page.
+- A derived parent replaces a base item with the same `id` in place; items of
+  the base chain render first (root ancestor to leaf).
+- Overrides live in `page.layout.overrides` as `{item, properties}`; `id` and
+  `kind` cannot be overridden. `page.layout.detached` lists detached item IDs.
+  An override or detach for an item that no longer exists is reported as
+  `orphaned_overrides` by `parent resolve` and is never dropped.
+- Margins resolve page, then parent chain (leaf to root), then
+  `layout.page_defaults`. Facing margins are `[top, inner, bottom, outer]`;
+  `parent resolve` reports absolute `[top, left, bottom, right]` plus the side
+  (`left`, `right` or `single`). In a facing spread the first of two pages is
+  `left`; a lone page (a cover) is `right`.
+- Parent removal is refused while a page uses it or a derived parent is based
+  on it (`in-use`), naming the users.
+- `migrate --target 9` adds `layout` with one non-facing single-page spread per
+  page and changes nothing else (pages are byte-identical). `--target 8` back
+  is refused, naming the first construct, unless the layout is trivial
+  (non-facing single-page spreads and no parents, sections, stories); then the
+  layout object is removed.
+- Version 9 documents may hold 5000 pages; earlier versions keep 1000. New
+  documents and the Studio upgrade prompt stay on version 8 until the layout
+  engine ships.
+
 ### 3.4 Sections and numbering
 
 ```json
@@ -158,6 +190,20 @@ Each result reports `pages_added`, `pages_removed`, `stories_reflowed`,
 frames re-threads their neighbors (previous → next) and reports it; a story's
 last frame is never deleted without an explicit `--drop-story`. Document-wide
 reflow is bounded (section 12); exceeding the bound aborts with no mutation.
+
+Task 2 behavior (stories arrive with task 3, so those counters stay `0`):
+
+| Operation | Spreads | Sections and numbering |
+| --- | --- | --- |
+| `page add --after/--before` (`--count`, `--parent`) | each new page is its own non-facing spread; later spreads keep their IDs | later pages are renumbered; `pages_renumbered` counts existing pages whose label changed |
+| `page duplicate` | copy follows the source as a single-page spread; overrides and detaches are copied | as add |
+| `page move` | the page leaves its spread and forms its own | a section start moves with its page ID, then sections are re-ordered by page order |
+| `page remove` | page leaves its spread (an emptied spread disappears) | a section starting there moves to the next page, or is dropped when the next page starts one; reported in `sections_changed` |
+| `spread merge/split/facing/arrange` | explicit regrouping; pages are never reordered | recomputed |
+
+Every result carries `reflow: {pages_added, pages_removed, pages_renumbered,
+sections_changed, stories_reflowed, frames_overset}`; a failed or `--dry-run`
+operation never writes.
 
 ## 4. Stories, frames and threads
 

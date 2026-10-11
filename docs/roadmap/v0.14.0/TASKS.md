@@ -126,6 +126,15 @@ and documentation.
   Migrating up is lossless. Existing pages become single-page spreads with no
   parent.
 
+  *Progress:* spreads, parents (based-on chains, per-item per-property override,
+  detach, orphan reporting), sections with numbering and page labels, and page
+  insert/move/duplicate/delete with a reflow report are implemented in
+  `src/spreads.rs` and covered by `tests/v0140_spreads.rs`; contract in
+  `docs/layout-v1.md` section 3.3/3.6. Still open before this box is ticked:
+  per-page size/margin editing commands, the `current`/`next`/`previous` text
+  markers (need stories from task 3), Studio surfaces, and cross-platform CI
+  evidence.
+
 - [ ] **3. Add stories, threaded frames and frame options.**
   - Stories are separate from frames: thread, unthread, insert into a thread,
     and auto-flow text, which adds pages from a parent in a bounded way.

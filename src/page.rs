@@ -11,12 +11,26 @@ pub enum PageAction {
         id: String,
         #[arg(long)]
         name: Option<String>,
-        #[arg(long, default_value_t = 1200)]
-        width: u32,
-        #[arg(long, default_value_t = 800)]
-        height: u32,
-        #[arg(long, default_value = "#ffffff")]
-        background: String,
+        /// Canvas width (default 1200, or the neighbouring page in version 9).
+        #[arg(long)]
+        width: Option<u32>,
+        /// Canvas height (default 800, or the neighbouring page in version 9).
+        #[arg(long)]
+        height: Option<u32>,
+        #[arg(long)]
+        background: Option<String>,
+        /// Insert after this page (version 9 only).
+        #[arg(long)]
+        after: Option<String>,
+        /// Insert before this page (version 9 only).
+        #[arg(long)]
+        before: Option<String>,
+        /// Assign this parent page set (version 9 only).
+        #[arg(long)]
+        parent: Option<String>,
+        /// Add this many pages, IDs suffixed -2, -3, ... (version 9 only).
+        #[arg(long)]
+        count: Option<usize>,
     },
     /// Rename a page.
     Rename { id: String, name: String },
@@ -38,7 +52,16 @@ pub fn apply(doc: &mut Document, action: PageAction) -> Result<serde_json::Value
             width,
             height,
             background,
+            after,
+            before,
+            parent,
+            count,
         } => {
+            if after.is_some() || before.is_some() || parent.is_some() || count.is_some() {
+                bail!("[unsupported-capability] --after, --before, --parent and --count need a version 9 document; run `pentool migrate --target 9` first");
+            }
+            let (width, height) = (width.unwrap_or(1200), height.unwrap_or(800));
+            let background = background.unwrap_or_else(|| "#ffffff".into());
             ensure_new_id(&pages, &id)?;
             pages.push(Page {
                 id: id.clone(),
@@ -150,9 +173,13 @@ mod tests {
             PageAction::Add {
                 id: "mobile".into(),
                 name: Some("Mobile".into()),
-                width: 390,
-                height: 844,
-                background: "#101010".into(),
+                width: Some(390),
+                height: Some(844),
+                background: Some("#101010".into()),
+                after: None,
+                before: None,
+                parent: None,
+                count: None,
             },
         )
         .unwrap();

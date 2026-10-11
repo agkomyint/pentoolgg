@@ -17,6 +17,7 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::composite::VERSION)
             | Some(crate::photo::VERSION)
             | Some(crate::color::VERSION)
+            | Some(crate::spreads::VERSION)
     )
 }
 
@@ -2208,6 +2209,9 @@ pub fn apply_text(
 /// `page add|rename|duplicate|move|remove` for scene (v4/v5) documents.
 pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Value> {
     use crate::page::PageAction;
+    if crate::spreads::is_v9(raw) {
+        return crate::spreads::apply_page(raw, action);
+    }
     validate(raw)?;
     if let PageAction::List = action {
         return Ok(page_list(raw));
@@ -2242,8 +2246,17 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             width,
             height,
             background,
+            after,
+            before,
+            parent,
+            count,
         } => {
             ensure_new(pages, &id)?;
+            if after.is_some() || before.is_some() || parent.is_some() || count.is_some() {
+                bail!("[unsupported-capability] --after, --before, --parent and --count need a version 9 document; run `pentool migrate --target 9` first")
+            }
+            let (width, height) = (width.unwrap_or(1200), height.unwrap_or(800));
+            let background = background.unwrap_or_else(|| "#ffffff".into());
             pages.push(json!({
                 "id": id,
                 "name": name.unwrap_or_else(|| id.clone()),
@@ -2314,9 +2327,10 @@ pub fn page_list(raw: &Value) -> Value {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let v9 = crate::spreads::is_v9(raw);
     json!({"pages": pages.iter().enumerate().map(|(index, page)| {
         let layers = page.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
-        json!({
+        let mut row = json!({
             "id": page.get("id"),
             "name": page.get("name"),
             "index": index,
@@ -2324,7 +2338,15 @@ pub fn page_list(raw: &Value) -> Value {
             "height": page["canvas"]["height"],
             "layers": layers.len(),
             "objects": layers.iter().map(|l| count(l.get("nodes").and_then(Value::as_array).map_or(&[][..], |n| n.as_slice()))).sum::<usize>()
-        })
+        });
+        if v9 {
+            if let (Some(row), Some(id)) = (row.as_object_mut(), page.get("id").and_then(Value::as_str)) {
+                if let Some(info) = crate::spreads::page_info(raw, id).as_object() {
+                    row.extend(info.clone());
+                }
+            }
+        }
+        row
     }).collect::<Vec<_>>()})
 }
 
@@ -2703,6 +2725,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 | crate::composite::VERSION
                 | crate::photo::VERSION
                 | crate::color::VERSION
+                | crate::spreads::VERSION
         )
     {
         bail!("not a supported Pentool scene document")
@@ -2735,8 +2758,13 @@ pub fn validate(raw: &Value) -> Result<()> {
         .get("pages")
         .and_then(Value::as_array)
         .context("v4 document has no pages")?;
-    if pages.is_empty() || pages.len() > 1000 {
-        bail!("document must contain 1–1000 pages")
+    let max_pages = if version >= crate::spreads::VERSION {
+        crate::spreads::MAX_PAGES
+    } else {
+        1000
+    };
+    if pages.is_empty() || pages.len() > max_pages {
+        bail!("document must contain 1–{max_pages} pages")
     }
     let mut page_ids = HashSet::new();
     for page in pages {
@@ -2793,6 +2821,21 @@ pub fn validate(raw: &Value) -> Result<()> {
     if compositing {
         crate::composite::validate(raw)?;
     }
+    crate::spreads::validate(raw, version)?;
+    if version >= crate::spreads::VERSION {
+        for (parent, layer) in crate::spreads::parent_layers(raw) {
+            let mut ids = HashSet::new();
+            for node in layer
+                .get("nodes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)
+                    .with_context(|| format!("parent {parent} item is invalid"))?;
+            }
+        }
+    }
     // Photo catalog structure and photo node references (v7), or their absence.
     crate::photo::catalog::validate(raw, version)?;
     crate::color::catalog::validate(raw, version)?;
@@ -2802,7 +2845,10 @@ pub fn validate(raw: &Value) -> Result<()> {
 
 pub fn flatten_to_v3(raw: &Value) -> Result<Value> {
     validate(raw)?;
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::spreads::VERSION) {
+        return flatten_to_v3(&crate::spreads::downgrade(raw.clone())?);
+    }
+    if crate::color::has_v8(raw) {
         return flatten_to_v3(&crate::color::catalog::downgrade(raw.clone())?);
     }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {

@@ -2071,6 +2071,46 @@ enum Command {
         #[command(subcommand)]
         action: page::PageAction,
     },
+    /// Version 9 spreads: facing pages, merge, split, arrange.
+    Spread {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::SpreadAction,
+    },
+    /// Version 9 parent pages: create, items, assignment, resolution.
+    Parent {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::ParentAction,
+    },
+    /// Version 9 sections: numbering styles, prefixes, start numbers.
+    Section {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::SectionAction,
+    },
+    /// Version 9 parent-item overrides and detach, per page.
+    Override {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::OverrideAction,
+    },
     /// Raster-paint layers: sparse tiles, deterministic brush strokes, checkpoints.
     Raster {
         input: PathBuf,
@@ -6528,6 +6568,30 @@ async fn run() -> Result<()> {
                 )
             }
         }
+        Command::Spread {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_spread(&input, dry_run, if_revision.as_deref(), action),
+        Command::Parent {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_parent(&input, dry_run, if_revision.as_deref(), action),
+        Command::Section {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_section(&input, dry_run, if_revision.as_deref(), action),
+        Command::Override {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_override(&input, dry_run, if_revision.as_deref(), action),
         Command::Raster {
             input,
             dry_run,
@@ -7495,10 +7559,10 @@ async fn run() -> Result<()> {
             if selected_page.is_some() {
                 bail!("[invalid-input] format migration affects the entire document; --page is not applicable");
             }
-            if !matches!(target, 3..=8) {
-                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, or 8")
+            if !matches!(target, 3..=9) {
+                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, 8, or 9")
             }
-            let before = if u64::from(target) == pentool::color::VERSION {
+            let before = if u64::from(target) >= pentool::color::VERSION {
                 pentool::resource::read_bounded(
                     &input,
                     pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
@@ -7510,6 +7574,7 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
+                9 => pentool::spreads::migrate(raw)?,
                 8 => pentool::color::catalog::migrate(raw)?,
                 7 => pentool::photo::catalog::migrate(raw)?,
                 6 => composite::migrate(raw)?,
@@ -8975,7 +9040,7 @@ fn write_image_export(
 }
 
 fn ensure_v8_production(raw: &serde_json::Value) -> Result<()> {
-    if raw["version"] != pentool::color::VERSION {
+    if !pentool::color::has_v8(raw) {
         bail!(
             "[unsupported-version] production geometry requires a version {} document; run `migrate` first",
             pentool::color::VERSION

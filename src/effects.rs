@@ -150,7 +150,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             crate::fill::validate_color(
                 p.get("color").unwrap_or(&json!("#000000")),
                 raw.get("styles").unwrap_or(&Value::Null),
-                raw["version"] == crate::color::VERSION,
+                crate::color::has_v8(raw),
             )?;
         }
     }

@@ -52,9 +52,7 @@ fn format_number(style: &str, n: u32) -> String {
         "upper-roman" => roman(n).to_uppercase(),
         "lower-alpha" | "upper-alpha" => {
             let letter = (b'a' + ((n - 1) % 26) as u8) as char;
-            let text: String = std::iter::repeat(letter)
-                .take(((n - 1) / 26 + 1) as usize)
-                .collect();
+            let text: String = std::iter::repeat_n(letter, ((n - 1) / 26 + 1) as usize).collect();
             if style == "upper-alpha" {
                 text.to_uppercase()
             } else {
