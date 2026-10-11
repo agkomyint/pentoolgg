@@ -1613,7 +1613,7 @@ mod tests {
         .unwrap();
         let document = &value["document"];
         assert!(document["version"].as_u64().unwrap() >= 6);
-        let info = crate::raster::info(&mut document.clone(), None, "paint-1").unwrap();
+        let info = crate::raster::info(document, None, "paint-1").unwrap();
         assert_eq!(info["width"], 64);
         assert_eq!(info["height"], 48);
     }
