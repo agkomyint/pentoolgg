@@ -2295,6 +2295,7 @@ enum Command {
     /// Create and attach reusable masks; apply explicitly bakes a content node.
     Mask(Box<MaskArgs>),
     /// Attach or detach explicit consecutive clipping-stack membership.
+    /// The clipped node must be a following sibling of its base.
     Clip(Box<ClipArgs>),
     /// Edit an immutable-source affine/projective transform stack.
     Transform(Box<TransformArgs>),
