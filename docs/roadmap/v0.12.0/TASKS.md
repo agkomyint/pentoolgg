@@ -3,6 +3,11 @@
 Extend v0.11.0's RGB foundation into professional ICC, CMYK/Lab, proofing, spot
 color, separation, preflight, and standards-conforming print delivery in Rust.
 
+**Release note (2026-10-11):** v0.12.0 shipped as the print-production foundation.
+The owner scoped the release down; unfinished items are listed in
+[`DEFERRED.md`](DEFERRED.md) and are not claimed by the release. See
+[`docs/release-v0.12.0.md`](../../release-v0.12.0.md).
+
 Implementation has started from the v0.11.1 codebase. The developing contract is
 [`professional-color-v1.md`](../../professional-color-v1.md). It describes the
 target behavior, not released capabilities. Items remain unchecked until their
@@ -10,8 +15,7 @@ implementation and required evidence are complete.
 
 ## Implementation handoff (2026-10-10)
 
-The package remains `0.11.1`; this roadmap does not authorize a version bump,
-tag, or release. Top-level milestone boxes stay open until their complete ship
+The package was `0.11.1` during implementation. The owner approved the scoped-down 0.12.0 release on 2026-10-11 (see the release note above). Top-level milestone boxes stay open until their complete ship
 criteria and cross-platform evidence exist. The smaller boxes below record code
 that is implemented and locally exercised so another contributor can resume at
 the first unchecked boundary.
