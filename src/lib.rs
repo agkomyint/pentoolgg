@@ -28,6 +28,7 @@ pub mod mask;
 pub mod package;
 pub mod page;
 pub mod paint_analysis;
+pub mod paint_bundle;
 pub mod paint_constraints;
 pub mod paint_fields;
 pub mod paint_guide;

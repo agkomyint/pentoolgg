@@ -446,6 +446,11 @@ pub fn execute(raw: &mut Value, page: Option<&str>, plan_json: &Value) -> Result
     }))
 }
 
+/// Validate a plan document without running it and return its canonical hash.
+pub fn validate_template(plan_json: &Value) -> Result<String> {
+    Plan::parse(plan_json)?.hash()
+}
+
 pub fn run(args: PlanArgs, selected_page: Option<&str>) -> Result<()> {
     let PlanArgs {
         input,

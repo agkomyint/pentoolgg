@@ -1566,6 +1566,14 @@ pub fn add(
 }
 
 /// The current pixels of raster layer `id`, for diffing before and after an edit.
+/// Ids of the page-level raster layers, in document order.
+pub fn raster_ids(raw: &Value) -> Vec<String> {
+    all_rasters(raw)
+        .into_iter()
+        .filter_map(|node| node["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
 pub fn layer_surface(raw: &Value, id: &str) -> Result<Surface> {
     let node = all_rasters(raw)
         .into_iter()

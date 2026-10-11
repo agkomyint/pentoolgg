@@ -858,6 +858,25 @@ Runs an ordered list of stroke/field/fill passes as one atomic transaction with
 per-pass changed bounds, dab and tile counts, enforced limits and one undo entry.
 See [the protocol](docs/agent-painting-protocol-v1.md).
 
+### Paint bundles, templates and diff
+
+```sh
+pentool paint-bundle src.pen export --out look.json --brushes round --plans wash
+pentool paint-bundle dst.pen --dry-run import look.json
+pentool paint-bundle dst.pen plan-add wash plan.json
+pentool paint-bundle dst.pen plan-show wash --out wash-plan.json
+pentool paint-diff before.pen after.pen
+pentool paint-diff --plans old-plan.json new-plan.json
+```
+
+A bundle carries brushes, palettes, guides and plan templates as data only. Import
+validates every entry, never edits scene nodes (so component instances, masks and
+overrides are untouched), and commits through the shared transaction (undo,
+`--dry-run`, `--if-revision`). `paint-diff` summarizes added, removed and changed
+paint data, per-pass and limit changes between plans, and changed tiles per layer.
+Package manifests list each asset's paint data with hashes. See
+[the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Visual analysis
 
 ```sh

@@ -328,6 +328,32 @@ byte-for-byte unchanged. Success is one transaction and one history entry, so on
 `plan_hash` covers the canonical plan and `commit.if_revision` is the revision a
 commit must pass back.
 
+## Bundles, templates, diff and packages (engine 1 implementation)
+
+`pentool paint-bundle DOCUMENT` exports and imports a data-only bundle:
+`{"schema":1,"kind":"pentool-paint-bundle","engine":1,"brushes","palettes",
+"guides","plans","bundle_hash"}`. Unknown top-level fields are rejected
+(`[invalid-request]`), a mismatched `bundle_hash` is `[conflict]`, and a newer
+engine is `[unsupported-capability]`. Every entry passes the validator its own
+command uses (`Brush::parse`, palette colors and hash, guide geometry and
+`guide_hash`, plan parse and canonical hash). Existing names conflict unless
+`--replace`; a failed import writes nothing. Import edits only the document-level
+maps `brush_presets`, `paint_palettes`, `paint_guides` and `paint_plans`; scene
+nodes, component instances, masks and overrides are never touched, and commits use
+the shared transaction (history, `--dry-run`, `--if-revision`).
+
+Plan templates are stored in `paint_plans` as `{plan, plan_hash}`; `plan-show`
+writes one for `paint-plan`, which remains the only way to run it.
+
+`pentool paint-diff BEFORE AFTER` is read-only. For documents it reports
+added/removed/changed names per section, per-template plan diffs, and per raster
+layer the changed tile count, tile bounds and tile-map hashes. With `--plans` it
+compares two plans: added, removed, changed (by field) and reordered passes plus
+limit and header changes.
+
+Package manifests carry a `paint_assets` table (`section`, `id`, `hash`) per asset;
+`pack`, `collect` and `verify` recompute it and reject a mismatch.
+
 ## Material paint modes (engine 1 implementation)
 
 A brush may carry a `media` object (`brush.media`, valid with blend `normal`

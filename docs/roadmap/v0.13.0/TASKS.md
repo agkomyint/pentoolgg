@@ -129,7 +129,7 @@ commits as one history entry and must be reviewable before execution.
   suggestions. Provide before/after scoring for a declared goal without silently
   accepting, reverting, or continuing a plan.
 
-- [ ] **12. Integrate presets, batch, history, diff, packages, and components.**
+- [x] **12. Integrate presets, batch, history, diff, packages, and components.**
   Portable presets can bundle brushes, palettes, fields, guides, and plan templates
   but no code. Structural diff summarizes plan/pass/constraint changes and tile
   impact. Packages collect all accepted assets and hashes. Component instances and

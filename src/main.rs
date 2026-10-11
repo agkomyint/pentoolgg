@@ -2404,6 +2404,18 @@ enum Command {
         #[command(subcommand)]
         action: pentool::paint_guide::GuideAction,
     },
+    /// Portable paint bundles and stored plan templates (v0.13.0 agent painting).
+    PaintBundle {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::paint_bundle::BundleAction,
+    },
+    /// Structural diff of paint data and layer pixels between two documents or plans.
+    PaintDiff(Box<pentool::paint_bundle::DiffArgs>),
     /// Run a declarative, atomic multi-pass paint plan (v0.13.0 agent painting).
     PaintPlan(Box<pentool::paint_plan::PlanArgs>),
     /// Compact, paginated visual analysis of a bounded scope (v0.13.0 agent painting).
@@ -8243,6 +8255,13 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::paint_guide::run(&input, dry_run, if_revision.as_deref(), action),
+        Command::PaintBundle {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::paint_bundle::run(&input, dry_run, if_revision.as_deref(), action),
+        Command::PaintDiff(args) => pentool::paint_bundle::run_diff(*args),
         Command::PaintPlan(args) => pentool::paint_plan::run(*args, selected_page),
         Command::PaintAnalyze(args) => pentool::paint_analysis::run(*args, selected_page),
         Command::PaintReview { input, action } => {

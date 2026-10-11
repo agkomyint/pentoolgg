@@ -376,7 +376,7 @@ fn ray_fan(g: &mut Geometry, origin: [f64; 2], r: [f64; 4], rays: u64) {
     }
 }
 
-fn guide_hash(kind: &str, params: &Value) -> Result<String> {
+pub(crate) fn guide_hash(kind: &str, params: &Value) -> Result<String> {
     Ok(crate::resource::sha256(&serde_json::to_vec(&json!({
         "algorithm": ALGORITHM,
         "kind": kind,
@@ -384,7 +384,7 @@ fn guide_hash(kind: &str, params: &Value) -> Result<String> {
     }))?))
 }
 
-fn valid_id(text: &str) -> bool {
+pub(crate) fn valid_id(text: &str) -> bool {
     !text.is_empty()
         && text.len() <= 128
         && text
