@@ -20,8 +20,7 @@ export function Planned({ workspace }: { workspace: Workspace }) {
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">
-          This area works through the CLI and the classic editor at <a className="underline" href="/">/</a>. Studio
-          controls are still to be built:
+          This area works through the CLI and the agent API. Studio controls are still to be built:
         </p>
       )}
       {workspace.planned.length > 0 && (

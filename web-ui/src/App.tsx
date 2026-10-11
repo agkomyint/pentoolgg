@@ -14,6 +14,10 @@ import { DesignPanel } from "@/workspaces/DesignPanel";
 import { CompositePanel, ImagePanel, SceneConsole } from "@/workspaces/OperationsPanel";
 import { PrintPanel } from "@/workspaces/PrintPanel";
 import { Planned } from "@/workspaces/Planned";
+import { PhotoPanel } from "@/workspaces/PhotoPanel";
+import { PhotoStage } from "@/workspaces/PhotoStage";
+import { RasterPanel } from "@/workspaces/RasterPanel";
+import { RasterStage } from "@/workspaces/RasterStage";
 import { ImageAdjust } from "@/workspaces/ImageAdjust";
 import { findNode, pageOf } from "@/lib/model";
 import { exportAs } from "@/lib/actions";
@@ -36,6 +40,10 @@ function WorkspaceBody() {
       return <CompositePanel />;
     case "print":
       return <PrintPanel />;
+    case "photo":
+      return <PhotoPanel />;
+    case "paint":
+      return <RasterPanel />;
     default:
       return <Planned workspace={workspace} />;
   }
@@ -48,7 +56,7 @@ function Inspector() {
   const selectedImage = picked?.kind === "image" && doc && doc.version >= 5 ? picked : null;
   return (
     <aside className="flex w-80 shrink-0 flex-col border-l bg-card">
-      <Tabs defaultValue="properties" className="flex min-h-0 flex-1 flex-col" key={selectedId ? "sel" : "none"}>
+      <Tabs defaultValue={workspaceId === "photo" || workspaceId === "paint" ? "workspace" : "properties"} className="flex min-h-0 flex-1 flex-col" key={`${workspaceId}-${selectedId ? "sel" : "none"}`}>
         <TabsList>
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="outline">Layers</TabsTrigger>
@@ -206,11 +214,19 @@ export default function App() {
             </div>
           )}
           <div className="flex min-h-0 flex-1">
-            <Toolbar />
-            <main className="flex min-w-0 flex-1 flex-col">
-              <Canvas />
-              <ToolHint />
-            </main>
+            {s.workspaceId === "photo" ? (
+              <PhotoStage />
+            ) : s.workspaceId === "paint" ? (
+              <RasterStage />
+            ) : (
+              <>
+                <Toolbar />
+                <main className="flex min-w-0 flex-1 flex-col">
+                  <Canvas />
+                  <ToolHint />
+                </main>
+              </>
+            )}
             <Inspector />
           </div>
         </div>
