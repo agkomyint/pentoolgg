@@ -4,6 +4,35 @@
   const status = $('printStatus');
   const list = $('printIssues');
   let busy = false;
+  let production = null;
+  const guides = $('printGuides');
+  const NS = 'http://www.w3.org/2000/svg';
+  // Draw the resolved media, bleed, trim and safe rectangles over the plate or
+  // proof image. Coordinates are canvas units, so the image (rendered at the
+  // canvas aspect ratio) and the guides scale together.
+  function drawGuides() {
+    const on = $('printGuidesToggle').checked && production && production.canvas && !$('printImage').hidden;
+    guides.hidden = !on;
+    guides.replaceChildren();
+    if (!on) return;
+    guides.setAttribute('viewBox', `0 0 ${production.canvas.width} ${production.canvas.height}`);
+    guides.setAttribute('preserveAspectRatio', 'none');
+    for (const [name, color, dash] of [['media', '#888888', ''], ['bleed', '#e11d48', '4 3'], ['trim', '#2563eb', ''], ['safe', '#16a34a', '2 2']]) {
+      const box = production[name];
+      if (!box) continue;
+      const rect = document.createElementNS(NS, 'rect');
+      rect.setAttribute('x', box.x); rect.setAttribute('y', box.y);
+      rect.setAttribute('width', box.width); rect.setAttribute('height', box.height);
+      rect.setAttribute('fill', 'none'); rect.setAttribute('stroke', color);
+      rect.setAttribute('vector-effect', 'non-scaling-stroke'); rect.setAttribute('stroke-width', '1.5');
+      if (dash) rect.setAttribute('stroke-dasharray', dash);
+      const title = document.createElementNS(NS, 'title');
+      title.textContent = `${name}: ${box.width} x ${box.height} at ${box.x}, ${box.y}`;
+      rect.append(title);
+      guides.append(rect);
+    }
+  }
+  $('printGuidesToggle').onchange = drawGuides;
   function show(report) {
     list.replaceChildren(...report.issues.map(issue => {
       const item = document.createElement('li');
@@ -21,6 +50,8 @@
     status.textContent = report.ok
       ? `Ready: ${report.warnings} warning(s), no blocking errors.`
       : `Blocked: ${report.errors} error(s) and ${report.warnings} warning(s).`;
+    production = report.production || null;
+    drawGuides();
     $('printGeometry').textContent = report.production
       ? JSON.stringify(report.production, null, 2)
       : 'This page declares no production geometry.';
@@ -53,9 +84,11 @@
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(blob);
       image.src = objectUrl; image.hidden = false;
+      drawGuides();
       view.textContent = `${label} (numeric view, not a contract proof).`;
     } catch (error) {
       image.hidden = true;
+      drawGuides();
       view.textContent = error.message || 'Could not render the view.';
     }
   }

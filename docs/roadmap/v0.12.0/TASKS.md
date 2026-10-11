@@ -354,8 +354,10 @@ remain at the shared ICC, catalog, role, package and performance foundations.
   geometry (tests/v0120_print_ui.rs). Read-only `GET /api/color/plates` (per-plate
   coverage, or one plate as a grayscale PNG) and `GET /api/color/proof` back a
   plate viewer and soft-proof button in the panel, and clicking a preflight
-  issue dispatches `pentool-select-node` to select the object. Overprint and
-  gamut overlays, bleed overlays on the canvas, proof setup and export controls
+  issue dispatches `pentool-select-node` to select the object. The plate/proof view overlays
+  the resolved media, bleed, trim and safe rectangles as SVG guides with a toggle
+  (served markup asserted in the UI test). Overprint and gamut overlays, canvas
+  (not just plate-view) bleed overlays, proof setup and export controls
   remain open; there is no browser-level interaction test (endpoints and the
   served panel are tested; the DOM wiring is only syntax-checked).
 - [ ] **16. Prove security, conformance, and performance** across hostile ICC/PDF
