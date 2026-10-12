@@ -56,3 +56,41 @@ map keyed by the ink's stable ID. Unknown fields are rejected.
   appear in `tree` or `search`; use `mask list` and `mask attach`.
 - `raster add` keeps the document's version (v6 or later); only older documents are
   migrated to v6.
+
+## Plate separation
+
+- Raster layers (`kind: "raster"`) separate like embedded images: the rendered
+  sRGB pixels convert to the CMYK destination through the verified profile.
+- Still refused, with the node named: gradients with native interpolation or
+  partial-alpha stops, patterns, effects, masks, clips, opacity below 1, blend
+  modes other than `normal`, and spot paints with partial alpha.
+
+## ICC profiles
+
+- Executed: matrix/TRC, `mft2` (LUT16) and `mAB`/`mBA` in version 4 profiles.
+- Refused with `[unsupported-capability]`: `mft1` (8-bit LUT) with an XYZ PCS,
+  `mAB`/`mBA` inside a version 2 profile, parametric curve function types the
+  executor does not implement, profiles with more than four device channels, and
+  named-color or abstract classes. Pentool never substitutes a TRC for a LUT.
+
+## Media parameters
+
+`media.*` accepts only the parameters its kind reads; for example `media.edge`
+applies to `palette-knife` and `watercolor-wash` but not `impasto`. The refusal
+names the parameters that kind does read.
+
+## Text shaping
+
+Burmese (Myanmar) clustering and reordering are not implemented; text in that
+script is laid out with the generic shaper and is not typographically correct.
+This belongs to the shaping milestone, not to a flag.
+
+## Long-running commands
+
+There is no progress stream or background job path yet; a long repeat run blocks
+until it finishes and honors cancellation. Prefer smaller batches.
+
+## Node geometry names
+
+Rounded rects and ellipses use `radius_x` and `radius_y` (not SVG's `rx`/`ry`).
+A missing value reports the expected key name.

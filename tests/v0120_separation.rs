@@ -707,3 +707,11 @@ fn photo_nodes_separate_like_images() {
     assert!(dir.join("plates/plate-01-M.png").is_file());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn raster_layers_separate_like_images() {
+    let mut raw = doc(vec![]);
+    pentool::raster::add(&mut raw, None, None, "paint", 0.0, 0.0, 8, 2).unwrap();
+    let result = separate(&raw).expect("raster layers are separable");
+    assert_eq!(result.objects, 1);
+}
