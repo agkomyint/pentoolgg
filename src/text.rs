@@ -217,6 +217,26 @@ pub fn validate_content(content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Enforce the typography ranges export requires (size 0.1–4096, weight
+/// 100–900, line height 0.1–10) at write time. Each range is checked only
+/// when a value is present.
+pub fn validate_typography(
+    size: Option<f64>,
+    weight: Option<f64>,
+    line_height: Option<f64>,
+) -> Result<()> {
+    if size.is_some_and(|v| !v.is_finite() || !(0.1..=4096.0).contains(&v)) {
+        bail!("font size must be finite and between 0.1 and 4096")
+    }
+    if weight.is_some_and(|v| !v.is_finite() || !(100.0..=900.0).contains(&v)) {
+        bail!("font weight must be finite and between 100 and 900")
+    }
+    if line_height.is_some_and(|v| !v.is_finite() || !(0.1..=10.0).contains(&v)) {
+        bail!("line height must be finite and between 0.1 and 10")
+    }
+    Ok(())
+}
+
 pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
     if matches!(
         action,
@@ -447,5 +467,17 @@ mod tests {
                 "unexpected error for {bad:?}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn validate_typography_enforces_export_ranges() {
+        validate_typography(Some(48.0), Some(400.0), Some(1.2)).unwrap();
+        validate_typography(None, None, None).unwrap();
+        let err = validate_typography(Some(48.0), Some(9999.0), Some(1.2)).unwrap_err();
+        assert!(err.to_string().contains("font weight"), "unexpected: {err}");
+        let err = validate_typography(Some(48.0), Some(400.0), Some(0.0)).unwrap_err();
+        assert!(err.to_string().contains("line height"), "unexpected: {err}");
+        let err = validate_typography(Some(99999.0), Some(400.0), Some(1.2)).unwrap_err();
+        assert!(err.to_string().contains("font size"), "unexpected: {err}");
     }
 }
