@@ -20,6 +20,7 @@ Nothing was pushed.
 | 6 Styles | `src/styles.rs`, `layout-style` | core done (see below) |
 | 7 Grids, guides, alignment | `src/grids.rs`, `layout-grid` | core done |
 | 8 Text wrap, anchored objects | `src/wrap.rs`, `layout-wrap` | core done; estimator based |
+| 9 Tables | `src/tables.rs`, `layout-table` | core done; estimator based |
 
 ## Open items inside started tasks
 

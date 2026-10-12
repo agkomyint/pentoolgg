@@ -55,6 +55,7 @@ pub mod stories;
 pub mod style;
 pub mod style_eval;
 pub mod styles;
+pub mod tables;
 pub mod text;
 pub mod transaction;
 pub mod transform;

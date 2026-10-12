@@ -175,6 +175,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
     crate::stories::validate(raw)?;
     crate::grids::validate(raw)?;
     crate::wrap::validate(raw)?;
+    crate::tables::validate(raw)?;
     Ok(())
 }
 

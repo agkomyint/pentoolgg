@@ -301,6 +301,22 @@ pub fn run_layout_wrap(
     finish(input, "layout-wrap", dry_run, revision, &raw, result)
 }
 
+pub fn run_layout_table(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    action: crate::tables::TableAction,
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let (result, read_only) = crate::tables::run(&mut raw, action)?;
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    spreads::validate(&raw, spreads::VERSION)?;
+    finish(input, "layout-table", dry_run, revision, &raw, result)
+}
+
 pub fn run_parent(
     input: &Path,
     dry_run: bool,
