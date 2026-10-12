@@ -367,7 +367,7 @@ fn walk<'a>(
                     out,
                 )?;
             }
-            "image" | "photo" => {
+            "image" | "photo" | "raster" => {
                 ensure!(
                     out.len() < MAX_OBJECTS,
                     "[limit-exceeded] separation supports at most {MAX_OBJECTS} painted slots"
@@ -430,7 +430,7 @@ fn walk<'a>(
                 }
             }
             kind => bail!(
-                "[unsupported-capability] node {} has kind {kind}; plate separation supports vector, text and plain group nodes",
+                "[unsupported-capability] node {} has kind {kind}; plate separation supports vector, text, image, photo, raster and plain group nodes",
                 name(node)
             ),
         }

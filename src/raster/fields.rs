@@ -316,7 +316,7 @@ pub fn build(raw: &Value, id: &str, spec: &FieldSpec) -> Result<Field> {
     {
         return Err(bad(
             "invalid-request",
-            format!("field rect {rect:?} exceeds the {lw}x{lh} layer"),
+            format!("field rect {rect:?} (x, y, width, height in layer pixels) exceeds the {lw}x{lh} layer; keep x+width <= {lw} and y+height <= {lh}, or omit the rect to cover the whole layer"),
         ));
     }
     let (cols, rows) = (rect[2].div_ceil(spec.cell), rect[3].div_ceil(spec.cell));

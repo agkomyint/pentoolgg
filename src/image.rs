@@ -1410,10 +1410,15 @@ fn integer(object: &Map<String, Value>, key: &str) -> Result<u64> {
 }
 
 fn finite(object: &Map<String, Value>, key: &str) -> Result<f64> {
-    let value = object
-        .get(key)
-        .and_then(Value::as_f64)
-        .with_context(|| format!("[malformed-resource] {key} must be a number"))?;
+    let value = object.get(key).and_then(Value::as_f64).with_context(|| {
+        let hint = match key {
+            "radius_x" | "radius_y" => {
+                "; ellipses and rounded rects use radius_x/radius_y, not rx/ry"
+            }
+            _ => "",
+        };
+        format!("[malformed-resource] {key} must be a number{hint}")
+    })?;
     if !value.is_finite() {
         bail!("[malformed-resource] {key} must be finite")
     }
