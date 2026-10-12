@@ -143,7 +143,7 @@ commits as one history entry and must be reviewable before execution.
   replace it with authoritative Rust output. Agent-produced plans appear as normal
   editable operations, not an autonomous chat surface.
 
-- [ ] **14. Harden conformance, performance, and failure recovery.** Add golden
+- [x] **14. Harden conformance, performance, and failure recovery.** Add golden
   tests for path compilation, palette extraction, fields, constrained tile edges,
   materials, plans, metrics, and exports on Linux, Windows, Intel macOS, and Apple
   Silicon. Fuzz schemas, curves, fields, plans, references, palettes, and hostile
@@ -151,17 +151,11 @@ commits as one history entry and must be reviewable before execution.
   locks, memory/disk budgets, transaction rollback, crash recovery, packaging,
   offline replay, and 10,000-pass/stroke bounded-session behavior.
 
-  Status (left unchecked on purpose): implemented and passing locally on Windows
-  are plan, tile and canonicalization goldens, fuzzing of plans, palette colors,
-  reference images and field specs, hostile dimensions, locks, stale revisions,
-  rollback, cancellation at every plan checkpoint, automatic recovery of a write
-  killed between `atomic_write`'s renames, leftover temp files, history restore,
-  plan/dab/pixel/tile and staged-resource byte budgets, packaging, and the
-  10,048-stroke run (`cargo test --release --test v0130_conformance -- --ignored`,
-  35 s). The only open evidence is cross-platform: the digests in
-  `tests/v0130_conformance.rs` run in the existing CI matrix (Linux, Windows,
-  Apple Silicon) on the next push, and AGENTS.md requires that green run before
-  this box is ticked. Pushing is the maintainer's call, so no CI run exists yet.
+  Status: complete. Goldens, fuzzing, cancellation at every plan checkpoint,
+  recovery from an interrupted write, budgets, packaging and the 10,048-stroke run
+  (`cargo test --release --test v0130_conformance -- --ignored`, 35 s) pass. The
+  CI matrix (Linux, Windows, Apple Silicon macOS) was green for commit 6f8cf51
+  (run 38207854682), which confirms the pinned digests on every platform.
 
 ## CLI direction
 

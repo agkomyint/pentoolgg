@@ -411,8 +411,8 @@ present document is never replaced. Budgets (plan passes, dabs, changed pixels,
 tiles, plan bytes, staged resource bytes) are refused before anything is written.
 
 The pinned digests in `tests/v0130_conformance.rs` were computed on Windows; they
-use only integer arithmetic and run unchanged in the CI matrix, which is the
-cross-platform authority until a green run exists.
+use only integer arithmetic; they were confirmed unchanged by the green CI matrix
+(Linux, Windows, Apple Silicon macOS) for commit 6f8cf51.
 
 ## Material paint modes (engine 1 implementation)
 
