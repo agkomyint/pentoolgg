@@ -9131,6 +9131,9 @@ async fn run() -> Result<()> {
             format,
             link_images,
         } => {
+            if all_pages && selected_page.is_some() {
+                anyhow::bail!("[invalid-input] --page cannot be combined with --all-pages")
+            }
             if !scale.is_finite() || !(0.1..=8.0).contains(&scale) {
                 anyhow::bail!("export scale must be finite and between 0.1 and 8")
             }
