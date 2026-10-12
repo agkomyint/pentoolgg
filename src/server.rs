@@ -118,7 +118,7 @@ async fn asset_search(
         let project = crate::library::project_index(&state.project_root);
         let user = crate::library::user_index().ok();
         let index = crate::library::merged_indexes(Some(&project), user.as_deref())?;
-        Ok(crate::library::search(
+        crate::library::search(
             &index,
             &crate::library::SearchOptions {
                 query: q.query.as_deref(),
@@ -129,7 +129,7 @@ async fn asset_search(
                 offset: q.offset.unwrap_or(0),
                 limit: q.limit.unwrap_or(50),
             },
-        ))
+        )
     })();
     match result {
         Ok(value) => Json(value).into_response(),
