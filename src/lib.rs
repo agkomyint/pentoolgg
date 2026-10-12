@@ -14,6 +14,7 @@ pub mod effects;
 pub mod fill;
 pub mod fonts;
 pub mod geometry;
+pub mod grids;
 pub mod history;
 pub mod image;
 pub mod imageops;

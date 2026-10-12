@@ -18,6 +18,7 @@ Nothing was pushed.
 | 4 Shaping and fonts | `src/shaping.rs`, `text shape` | core done |
 | 5 Paragraph composer | `src/compose.rs`, `text compose` | core done |
 | 6 Styles | `src/styles.rs`, `layout-style` | core done (see below) |
+| 7 Grids, guides, alignment | `src/grids.rs`, `layout-grid` | core done |
 
 ## Open items inside started tasks
 
@@ -29,11 +30,14 @@ Nothing was pushed.
   Open: composed-line evaluation of line styles in frames; `after-section` list
   restarts; IDML style import; shortcuts; style changes recompose exactly the
   affected stories via the usage index.
+- **Task 7:** `align_to_grid` is stored but composed lines are not yet snapped
+  to the baseline grid (needs composer wiring, same as task 5); alpha/subject
+  aware fitting; studio overlays and drag guides.
 - **Tasks 2-4:** see the Progress notes in `TASKS.md`.
 
 ## Not started
 
-7 grids/guides/alignment; 8 text wrap and anchored objects; 9 tables;
+8 text wrap and anchored objects; 9 tables;
 10 long-document features; 11 `.penbook` books; 12 data merge and adaptive
 layout; 13 IDML import; 14 IDML export; 15 publishing exports; 16 layout
 preflight; 17 editor layout experience; 18 conformance, performance, recovery.

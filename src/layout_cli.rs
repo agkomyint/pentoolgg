@@ -269,6 +269,22 @@ pub fn run_layout_style(
     finish(input, "layout-style", dry_run, revision, &raw, result)
 }
 
+pub fn run_layout_grid(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    action: crate::grids::GridAction,
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let (result, read_only) = crate::grids::run(&mut raw, action)?;
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    spreads::validate(&raw, spreads::VERSION)?;
+    finish(input, "layout-grid", dry_run, revision, &raw, result)
+}
+
 pub fn run_parent(
     input: &Path,
     dry_run: bool,

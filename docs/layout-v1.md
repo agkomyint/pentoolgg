@@ -620,6 +620,39 @@ script runs via `unicode-script` and subsetting via `subsetter`.
   planner operations producing ordinary node transforms and IDs; step-and-repeat
   count is bounded (≤ 1000 per operation).
 
+### 7.1 `layout-grid` (implemented, `src/grids.rs`)
+
+All actions need a version 9 document and run through the shared validators
+and transaction path (`--dry-run`, `--if-revision`).
+
+- `baseline-set/show/clear [--frame ID]`: `layout.baseline_grid` or a frame's
+  `baseline_grid` (object, or the string `off` to disable the document grid for
+  that frame). `baseline-snap Y [--frame] [--page]` is read only and rounds up
+  using integer milli-points, so results are identical on every platform.
+  `relative_to: margin` measures from the resolved top margin of the page.
+- `guide-add/set/remove`, `guide-grid`, `guide-list`: entries of
+  `layout.guides` (`ruler-h` is a horizontal line at `position` y, `ruler-v` a
+  vertical line at x; `layout-grid` has `rows`, `columns`, gutters and
+  `relative_to`). At most 5000 guides; IDs are unique; the page must exist;
+  locked guides refuse `guide-set`. `guide-list --derived --page P` appends the
+  margin and column guides computed from `spread resolve`, so they are never
+  stored twice.
+- `measure --ids a,b,...` (2-64 objects on one page, read only): edge and center
+  alignments within `--tolerance` (default 0.5 pt), pairwise gaps, equal spacing
+  along each axis and the distance of every object to the margin box.
+- `step-repeat ID --count N --dx --dy --prefix P`: N ≤ 1000 copies with IDs
+  `P1..PN` (children get `-P<n>` suffixes). It refuses text frames (a copy would
+  fork a story thread), locked layers, grouped objects and ID collisions.
+- `frame-grid PREFIX --rows --columns --x --y --width --height --gutter-x
+  --gutter-y [--story S]`: up to 1000 cells named `PREFIX-r<row>c<col>`,
+  graphic frames, or text frames threaded in reading order through the story.
+- `fit FRAME MODE [--content ID]`: `fill` (cover), `fit` (contain),
+  `fit-content-to-frame` (stretch), `fit-frame-to-content`, `center`,
+  `proportional` (frame width, keep aspect). The content's natural size is
+  stored on the frame as `natural_size` so switching modes is idempotent.
+
+Align, distribute, gaps and key objects remain `pentool layout`.
+
 ## 8. Text wrap and anchored objects
 
 - Wrap modes: `none`, `bounding-box`, `shape` (object geometry), `alpha`

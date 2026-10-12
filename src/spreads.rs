@@ -173,6 +173,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
     }
     crate::styles::validate(raw)?;
     crate::stories::validate(raw)?;
+    crate::grids::validate(raw)?;
     Ok(())
 }
 
