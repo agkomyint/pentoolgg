@@ -25,10 +25,9 @@ Nothing was pushed.
   cases; line-break goldens across the IDML corpus; wire the composer into
   frames (replace the task 3 estimator) and render composed frames; PDF
   subset-font embedding; cross-platform CI evidence.
-- **Task 6:** evaluate nested, line and GREP styles (bounded regex dialect in
-  `docs/layout-v1.md` section 5.3: 512-char pattern, 100,000 step budget,
-  `grep-budget-exceeded`); lists (levels, restart rules, continuation across
-  stories); IDML style import; shortcuts; style changes recompose exactly the
+- **Task 6:** nested, GREP and list evaluation are done (`src/style_eval.rs`).
+  Open: composed-line evaluation of line styles in frames; `after-section` list
+  restarts; IDML style import; shortcuts; style changes recompose exactly the
   affected stories via the usage index.
 - **Tasks 2-4:** see the Progress notes in `TASKS.md`.
 

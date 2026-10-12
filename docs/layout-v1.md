@@ -404,7 +404,46 @@ refuses a style that is in use unless `--reassign STYLE` names a replacement;
 derived styles otherwise fall back to the removed style's own base. `import`
 remaps `based_on`/`next` within the imported set.
 
-Not yet implemented: nested/line/GREP evaluation, lists, IDML import.
+#### Rule evaluation and lists (task 6)
+
+`layout-style FILE evaluate STORY` (read only, paginated) returns, per paragraph
+whose resolved style has rules, ordered character-style `spans` in paragraph
+character offsets (later spans win) and a `skipped` list. Order is nested, then
+line, then GREP.
+
+- `nested`: `[{"style": CHAR, "through": N, "of": DELIM, "inclusive": true,
+  "repeat": false}]`. Rules apply consecutively from the paragraph start;
+  `repeat: true` on the last rule cycles the whole list. `DELIM` is `character`,
+  `word`, `sentence`, `tab`, `forced-break`, `em-space`, `en-space`,
+  `nonbreaking-space`, `letter` or `digit`. Fewer delimiters than `through`
+  styles to the paragraph end.
+- `line_styles`: `[{"style": CHAR, "lines": N}]`, consecutive rules over
+  consecutive composed lines. Lines exist only after composition, so without
+  composed line starts these are reported as `skipped` with
+  `reason: "needs-composition"`, never dropped silently.
+- `grep`: `[{"style": CHAR, "pattern": "…"}]`. Patterns are compiled when the
+  style is written; look-behind, back-references, named groups, inline flags,
+  unsupported escapes and nested unbounded repeats such as `(a*)*` are refused,
+  the last with `grep-budget-exceeded`. Single-character repeats run iteratively;
+  group repeats are limited to 1,500 nested frames and 100,000 steps per match
+  attempt. Overrun at evaluation time fails the whole paragraph with
+  `grep-budget-exceeded` and applies no partial spans.
+- A rule naming a missing character style is skipped with
+  `reason: "missing-style"`.
+
+`layout.lists` is `[{"id", "levels": [{"format", "number_style", "restart",
+"start"}]}]` (1–9 levels, validated with the styles). A paragraph style joins a
+list with `list: {"list": ID, "level": N}`. `layout-style FILE lists
+[--story ID]` computes labels in story order; counters continue across stories
+that share the list ID, a level restarts after a higher level unless `restart`
+says `never`, and `after-story` restarts at each story. Format tokens: `^#`
+the level's number, `^1`–`^9` an earlier level's number, `^t` a tab, `^^` a
+caret. Number styles are `1`, `A`, `a`, `I`, `i`. A paragraph whose list is
+undefined is reported under `problems`.
+
+Not yet implemented: `after-section` restarts (they behave as `never` until
+sections are bound to stories), composed-line evaluation of line styles in
+frames, IDML style import, shortcuts.
 
 ## 6. Composition: algorithm and determinism
 
