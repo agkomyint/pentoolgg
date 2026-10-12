@@ -86,10 +86,17 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
         if op.get("blend_space").is_some_and(|v| !v.is_string()) {
             bail!("effect blend_space must be a string")
         }
-        let kind = op["kind"]
-            .as_str()
+        let kind = op
+            .get("kind")
+            .and_then(Value::as_str)
             .filter(|k| KINDS.contains(k))
-            .context("unknown effect kind")?;
+            .with_context(|| {
+                format!(
+                    "unknown effect kind {}; valid kinds: {}",
+                    op.get("kind").unwrap_or(&Value::Null),
+                    KINDS.join(", ")
+                )
+            })?;
         let params = op["params"]
             .as_object()
             .context("effect params must be an object")?;
@@ -150,7 +157,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             crate::fill::validate_color(
                 p.get("color").unwrap_or(&json!("#000000")),
                 raw.get("styles").unwrap_or(&Value::Null),
-                raw["version"] == crate::color::VERSION,
+                crate::color::has_v8(raw),
             )?;
         }
     }

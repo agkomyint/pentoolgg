@@ -17,6 +17,7 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::composite::VERSION)
             | Some(crate::photo::VERSION)
             | Some(crate::color::VERSION)
+            | Some(crate::spreads::VERSION)
     )
 }
 
@@ -706,7 +707,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                     });
                 Rect::new(x, y - size, x + width, y - size + height)
             }
-            "image" | "raster" | "photo" => Rect::new(
+            "image" | "raster" | "photo" | "text-frame" | "graphic-frame" => Rect::new(
                 node["x"].as_f64().context("image x missing")?,
                 node["y"].as_f64().context("image y missing")?,
                 node["x"].as_f64().unwrap()
@@ -924,24 +925,26 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 fn reorder_node(page: &mut Value, id: &str, requested: usize) -> Result<usize> {
-    fn apply(nodes: &mut Vec<Value>, id: &str, requested: usize) -> Option<usize> {
+    fn apply(nodes: &mut Vec<Value>, id: &str, requested: usize) -> Result<Option<usize>> {
         if let Some(from) = nodes
             .iter()
             .position(|node| node.get("id").and_then(Value::as_str) == Some(id))
         {
+            if requested >= nodes.len() {
+                bail!("group index out of range");
+            }
             let node = nodes.remove(from);
-            let to = requested.min(nodes.len());
-            nodes.insert(to, node);
-            return Some(to);
+            nodes.insert(requested, node);
+            return Ok(Some(requested));
         }
         for node in nodes {
             if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
-                if let Some(index) = apply(children, id, requested) {
-                    return Some(index);
+                if let Some(index) = apply(children, id, requested)? {
+                    return Ok(Some(index));
                 }
             }
         }
-        None
+        Ok(None)
     }
     for layer in page
         .get_mut("layers")
@@ -955,7 +958,7 @@ fn reorder_node(page: &mut Value, id: &str, requested: usize) -> Result<usize> {
                 .context("layer nodes are missing")?,
             id,
             requested,
-        ) {
+        )? {
             return Ok(index);
         }
     }
@@ -1153,6 +1156,14 @@ pub enum TextAnchor {
     Baseline,
     Top,
     Center,
+    Bottom,
+}
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextVerticalAlign {
+    #[default]
+    Top,
+    Middle,
     Bottom,
 }
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -2110,12 +2121,28 @@ pub fn apply_text(
     action: crate::text::TextAction,
 ) -> Result<()> {
     use crate::text::TextAction;
+    let action = match action {
+        TextAction::Story { action } => {
+            crate::stories::run_story(raw, action)?;
+            return Ok(());
+        }
+        TextAction::Frame { action } => {
+            crate::stories::run_frame(raw, action)?;
+            return Ok(());
+        }
+        other => other,
+    };
     validate(raw)?;
     let page = page_mut(raw, page_id)?;
     let layer_id = match &action {
         TextAction::Put { layer, .. }
         | TextAction::Set { layer, .. }
         | TextAction::Remove { layer, .. } => layer.clone(),
+        TextAction::Story { .. }
+        | TextAction::Frame { .. }
+        | TextAction::Shape { .. }
+        | TextAction::Compose { .. }
+        | TextAction::FontReport => unreachable!("handled above"),
     };
     ensure_layer_unlocked(page, &layer_id)?;
     match action {
@@ -2211,6 +2238,11 @@ pub fn apply_text(
                 bail!("text not found in layer {layer_id}: {id}")
             }
         }
+        TextAction::Story { .. }
+        | TextAction::Frame { .. }
+        | TextAction::Shape { .. }
+        | TextAction::Compose { .. }
+        | TextAction::FontReport => unreachable!("handled above"),
     }
     validate(raw)
 }
@@ -2218,6 +2250,9 @@ pub fn apply_text(
 /// `page add|rename|duplicate|move|remove` for scene (v4/v5) documents.
 pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Value> {
     use crate::page::PageAction;
+    if crate::spreads::is_v9(raw) {
+        return crate::spreads::apply_page(raw, action);
+    }
     validate(raw)?;
     if let PageAction::List = action {
         return Ok(page_list(raw));
@@ -2252,8 +2287,17 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             width,
             height,
             background,
+            after,
+            before,
+            parent,
+            count,
         } => {
             ensure_new(pages, &id)?;
+            if after.is_some() || before.is_some() || parent.is_some() || count.is_some() {
+                bail!("[unsupported-capability] --after, --before, --parent and --count need a version 9 document; run `pentool migrate --target 9` first")
+            }
+            let (width, height) = (width.unwrap_or(1200), height.unwrap_or(800));
+            let background = background.unwrap_or_else(|| "#ffffff".into());
             pages.push(json!({
                 "id": id,
                 "name": name.unwrap_or_else(|| id.clone()),
@@ -2290,7 +2334,7 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             pages.insert(index, page);
             json!({"operation":"move","page":id,"index":index})
         }
-        PageAction::Remove { id } => {
+        PageAction::Remove { id, .. } => {
             if pages.len() == 1 {
                 bail!("cannot remove the last page")
             }
@@ -2324,9 +2368,10 @@ pub fn page_list(raw: &Value) -> Value {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let v9 = crate::spreads::is_v9(raw);
     json!({"pages": pages.iter().enumerate().map(|(index, page)| {
         let layers = page.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
-        json!({
+        let mut row = json!({
             "id": page.get("id"),
             "name": page.get("name"),
             "index": index,
@@ -2334,7 +2379,15 @@ pub fn page_list(raw: &Value) -> Value {
             "height": page["canvas"]["height"],
             "layers": layers.len(),
             "objects": layers.iter().map(|l| count(l.get("nodes").and_then(Value::as_array).map_or(&[][..], |n| n.as_slice()))).sum::<usize>()
-        })
+        });
+        if v9 {
+            if let (Some(row), Some(id)) = (row.as_object_mut(), page.get("id").and_then(Value::as_str)) {
+                if let Some(info) = crate::spreads::page_info(raw, id).as_object() {
+                    row.extend(info.clone());
+                }
+            }
+        }
+        row
     }).collect::<Vec<_>>()})
 }
 
@@ -2438,6 +2491,9 @@ pub fn apply_object(
                     node["style"]["stroke"] = json!({"fallback": v});
                 }
                 if let Some(v) = width {
+                    if !v.is_finite() || *v < 0.0 {
+                        bail!("width must be finite and nonnegative")
+                    }
                     node["style"]["stroke_width"] = json!({"fallback": v});
                 }
                 if let Some(v) = fill {
@@ -2450,6 +2506,9 @@ pub fn apply_object(
                     node["style"]["stroke_linejoin"] = json!({"fallback": v.svg()});
                 }
                 if let Some(v) = miter_limit {
+                    if !v.is_finite() || *v < 1.0 || *v > 1000.0 {
+                        bail!("miter limit must be finite and between 1 and 1000")
+                    }
                     node["style"]["stroke_miterlimit"] = json!({"fallback": v});
                 }
             } else if kind == "text" {
@@ -2713,6 +2772,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 | crate::composite::VERSION
                 | crate::photo::VERSION
                 | crate::color::VERSION
+                | crate::spreads::VERSION
         )
     {
         bail!("not a supported Pentool scene document")
@@ -2745,8 +2805,13 @@ pub fn validate(raw: &Value) -> Result<()> {
         .get("pages")
         .and_then(Value::as_array)
         .context("v4 document has no pages")?;
-    if pages.is_empty() || pages.len() > 1000 {
-        bail!("document must contain 1–1000 pages")
+    let max_pages = if version >= crate::spreads::VERSION {
+        crate::spreads::MAX_PAGES
+    } else {
+        1000
+    };
+    if pages.is_empty() || pages.len() > max_pages {
+        bail!("document must contain 1–{max_pages} pages")
     }
     let mut page_ids = HashSet::new();
     for page in pages {
@@ -2803,6 +2868,21 @@ pub fn validate(raw: &Value) -> Result<()> {
     if compositing {
         crate::composite::validate(raw)?;
     }
+    crate::spreads::validate(raw, version)?;
+    if version >= crate::spreads::VERSION {
+        for (parent, layer) in crate::spreads::parent_layers(raw) {
+            let mut ids = HashSet::new();
+            for node in layer
+                .get("nodes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)
+                    .with_context(|| format!("parent {parent} item is invalid"))?;
+            }
+        }
+    }
     // Photo catalog structure and photo node references (v7), or their absence.
     crate::photo::catalog::validate(raw, version)?;
     crate::color::catalog::validate(raw, version)?;
@@ -2812,7 +2892,10 @@ pub fn validate(raw: &Value) -> Result<()> {
 
 pub fn flatten_to_v3(raw: &Value) -> Result<Value> {
     validate(raw)?;
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+    if raw.get("version").and_then(Value::as_u64) == Some(crate::spreads::VERSION) {
+        return flatten_to_v3(&crate::spreads::downgrade(raw.clone())?);
+    }
+    if crate::color::has_v8(raw) {
         return flatten_to_v3(&crate::color::catalog::downgrade(raw.clone())?);
     }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
@@ -3192,6 +3275,7 @@ pub(crate) fn validate_node(
             "adjustment" if compositing => crate::composite::validate_node(node)?,
             "raster" if compositing => crate::raster::validate_node(node)?,
             "photo" if compositing => crate::photo::catalog::validate_node(o)?,
+            "text-frame" | "graphic-frame" => crate::stories::validate_frame_node(o)?,
             "image" => crate::image::validate_node_for_version(
                 o,
                 image_assets.context(
@@ -3256,6 +3340,37 @@ mod tests {
         let flattened = flatten_to_v3(&raw).unwrap();
         let doc: crate::document::Document = serde_json::from_value(flattened).unwrap();
         assert_eq!(doc.layers[0].paths.len(), 1);
+    }
+
+    #[test]
+    fn group_reorder_rejects_out_of_range_index() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = apply_group(
+            &mut raw,
+            None,
+            GroupAction::Reorder {
+                id: "card".into(),
+                index: 999999,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("group index out of range"),
+            "unexpected error: {err}"
+        );
+        let index = apply_group(
+            &mut raw,
+            None,
+            GroupAction::Reorder {
+                id: "card".into(),
+                index: 0,
+            },
+        )
+        .unwrap()["index"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(index, 0);
     }
 
     #[test]
@@ -3369,6 +3484,67 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string().contains("invalid XML characters"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn object_set_rejects_bad_stroke_width_and_miter_limit() {
+        use crate::agent::ObjectAction;
+        let mut raw = new_document(320, 240);
+        apply_path(
+            &mut raw,
+            None,
+            crate::editing::PathAction::Put {
+                id: "line".into(),
+                layer: "layer-1".into(),
+                d: "M0 0 L10 10".into(),
+                stroke: "#123456".into(),
+                width: 2.0,
+                fill: "none".into(),
+                closed: false,
+                cap: crate::document::StrokeCap::Butt,
+                join: crate::document::StrokeJoin::Miter,
+                miter_limit: 4.0,
+            },
+        )
+        .unwrap();
+        let set = |width: Option<f32>, miter_limit: Option<f32>| ObjectAction::Set {
+            id: "line".into(),
+            layer: "layer-1".into(),
+            d: None,
+            stroke: None,
+            width,
+            fill: None,
+            cap: None,
+            join: None,
+            miter_limit,
+            content: None,
+            x: None,
+            y: None,
+            font: None,
+            size: None,
+            weight: None,
+            italic: None,
+            align: None,
+            letter_spacing: None,
+            line_height: None,
+            blend: None,
+            blend_space: None,
+            opacity: None,
+            content_opacity: None,
+            isolation: None,
+        };
+        let err = apply_object(&mut raw, None, &set(Some(-1.0), None)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("width must be finite and nonnegative"),
+            "unexpected error: {err}"
+        );
+        let err = apply_object(&mut raw, None, &set(None, Some(0.0))).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("miter limit must be finite and between 1 and 1000"),
             "unexpected error: {err}"
         );
     }
@@ -3543,7 +3719,7 @@ pub fn inspect_paginated_v4(
         matches += layer_matches;
     }
 
-    Ok(json!({
+    let mut result = json!({
         "document": doc_name,
         "version": version,
         "page": active_page,
@@ -3554,7 +3730,16 @@ pub fn inspect_paginated_v4(
         "has_more": offset.saturating_add(returned) < matches,
         "stacking": "layers, then depth-first nodes; zero is back",
         "layers": layers
-    }))
+    });
+    if version >= crate::spreads::VERSION {
+        let stories = crate::stories::summary(raw);
+        if stories["stories"].as_u64().unwrap_or(0) > 0
+            || stories["frames"].as_u64().unwrap_or(0) > 0
+        {
+            result["stories"] = stories;
+        }
+    }
+    Ok(result)
 }
 
 fn collect_v4_matches(
@@ -3574,7 +3759,12 @@ fn collect_v4_matches(
         let query_matches = ancestor_match
             || id.to_lowercase().contains(needle)
             || name.to_lowercase().contains(needle)
-            || content.is_some_and(|value| value.to_lowercase().contains(needle));
+            || content.is_some_and(|value| value.to_lowercase().contains(needle))
+            || (kind == "text-frame"
+                && node
+                    .get("story")
+                    .and_then(Value::as_str)
+                    .is_some_and(|story| story.to_lowercase().contains(needle)));
         let kind_matches = match kind_filter {
             Some("text") => kind == "text",
             Some("path") => matches!(kind, "path" | "rect" | "ellipse" | "line"),
@@ -3606,6 +3796,10 @@ fn collect_v4_matches(
             }
             if let Some(asset) = node.get("asset").and_then(Value::as_str) {
                 object["asset"] = json!(asset);
+            }
+            if kind == "text-frame" {
+                object["story"] = node.get("story").cloned().unwrap_or(Value::Null);
+                object["next"] = node.get("next").cloned().unwrap_or(Value::Null);
             }
             if node.get("kind").and_then(Value::as_str) == Some("photo") {
                 for key in ["photo", "variant"] {
