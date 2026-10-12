@@ -882,14 +882,26 @@ pub fn edit(
             if crate::scene::find_node_mut(selected, id).is_some() {
                 bail!("[invalid-adjustment] node ID {id} already exists")
             }
-            let layer_id = settings["layer"].as_str().unwrap_or("layer-1");
-            crate::scene::ensure_layer_unlocked(selected, layer_id)?;
+            let layer_id = settings["layer"]
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| {
+                    selected
+                        .get("layers")
+                        .and_then(Value::as_array)
+                        .and_then(|layers| layers.first())
+                        .and_then(|layer| layer.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .context("[invalid-adjustment] page has no layers")?;
+            crate::scene::ensure_layer_unlocked(selected, &layer_id)?;
             let node = json!({"kind":"adjustment", "id":id,
                 "adjustment":settings["adjustment"], "params":settings.get("params").cloned().unwrap_or(json!({})),
                 "scope":settings.get("scope").cloned().unwrap_or(json!({"kind":"below"})),
                 "enabled":settings.get("enabled").cloned().unwrap_or(json!(true)),
                 "opacity":settings.get("opacity").cloned().unwrap_or(json!(1.0)), "blend_mode":settings.get("blend_mode").cloned().unwrap_or(json!("normal")),"blend_space":settings.get("blend_space").cloned().unwrap_or(json!("srgb"))});
-            crate::scene::layer_nodes_mut(selected, layer_id)?.push(node.clone());
+            crate::scene::layer_nodes_mut(selected, &layer_id)?.push(node.clone());
             node
         }
         "set" | "enable" | "disable" => {

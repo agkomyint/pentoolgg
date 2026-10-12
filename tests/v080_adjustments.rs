@@ -283,6 +283,27 @@ fn cli_adjustments_use_one_guarded_history_entry_and_export_all_formats() {
 }
 
 #[test]
+fn adjustment_add_defaults_to_first_layer_not_layer_1() {
+    let mut raw: Value =
+        serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+    let migrated = composite::migrate(raw.clone()).unwrap();
+    raw = migrated;
+    assert_ne!(raw["pages"][0]["layers"][0]["id"], "layer-1");
+    composite::edit(
+        &mut raw,
+        None,
+        "add",
+        "grade",
+        &serde_json::json!({"adjustment":"invert"}),
+    )
+    .unwrap();
+    let nodes = raw["pages"][0]["layers"][0]["nodes"].as_array().unwrap();
+    assert!(nodes
+        .iter()
+        .any(|n| n["id"] == "grade" && n["kind"] == "adjustment"));
+}
+
+#[test]
 fn cli_adjustment_validates_operation_before_requiring_id() {
     let directory = std::env::temp_dir().join(format!("pentool-v080-op-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
