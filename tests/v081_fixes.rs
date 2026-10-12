@@ -484,3 +484,33 @@ fn import_names_the_unsupported_version_instead_of_a_canvas_error() {
     assert!(stderr.contains("[unsupported-version]"), "{stderr}");
     assert!(!stderr.contains("no canvas"), "{stderr}");
 }
+
+#[test]
+fn text_box_rejects_unknown_align_and_vertical_align() {
+    let ws = Workspace::new("textbox-enums");
+    let doc = ws.path("t.pen");
+    ok(&["new", &doc, "--width", "400", "--height", "200"]);
+    for (flag, value) in [("--align", "diagonal"), ("--vertical-align", "sideways")] {
+        let out = run(&[
+            "text-box",
+            &doc,
+            "bad",
+            "--layer",
+            "layer-1",
+            "--content",
+            "hi",
+            flag,
+            value,
+        ]);
+        assert!(!out.status.success(), "{flag} {value} should fail");
+        let message = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(
+            message.contains("invalid value"),
+            "unexpected error: {message}"
+        );
+    }
+}

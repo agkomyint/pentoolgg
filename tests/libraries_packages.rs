@@ -66,7 +66,8 @@ fn local_asset_index_and_package_round_trip() {
                 offset: 0,
                 limit: 20
             }
-        )["matches"],
+        )
+        .unwrap()["matches"],
         1
     );
 
@@ -118,4 +119,50 @@ fn package_rejects_escaping_archive_paths() {
         .to_string()
         .contains("unsafe"));
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explore_rejects_zero_limit() {
+    let index = library::AssetIndex {
+        schema: 1,
+        assets: vec![library::IndexedAsset {
+            id: "ui/card".into(),
+            library: "local".into(),
+            path: PathBuf::from("library/assets/card.pen"),
+            relative_path: PathBuf::from("library/assets/card.pen"),
+            name: "Card".into(),
+            description: "Reusable card".into(),
+            version: "1.0.0".into(),
+            kind: "component".into(),
+            author: "Pentool".into(),
+            license: "MIT".into(),
+            tags: vec!["ui".into()],
+            category: "layout".into(),
+            width: 320,
+            height: 200,
+            layers: 1,
+            objects: 1,
+            modified_ms: 0,
+            size: 64,
+            content_hash: "sha256:00".into(),
+        }],
+        warnings: vec![],
+    };
+    let options = |limit: usize| library::SearchOptions {
+        query: None,
+        library: None,
+        tag: None,
+        category: None,
+        kind: None,
+        offset: 0,
+        limit,
+    };
+    let err = library::search(&index, &options(0)).unwrap_err();
+    assert!(
+        err.to_string().contains("--limit"),
+        "unexpected error: {err}"
+    );
+    let page = library::search(&index, &options(1)).unwrap();
+    assert_eq!(page["returned"], 1);
+    assert_eq!(page["has_more"], false);
 }

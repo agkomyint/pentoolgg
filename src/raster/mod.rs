@@ -29,16 +29,21 @@ fn bad(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
 mod api;
 mod clone;
 mod compose;
+pub mod constraints;
+pub mod fields;
 mod flood;
 mod heal;
 mod input;
 mod layer;
-mod math;
+pub mod math;
+pub mod media;
+pub use math::splitmix64;
 mod pixels;
 mod preset;
 mod recovery;
 mod retouch;
 mod selection;
+mod semantic;
 mod shape;
 mod tip;
 pub use api::{apply, batch, MAX_BATCH_OPS, MAX_BATCH_SAMPLES};
@@ -73,6 +78,7 @@ pub use preset::{
 pub use recovery::{repair, replay, verify, RepairStrategy};
 pub use retouch::Tool;
 pub use selection::{clear_op as select_clear, info_op as select_info, Mode as SelectionMode};
+pub use semantic::{paint_path, PathRequest};
 pub use shape::{
     delete as select_delete, lasso as select_lasso, load as select_load, marquee as select_marquee,
     modify as select_modify, quickmask as select_quickmask, save as select_save, Marquee,
@@ -361,6 +367,8 @@ pub struct Brush {
     pub tone: Option<f64>,
     /// Name of the document preset this brush was resolved from (informational).
     pub preset: Option<String>,
+    /// Material-aware paint mode (v0.13.0 task 7); normal blend only.
+    pub media: Option<media::Media>,
 }
 
 pub const BRUSH_KINDS: [&str; 5] = [
@@ -402,7 +410,7 @@ impl Brush {
         let object = value
             .as_object()
             .context("[invalid-brush] brush must be an object")?;
-        const KNOWN: [&str; 23] = [
+        const KNOWN: [&str; 24] = [
             "kind",
             "size",
             "hardness",
@@ -426,6 +434,7 @@ impl Brush {
             "texture",
             "tone",
             "preset",
+            "media",
         ];
         if let Some(key) = object.keys().find(|k| !KNOWN.contains(&k.as_str())) {
             bail!(
@@ -505,7 +514,12 @@ impl Brush {
         if dynamics.flow.is_some() && flag("pressure_flow")? {
             bail!("[invalid-brush] use either pressure_flow or dynamics.flow, not both")
         }
+        let media = match object.get("media") {
+            None => None,
+            Some(value) => Some(media::Media::parse(value)?),
+        };
         Ok(Brush {
+            media,
             preset,
             dynamics,
             strength,
@@ -593,6 +607,9 @@ impl Brush {
         }
         if let Some(preset) = &self.preset {
             out["preset"] = json!(preset);
+        }
+        if let Some(media) = &self.media {
+            out["media"] = media.to_json();
         }
         out
     }
@@ -995,6 +1012,13 @@ fn apply_stroke_inner(
         )?),
         _ => None,
     };
+    let media = match &stroke.brush.media {
+        None => None,
+        Some(media) if stroke.blend == Blend::Normal => Some(media),
+        Some(_) => bail!(
+            "[invalid-brush] brush.media only applies to the normal blend; remove media or use blend normal"
+        ),
+    };
     let mut buffer = StrokeBuffer::new();
     for dab in &dab_list {
         stamp(
@@ -1029,6 +1053,38 @@ fn apply_stroke_inner(
         )?),
         _ => None,
     };
+    let media_context = media.map(|m| {
+        media::Context::new(
+            m,
+            stroke.seed,
+            (stroke.brush.opacity * 65535.0).round() as u32,
+        )
+    });
+    // Distance along the stroke at which each pixel is first reached, for wet
+    // washes that dry out over `wet_length`.
+    let mut reached: HashMap<(i64, i64), u32> = HashMap::new();
+    if media.is_some_and(|m| m.wet_length().is_some()) {
+        let mut travelled = 0.0f64;
+        let mut last: Option<(f64, f64)> = None;
+        for dab in &dab_list {
+            if let Some((px, py)) = last {
+                let (dx, dy) = (dab.x - px, dab.y - py);
+                travelled += (dx * dx + dy * dy).sqrt();
+            }
+            last = Some((dab.x, dab.y));
+            let at = (travelled * 1000.0).min(f64::from(u32::MAX)) as u32;
+            dab_pixels(
+                &stroke.brush,
+                tip,
+                dab,
+                surface.width,
+                surface.height,
+                |x, y, _| {
+                    reached.entry((x, y)).or_insert(at);
+                },
+            );
+        }
+    }
     let mut touched = 0usize;
     let mut bounds: Option<[u32; 4]> = None;
     let mut keys: Vec<_> = buffer.keys().copied().collect();
@@ -1073,7 +1129,27 @@ fn apply_stroke_inner(
                         let out = context.pixel(surface, x, y, i64::from(alpha16));
                         tile[index * 4..index * 4 + 4].copy_from_slice(&out);
                     }
-                    None => composite(&mut tile, index * 4, stroke.color, alpha16, stroke.blend),
+                    None => match &media_context {
+                        Some(context) => {
+                            let at = index * 4;
+                            let dst = [tile[at], tile[at + 1], tile[at + 2], tile[at + 3]];
+                            let travelled = reached.get(&(i64::from(x), i64::from(y))).copied();
+                            let (alpha, color) = context.pixel(
+                                i64::from(x),
+                                i64::from(y),
+                                alpha16,
+                                stroke.color,
+                                dst,
+                                travelled,
+                            );
+                            if alpha > 0 {
+                                composite(&mut tile, at, color, alpha, Blend::Normal);
+                            }
+                        }
+                        None => {
+                            composite(&mut tile, index * 4, stroke.color, alpha16, stroke.blend)
+                        }
+                    },
                 }
             }
             let b = bounds.get_or_insert([x, y, x + 1, y + 1]);
@@ -1487,6 +1563,28 @@ pub fn add(
     crate::scene::validate(&migrated)?;
     *raw = migrated;
     Ok(json!({"id":id,"width":width,"height":height,"tile_size":TILE,"tiles":0}))
+}
+
+/// The current pixels of raster layer `id`, for diffing before and after an edit.
+/// Ids of the page-level raster layers, in document order.
+pub fn raster_ids(raw: &Value) -> Vec<String> {
+    all_rasters(raw)
+        .into_iter()
+        .filter_map(|node| node["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+pub fn layer_surface(raw: &Value, id: &str) -> Result<Surface> {
+    let node = all_rasters(raw)
+        .into_iter()
+        .find(|node| node["id"] == id)
+        .ok_or_else(|| {
+            bad(
+                "not-found",
+                format!("raster layer {id} was not found; list nodes with `pentool tree DOCUMENT --kind raster`"),
+            )
+        })?;
+    Surface::load(raw, node)
 }
 
 pub fn info(raw: &Value, page: Option<&str>, id: &str) -> Result<Value> {

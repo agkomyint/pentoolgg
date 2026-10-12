@@ -24,3 +24,11 @@ pub mod spot;
 pub mod value;
 
 pub const VERSION: u64 = 8;
+
+/// True for a document at the color format version or any later one, which
+/// carries every v8 construct unchanged (version 9 only adds layout).
+pub fn has_v8(raw: &serde_json::Value) -> bool {
+    raw.get("version")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|v| v >= VERSION)
+}

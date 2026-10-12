@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "engine": 1,
+  "page": "page-1",
+  "target": "paint",
+  "path": {
+    "flatness": 0.25,
+    "segments": [
+      {"op": "M", "to": [10, 20]},
+      {"op": "C", "control1": [30, 0], "control2": [70, 40], "to": [90, 20]}
+    ]
+  },
+  "brush": {"kind": "hard-round", "size": 12, "spacing": 0.2, "flow": 0.5, "opacity": 1},
+  "color": [139, 90, 60, 255],
+  "blend": "normal",
+  "seed": 42,
+  "curves": {
+    "size": [[0, 0.5], [0.5, 1], [1, 0.5]],
+    "pressure": [[0, 0.2], [0.5, 0.8], [1, 0.5]]
+  },
+  "dry_run": true,
+  "limits": {"max_samples": 4096, "max_dabs": 16384, "max_changed_pixels": 1048576}
+}

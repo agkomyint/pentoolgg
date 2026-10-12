@@ -5,7 +5,6 @@ use super::{
     catalog,
     icc::Intent,
     value::{Destination, Evaluator, NativeColor, ProfileSet},
-    VERSION,
 };
 use anyhow::{ensure, Context, Result};
 use serde_json::{json, Value};
@@ -549,7 +548,7 @@ fn collect(raw: &Value, scope: Scope<'_>, legacy: bool) -> Result<Collected> {
 
 /// Structure/header validation is offline and does not open external profiles.
 pub fn validate(raw: &Value) -> Result<()> {
-    if raw["version"].as_u64() != Some(VERSION) {
+    if !crate::color::has_v8(raw) {
         return Ok(());
     }
     let collected = collect(raw, Scope::Document, false)?;
@@ -594,7 +593,7 @@ pub(crate) fn preview_scope(
     document: &Path,
     scope: Scope<'_>,
 ) -> Result<Vec<Value>> {
-    if raw["version"].as_u64() != Some(VERSION) {
+    if !crate::color::has_v8(raw) {
         return Ok(Vec::new());
     }
     // Style resolution can replace snapshot fallbacks in this private clone.

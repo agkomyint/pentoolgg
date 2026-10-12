@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "engine": 1,
+  "case": "straight-line-endpoints-v1",
+  "request": {
+    "schema": 1,
+    "engine": 1,
+    "page": "page-1",
+    "target": "paint",
+    "path": {"flatness": 0.25, "segments": [{"op": "M", "to": [0, 0]}, {"op": "L", "to": [1, 1]}]},
+    "brush": {"kind": "pixel", "size": 1, "spacing": 1, "flow": 1, "opacity": 1},
+    "color": [255, 0, 0, 255],
+    "seed": 0,
+    "limits": {"max_samples": 16, "max_dabs": 16, "max_changed_pixels": 16}
+  },
+  "expected": {
+    "normalized_points": [[0, 0], [1, 1]],
+    "canonical_samples": [
+      {"x": 0, "y": 0, "pressure": 1, "size": 1, "flow": 1, "opacity": 1, "rotation": 0, "color": [255, 0, 0, 255]},
+      {"x": 1, "y": 1, "pressure": 1, "size": 1, "flow": 1, "opacity": 1, "rotation": 0, "color": [255, 0, 0, 255]}
+    ],
+    "source_samples": 2,
+    "generated_samples": 2,
+    "endpoint_policy": "first-and-final-exactly-once",
+    "rounding": "nearest-0.001-ties-away-from-zero"
+  }
+}
