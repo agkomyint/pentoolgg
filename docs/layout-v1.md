@@ -761,6 +761,57 @@ header/footer row counts, and a table style. Rules:
   root collation tailored per language, with a code-point fallback) and page
   ranges follow `page-range` rules (`first`, `contiguous`, `all`).
 
+### 10.1 `layout-doc` (implemented, `src/longdoc.rs`)
+
+`pentool layout-doc DOC [--dry-run] [--if-revision N] [--file-name NAME] ACTION`
+works on version 9 documents. Every action validates before writing and goes
+through the shared transaction; read-only actions never write. Records live in
+`layout.notes`, `bookmarks`, `hyperlinks`, `xrefs`, `variables`, `conditions`,
+`condition_sets`, `index_topics` and `generated`.
+
+- **Notes:** `note-add ID --story S --paragraph N [--at CHAR] --text T
+  [--kind footnote|endnote] [--span-columns]`, `note-remove`, `note-list`,
+  `note-settings [--restart document|story|section|page] [--style arabic|
+  lower-roman|upper-roman|lower-alpha|upper-alpha]`, `note-plan`. Numbers are
+  assigned in story reading order per the restart rule (endnotes treat `page`
+  as `document`). `note-plan` reports `fits`, `splits`, `moves`, `collected`
+  (endnotes) or `unplaced` per note with a footnote area of 40% of the frame
+  height; all heights are `estimated: true`.
+- **Cross-references:** `bookmark-add`, `link-add` (`--url` http/https/mailto
+  only, `--page` or `--bookmark`), `xref-add` with `--format page|
+  paragraph-text|paragraph-number|chapter|custom` and `--template` using
+  `{page} {text} {number} {chapter}`. A broken target renders `?` and is listed
+  by `xref-list` and `report`; nothing is dropped. `link-remove` keeps the
+  visible text. URLs are never fetched.
+- **Variables:** `chapter-number`, `running-header` (`--style`, `--pick
+  first|last`), `creation-date`, `modification-date`, `output-date`,
+  `file-name`, `last-page-number` and `custom`. Dates never use the wall clock:
+  they come from `layout.created_at`, `modified_at`, `output_at`, or `--date`;
+  without one the variable is reported as unresolved. `file-name` comes from
+  `--file-name` or the input file name. Date patterns: `YYYY YY MMMM MMM MM DD
+  HH mm ss`.
+- **Conditions:** `condition-define`, `condition-set-define --show --hide`,
+  `condition-activate SET|--none`, `condition-wrap`, `condition-list`.
+  Hidden text is omitted from resolved text and from flow estimation.
+- **Generated stories:** `generated-add ID --kind toc|index|captions|
+  list-of-figures|endnotes --story S [options]`, `generate`, `generated-list`,
+  `generated-check` (writes `stale`), `generated-remove`. Generated paragraphs
+  use the styles `toc-N`, `index-letter`, `index-entry`, `caption-entry`,
+  `figure-entry` and `endnote`. Indexes sort with a locale-tailored key
+  (Swedish/Finnish å ä ö and Danish/Norwegian æ ø å follow z), group by
+  letter, and apply `--page-range first|contiguous|all`; `see` topics render
+  as cross-references. Captions come from paragraph styles, node `caption`
+  metadata or both.
+- **Staleness:** each generated record stores the SHA-256 digest of the
+  paragraphs it wrote. `reason` is `never-generated`, `source-changed` (the
+  document would now generate different text), `edited` (the story was changed
+  by hand) or `current`. Regenerating an unchanged document is byte-identical.
+- `report` lists every unresolved cross-reference, link, bookmark, variable,
+  unplaced marker and stale generated item with stable codes.
+- Page numbers come from the task 3 estimator, which does not yet honor
+  frame-break and page-break specials; results are `estimated: true` until the
+  composer is wired to frames.
+
 ## 11. Books (`.penbook`)
 
 A `.penbook` is readable JSON listing member `.pen` paths relative to the book

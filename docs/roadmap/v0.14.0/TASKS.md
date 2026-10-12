@@ -274,6 +274,16 @@ and documentation.
   Tables flow inside stories and break predictably.
 
 - [ ] **10. Add long-document features.**
+  Progress: `layout-doc` (`src/longdoc.rs`, `tests/v0140_longdoc.rs`, design in
+  `docs/layout-v1.md` section 10.1) provides footnotes, endnotes and
+  column-spanning notes with numbering rules and a fit plan; bookmarks,
+  hyperlinks (http/https/mailto only) and cross-references with formats;
+  variables (running header, dates without the wall clock, file name, chapter
+  number); conditions and sets; and deterministic generated TOC, index,
+  captions and endnote stories with digest-based stale state. Page numbers use
+  the task 3 estimator (`estimated: true`). Open: composer-driven note
+  placement and rendering of generated items, frame-break specials in the
+  estimator, studio UI, CI evidence.
   - Footnotes, endnotes, and column-spanning notes.
   - Cross-references with formats, and hyperlinks and bookmarks.
   - Text variables: running headers from styles, date, file name and chapter

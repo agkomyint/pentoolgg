@@ -344,26 +344,28 @@ fn validate_story(story: &Value) -> Result<usize> {
                     );
                     characters += 1;
                 }
-                "condition" => {
+                "condition" | "link" => {
+                    let key = kinds[0];
                     ensure!(
-                        object["condition"].as_str().is_some_and(|c| !c.is_empty()),
-                        "[malformed-resource] story {id} paragraph {index}: condition must name a condition ID"
+                        object[key].as_str().is_some_and(|c| !c.is_empty()),
+                        "[malformed-resource] story {id} paragraph {index}: {key} must name a {} ID",
+                        if key == "link" { "hyperlink" } else { "condition" }
                     );
                     let nested = object
                         .get("runs")
                         .and_then(Value::as_array)
                         .with_context(|| {
-                            format!("[malformed-resource] story {id} paragraph {index}: a condition run needs `runs`")
+                            format!("[malformed-resource] story {id} paragraph {index}: a {key} run needs `runs`")
                         })?;
                     ensure!(
                         nested.len() <= MAX_RUNS_PER_PARAGRAPH,
-                        "[limit-exceeded] story {id} paragraph {index}: too many runs in a condition"
+                        "[limit-exceeded] story {id} paragraph {index}: too many runs in a {key} run"
                     );
                     for inner in nested {
                         ensure!(
                             inner.get("text").is_some_and(Value::is_string)
                                 || inner.get("special").is_some_and(Value::is_string),
-                            "[malformed-resource] story {id} paragraph {index}: a conditional run holds only text and special runs"
+                            "[malformed-resource] story {id} paragraph {index}: a {key} run holds only text and special runs"
                         );
                         if let Some(text) = inner.get("text").and_then(Value::as_str) {
                             validate_text(text, &format!("story {id} paragraph {index}"))?;
@@ -506,10 +508,12 @@ pub(crate) fn run_chars(raw: &Value, run: &Value) -> usize {
     if run.get("special").is_some() {
         return 1;
     }
-    if let Some(condition) = run.get("condition").and_then(Value::as_str) {
-        if !condition_visible(raw, condition) {
-            return 0;
-        }
+    let nested_text = run.get("link").is_some()
+        || run
+            .get("condition")
+            .and_then(Value::as_str)
+            .is_some_and(|c| condition_visible(raw, c));
+    if nested_text {
         return list(run, "runs")
             .iter()
             .map(|nested| match nested.get("text").and_then(Value::as_str) {

@@ -26,6 +26,7 @@ pub mod layout;
 pub mod layout_cli;
 pub mod library;
 pub mod linked;
+pub mod longdoc;
 pub mod mask;
 pub mod package;
 pub mod page;

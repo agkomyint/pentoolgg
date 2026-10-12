@@ -35,12 +35,15 @@ Nothing was pushed.
 - **Task 7:** `align_to_grid` is stored but composed lines are not yet snapped
   to the baseline grid (needs composer wiring, same as task 5); alpha/subject
   aware fitting; studio overlays and drag guides.
+- **Tasks 9-10:** tables and long-document features (`layout-table`,
+  `layout-doc`) are implemented through the CLI with estimated heights and
+  pages. Open: composer-driven row heights, note placement and generated-story
+  rendering; graphic cells; frame-break specials in the estimator; CI evidence.
 - **Tasks 2-4:** see the Progress notes in `TASKS.md`.
 
 ## Not started
 
-9 tables;
-10 long-document features; 11 `.penbook` books; 12 data merge and adaptive
+11 `.penbook` books; 12 data merge and adaptive
 layout; 13 IDML import; 14 IDML export; 15 publishing exports; 16 layout
 preflight; 17 editor layout experience; 18 conformance, performance, recovery.
 
