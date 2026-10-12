@@ -4,9 +4,13 @@ use std::{fs, path::PathBuf, process::Command};
 struct Workspace(PathBuf);
 impl Workspace {
     fn new() -> Self {
+        // Parallel tests can share a clock tick on coarse-timer platforms (macOS), so
+        // a process-wide counter keeps every workspace unique.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
-            "pentool-v0130-path-{}-{}",
+            "pentool-v0130-path-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
