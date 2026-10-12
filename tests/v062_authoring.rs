@@ -169,3 +169,44 @@ fn feedback_scale_scene_is_one_batch_and_compacts_by_over_25_percent() {
         pretty.len()
     );
 }
+
+#[test]
+fn replace_rejects_unknown_page_layer_and_object_type() {
+    fn options<'a>(
+        page: Option<&'a str>,
+        all_pages: bool,
+        layer: Option<&'a str>,
+        object_type: Option<&'a str>,
+    ) -> replace::Options<'a> {
+        replace::Options {
+            page,
+            all_pages,
+            layer,
+            group: None,
+            object_type,
+            visible: None,
+            property: "fill",
+            from: "#111827",
+            to: "#00ff00",
+        }
+    }
+    let mut value = fixture();
+    let err = replace::apply(&mut value, &options(Some("bogus"), false, None, None)).unwrap_err();
+    assert!(
+        err.to_string().contains("page not found: bogus"),
+        "unexpected: {err}"
+    );
+    let err = replace::apply(&mut value, &options(None, true, Some("nosuch"), None)).unwrap_err();
+    assert!(
+        err.to_string().contains("layer not found: nosuch"),
+        "unexpected: {err}"
+    );
+    let err =
+        replace::apply(&mut value, &options(None, true, None, Some("frobnicate"))).unwrap_err();
+    assert!(
+        err.to_string().contains("matches no nodes in scope"),
+        "unexpected: {err}"
+    );
+    let ok = replace::apply(&mut value, &options(None, true, None, Some("rect"))).unwrap();
+    assert!(ok["before_count"].as_u64().unwrap() >= 1);
+}

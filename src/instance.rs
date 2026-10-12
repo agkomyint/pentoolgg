@@ -657,7 +657,7 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
     let source_raw: Value = serde_json::from_slice(&source_bytes)?;
     let plan = update_plan_value(&destination, id, &source_raw, &source_bytes)?;
     if !plan["changed"].as_bool().unwrap_or(false) {
-        return Ok(json!({"ok":true,"changed":false,"instance":id}));
+        return Ok(json!({"ok":true,"dry_run":dry_run,"changed":false,"instance":id}));
     }
     if plan["conflicts"].as_array().is_some_and(|a| !a.is_empty()) {
         bail!("instance update has conflicts; inspect the update plan")

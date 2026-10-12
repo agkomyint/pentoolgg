@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "engine": 1,
+  "page": "page-1",
+  "target": "paint",
+  "path": {"segments": [{"op": "M", "to": [0, 0]}, {"op": "L", "to": [10, 10]}]},
+  "brush": {"kind": "hard-round", "size": 4, "spacing": 0.25, "flow": 1, "opacity": 1},
+  "color": [0, 0, 0, 255],
+  "seed": 1,
+  "curves": {"opacity": [[0, 0], [0.5, 1], [0.5, 0.5], [1, 1]]},
+  "limits": {"max_samples": 100, "max_dabs": 100, "max_changed_pixels": 10000}
+}

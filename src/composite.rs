@@ -259,12 +259,12 @@ pub const ADJUSTMENTS: [&str; 13] = [
 pub fn is_document(raw: &Value) -> bool {
     matches!(
         raw.get("version").and_then(Value::as_u64),
-        Some(VERSION | crate::photo::VERSION | crate::color::VERSION)
+        Some(VERSION | crate::photo::VERSION | crate::color::VERSION | crate::spreads::VERSION)
     )
 }
 
 pub fn migrate(mut raw: Value) -> Result<Value> {
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+    if crate::color::has_v8(&raw) {
         raw = crate::color::catalog::downgrade(raw)?;
     }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
@@ -283,7 +283,7 @@ pub fn migrate(mut raw: Value) -> Result<Value> {
 
 /// Downgrade only an unextended v6 scene. Never demote required compositing data.
 pub fn downgrade(mut raw: Value) -> Result<Value> {
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+    if crate::color::has_v8(&raw) {
         raw = crate::color::catalog::downgrade(raw)?;
     }
     if raw.get("version").and_then(Value::as_u64) == Some(crate::photo::VERSION) {
@@ -743,7 +743,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                     .as_str()
                     .context("[invalid-clipping] base ID missing")?;
                 if node["kind"] == "adjustment" || clip_base != Some(base) {
-                    bail!("[invalid-clipping] node {} must immediately follow base {base} or its clipping members; detach clipping before reordering",node["id"])
+                    bail!("[invalid-clipping] node {} must be a following sibling of base {base} (immediately after it or its clipping members); detach clipping before reordering",node["id"])
                 }
             } else {
                 clip_base = if node["kind"] == "adjustment" {

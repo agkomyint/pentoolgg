@@ -3,6 +3,7 @@ import { usePaint, type RasterTool } from "./rasterStore";
 import { useRasterLayers } from "./RasterStage";
 import { useStudio } from "@/store";
 import { api, postJson, type Doc } from "@/lib/api";
+import { PlanPanel } from "./PlanPanel";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
 const TOOLS: [RasterTool, string][] = [
@@ -190,6 +191,7 @@ export function RasterPanel() {
         </Button>
       </div>
       <p className="text-muted-foreground">Rulers, guides, snapping and the navigator are view aids kept in the browser only.</p>
+      <PlanPanel />
     </div>
   );
 }
