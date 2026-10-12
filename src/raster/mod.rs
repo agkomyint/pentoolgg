@@ -1516,7 +1516,14 @@ pub fn add(
     {
         bail!("[limit-exceeded] raster width and height must be 1-{MAX_DIMENSION}")
     }
-    let mut migrated = crate::composite::migrate(raw.clone())?;
+    // `composite::migrate` demotes v7-v9 documents to v6; a raster layer needs
+    // v6 or later, so documents already at a supported version keep theirs.
+    let mut migrated = if crate::composite::is_document(raw) {
+        crate::scene::validate(raw)?;
+        raw.clone()
+    } else {
+        crate::composite::migrate(raw.clone())?
+    };
     let pages = migrated["pages"]
         .as_array_mut()
         .context("document has no pages")?;

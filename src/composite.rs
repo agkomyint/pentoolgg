@@ -48,6 +48,43 @@ pub(crate) fn with_cancel<T>(
 }
 /// Test hook: run `operation` with cancellation at its `n`th check on this
 /// thread (1-based). Returns the result and whether that check was reached.
+/// Pixels a plain, unstyled rectangle or ellipse can touch (padded for
+/// antialiasing); every other node is charged the full canvas.
+fn plain_node_pixels(node: &Value, canvas: u64, scale: f32) -> u64 {
+    let plain = matches!(node["kind"].as_str(), Some("rect" | "ellipse"))
+        && ["effects", "transforms", "mask", "rotation", "skew"]
+            .iter()
+            .all(|key| {
+                node.get(*key)
+                    .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty))
+            });
+    let (Some(w), Some(h)) = (node["width"].as_f64(), node["height"].as_f64()) else {
+        return canvas;
+    };
+    if !plain || !w.is_finite() || !h.is_finite() || w < 0.0 || h < 0.0 {
+        return canvas;
+    }
+    // Stroke width and a generous pad cover outside strokes and AA fringes.
+    let sw = &node["style"]["stroke_width"];
+    let stroke = match sw {
+        Value::Null => 0.0,
+        Value::Number(n) => n.as_f64().unwrap_or(0.0),
+        other => match other["fallback"].as_f64() {
+            Some(v) => v,
+            None => return canvas,
+        },
+    }
+    .max(0.0);
+    let pad = 2.0 * stroke + 4.0;
+    let scale = f64::from(scale);
+    let pixels = (w + pad) * (h + pad) * scale * scale;
+    if pixels.is_finite() {
+        (pixels.ceil() as u64).min(canvas)
+    } else {
+        canvas
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn cancel_at_check<T>(n: usize, operation: impl FnOnce() -> T) -> (T, bool) {
     TRIP.with(|t| t.set(n));
@@ -1231,6 +1268,21 @@ impl Renderer<'_> {
     fn reserve(&mut self) -> Result<()> {
         self.reserve_pixels(u64::from(self.width) * u64::from(self.height))
     }
+    fn plain_node_pixels(&self, node: &Value) -> u64 {
+        plain_node_pixels(
+            node,
+            u64::from(self.width) * u64::from(self.height),
+            self.scale,
+        )
+    }
+    /// Reserve a full surface of live memory but only `work` pixels of the
+    /// cumulative pixel-work budget.
+    fn reserve_surface(&mut self, work: u64) -> Result<()> {
+        let canvas = u64::from(self.width) * u64::from(self.height);
+        self.reserve_pixels(canvas)?;
+        self.pixel_work -= canvas - work.min(canvas);
+        Ok(())
+    }
     fn reserve_pixels(&mut self, pixels: u64) -> Result<()> {
         check_cancelled()?;
         self.pixel_work = self
@@ -1715,7 +1767,8 @@ impl Renderer<'_> {
                     self.vector_surface(node, render_parent)?
                 } else {
                     // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
-                    self.reserve()?;
+                    let work = self.plain_node_pixels(node);
+                    self.reserve_surface(work)?;
                     let mut content = node.clone();
                     if matches!(content["kind"].as_str(), Some("image" | "raster" | "photo")) {
                         content["opacity"] = json!(1.0);
@@ -2597,4 +2650,25 @@ pub fn svg(raw: &Value, document: &Path, page: Option<&str>, scale: f32) -> Resu
     Ok(format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><image width="{width}" height="{height}" href="data:image/png;base64,{encoded}"/></svg>"#
     ))
+}
+
+#[cfg(test)]
+mod plain_node_budget_tests {
+    use super::*;
+
+    #[test]
+    fn many_small_plain_nodes_fit_the_pixel_work_budget() {
+        let canvas = 1920_u64 * 1080;
+        let rect = json!({"kind":"rect","id":"r","width":40,"height":40});
+        let each = plain_node_pixels(&rect, canvas, 1.0);
+        assert!(each < canvas / 100, "{each}");
+        // 600 plain nodes previously charged 600 full canvases (> 1 Gpx).
+        assert!(600 * each < MAX_PIXEL_WORK);
+        assert!(600 * canvas > MAX_PIXEL_WORK);
+        let effect =
+            json!({"kind":"rect","id":"r","width":40,"height":40,"effects":[{"kind":"blur"}]});
+        assert_eq!(plain_node_pixels(&effect, canvas, 1.0), canvas);
+        let text = json!({"kind":"text","id":"t","width":40,"height":40});
+        assert_eq!(plain_node_pixels(&text, canvas, 1.0), canvas);
+    }
 }

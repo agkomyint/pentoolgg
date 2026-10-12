@@ -152,7 +152,7 @@ pub fn edit_page_options(
         }
     }
     let summary = crate::transaction::commit_value(file, operation, dry_run, expected, &raw)?;
-    println!("{}", serde_json::to_string(&summary)?);
+    println!("{}", serde_json::to_string(&summary.to_value())?);
     Ok(())
 }
 
