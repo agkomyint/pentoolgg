@@ -303,6 +303,14 @@ and documentation.
   Book operations are transactional across member documents: either every
   member is written or none is.
 
+  Progress: `pentool book` (`src/book.rs`, `tests/v0140_book.rs`,
+  `docs/layout-v1.md` section 11) provides init/add/remove/move, status,
+  renumber (continuous or restart-each pages, chapter and footnote offsets),
+  style/swatch/parent synchronization, book-wide TOC and index, preflight,
+  package and one-file PDF/X-4 export, with a journaled all-or-none commit.
+  Open: EPUB export (task 15), InDesign `.indb` import (task 13), cross-platform
+  CI evidence, Studio UI (task 17).
+
 - [ ] **12. Add data merge and adaptive layout.**
   - Data merge from bounded CSV or JSON into text and image placeholders, giving
     one record per page or several, with an overflow report.

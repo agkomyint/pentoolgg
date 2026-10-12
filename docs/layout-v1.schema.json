@@ -17,6 +17,15 @@
     "tables": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
     "notes": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/note"}},
     "note_settings": {"$ref": "#/$defs/noteSettings"},
+    "book_numbering": {
+      "type": "object",
+      "description": "Written by `pentool book renumber`: the chapter and footnote counts that precede this member in its .penbook.",
+      "properties": {
+        "chapter_offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "footnote_offset": {"type": "integer", "minimum": 0, "maximum": 1000000}
+      },
+      "additionalProperties": false
+    },
     "conditions": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/condition"}},
     "condition_sets": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/conditionSet"}},
     "active_condition_set": {"$ref": "#/$defs/id"},

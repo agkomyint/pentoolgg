@@ -4,6 +4,7 @@ pub mod ai;
 pub mod asset;
 pub mod benchmark;
 pub mod blend;
+pub mod book;
 pub mod color;
 pub mod compose;
 pub mod composite;

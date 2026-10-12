@@ -42,11 +42,16 @@ Nothing was pushed.
   `layout-doc`) are implemented through the CLI with estimated heights and
   pages. Open: composer-driven row heights, note placement and generated-story
   rendering; graphic cells; frame-break specials in the estimator; CI evidence.
+- **Task 11:** `pentool book` (`src/book.rs`, `tests/v0140_book.rs`) implements
+  the manifest, all-or-none commits with a journal, renumber, style/swatch/
+  parent sync, book-wide TOC and index, preflight, package and PDF export
+  (`pdfx::build_many`). Open: EPUB export (task 15), measured InDesign book
+  parity, cross-platform CI evidence, Studio book panel (task 17).
 - **Tasks 2-4:** see the Progress notes in `TASKS.md`.
 
 ## Not started
 
-11 `.penbook` books; 12 data merge and adaptive
+12 data merge and adaptive
 layout; 15 publishing exports; 16 layout preflight; 17 editor layout
 experience; 18 conformance, performance, recovery. Tasks 13-14 have their
 subsets implemented; the remaining mapping rows are listed in
