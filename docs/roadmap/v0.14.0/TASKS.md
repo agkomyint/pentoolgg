@@ -227,6 +227,12 @@ and documentation.
   are implemented and covered by `tests/v0140_style_eval.rs`.
 
 - [ ] **7. Add grids, guides and alignment.**
+  Progress: `layout-grid` (`src/grids.rs`, `tests/v0140_grids.rs`) provides
+  baseline grids (document and frame), ruler/layout-grid guides with derived
+  margin and column guides, smart-guide measurement, step-and-repeat, grids of
+  frames and graphic-frame fitting; align/distribute/key object already exist
+  in `pentool layout`. Open: applying `align_to_grid` to composed lines,
+  content-aware (alpha/subject) fitting, studio overlays, CI evidence.
   - A baseline grid per document and per frame, with align-to-grid modes.
   - Ruler guides, margin and column guides, layout grids, and smart guides with
     measurement.

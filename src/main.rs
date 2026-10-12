@@ -2112,6 +2112,16 @@ enum Command {
         #[command(subcommand)]
         action: pentool::styles::StyleAction,
     },
+    /// Version 9 baseline grids, guides, smart-guide measurement, step-and-repeat and frame grids.
+    LayoutGrid {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::grids::GridAction,
+    },
     /// Version 9 sections: numbering styles, prefixes, start numbers.
     Section {
         input: PathBuf,
@@ -6717,6 +6727,12 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_layout_style(&input, dry_run, if_revision.as_deref(), action),
+        Command::LayoutGrid {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_grid(&input, dry_run, if_revision.as_deref(), action),
         Command::Parent {
             input,
             dry_run,

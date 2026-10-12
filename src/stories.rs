@@ -727,6 +727,46 @@ fn frame_mut<'a>(raw: &'a mut Value, id: &str) -> Option<&'a mut Value> {
     None
 }
 
+/// Read access to a text or graphic frame by ID (used by grids and guides).
+pub(crate) fn frame_node<'a>(raw: &'a Value, id: &str) -> Option<&'a Value> {
+    for page in pages(raw) {
+        for layer in list(page, "layers") {
+            let mut found = None;
+            fn walk<'a>(nodes: &'a [Value], id: &str, out: &mut Option<&'a Value>) {
+                for n in nodes {
+                    if n.get("id").and_then(Value::as_str) == Some(id) {
+                        *out = Some(n);
+                        return;
+                    }
+                    walk(list(n, "children"), id, out);
+                    if out.is_some() {
+                        return;
+                    }
+                }
+            }
+            walk(list(layer, "nodes"), id, &mut found);
+            if let Some(n) = found {
+                return matches!(
+                    n.get("kind").and_then(Value::as_str),
+                    Some("text-frame" | "graphic-frame")
+                )
+                .then_some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Mutable access to a text or graphic frame by ID.
+pub(crate) fn frame_node_mut<'a>(raw: &'a mut Value, id: &str) -> Option<&'a mut Value> {
+    frame_mut(raw, id).filter(|n| {
+        matches!(
+            n.get("kind").and_then(Value::as_str),
+            Some("text-frame" | "graphic-frame")
+        )
+    })
+}
+
 fn remove_node(nodes: &mut Vec<Value>, id: &str) -> bool {
     if let Some(index) = nodes
         .iter()
