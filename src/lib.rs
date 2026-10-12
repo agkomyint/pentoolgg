@@ -20,6 +20,7 @@ pub mod imageops;
 pub mod import;
 pub mod inspect;
 pub mod instance;
+pub mod json;
 pub mod layout;
 pub mod layout_cli;
 pub mod library;
