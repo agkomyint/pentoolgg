@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "engine": 1,
+  "id": "allocation-attack",
+  "page": "page-1",
+  "passes": [],
+  "limits": {"max_passes": 1000000, "max_generated_strokes": 1000000000, "max_samples": 999999999999, "max_dabs": 999999999999, "max_changed_pixels": 999999999999, "max_tiles": 999999999}
+}

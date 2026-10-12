@@ -37,6 +37,12 @@ pub fn apply(
     if ids.len() < 2 {
         bail!("layout requires at least two node IDs")
     }
+    let mut seen = std::collections::HashSet::new();
+    for id in ids {
+        if !seen.insert(id) {
+            bail!("duplicate layout ID: {id}")
+        }
+    }
     let mut boxes = ids
         .iter()
         .map(|id| {
@@ -159,4 +165,28 @@ fn move_one(
         json!({"id":b.id,"dx":dx,"dy":dy,"bounds":{"x":b.x,"y":b.y,"width":b.w,"height":b.h}}),
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_rejects_duplicate_ids() {
+        let mut raw = json!({"format":"pentool","version":4});
+        let err = apply(
+            &mut raw,
+            None,
+            Operation::Left,
+            &["a".into(), "a".into()],
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate layout ID: a"),
+            "unexpected error: {err}"
+        );
+    }
 }

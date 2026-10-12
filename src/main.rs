@@ -1,7 +1,7 @@
 use pentool::{
     agent, ai, asset, benchmark, composite, diff, document, editing, fonts, geometry, history,
-    image, import, instance, layout, library, package, page, pdf, raster, render, replace, scene,
-    server, style, text, transaction,
+    image, import, instance, json, layout, library, package, page, pdf, raster, render, replace,
+    scene, server, style, text, transaction,
 };
 
 use anyhow::{bail, Context, Result};
@@ -79,6 +79,8 @@ struct AnalyzeArgs {
     /// JSON array of pixel coordinates, e.g. [[10,20]].
     #[arg(long, default_value = "[]")]
     samples: String,
+    /// Also compare the scope against itself with effects disabled and masks
+    /// stripped (effects-on vs effects-off, not a diff between files).
     #[arg(long)]
     compare: bool,
     /// Explicitly create color tokens from the reported palette.
@@ -395,10 +397,10 @@ struct TextBoxArgs {
     weight: u16,
     #[arg(long, default_value = "#111827")]
     fill: String,
-    #[arg(long, default_value = "left")]
-    align: String,
-    #[arg(long, default_value = "top")]
-    vertical_align: String,
+    #[arg(long, value_enum, default_value = "left")]
+    align: document::TextAlign,
+    #[arg(long, value_enum, default_value = "top")]
+    vertical_align: scene::TextVerticalAlign,
     #[arg(long, default_value_t = 1.2)]
     line_height: f64,
     #[arg(long, value_enum, default_value = "baseline")]
@@ -464,6 +466,10 @@ enum SearchKind {
     Image,
     /// v6 raster-paint layers.
     Raster,
+    /// v9 text frames.
+    TextFrame,
+    /// v9 graphic frames.
+    GraphicFrame,
 }
 
 impl SearchKind {
@@ -473,6 +479,8 @@ impl SearchKind {
             Self::Text => "text",
             Self::Image => "image",
             Self::Raster => "raster",
+            Self::TextFrame => "text-frame",
+            Self::GraphicFrame => "graphic-frame",
         }
     }
     fn legacy(self) -> Result<agent::ObjectKind> {
@@ -484,6 +492,9 @@ impl SearchKind {
             ),
             Self::Raster => anyhow::bail!(
                 "[unsupported-capability] --kind raster requires a v6 document; migrate with `pentool migrate`"
+            ),
+            Self::TextFrame | Self::GraphicFrame => anyhow::bail!(
+                "[unsupported-capability] frame kinds require a v9 document; migrate with `pentool migrate --target 9`"
             ),
         }
     }
@@ -2071,6 +2082,56 @@ enum Command {
         #[command(subcommand)]
         action: page::PageAction,
     },
+    /// Version 9 spreads: facing pages, merge, split, arrange.
+    Spread {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::SpreadAction,
+    },
+    /// Version 9 parent pages: create, items, assignment, resolution.
+    Parent {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::ParentAction,
+    },
+    /// Version 9 layout styles: paragraph, character, object, table and cell styles.
+    LayoutStyle {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::styles::StyleAction,
+    },
+    /// Version 9 sections: numbering styles, prefixes, start numbers.
+    Section {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::SectionAction,
+    },
+    /// Version 9 parent-item overrides and detach, per page.
+    Override {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::layout_cli::OverrideAction,
+    },
     /// Raster-paint layers: sparse tiles, deterministic brush strokes, checkpoints.
     Raster {
         input: PathBuf,
@@ -2295,6 +2356,7 @@ enum Command {
     /// Create and attach reusable masks; apply explicitly bakes a content node.
     Mask(Box<MaskArgs>),
     /// Attach or detach explicit consecutive clipping-stack membership.
+    /// The clipped node must be a following sibling of its base.
     Clip(Box<ClipArgs>),
     /// Edit an immutable-source affine/projective transform stack.
     Transform(Box<TransformArgs>),
@@ -2306,6 +2368,67 @@ enum Command {
     Selection(Box<SelectionArgs>),
     /// Inspect composite histograms, samples, palettes, and before/after pixels.
     Analyze(Box<AnalyzeArgs>),
+    /// Sample colors and manage portable palettes (v0.13.0 agent painting).
+    PaintPalette {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::paint_palette::PaletteAction,
+    },
+    /// Build and preview stroke fields and their stroke plans (v0.13.0 agent painting).
+    PaintFields {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: pentool::paint_fields::FieldAction,
+    },
+    /// List material paint modes and canonicalise a media spec (v0.13.0 agent painting).
+    PaintMedia {
+        #[command(subcommand)]
+        action: pentool::paint_media::MediaAction,
+    },
+    /// Resolve and preview region painting constraints (v0.13.0 agent painting).
+    PaintConstraints {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: pentool::paint_constraints::ConstraintAction,
+    },
+    /// Score two revisions of a layer against a goal (v0.13.0 agent painting).
+    PaintScore(Box<pentool::paint_score::ScoreArgs>),
+    /// Reusable composition and form guides (v0.13.0 agent painting).
+    PaintGuide {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::paint_guide::GuideAction,
+    },
+    /// Portable paint bundles and stored plan templates (v0.13.0 agent painting).
+    PaintBundle {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::paint_bundle::BundleAction,
+    },
+    /// Structural diff of paint data and layer pixels between two documents or plans.
+    PaintDiff(Box<pentool::paint_bundle::DiffArgs>),
+    /// Run a declarative, atomic multi-pass paint plan (v0.13.0 agent painting).
+    PaintPlan(Box<pentool::paint_plan::PlanArgs>),
+    /// Compact, paginated visual analysis of a bounded scope (v0.13.0 agent painting).
+    PaintAnalyze(Box<pentool::paint_analysis::AnalyzeArgs>),
+    /// Bounded region previews and structural comparison (v0.13.0 agent painting).
+    PaintReview {
+        input: PathBuf,
+        #[command(subcommand)]
+        action: pentool::paint_review::ReviewAction,
+    },
     /// Maintain verified linked sources and collect portable projects offline.
     Linked(Box<LinkedArgs>),
     /// Save data-only appearance presets or copy/paste named appearances.
@@ -3173,6 +3296,59 @@ enum RasterAction {
         blend: String,
         #[arg(long, default_value_t = 0)]
         seed: u64,
+    },
+    /// Compile an absolute SVG M/L/Q/C/A path into deterministic canonical raster strokes.
+    StrokePath {
+        id: String,
+        /// Absolute SVG path with one subpath and no close command.
+        #[arg(long)]
+        path: String,
+        /// Curve-flattening tolerance in pixels.
+        #[arg(long, default_value_t = 0.25)]
+        flatness: f64,
+        /// JSON object containing size, pressure, flow, opacity, rotation or color curves, or @file.json.
+        #[arg(long, default_value = "{}")]
+        curves: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long, default_value = "#000000")]
+        color: String,
+        #[arg(long, default_value = "normal")]
+        blend: String,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Region constraints JSON (inside, avoid, opaque_clip, barriers, reach_from,
+        /// follow), or @file.json. See docs/agent-painting-protocol-v1.md.
+        #[arg(long)]
+        constraints: Option<String>,
+    },
+    /// Paint seeded strokes through a deterministic direction field (hair, grass,
+    /// fabric, form-following hatching). The field hash is pinned in the journal.
+    StrokeField {
+        id: String,
+        /// Field JSON: {"method":"contour|gradient|distance|tensor|vanishing|radial|angle|vectors",
+        /// "cell":8,"rect":[x,y,w,h],...} or @file.json.
+        #[arg(long)]
+        field: String,
+        /// Stroke rules JSON: spacing, jitter, length, length_jitter, step, curvature,
+        /// overlap, taper, collision (stop|skip|allow), min_length; or @file.json.
+        #[arg(long, default_value = "{}")]
+        params: String,
+        #[arg(long, default_value = "{}")]
+        brush: String,
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long, default_value = "#000000")]
+        color: String,
+        #[arg(long, default_value = "normal")]
+        blend: String,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Region constraints JSON (see stroke-path); `follow` is not allowed here.
+        #[arg(long)]
+        constraints: Option<String>,
     },
     /// Choose where clone strokes on a layer copy from (resets the aligned anchor).
     CloneSource {
@@ -5955,7 +6131,7 @@ async fn run() -> Result<()> {
                         offset,
                         limit
                     }
-                ))?
+                )?)?
             );
             Ok(())
         }
@@ -6458,6 +6634,7 @@ async fn run() -> Result<()> {
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             let operation_bytes = fs::read(&operations)
                 .with_context(|| format!("could not read {}", operations.display()))?;
+            json::reject_duplicate_keys(&operation_bytes)?;
             let changes = if scene::is_scene_document(&raw) {
                 let mut actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
                 if upsert {
@@ -6528,6 +6705,36 @@ async fn run() -> Result<()> {
                 )
             }
         }
+        Command::Spread {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_spread(&input, dry_run, if_revision.as_deref(), action),
+        Command::LayoutStyle {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_style(&input, dry_run, if_revision.as_deref(), action),
+        Command::Parent {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_parent(&input, dry_run, if_revision.as_deref(), action),
+        Command::Section {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_section(&input, dry_run, if_revision.as_deref(), action),
+        Command::Override {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_override(&input, dry_run, if_revision.as_deref(), action),
         Command::Raster {
             input,
             dry_run,
@@ -7123,6 +7330,93 @@ async fn run() -> Result<()> {
                     result["input"] = input_summary;
                     ("raster-stroke", result)
                 }
+                RasterAction::StrokeField {
+                    id,
+                    field,
+                    params,
+                    brush,
+                    preset,
+                    color,
+                    blend,
+                    seed,
+                    constraints,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                if fs::metadata(path)?.len() > 4 << 20 {
+                                    bail!("[limit-exceeded] {path} is larger than 4 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let request = raster::fields::FieldRequest {
+                        field: read(&field)?,
+                        params: read(&params)?,
+                        brush: raster::Brush::parse(&raster::resolve_preset(
+                            &raw,
+                            &read(&brush)?,
+                            preset.as_deref(),
+                        )?)?,
+                        color: raster::parse_color(&color)?,
+                        blend: raster::Blend::parse(&blend)?,
+                        seed,
+                        constraints: match &constraints {
+                            Some(text) => read(text)?,
+                            None => serde_json::Value::Null,
+                        },
+                    };
+                    let result = raster::fields::paint_field(&mut raw, page, &id, request)?;
+                    ("raster-stroke-field", result)
+                }
+                RasterAction::StrokePath {
+                    id,
+                    path,
+                    flatness,
+                    curves,
+                    brush,
+                    preset,
+                    color,
+                    blend,
+                    seed,
+                    constraints,
+                } => {
+                    let read = |text: &str| -> Result<serde_json::Value> {
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                const MAX_JSON: u64 = 4 << 20;
+                                if fs::metadata(path)?.len() > MAX_JSON {
+                                    bail!("[limit-exceeded] {path} is larger than 4 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.to_owned(),
+                        };
+                        Ok(serde_json::from_str(&body)?)
+                    };
+                    let request = raster::PathRequest {
+                        path,
+                        flatness,
+                        brush: raster::Brush::parse(&raster::resolve_preset(
+                            &raw,
+                            &read(&brush)?,
+                            preset.as_deref(),
+                        )?)?,
+                        color: raster::parse_color(&color)?,
+                        blend: raster::Blend::parse(&blend)?,
+                        seed,
+                        curves: read(&curves)?,
+                        constraints: match &constraints {
+                            Some(text) => read(text)?,
+                            None => serde_json::Value::Null,
+                        },
+                    };
+                    let result = raster::paint_path(&mut raw, page, &id, request)?;
+                    ("raster-stroke-path", result)
+                }
             };
             let summary = transaction::commit_value(
                 &input,
@@ -7226,7 +7520,34 @@ async fn run() -> Result<()> {
             if_revision,
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            match &action {
+                text::TextAction::Shape(args) => {
+                    println!("{}", pentool::shaping::run_shape(&raw, args)?);
+                    return Ok(());
+                }
+                text::TextAction::Compose(args) => {
+                    println!("{}", pentool::compose::run_compose(&raw, args)?);
+                    return Ok(());
+                }
+                text::TextAction::FontReport => {
+                    println!("{}", pentool::shaping::font_report(&raw)?);
+                    return Ok(());
+                }
+                _ => {}
+            }
             if scene::is_scene_document(&raw) {
+                if matches!(
+                    action,
+                    text::TextAction::Story { .. } | text::TextAction::Frame { .. }
+                ) {
+                    return pentool::layout_cli::run_text_layout(
+                        &input,
+                        dry_run,
+                        if_revision.as_deref(),
+                        raw,
+                        action,
+                    );
+                }
                 scene::apply_text(&mut raw, selected_page, action)?;
                 let summary = transaction::commit_value(
                     &input,
@@ -7253,14 +7574,33 @@ async fn run() -> Result<()> {
             action,
             dry_run,
             if_revision,
-        } => editing::edit_page_options(
-            &input,
-            selected_page,
-            "font",
-            dry_run,
-            if_revision.as_deref(),
-            |doc| text::font(doc, action),
-        ),
+        } => {
+            let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+            if scene::is_scene_document(&raw) {
+                let result = pentool::shaping::scene_font(&mut raw, action)?;
+                let change = transaction::commit_value(
+                    &input,
+                    "font",
+                    dry_run,
+                    if_revision.as_deref(),
+                    &raw,
+                )?;
+                println!(
+                    "{}",
+                    serde_json::json!({"change": change, "result": result})
+                );
+                Ok(())
+            } else {
+                editing::edit_page_options(
+                    &input,
+                    selected_page,
+                    "font",
+                    dry_run,
+                    if_revision.as_deref(),
+                    |doc| text::font(doc, action),
+                )
+            }
+        }
         Command::Fonts { input } => {
             let doc = match input {
                 Some(path) => read_document(&path, selected_page)?,
@@ -7495,10 +7835,10 @@ async fn run() -> Result<()> {
             if selected_page.is_some() {
                 bail!("[invalid-input] format migration affects the entire document; --page is not applicable");
             }
-            if !matches!(target, 3..=8) {
-                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, or 8")
+            if !matches!(target, 3..=9) {
+                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, 8, or 9")
             }
-            let before = if u64::from(target) == pentool::color::VERSION {
+            let before = if u64::from(target) >= pentool::color::VERSION {
                 pentool::resource::read_bounded(
                     &input,
                     pentool::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
@@ -7510,6 +7850,7 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
+                9 => pentool::spreads::migrate(raw)?,
                 8 => pentool::color::catalog::migrate(raw)?,
                 7 => pentool::photo::catalog::migrate(raw)?,
                 6 => composite::migrate(raw)?,
@@ -7893,6 +8234,42 @@ async fn run() -> Result<()> {
                 )?
             );
             Ok(())
+        }
+        Command::PaintPalette {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::paint_palette::run(
+            &input,
+            selected_page,
+            dry_run,
+            if_revision.as_deref(),
+            action,
+        ),
+        Command::PaintFields { input, action } => pentool::paint_fields::run(&input, action),
+        Command::PaintMedia { action } => pentool::paint_media::run(action),
+        Command::PaintConstraints { input, action } => {
+            pentool::paint_constraints::run(&input, action)
+        }
+        Command::PaintScore(args) => pentool::paint_score::run(*args),
+        Command::PaintGuide {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::paint_guide::run(&input, dry_run, if_revision.as_deref(), action),
+        Command::PaintBundle {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::paint_bundle::run(&input, dry_run, if_revision.as_deref(), action),
+        Command::PaintDiff(args) => pentool::paint_bundle::run_diff(*args),
+        Command::PaintPlan(args) => pentool::paint_plan::run(*args, selected_page),
+        Command::PaintAnalyze(args) => pentool::paint_analysis::run(*args, selected_page),
+        Command::PaintReview { input, action } => {
+            pentool::paint_review::run(&input, selected_page, action)
         }
         Command::Analyze(args) => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
@@ -8320,6 +8697,12 @@ async fn run() -> Result<()> {
                 );
                 return Ok(());
             }
+            if !matches!(
+                args.operation.as_str(),
+                "add" | "set" | "enable" | "disable" | "remove"
+            ) {
+                anyhow::bail!("unknown adjustment operation {}", args.operation)
+            }
             let id = args
                 .id
                 .as_deref()
@@ -8691,8 +9074,8 @@ async fn run() -> Result<()> {
                     size: args.size,
                     weight: args.weight,
                     fill: args.fill,
-                    align: args.align,
-                    vertical_align: args.vertical_align,
+                    align: format!("{:?}", args.align).to_lowercase(),
+                    vertical_align: format!("{:?}", args.vertical_align).to_lowercase(),
                     line_height: args.line_height,
                     anchor: args.anchor,
                     overflow: args.overflow,
@@ -8758,6 +9141,9 @@ async fn run() -> Result<()> {
             format,
             link_images,
         } => {
+            if all_pages && selected_page.is_some() {
+                anyhow::bail!("[invalid-input] --page cannot be combined with --all-pages")
+            }
             if !scale.is_finite() || !(0.1..=8.0).contains(&scale) {
                 anyhow::bail!("export scale must be finite and between 0.1 and 8")
             }
@@ -8975,7 +9361,7 @@ fn write_image_export(
 }
 
 fn ensure_v8_production(raw: &serde_json::Value) -> Result<()> {
-    if raw["version"] != pentool::color::VERSION {
+    if !pentool::color::has_v8(raw) {
         bail!(
             "[unsupported-version] production geometry requires a version {} document; run `migrate` first",
             pentool::color::VERSION
@@ -9004,6 +9390,7 @@ fn read_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
 }
 
 fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    editing::recover_interrupted_write(path)?;
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     select_page(&mut doc, page)?;
@@ -9011,6 +9398,7 @@ fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Docum
 }
 
 fn read_render_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    editing::recover_interrupted_write(path)?;
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let raw: serde_json::Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     let flattened = if scene::is_scene_document(&raw) {

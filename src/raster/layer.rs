@@ -357,7 +357,7 @@ pub fn trim(raw: &mut Value, page: Option<&str>, id: &str) -> Result<Value> {
         .ok_or_else(|| bad("not-found", format!("raster layer {id} was not found")))?;
     let surface = Surface::load(raw, &node)?;
     let Some([x0, y0, x1, y1]) = surface.painted_bounds() else {
-        bail!("[invalid-input] raster {id} has no painted pixels to trim to; use `raster clear` or remove the node")
+        bail!("[invalid-input] raster {id} has no painted pixels to trim to; paint a stroke first or remove the node")
     };
     crop(
         raw,
