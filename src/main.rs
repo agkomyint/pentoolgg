@@ -1697,12 +1697,17 @@ enum ProductionAction {
         #[arg(long)]
         pdfx: bool,
     },
-    /// Replace the selected page's production object with the given JSON.
+    /// Replace the selected page's production object with the given JSON
+    /// (use --merge to patch only the keys you pass; a null value removes a key).
     Set {
         input: PathBuf,
         /// Production object, e.g. '{"trim":{...},"bleed":9}'.
         #[arg(long)]
         geometry: String,
+        /// Merge the JSON into the existing production object (RFC 7386
+        /// merge-patch) instead of replacing it; keys set to null are removed.
+        #[arg(long)]
+        merge: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -4239,6 +4244,7 @@ async fn run() -> Result<()> {
                 ProductionAction::Set {
                     input,
                     geometry: json,
+                    merge,
                     dry_run,
                     if_revision,
                 } => {
@@ -4248,8 +4254,36 @@ async fn run() -> Result<()> {
                     let (mut raw, revision) = read_color_document(&input, if_revision.as_deref())?;
                     ensure_v8_production(&raw)?;
                     let index = page_index(&raw)?;
-                    raw["pages"][index]["production"] =
+                    let patch: serde_json::Value =
                         serde_json::from_str(&json).context("invalid production JSON")?;
+                    let previous = raw["pages"][index]
+                        .get("production")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    let next = if merge {
+                        if !patch.is_object() {
+                            bail!("[invalid-input] --merge needs a JSON object, e.g. '{{\"bleed\":9}}'")
+                        }
+                        let mut base = if previous.is_object() {
+                            previous.clone()
+                        } else {
+                            serde_json::json!({})
+                        };
+                        merge_patch(&mut base, &patch);
+                        base
+                    } else {
+                        patch
+                    };
+                    let dropped: Vec<String> = previous
+                        .as_object()
+                        .map(|old| {
+                            old.keys()
+                                .filter(|key| next.get(key.as_str()).is_none())
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    raw["pages"][index]["production"] = next;
                     let geometry = production::resolve(&raw["pages"][index], false)?;
                     let change = transaction::commit_value(
                         &input,
@@ -4258,12 +4292,18 @@ async fn run() -> Result<()> {
                         Some(&revision),
                         &raw,
                     )?;
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(
-                            &serde_json::json!({"change":change,"geometry":geometry.map(|g| g.json())})
-                        )?
-                    );
+                    let mut result = serde_json::json!({
+                        "change": change,
+                        "geometry": geometry.map(|g| g.json()),
+                        "mode": if merge { "merge" } else { "replace" },
+                        "dropped_keys": dropped,
+                    });
+                    if !merge && !result["dropped_keys"].as_array().is_none_or(Vec::is_empty) {
+                        result["note"] = serde_json::json!(
+                            "the production object was replaced and the listed keys were removed; pass --merge to patch only the keys you give"
+                        );
+                    }
+                    println!("{}", serde_json::to_string_pretty(&result)?);
                     Ok(())
                 }
                 ProductionAction::Clear {
@@ -7647,7 +7687,7 @@ async fn run() -> Result<()> {
         }
         Command::Fonts { input } => {
             let doc = match input {
-                Some(path) => read_document(&path, selected_page)?,
+                Some(path) => read_render_document(&path, selected_page)?,
                 None => Document::new(1, 1),
             };
             println!("{}", fonts::list(&doc)?);
@@ -7755,7 +7795,7 @@ async fn run() -> Result<()> {
                     if_revision.as_deref(),
                     &raw,
                 )?;
-                println!("{}", serde_json::to_string(&summary)?);
+                println!("{}", serde_json::to_string(&summary.to_value())?);
                 Ok(())
             } else {
                 editing::edit_page_options(
@@ -9430,6 +9470,29 @@ fn read_document_unvalidated(path: &PathBuf, page: Option<&str>) -> Result<Docum
     let mut doc: Document = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     select_page(&mut doc, page)?;
     Ok(doc)
+}
+
+/// RFC 7386 JSON merge-patch: objects merge recursively, null removes a key.
+fn merge_patch(target: &mut serde_json::Value, patch: &serde_json::Value) {
+    match patch {
+        serde_json::Value::Object(patch) => {
+            if !target.is_object() {
+                *target = serde_json::json!({});
+            }
+            let object = target.as_object_mut().unwrap();
+            for (key, value) in patch {
+                if value.is_null() {
+                    object.remove(key);
+                } else {
+                    merge_patch(
+                        object.entry(key.clone()).or_insert(serde_json::Value::Null),
+                        value,
+                    );
+                }
+            }
+        }
+        other => *target = other.clone(),
+    }
 }
 
 fn read_render_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {

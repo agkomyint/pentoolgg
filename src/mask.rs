@@ -210,7 +210,11 @@ pub fn create(
         .insert(name.into(), json!(digest));
     crate::scene::validate(&candidate)?;
     *raw = candidate;
-    Ok(json!({"mask":name,"resource":digest}))
+    Ok(json!({
+        "mask":name,
+        "resource":digest,
+        "note":"a mask is a named resource, not a scene node: it is absent from tree and search; list it with `mask list` and use it with `mask attach FILE NODE_ID NAME`"
+    }))
 }
 
 pub fn attach(
