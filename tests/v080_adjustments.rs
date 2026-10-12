@@ -303,6 +303,41 @@ fn adjustment_add_collision_names_existing_node_kind() {
 }
 
 #[test]
+fn unknown_adjustment_kind_lists_valid_kinds() {
+    let err = composite::validate_settings("bogus", &serde_json::json!({})).unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown adjustment bogus"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("exposure") && message.contains("invert") && message.contains("threshold"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn adjustment_add_defaults_to_first_layer_not_layer_1() {
+    let mut raw: Value =
+        serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+    let migrated = composite::migrate(raw.clone()).unwrap();
+    raw = migrated;
+    assert_ne!(raw["pages"][0]["layers"][0]["id"], "layer-1");
+    composite::edit(
+        &mut raw,
+        None,
+        "add",
+        "grade",
+        &serde_json::json!({"adjustment":"invert"}),
+    )
+    .unwrap();
+    let nodes = raw["pages"][0]["layers"][0]["nodes"].as_array().unwrap();
+    assert!(nodes
+        .iter()
+        .any(|n| n["id"] == "grade" && n["kind"] == "adjustment"));
+}
+
+#[test]
 fn cli_adjustment_validates_operation_before_requiring_id() {
     let directory = std::env::temp_dir().join(format!("pentool-v080-op-{}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
