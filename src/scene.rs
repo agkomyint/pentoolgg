@@ -1287,6 +1287,11 @@ pub fn put_shape(
     if pages_node_ids(page).contains(id) {
         bail!("node ID already exists on page: {id}")
     }
+    if let Some(width) = input.stroke_width {
+        if !width.is_finite() || width < 0.0 {
+            bail!("stroke width must be finite and nonnegative")
+        }
+    }
     let layer = page
         .get_mut("layers")
         .and_then(Value::as_array_mut)
@@ -3351,6 +3356,34 @@ mod tests {
         let flattened = flatten_to_v3(&raw).unwrap();
         let doc: crate::document::Document = serde_json::from_value(flattened).unwrap();
         assert_eq!(doc.layers[0].paths.len(), 1);
+    }
+
+    #[test]
+    fn put_shape_rejects_negative_stroke_width() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = put_shape(
+            &mut raw,
+            None,
+            "content",
+            ShapeKind::Rect,
+            "bad-stroke",
+            ShapeInput {
+                x: Some(1.0),
+                y: Some(1.0),
+                width: Some(5.0),
+                height: Some(5.0),
+                stroke: Some("#000000".into()),
+                stroke_width: Some(-3.0),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("stroke width must be finite and nonnegative"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
