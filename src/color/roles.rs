@@ -4,7 +4,6 @@ use super::{
     catalog,
     icc::{Direction, Intent, Profile, Transform},
     value::Destination,
-    VERSION,
 };
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
@@ -146,7 +145,7 @@ pub(crate) fn validate_in(catalog: &Value) -> Result<()> {
 fn require(raw: &Value) -> Result<()> {
     crate::scene::validate(raw)?;
     ensure!(
-        raw["version"].as_u64() == Some(VERSION),
+        crate::color::has_v8(raw),
         "[unsupported-capability] color roles require explicit migration to v8"
     );
     Ok(())

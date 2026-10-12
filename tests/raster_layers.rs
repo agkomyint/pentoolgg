@@ -565,3 +565,19 @@ fn raster_documents_pack_into_packages_with_their_tiles() {
         .map(|r| assert_eq!(r["ok"], true))
         .unwrap();
 }
+
+#[test]
+fn trim_on_empty_layer_suggests_painting_instead_of_clear() {
+    let mut raw = document();
+    raster::add(&mut raw, None, None, "empty", 0.0, 0.0, 8, 8).unwrap();
+    let err = raster::trim(&mut raw, None, "empty").unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("paint a stroke first"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        !message.contains("raster clear"),
+        "must not suggest no-op clear: {message}"
+    );
+}
