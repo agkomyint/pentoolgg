@@ -364,7 +364,10 @@ pub fn validate_settings(kind: &str, params: &Value) -> Result<()> {
         .as_object()
         .context("[invalid-adjustment] params must be an object")?;
     if !ADJUSTMENTS.contains(&kind) {
-        bail!("[unsupported-capability] unknown adjustment {kind}")
+        bail!(
+            "[unsupported-capability] unknown adjustment {kind}; valid kinds: {}",
+            ADJUSTMENTS.join(", ")
+        )
     }
     if matches!(
         kind,
@@ -879,17 +882,33 @@ pub fn edit(
     let selected = crate::scene::page_mut(&mut candidate, page)?;
     let result = match operation {
         "add" => {
-            if crate::scene::find_node_mut(selected, id).is_some() {
-                bail!("[invalid-adjustment] node ID {id} already exists")
+            if let Some(existing) = crate::scene::find_node_mut(selected, id) {
+                let kind = existing
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("node");
+                bail!("[invalid-adjustment] node ID {id} already exists as a {kind} node")
             }
-            let layer_id = settings["layer"].as_str().unwrap_or("layer-1");
-            crate::scene::ensure_layer_unlocked(selected, layer_id)?;
+            let layer_id = settings["layer"]
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| {
+                    selected
+                        .get("layers")
+                        .and_then(Value::as_array)
+                        .and_then(|layers| layers.first())
+                        .and_then(|layer| layer.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .context("[invalid-adjustment] page has no layers")?;
+            crate::scene::ensure_layer_unlocked(selected, &layer_id)?;
             let node = json!({"kind":"adjustment", "id":id,
                 "adjustment":settings["adjustment"], "params":settings.get("params").cloned().unwrap_or(json!({})),
                 "scope":settings.get("scope").cloned().unwrap_or(json!({"kind":"below"})),
                 "enabled":settings.get("enabled").cloned().unwrap_or(json!(true)),
                 "opacity":settings.get("opacity").cloned().unwrap_or(json!(1.0)), "blend_mode":settings.get("blend_mode").cloned().unwrap_or(json!("normal")),"blend_space":settings.get("blend_space").cloned().unwrap_or(json!("srgb"))});
-            crate::scene::layer_nodes_mut(selected, layer_id)?.push(node.clone());
+            crate::scene::layer_nodes_mut(selected, &layer_id)?.push(node.clone());
             node
         }
         "set" | "enable" | "disable" => {

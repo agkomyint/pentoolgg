@@ -122,6 +122,60 @@ fn package_rejects_escaping_archive_paths() {
 }
 
 #[test]
+fn lock_verify_rehashes_package_sources() {
+    let root = temp("lock-verify");
+    let source = root.join("source.pen");
+    fs::write(
+        &source,
+        serde_json::to_vec_pretty(&Document::new(320, 200)).unwrap(),
+    )
+    .unwrap();
+    let assets = root.join("library").join("assets");
+    asset::create(&asset::CreateOptions {
+        input: source,
+        output: assets.join("card.pen"),
+        page: None,
+        layers: vec![],
+        objects: vec![],
+        rect: None,
+        canvas_bounds: true,
+        include_hidden: false,
+        properties: vec![],
+        id: "ui/card".into(),
+        name: "Card".into(),
+        description: "Reusable card".into(),
+        version: "1.0.0".into(),
+        kind: "component".into(),
+        author: "Pentool".into(),
+        license: "MIT".into(),
+        tags: vec!["ui".into()],
+        category: "layout".into(),
+        overwrite: false,
+        dry_run: false,
+    })
+    .unwrap();
+    let manifest = serde_json::json!({"schema":1,"name":"open/ui","version":"1.0.0","license":"MIT","assets":{}});
+    fs::write(
+        root.join("library").join("pentool.package.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let archive = root.join("pkg.penpack");
+    package::pack(&root.join("library"), &archive).unwrap();
+    let project = root.join("consumer");
+    fs::create_dir_all(&project).unwrap();
+    package::install(&archive, &project, &archive.display().to_string()).unwrap();
+    assert_eq!(package::lock_verify(&project).unwrap()["ok"], true);
+    let mut tampered = fs::read(&archive).unwrap();
+    tampered.extend_from_slice(b"tampered");
+    fs::write(&archive, &tampered).unwrap();
+    assert_eq!(package::lock_verify(&project).unwrap()["ok"], false);
+    fs::remove_file(&archive).unwrap();
+    assert_eq!(package::lock_verify(&project).unwrap()["ok"], false);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn explore_rejects_zero_limit() {
     let index = library::AssetIndex {
         schema: 1,

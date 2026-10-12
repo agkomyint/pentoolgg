@@ -48,6 +48,9 @@ pub fn edit_canvas(
 ) -> Result<()> {
     validate(raw)?;
     if let Some(name) = name {
+        if name.trim().is_empty() {
+            bail!("document name cannot be empty");
+        }
         raw["name"] = json!(name);
     }
     let canvas = page_mut(raw, page_id)?
@@ -1212,13 +1215,17 @@ pub fn put_text_box(
     input: TextBoxInput,
 ) -> Result<Value> {
     validate(raw)?;
-    if input.size <= 0.0
-        || !input.size.is_finite()
-        || input.width.is_some_and(|v| v <= 0.0 || !v.is_finite())
+    if input.width.is_some_and(|v| v <= 0.0 || !v.is_finite())
         || input.height.is_some_and(|v| v <= 0.0 || !v.is_finite())
     {
-        bail!("text box dimensions and font size must be finite and positive")
+        bail!("text box dimensions must be finite and positive")
     }
+    crate::text::validate_content(&input.content)?;
+    crate::text::validate_typography(
+        Some(input.size),
+        Some(input.weight as f64),
+        Some(input.line_height),
+    )?;
     let max_chars = input
         .width
         .map(|width| (width / (input.size * 0.6)).floor().max(1.0) as usize);
@@ -1292,6 +1299,11 @@ pub fn put_shape(
     };
     if pages_node_ids(page).contains(id) {
         bail!("node ID already exists on page: {id}")
+    }
+    if let Some(width) = input.stroke_width {
+        if !width.is_finite() || width < 0.0 {
+            bail!("stroke width must be finite and nonnegative")
+        }
     }
     let layer = page
         .get_mut("layers")
@@ -1660,6 +1672,17 @@ pub fn apply_batch_at(
                         bail!("node ID already exists: {id} (set mode replace or pass --upsert to replace it)")
                     }
                     let mut node = operation.clone();
+                    if kind == "put-text" {
+                        if let Some(content) = node.get("content").and_then(Value::as_str) {
+                            crate::text::validate_content(content)?;
+                        }
+                        let number = |key: &str| node.get(key).and_then(Value::as_f64);
+                        crate::text::validate_typography(
+                            number("font_size").or(number("size")),
+                            number("font_weight").or(number("weight")),
+                            number("line_height"),
+                        )?;
+                    }
                     let object = node.as_object_mut().unwrap();
                     object.remove("type");
                     object.remove("mode");
@@ -2168,9 +2191,8 @@ pub fn apply_text(
             line_height,
             ..
         } => {
-            if !size.is_finite() || size <= 0.0 {
-                bail!("font size must be finite and positive")
-            }
+            crate::text::validate_typography(Some(size), Some(weight as f64), Some(line_height))?;
+            crate::text::validate_content(&content)?;
             let align = serde_json::to_value(align)?;
             let replacement = json!({"kind":"text","id":id,"content":content,"x":x,"y":y,"font_family":font,"font_size":size,"font_weight":weight,"italic":italic,"align":align,"letter_spacing":letter_spacing,"line_height":line_height,"style":{"fill":{"fallback":fill}}});
             let nodes = layer_nodes_mut(page, &layer_id)?;
@@ -2201,8 +2223,9 @@ pub fn apply_text(
             line_height,
             ..
         } => {
-            if size.is_some_and(|v| !v.is_finite() || v <= 0.0) {
-                bail!("font size must be finite and positive")
+            crate::text::validate_typography(size, weight.map(|w| w as f64), line_height)?;
+            if let Some(ref content) = content {
+                crate::text::validate_content(content)?;
             }
             let nodes = layer_nodes_mut(page, &layer_id)?;
             let node = find_node_in_mut(nodes, &id)
@@ -2310,6 +2333,9 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             json!({"operation":"add","page":id})
         }
         PageAction::Rename { id, name } => {
+            if name.trim().is_empty() {
+                bail!("page name cannot be empty");
+            }
             let index = index_of(pages, &id)?;
             pages[index]["name"] = json!(name);
             json!({"operation":"rename","page":id})
@@ -2338,10 +2364,10 @@ pub fn apply_page(raw: &mut Value, action: crate::page::PageAction) -> Result<Va
             json!({"operation":"move","page":id,"index":index})
         }
         PageAction::Remove { id, .. } => {
+            let index = index_of(pages, &id)?;
             if pages.len() == 1 {
                 bail!("cannot remove the last page")
             }
-            let index = index_of(pages, &id)?;
             pages.remove(index);
             let active = pages[index.min(pages.len() - 1)]["id"]
                 .as_str()
@@ -3378,6 +3404,34 @@ mod tests {
     }
 
     #[test]
+    fn put_shape_rejects_negative_stroke_width() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = put_shape(
+            &mut raw,
+            None,
+            "content",
+            ShapeKind::Rect,
+            "bad-stroke",
+            ShapeInput {
+                x: Some(1.0),
+                y: Some(1.0),
+                width: Some(5.0),
+                height: Some(5.0),
+                stroke: Some("#000000".into()),
+                stroke_width: Some(-3.0),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("stroke width must be finite and nonnegative"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn group_reorder_rejects_out_of_range_index() {
         let mut raw: Value =
             serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
@@ -3456,6 +3510,36 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_missing_page_reports_not_found_before_last_page_guard() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = apply_page(
+            &mut raw,
+            crate::page::PageAction::Remove {
+                id: "nosuch".into(),
+                drop_story: false,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page not found: nosuch"),
+            "unexpected error: {err}"
+        );
+        let err = apply_page(
+            &mut raw,
+            crate::page::PageAction::Remove {
+                id: "page-1".into(),
+                drop_story: false,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("cannot remove the last page"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn v4_inspection_is_compact_and_paginates_nested_nodes() {
         let raw: Value =
             serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
@@ -3490,6 +3574,91 @@ mod tests {
         let shapes = inspect_paginated_v4(&raw, None, None, Some("path"), None, 0, 10).unwrap();
         assert_eq!(shapes["matches"], 1);
         assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
+    }
+
+    #[test]
+    fn renaming_a_page_to_an_empty_name_is_rejected() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = apply_page(
+            &mut raw,
+            crate::page::PageAction::Rename {
+                id: "page-1".into(),
+                name: "".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page name cannot be empty"),
+            "unexpected error: {err}"
+        );
+        let err = edit_canvas(&mut raw, None, None, None, None, Some("")).unwrap_err();
+        assert!(
+            err.to_string().contains("document name cannot be empty"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn put_text_rejects_xml_incompatible_content() {
+        use crate::document::TextAlign;
+        use crate::text::TextAction;
+        let mut raw = new_document(320, 240);
+        let err = apply_text(
+            &mut raw,
+            None,
+            TextAction::Put {
+                id: "bad".into(),
+                layer: "layer-1".into(),
+                content: "a\x01b".into(),
+                x: 5.0,
+                y: 5.0,
+                font: "Atkinson Hyperlegible".into(),
+                size: 16.0,
+                weight: 400,
+                italic: false,
+                fill: "#111827".into(),
+                align: TextAlign::Left,
+                letter_spacing: 0.0,
+                line_height: 1.2,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("invalid XML characters"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn text_put_rejects_out_of_range_weight() {
+        use crate::document::TextAlign;
+        use crate::text::TextAction;
+        let mut raw = new_document(320, 240);
+        let err = apply_text(
+            &mut raw,
+            None,
+            TextAction::Put {
+                id: "heavy".into(),
+                layer: "layer-1".into(),
+                content: "hi".into(),
+                x: 5.0,
+                y: 5.0,
+                font: "Atkinson Hyperlegible".into(),
+                size: 16.0,
+                weight: 9999,
+                italic: false,
+                fill: "#111827".into(),
+                align: TextAlign::Left,
+                letter_spacing: 0.0,
+                line_height: 1.2,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("font weight"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

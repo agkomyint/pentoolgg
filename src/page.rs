@@ -89,6 +89,9 @@ pub fn apply(doc: &mut Document, action: PageAction) -> Result<serde_json::Value
             Ok(serde_json::json!({"operation":"add","page":id}))
         }
         PageAction::Rename { id, name } => {
+            if name.trim().is_empty() {
+                bail!("page name cannot be empty");
+            }
             let page = pages
                 .iter_mut()
                 .find(|p| p.id == id)
@@ -125,13 +128,13 @@ pub fn apply(doc: &mut Document, action: PageAction) -> Result<serde_json::Value
             Ok(serde_json::json!({"operation":"move","page":id,"index":index}))
         }
         PageAction::Remove { id, .. } => {
-            if pages.len() == 1 {
-                bail!("cannot remove the last page");
-            }
             let index = pages
                 .iter()
                 .position(|p| p.id == id)
-                .context("page not found")?;
+                .with_context(|| format!("page not found: {id}"))?;
+            if pages.len() == 1 {
+                bail!("cannot remove the last page");
+            }
             pages.remove(index);
             let active = pages[index.min(pages.len() - 1)].id.clone();
             doc.replace_pages(pages, &active)
@@ -219,5 +222,51 @@ mod tests {
         assert_eq!(pages[0].canvas.width, 390);
         assert_eq!(pages[0].canvas.height, 844);
         assert_eq!(pages[0].layers[0].paths[0].id, "mark");
+    }
+
+    #[test]
+    fn removing_a_missing_page_reports_not_found_before_last_page_guard() {
+        let mut doc = Document::new(640, 480);
+        let err = apply(
+            &mut doc,
+            PageAction::Remove {
+                id: "nosuch".into(),
+                drop_story: false,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page not found: nosuch"),
+            "unexpected error: {err}"
+        );
+        let err = apply(
+            &mut doc,
+            PageAction::Remove {
+                id: "page-1".into(),
+                drop_story: false,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("cannot remove the last page"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn renaming_a_page_to_an_empty_name_is_rejected() {
+        let mut doc = Document::new(640, 480);
+        let err = apply(
+            &mut doc,
+            PageAction::Rename {
+                id: "page-1".into(),
+                name: "".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page name cannot be empty"),
+            "unexpected error: {err}"
+        );
     }
 }
