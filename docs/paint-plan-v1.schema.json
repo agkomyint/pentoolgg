@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/paint-plan-v1.json",
+  "title": "Pentool paint plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "engine", "id", "page", "passes", "limits"],
+  "properties": {
+    "schema": {"const": 1}, "engine": {"const": 1},
+    "id": {"$ref": "#/$defs/id"}, "page": {"$ref": "#/$defs/id"},
+    "description": {"type": "string", "maxLength": 4096},
+    "passes": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/pass"}},
+    "limits": {"$ref": "#/$defs/limits"}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "rect": {"type":"array","prefixItems":[{"type":"integer"},{"type":"integer"},{"type":"integer","minimum":1},{"type":"integer","minimum":1}],"items":false},
+    "scope": {"type":"object","additionalProperties":false,"required":["kind","rect","source_hash"],"properties":{"kind":{"enum":["layer","node","selection","composite","reference"]},"id":{"$ref":"#/$defs/id"},"rect":{"$ref":"#/$defs/rect"},"source_hash":{"$ref":"#/$defs/hash"}}},
+    "dependency": {"type":"object","additionalProperties":false,"required":["kind","id","hash"],"properties":{"kind":{"enum":["brush","palette","selection","field","guide","reference","tip"]},"id":{"$ref":"#/$defs/id"},"hash":{"$ref":"#/$defs/hash"}}},
+    "source": {"oneOf":[
+      {"type":"object","additionalProperties":false,"required":["kind","request_hash"],"properties":{"kind":{"const":"path"},"request_hash":{"$ref":"#/$defs/hash"}}},
+      {"type":"object","additionalProperties":false,"required":["kind","field_hash"],"properties":{"kind":{"const":"field"},"field_hash":{"$ref":"#/$defs/hash"}}},
+      {"type":"object","additionalProperties":false,"required":["kind","operations_hash"],"properties":{"kind":{"const":"operations"},"operations_hash":{"$ref":"#/$defs/hash"}}}
+    ]},
+    "pass": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "target", "scope", "brush", "blend", "opacity", "seed", "source", "dependencies", "limits"],
+      "properties": {
+        "id":{"$ref":"#/$defs/id"}, "target":{"$ref":"#/$defs/id"},
+        "scope":{"$ref":"#/$defs/scope"}, "brush":{"$ref":"#/$defs/id"},
+        "blend":{"enum":["normal","erase"]}, "opacity":{"type":"number","minimum":0,"maximum":1},
+        "seed":{"type":"integer","minimum":0,"maximum":9007199254740991},
+        "source":{"$ref":"#/$defs/source"},
+        "dependencies":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/dependency"}},
+        "constraints":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/hash"}},
+        "limits":{"$ref":"#/$defs/passLimits"}
+      }
+    },
+    "passLimits": {"type":"object","additionalProperties":false,"required":["max_samples","max_dabs","max_changed_pixels"],"properties":{"max_samples":{"type":"integer","minimum":1,"maximum":262144},"max_dabs":{"type":"integer","minimum":1,"maximum":1000000},"max_changed_pixels":{"type":"integer","minimum":1,"maximum":67108864}}},
+    "limits": {"type":"object","additionalProperties":false,"required":["max_passes","max_generated_strokes","max_samples","max_dabs","max_changed_pixels","max_tiles"],"properties":{"max_passes":{"type":"integer","minimum":1,"maximum":64},"max_generated_strokes":{"type":"integer","minimum":1,"maximum":100000},"max_samples":{"type":"integer","minimum":1,"maximum":16777216},"max_dabs":{"type":"integer","minimum":1,"maximum":4000000},"max_changed_pixels":{"type":"integer","minimum":1,"maximum":67108864},"max_tiles":{"type":"integer","minimum":1,"maximum":4096}}}
+  }
+}

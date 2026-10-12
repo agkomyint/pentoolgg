@@ -21,6 +21,76 @@ pub fn apply(raw: &mut Value, options: &Options<'_>) -> Result<Value> {
         bail!("choose --page or explicitly use --all-pages")
     }
     let pages = raw.get_mut("pages").and_then(Value::as_array_mut).unwrap();
+    if let Some(page) = options.page {
+        let found = pages
+            .iter()
+            .any(|p| p.get("id").and_then(Value::as_str) == Some(page));
+        if !found {
+            bail!("page not found: {page}")
+        }
+    }
+    if let Some(layer) = options.layer {
+        let mut found = false;
+        for page in pages.iter() {
+            let id = page.get("id").and_then(Value::as_str).unwrap_or_default();
+            if !options.all_pages && options.page != Some(id) {
+                continue;
+            }
+            if let Some(layers) = page.get("layers").and_then(Value::as_array) {
+                if layers
+                    .iter()
+                    .any(|l| l.get("id").and_then(Value::as_str) == Some(layer))
+                {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            bail!("layer not found: {layer}")
+        }
+    }
+    if let Some(kind) = options.object_type {
+        fn has_kind(node: &Value, kind: &str) -> bool {
+            if node.get("kind").and_then(Value::as_str) == Some(kind) {
+                return true;
+            }
+            if node.get("kind").and_then(Value::as_str) == Some("instance") {
+                return false;
+            }
+            node.get("children")
+                .and_then(Value::as_array)
+                .is_some_and(|children| children.iter().any(|child| has_kind(child, kind)))
+        }
+        let mut found = false;
+        for page in pages.iter() {
+            let id = page.get("id").and_then(Value::as_str).unwrap_or_default();
+            if !options.all_pages && options.page != Some(id) {
+                continue;
+            }
+            if let Some(layers) = page.get("layers").and_then(Value::as_array) {
+                for layer in layers {
+                    if options.layer.is_some()
+                        && options.layer != layer.get("id").and_then(Value::as_str)
+                    {
+                        continue;
+                    }
+                    if let Some(nodes) = layer.get("nodes").and_then(Value::as_array) {
+                        if nodes.iter().any(|node| has_kind(node, kind)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        if !found {
+            bail!("object type \"{kind}\" matches no nodes in scope")
+        }
+    }
     let mut ids = Vec::new();
     for page in pages {
         let page_id = page.get("id").and_then(Value::as_str).unwrap_or_default();

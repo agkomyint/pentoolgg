@@ -737,6 +737,157 @@ Dual-licensed under MIT or Apache-2.0, at your option.
 Bundled fonts have a separate [SIL Open Font License](assets/fonts/OFL.txt).
 See [font attribution](assets/fonts/README.md).
 
+### Deterministic semantic raster strokes
+
+Compact absolute SVG paths compile to the same canonical raster samples and
+journal operations used by pointer strokes. Optional normalized curves vary brush
+properties deterministically along path distance:
+
+```sh
+pentool raster portrait.pen stroke-path paint \
+  --path 'M20 180 C80 20 220 20 300 180' \
+  --brush '{"size":18,"spacing":0.2}' \
+  --curves '{"size":[[0,8],[0.5,24],[1,10]],"pressure":[[0,0.2],[0.5,1],[1,0.4]]}' \
+  --color '#8B5A3C' --seed 42
+```
+
+Line, quadratic, cubic, and arc segments are supported. Dry run, revision guards,
+locks, bounded compilation, history, replay, batch, and the shared raster API use
+the same planner. See [the raster-paint contract](docs/raster-paint-v1.md).
+
+### Color sampling and portable palettes
+
+Sample through the authoritative renderer, extract deterministic palettes, mix
+colors and generate seeded variations. Named palettes are readable document data
+under `paint_palettes` with scope, color space, algorithm version and source hash:
+
+```sh
+pentool paint-palette portrait.pen sample --scope node:paint --x 40 --y 12
+pentool paint-palette portrait.pen extract --scope node:paint --role shadow   --count 4 --save skin-shadows
+pentool paint-palette portrait.pen mix '#8B5A3C' '#f1d3b8' --amount 0.25
+pentool paint-palette portrait.pen vary '#8B5A3C' --seed 7 --amount 10 --count 6
+pentool paint-palette portrait.pen list
+```
+
+Roles are `dominant`, `median`, `highlight`, `midtone`, `shadow` and `edge`.
+Read-only actions reject `--dry-run`; saving and removing use the shared
+transaction. See the "Color sampling and palettes" section of
+[the protocol](docs/agent-painting-protocol-v1.md).
+
+### Region previews and structural comparison
+
+```sh
+pentool paint-review portrait.pen preview --scope node:paint --rect 0,0,128,128 --max-edge 256 --out look.png
+pentool paint-review portrait.pen compare --scope node:paint --reference-image study.png --heatmap diff.png
+pentool paint-review portrait.pen compare --scope page --reference-document earlier.pen
+```
+
+Metrics (`color_mae`, `value_mae`, `edge_disagreement`, `silhouette_iou`,
+`structure_mae`, `texture_frequency_mae`) are exact integer ratios plus a six-place
+decimal, with `changed_bounds`; they are guidance, not a quality score. Both
+actions are read-only. See [the protocol](docs/agent-painting-protocol-v1.md).
+
+### Region-aware painting constraints
+
+```sh
+pentool raster portrait.pen select-marquee paint --rect 0 0 32 64
+pentool raster portrait.pen select-save paint left
+pentool raster portrait.pen stroke-path paint --path "M4 32 L60 32" --color "#ff0000"   --constraints '{"inside":["saved:left"],"follow":"contour"}'
+pentool paint-constraints portrait.pen preview paint --spec '{"opaque_clip":true,"follow":"gradient"}' --out mask.png
+```
+
+Constraints (`inside`, `avoid`, `opaque_clip`, `barriers`, `reach_from`, `follow`)
+resolve to one hashed, previewable mask; see [the protocol](docs/agent-painting-protocol-v1.md).
+
+### Stroke fields
+
+```sh
+pentool paint-fields grass.pen preview paint --field '{"method":"tensor","cell":4}'   --params '{"spacing":6,"length":30,"collision":"stop"}'
+pentool raster grass.pen stroke-field paint --field '{"method":"radial","center":[128,128],"cell":8}'   --params '{"spacing":10,"length":60,"taper":0.3}' --brush '{"size":3}' --color '#2f6b2f' --seed 7
+```
+
+Fields come from contours, gradients, distance transforms, structure tensors,
+guides or supplied vectors; strokes are seeded, collision-aware and pin the field
+hash in the journal. See [the protocol](docs/agent-painting-protocol-v1.md).
+
+### Material paint modes
+
+```sh
+pentool paint-media list
+pentool paint-media describe '{"kind":"impasto","light":45,"scale":4}'
+pentool raster art.pen stroke-path paint --path "M4 32 L60 32" --color "#c05030"   --brush '{"size":14,"media":{"kind":"watercolor-wash","wetness":0.8,"wet_length":120}}'
+```
+
+Ten documented recipes (glaze, dry-brush, bristle, impasto, palette-knife,
+watercolor-wash, charcoal, pencil, canvas-grain, paper-grain) with light
+direction, tonal zones, preserve-luminance/chroma, pickup/deposit and wetness
+lifetime. Procedural grain is canvas-fixed and integer-only, so strokes replay
+exactly. See [the protocol](docs/agent-painting-protocol-v1.md).
+
+### Diagnostics and scoring
+
+```sh
+pentool paint-score before.pen after.pen --layer paint --goal '{"coverage":[0.2,0.5],"palette":["#204080"]}'
+```
+
+Plan passes report measured changed bounds, coverage, value range, palette drift,
+edge spill and protected-region violations, plus warnings labelled measured or
+heuristic. `paint-score` compares two revisions against a goal and never accepts or
+reverts anything.
+
+### Composition guides
+
+```sh
+pentool paint-guide portrait.pen add thirds --kind thirds --params '{"rect":[0,0,1200,1600]}'
+pentool paint-guide portrait.pen snap thirds --point 410,805 --radius 20
+```
+
+Thirds, golden ratio, symmetry, horizon, perspective, vanishing point, gesture,
+proportion, value-map and custom guides are stored as document data, never export
+unless you ask for an SVG proof, and never change pixels. Stroke fields can use a
+guide with `{"method":"guide","guide":"ID"}`.
+
+### Paint plans
+
+```sh
+pentool paint-plan portrait.pen plan.json --dry-run
+pentool paint-plan portrait.pen plan.json --if-revision REV --expect-plan-hash sha256:...
+```
+
+Runs an ordered list of stroke/field/fill passes as one atomic transaction with
+per-pass changed bounds, dab and tile counts, enforced limits and one undo entry.
+See [the protocol](docs/agent-painting-protocol-v1.md).
+
+### Paint bundles, templates and diff
+
+```sh
+pentool paint-bundle src.pen export --out look.json --brushes round --plans wash
+pentool paint-bundle dst.pen --dry-run import look.json
+pentool paint-bundle dst.pen plan-add wash plan.json
+pentool paint-bundle dst.pen plan-show wash --out wash-plan.json
+pentool paint-diff before.pen after.pen
+pentool paint-diff --plans old-plan.json new-plan.json
+```
+
+A bundle carries brushes, palettes, guides and plan templates as data only. Import
+validates every entry, never edits scene nodes (so component instances, masks and
+overrides are untouched), and commits through the shared transaction (undo,
+`--dry-run`, `--if-revision`). `paint-diff` summarizes added, removed and changed
+paint data, per-pass and limit changes between plans, and changed tiles per layer.
+Package manifests list each asset's paint data with hashes. See
+[the protocol](docs/agent-painting-protocol-v1.md).
+
+### Visual analysis
+
+```sh
+pentool paint-analyze portrait.pen --scope node:paint --rect 300,200,400,400   --features contours,values,palette,orientation --values 5 --colors 8
+```
+
+Returns contour polylines, value zones, dominant colors, texture frequency,
+gradient/stroke orientation, focal candidates, coverage gaps and clipping for a
+bounded scope, tagged with renderer, revision and hashes, and paginated. It is
+read-only. See [the protocol](docs/agent-painting-protocol-v1.md).
+
 ### Non-destructive image operations
 
 Image nodes carry an ordered operation stack evaluated top to bottom; the source

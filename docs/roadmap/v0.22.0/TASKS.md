@@ -1,40 +1,43 @@
-# v0.22.0 — Design systems, brand kits and templates
+# v0.22.0 — Hosted Pentool (self-hostable service)
 
-Make reusable design decisions first class: tokens, brand kits and templates
-that documents reference, update and audit.
+Make it practical to run Pentool as a multi-user service. The product stays one
+offline-capable Rust binary: hosting is a deployment mode, not a different
+product, and every feature still works locally without an account.
 
 ## Product contract
 
-- Tokens (color, type, spacing, radius, shadow) are named, versioned values in a
-  library that documents reference by ID. Resolving a token is deterministic.
-- Updating a library never silently rewrites local overrides (the v0.6.24
-  component-override rules apply); the planner reports what would change.
-- Libraries are packages: content-addressed, verified offline, installable and
-  lockable with the existing `lock` mechanism.
-- Brand kits can carry ICC/spot-ink references from v0.12.0 so print colors are
-  stated once.
-- Templates are ordinary `.pen` documents with declared parameters. Filling a
-  template is a transaction with a dry run.
+- Isolation first: one workspace per user or team, with a separate process or
+  container per workspace. `pentool serve` itself gains authentication, but the
+  default posture of the binary remains local-only and unauthenticated on
+  `127.0.0.1`, unchanged.
+- Authentication is required whenever `serve` binds a non-loopback address; it
+  refuses to start otherwise unless an explicit, loudly named flag is passed.
+- All storage stays file based and portable. A workspace can be exported as a
+  collected project and opened on a laptop with no loss.
+- Quotas (storage, CPU time, memory, concurrent exports) are enforced and
+  reported, and a quota failure leaves documents unchanged.
+- Hosting adds no hidden network access to open, validate or render.
+- The hosted layer is optional: a deployment guide and container image are
+  provided, but the single binary remains the supported artifact.
 
 ## Must ship, in order
 
-- [ ] **1. Specify token and library schema,** resolution order and override
-  semantics in `docs/design-systems-v1.md`.
-- [ ] **2. Token resolution** in the shared scene path with cycle rejection.
-- [ ] **3. Library packages,** locks, update planning and diff reports.
-- [ ] **4. Brand kit:** colors, type, logos, ink references and usage rules.
-- [ ] **5. Template parameters and fill command,** with validation and limits.
-- [ ] **6. Audit command:** find off-token colors, fonts and spacing, with fixes
-  proposed as a plan.
-- [ ] **7. Editor:** token panel, library browser, template gallery.
-- [ ] **8. Import/export of token files** (a documented JSON format, and
-  W3C design tokens where it maps exactly).
-
-## Acceptance targets
-
-- Updating a token changes exactly its dependents and nothing else.
-- An audit of a large document is bounded, paginated and deterministic.
+- [ ] **1. Threat model and deployment guide** (`docs/hosting-v1.md`): path
+  containment review of every API route, untrusted-file handling, secrets.
+- [ ] **2. Authentication** (tokens and an OIDC-compatible mode) and the
+  non-loopback refusal rule.
+- [ ] **3. Workspaces:** per-user storage roots with strict containment and
+  quota accounting.
+- [ ] **4. Process supervisor mode:** start, idle-stop and wake a workspace
+  instance on demand, with resource limits.
+- [ ] **5. Audit log and usage metrics** in a compact, machine-readable form.
+- [ ] **6. Container image and reference reverse-proxy configuration.**
+- [ ] **7. Backup, export and restore** of workspaces as verified packages.
+- [ ] **8. Evidence:** isolation tests, a hostile-tenant suite, load test and
+  recorded memory per idle and active workspace.
 
 ## Explicitly deferred
 
-- Cloud-hosted shared libraries and permissioned design-system registries.
+- Billing, a managed commercial offering and a public marketplace. These are
+  business decisions outside the repository.
+- Multi-tenant single-process serving (many users inside one process).

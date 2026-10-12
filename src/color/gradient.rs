@@ -3,7 +3,6 @@
 use super::{
     icc::Intent,
     value::{Destination, Evaluator, NativeColor},
-    VERSION,
 };
 use anyhow::{ensure, Context, Result};
 use serde_json::{json, Value};
@@ -14,7 +13,7 @@ pub(crate) fn setting(raw: &Value, fill: &Value) -> Result<Option<(Destination, 
         return Ok(None);
     }
     ensure!(
-        raw["version"] == VERSION,
+        crate::color::has_v8(raw),
         "[unsupported-capability] explicit native gradient interpolation requires version 8"
     );
     let destination = Destination::parse(&fill["space"])?;
@@ -191,7 +190,7 @@ pub(crate) fn profiles(
     document: &Path,
     scope: super::scene::Scope<'_>,
 ) -> Result<super::value::ProfileSet> {
-    if raw["version"] != VERSION {
+    if !crate::color::has_v8(raw) {
         return Ok(super::value::ProfileSet::default());
     }
     let destinations = super::scene::destinations(raw, scope)?;

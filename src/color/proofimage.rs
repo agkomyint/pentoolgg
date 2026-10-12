@@ -107,7 +107,7 @@ fn render_with(
     setup: Setup,
 ) -> Result<Proof> {
     ensure!(
-        raw["version"] == super::VERSION,
+        crate::color::has_v8(raw),
         "[unsupported-version] proof images require a version {} document",
         super::VERSION
     );

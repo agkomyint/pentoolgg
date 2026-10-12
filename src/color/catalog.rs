@@ -300,7 +300,7 @@ pub(crate) fn embedded(record: &Value) -> Result<Vec<u8>> {
 
 pub fn validate(raw: &Value, version: u64) -> Result<()> {
     // Before v8 this name remains an uninterpreted extension, as released.
-    if version != VERSION {
+    if version < VERSION {
         return Ok(());
     }
     let catalog = object(
@@ -404,6 +404,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
 }
 
 pub fn migrate(raw: Value) -> Result<Value> {
+    let raw = crate::spreads::to_v8(raw)?;
     if raw["version"].as_u64() == Some(VERSION) {
         crate::scene::validate(&raw)?;
         size_gate(&raw)?;
@@ -418,7 +419,8 @@ pub fn migrate(raw: Value) -> Result<Value> {
     Ok(raw)
 }
 
-pub fn downgrade(mut raw: Value) -> Result<Value> {
+pub fn downgrade(raw: Value) -> Result<Value> {
+    let mut raw = crate::spreads::to_v8(raw)?;
     crate::scene::validate(&raw)?;
     ensure!(
         raw["version"].as_u64() == Some(VERSION),
@@ -436,7 +438,7 @@ pub fn downgrade(mut raw: Value) -> Result<Value> {
 
 fn catalog(raw: &Value) -> Result<&Value> {
     crate::scene::validate(raw)?;
-    ensure!(raw["version"].as_u64()==Some(VERSION),"[unsupported-capability] professional profiles require version 8; run `pentool migrate --target 8` first");
+    ensure!(crate::color::has_v8(raw),"[unsupported-capability] professional profiles require version 8; run `pentool migrate --target 8` first");
     Ok(&raw["color_management"])
 }
 
@@ -628,7 +630,7 @@ pub fn package_table(raw: &Value) -> Result<Vec<Value>> {
 /// Package callers have already run the shared document validator. Reuse that
 /// validation rather than decoding original image/ICC bytes a second time.
 pub(crate) fn package_table_validated(raw: &Value) -> Result<Vec<Value>> {
-    if raw["version"].as_u64() != Some(VERSION) {
+    if !crate::color::has_v8(raw) {
         return Ok(Vec::new());
     }
     for (identity, record) in raw["color_management"]["profiles"].as_object().unwrap() {
