@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Fonts xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
+  <FontFamily Self="FontFamily/Atkinson" Name="Atkinson Hyperlegible">
+    <Font Self="Font/Atkinson Regular" FontFamily="Atkinson Hyperlegible" Name="Atkinson Hyperlegible Regular" FontStyleName="Regular" Status="Installed"/>
+    <Font Self="Font/Atkinson Bold" FontFamily="Atkinson Hyperlegible" Name="Atkinson Hyperlegible Bold" FontStyleName="Bold" Status="NotAvailable"/>
+  </FontFamily>
+</idPkg:Fonts>

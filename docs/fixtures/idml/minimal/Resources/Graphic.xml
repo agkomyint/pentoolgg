@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Graphic xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
+  <Color Self="Color/Black" Model="Process" Space="CMYK" ColorValue="0 0 0 100" Name="Black"/>
+  <Color Self="Color/Brand" Model="Process" Space="RGB" ColorValue="17 94 163" Name="Brand"/>
+  <Color Self="Color/Paper" Model="Process" Space="RGB" ColorValue="255 255 255" Name="Paper"/>
+  <Swatch Self="Swatch/None" Name="None"/>
+</idPkg:Graphic>

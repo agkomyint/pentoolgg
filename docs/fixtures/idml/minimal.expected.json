@@ -1,0 +1,30 @@
+{
+  "fixture": "minimal",
+  "pages": 2,
+  "spreads": 1,
+  "stories": 1,
+  "parents": 1,
+  "threads": [
+    [
+      "u100",
+      "u101"
+    ]
+  ],
+  "counts": {
+    "supported": 17,
+    "approximated": 2,
+    "carried": 3,
+    "unsupported": 1
+  },
+  "unsupported": [
+    "Button"
+  ],
+  "missing_fonts": [
+    "Atkinson Hyperlegible Bold"
+  ],
+  "carried": [
+    "master TextFrame umfolio",
+    "ParagraphStyle Body KeepLinesTogether",
+    "ParagraphStyle Heading FillColor"
+  ]
+}

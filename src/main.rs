@@ -2145,6 +2145,32 @@ enum Command {
         #[command(subcommand)]
         action: pentool::tables::TableAction,
     },
+    /// Import an InDesign Markup (IDML) package as a version 9 document with a
+    /// fidelity report. Native .indd/.indb files are refused.
+    IdmlImport {
+        input: PathBuf,
+        output: PathBuf,
+        /// Write the full fidelity report here (JSON).
+        #[arg(long)]
+        report: Option<PathBuf>,
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Export a document as an InDesign Markup (IDML) package. Features with no
+    /// exact IDML equivalent fail the export unless --allow-approximation is
+    /// given; carried IDML data returns unchanged.
+    IdmlExport {
+        input: PathBuf,
+        output: PathBuf,
+        /// Write the full export report here (JSON).
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Drop or approximate features IDML cannot express, listing each one.
+        #[arg(long)]
+        allow_approximation: bool,
+        #[arg(long)]
+        overwrite: bool,
+    },
     /// Version 9 long documents: notes, cross-references, links, variables,
     /// conditional text and generated tables of contents, indexes and captions.
     LayoutDoc {
@@ -7906,6 +7932,78 @@ async fn run() -> Result<()> {
                     |doc| editing::path(doc, action),
                 )
             }
+        }
+        Command::IdmlImport {
+            input,
+            output,
+            report,
+            overwrite,
+        } => {
+            if output.exists() && !overwrite {
+                anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written", output.display())
+            }
+            let bytes =
+                pentool::resource::read_bounded(&input, pentool::idml::MAX_ARCHIVE_BYTES as usize)?;
+            let imported = pentool::idml::import(&bytes, &input.display().to_string())?;
+            let pretty = serde_json::to_vec_pretty(&imported.report)?;
+            if let Some(path) = &report {
+                editing::atomic_write(path, &pretty)
+                    .with_context(|| format!("could not write {}", path.display()))?;
+            }
+            editing::atomic_write(&output, &serde_json::to_vec_pretty(&imported.document)?)
+                .with_context(|| format!("could not write {}", output.display()))?;
+            let mut summary = imported.report.clone();
+            if let Some(map) = summary.as_object_mut() {
+                if report.is_some() {
+                    map.remove("items");
+                }
+                map.insert(
+                    "output".into(),
+                    serde_json::json!(output.display().to_string()),
+                );
+            }
+            println!("{}", serde_json::to_string(&summary)?);
+            Ok(())
+        }
+        Command::IdmlExport {
+            input,
+            output,
+            report,
+            allow_approximation,
+            overwrite,
+        } => {
+            if output.exists() && !overwrite {
+                anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written", output.display())
+            }
+            let raw: serde_json::Value = serde_json::from_slice(&pentool::resource::read_bounded(
+                &input,
+                256 * 1024 * 1024,
+            )?)
+            .with_context(|| format!("{} is not a Pentool document", input.display()))?;
+            transaction::validate_value(&raw)?;
+            let exported = pentool::idml_export::export(
+                &raw,
+                &input.display().to_string(),
+                allow_approximation,
+            )?;
+            if let Some(path) = &report {
+                editing::atomic_write(path, &serde_json::to_vec_pretty(&exported.report)?)
+                    .with_context(|| format!("could not write {}", path.display()))?;
+            }
+            editing::atomic_write(&output, &exported.bytes)
+                .with_context(|| format!("could not write {}", output.display()))?;
+            let mut summary = exported.report.clone();
+            if let Some(map) = summary.as_object_mut() {
+                if report.is_some() {
+                    map.remove("items");
+                }
+                map.insert(
+                    "output".into(),
+                    serde_json::json!(output.display().to_string()),
+                );
+            }
+            println!("{}", serde_json::to_string(&summary)?);
+            Ok(())
         }
         Command::New {
             output,

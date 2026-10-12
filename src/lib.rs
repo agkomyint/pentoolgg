@@ -16,6 +16,8 @@ pub mod fonts;
 pub mod geometry;
 pub mod grids;
 pub mod history;
+pub mod idml;
+pub mod idml_export;
 pub mod image;
 pub mod imageops;
 pub mod import;

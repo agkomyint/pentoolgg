@@ -312,6 +312,14 @@ and documentation.
     stories.
 
 - [ ] **13. Import IDML.**
+  Progress: `pentool idml-import` (`src/idml.rs`, `tests/v0140_idml.rs`,
+  fixture `docs/fixtures/idml/minimal/`, subset table in
+  `docs/idml-mapping-v1.md`) reads spreads, pages, parents, stories, styles,
+  swatches, layers, shapes, groups, text frames and threads with bounded,
+  contained package reading and a fidelity report. Open: tables, footnotes,
+  anchored objects, variables, conditions, xrefs, TOC/index, image relinking,
+  `.penbook` from book files, the corpus and its measured line-break share, CI
+  evidence.
   - Spreads, pages, parents, stories, styles, swatches (through v0.12.0's
     color), layers, frames, threads, tables, footnotes and anchored objects.
   - Links to placed images (relinked through the existing asset model), text
@@ -322,7 +330,15 @@ and documentation.
   Acceptance: a measured share of the corpus matches InDesign's own PDF of each
   file within documented line-break and position tolerances.
 
-- [ ] **14. Export IDML.** Write IDML that opens in InDesign with:
+- [ ] **14. Export IDML.**
+  Progress: `pentool idml-export` (`src/idml_export.rs`) writes the same subset
+  deterministically, returns carried blocks (reporting `carried-dropped`) and
+  fails without `--allow-approximation` when a feature has no IDML equivalent.
+  The IDML → `.pen` → IDML round trip of the minimal fixture is covered by a
+  test. Open: the remaining mapping rows, opening files in current InDesign
+  versions (release evidence), line-break parity, CI evidence.
+
+  Write IDML that opens in InDesign with:
   - stories, styles, threads and parents intact;
   - text that reflows to the same lines where fonts match.
 

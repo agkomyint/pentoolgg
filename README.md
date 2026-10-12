@@ -216,6 +216,24 @@ commit; `--if-revision` and undo are supported. These commands convert stored
 paints, including hidden ones; raster pixels and document profile roles are not
 part of this operation.
 
+## InDesign interchange (v0.14 in development)
+
+Pentool reads and writes InDesign Markup (IDML), Adobe's published XML
+interchange format. Native `.indd`/`.indb` files are refused with instructions
+to export IDML from InDesign.
+
+```sh
+pentool idml-import mag.idml mag.pen --report fidelity.json
+pentool idml-export mag.pen mag.idml --report export.json
+pentool idml-export mag.pen mag.idml --allow-approximation --overwrite
+```
+
+The import report lists every `supported`, `approximated`, `carried` and
+`unsupported` element; unknown data is kept under `extension.idml` and written
+back on export. Export is deterministic and fails (writing nothing) when a
+feature has no IDML equivalent unless `--allow-approximation` is given. The
+supported subset and known gaps are in `docs/idml-mapping-v1.md`.
+
 ## Optional image models (v0.9)
 
 `pentool ai` connects your own Gemini or OpenAI-compatible account, generates reviewable

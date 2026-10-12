@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:MasterSpread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
+  <MasterSpread Self="umaster" Name="A-Master" NamePrefix="A" BaseName="Master" PageCount="1" ItemTransform="1 0 0 1 0 0">
+    <Page Self="umpage" Name="A" GeometricBounds="0 0 792 612" ItemTransform="1 0 0 1 0 -396" AppliedMaster="n">
+      <MarginPreference ColumnCount="2" ColumnGutter="12" Top="54" Bottom="54" Left="54" Right="54"/>
+    </Page>
+    <Rectangle Self="umrule" ItemLayer="ulayer1" FillColor="Color/Brand" StrokeColor="Swatch/None" StrokeWeight="0" ItemTransform="1 0 0 1 54 -330">
+      <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+        <PathPointType Anchor="0 0" LeftDirection="0 0" RightDirection="0 0"/>
+        <PathPointType Anchor="0 3" LeftDirection="0 3" RightDirection="0 3"/>
+        <PathPointType Anchor="504 3" LeftDirection="504 3" RightDirection="504 3"/>
+        <PathPointType Anchor="504 0" LeftDirection="504 0" RightDirection="504 0"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+    </Rectangle>
+    <TextFrame Self="umfolio" ParentStory="umfoliostory" ItemLayer="ulayer1" ItemTransform="1 0 0 1 54 330">
+      <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+        <PathPointType Anchor="0 0" LeftDirection="0 0" RightDirection="0 0"/>
+        <PathPointType Anchor="0 14" LeftDirection="0 14" RightDirection="0 14"/>
+        <PathPointType Anchor="100 14" LeftDirection="100 14" RightDirection="100 14"/>
+        <PathPointType Anchor="100 0" LeftDirection="100 0" RightDirection="100 0"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+    </TextFrame>
+  </MasterSpread>
+</idPkg:MasterSpread>

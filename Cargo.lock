@@ -1101,6 +1101,7 @@ dependencies = [
  "rand_core",
  "reqwest",
  "resvg",
+ "roxmltree",
  "rustybuzz",
  "semver",
  "serde",
