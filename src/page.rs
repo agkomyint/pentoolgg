@@ -89,6 +89,9 @@ pub fn apply(doc: &mut Document, action: PageAction) -> Result<serde_json::Value
             Ok(serde_json::json!({"operation":"add","page":id}))
         }
         PageAction::Rename { id, name } => {
+            if name.trim().is_empty() {
+                bail!("page name cannot be empty");
+            }
             let page = pages
                 .iter_mut()
                 .find(|p| p.id == id)
@@ -219,5 +222,22 @@ mod tests {
         assert_eq!(pages[0].canvas.width, 390);
         assert_eq!(pages[0].canvas.height, 844);
         assert_eq!(pages[0].layers[0].paths[0].id, "mark");
+    }
+
+    #[test]
+    fn renaming_a_page_to_an_empty_name_is_rejected() {
+        let mut doc = Document::new(640, 480);
+        let err = apply(
+            &mut doc,
+            PageAction::Rename {
+                id: "page-1".into(),
+                name: "".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("page name cannot be empty"),
+            "unexpected error: {err}"
+        );
     }
 }

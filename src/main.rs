@@ -7731,6 +7731,9 @@ async fn run() -> Result<()> {
                             doc.canvas.background = v;
                         }
                         if let Some(v) = name {
+                            if v.trim().is_empty() {
+                                anyhow::bail!("document name cannot be empty");
+                            }
                             doc.name = v;
                         }
                         Ok(())
