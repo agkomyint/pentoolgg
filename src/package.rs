@@ -744,14 +744,28 @@ pub fn lock_verify(project: &Path) -> Result<Value> {
     let lock: Lockfile = serde_json::from_slice(&fs::read(&p)?)?;
     let mut results = vec![];
     for e in &lock.packages {
-        let marker = project
-            .join(".pentool")
-            .join("packages")
-            .join(&e.name)
-            .join(&e.version)
-            .join(".package-hash");
-        let actual = fs::read_to_string(&marker).unwrap_or_default();
-        results.push(json!({"name":e.name,"version":e.version,"ok":actual==e.package_hash,"expected":e.package_hash,"actual":actual}));
+        // Re-hash the recorded source (or the content-addressed download cache
+        // for registry installs) instead of trusting the install marker, so
+        // tampered or missing sources fail closed.
+        let source_path = project.join(&e.source);
+        let (actual, via) = if source_path.is_file() {
+            match fs::read(&source_path) {
+                Ok(bytes) => (asset::hash_bytes(&bytes), "source"),
+                Err(_) => (String::new(), "none"),
+            }
+        } else {
+            let cache = project
+                .join(".pentool")
+                .join("cache")
+                .join("sha256")
+                .join(e.package_hash.trim_start_matches("sha256:"));
+            match fs::read(&cache) {
+                Ok(bytes) => (asset::hash_bytes(&bytes), "cache"),
+                Err(_) => (String::new(), "none"),
+            }
+        };
+        let ok = !actual.is_empty() && actual == e.package_hash;
+        results.push(json!({"name":e.name,"version":e.version,"ok":ok,"expected":e.package_hash,"actual":actual,"via":via}));
     }
     let ok = results.iter().all(|r| r["ok"] == true);
     Ok(json!({"ok":ok,"lockfile":p,"packages":results}))
