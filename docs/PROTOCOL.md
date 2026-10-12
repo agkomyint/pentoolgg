@@ -58,7 +58,10 @@ output-profile soft-proof image as a PNG; `GET /api/color/gamut` (`page`) return
 pixels), read only, and answer 400 with `error` for unsupported pages or roles.
 
 `POST /api/render/svg` and `/api/render/png` accept optional `page`, `max_edge`
-(v6: 1..4096) and `job` query parameters. V6 proxy sizing bounds the output canvas,
+(v6: 1..4096) and `job` query parameters. The request body must be the complete
+document JSON as returned by `GET /api/document` (it carries the `format` and
+`version` fields the renderer dispatches on); an empty or partial body answers
+400 with a missing-field `error`. V6 proxy sizing bounds the output canvas,
 not the persisted sources. SVG responses mark `x-pentool-preview` as approximate
 when a proxy is requested. V6 has at most four active renderer workers.
 `POST /api/composite/cancel` with `{ "job": "JOB_ID" }` signals cancellation;
