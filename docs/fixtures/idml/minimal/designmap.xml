@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0" Self="d">
+  <Language Self="Language/$ID/English%3a USA" Name="$ID/English: USA"/>
+  <idPkg:Graphic src="Resources/Graphic.xml"/>
+  <idPkg:Fonts src="Resources/Fonts.xml"/>
+  <idPkg:Styles src="Resources/Styles.xml"/>
+  <Layer Self="ulayer1" Name="Layer 1" Visible="true" Locked="false"/>
+  <Section Self="usec1" PageStart="upage1" PageNumberStart="1" PageNumberStyle="Arabic" ContinueNumbering="false"/>
+  <idPkg:MasterSpread src="MasterSpreads/MasterSpread_ua.xml"/>
+  <idPkg:Spread src="Spreads/Spread_u1.xml"/>
+  <idPkg:Story src="Stories/Story_u10.xml"/>
+</Document>

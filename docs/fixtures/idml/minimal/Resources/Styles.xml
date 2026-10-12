@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
+  <RootParagraphStyleGroup Self="u50">
+    <ParagraphStyle Self="ParagraphStyle/Body" Name="Body" PointSize="10" Leading="13" Justification="FullyJustified" Hyphenation="true" SpaceAfter="6" KeepLinesTogether="true">
+      <Properties><AppliedFont type="string">Atkinson Hyperlegible</AppliedFont></Properties>
+    </ParagraphStyle>
+    <ParagraphStyle Self="ParagraphStyle/Heading" Name="Heading" PointSize="18" FontStyle="Bold" FillColor="Color/Brand" NextStyle="ParagraphStyle/Body">
+      <Properties><BasedOn type="object">ParagraphStyle/Body</BasedOn></Properties>
+    </ParagraphStyle>
+  </RootParagraphStyleGroup>
+  <RootCharacterStyleGroup Self="u51">
+    <CharacterStyle Self="CharacterStyle/Emphasis" Name="Emphasis" FontStyle="Italic"/>
+  </RootCharacterStyleGroup>
+</idPkg:Styles>

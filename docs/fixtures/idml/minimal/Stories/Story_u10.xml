@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
+  <Story Self="u10" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="$ID/" AppliedNamedGrid="n">
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Heading">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+        <Content>Rivers carry more than water</Content>
+        <Br/>
+      </CharacterStyleRange>
+    </ParagraphStyleRange>
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Body">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+        <Content>They carry the history of a place</Content>
+        <Content>&#x2028;</Content>
+        <Content>and </Content>
+      </CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Emphasis">
+        <Content>silt</Content>
+      </CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+        <Content>. Page </Content>
+        <?ACE 18?>
+      </CharacterStyleRange>
+    </ParagraphStyleRange>
+  </Story>
+</idPkg:Story>

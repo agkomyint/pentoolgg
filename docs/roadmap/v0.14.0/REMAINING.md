@@ -21,6 +21,9 @@ Nothing was pushed.
 | 7 Grids, guides, alignment | `src/grids.rs`, `layout-grid` | core done |
 | 8 Text wrap, anchored objects | `src/wrap.rs`, `layout-wrap` | core done; estimator based |
 | 9 Tables | `src/tables.rs`, `layout-table` | core done; estimator based |
+| 10 Long documents | `src/longdoc.rs`, `layout-doc` | core done; estimator based |
+| 13 IDML import | `src/idml.rs`, `idml-import` | subset done (see mapping doc) |
+| 14 IDML export | `src/idml_export.rs`, `idml-export` | subset done; round trip tested |
 
 ## Open items inside started tasks
 
@@ -44,8 +47,10 @@ Nothing was pushed.
 ## Not started
 
 11 `.penbook` books; 12 data merge and adaptive
-layout; 13 IDML import; 14 IDML export; 15 publishing exports; 16 layout
-preflight; 17 editor layout experience; 18 conformance, performance, recovery.
+layout; 15 publishing exports; 16 layout preflight; 17 editor layout
+experience; 18 conformance, performance, recovery. Tasks 13-14 have their
+subsets implemented; the remaining mapping rows are listed in
+`docs/idml-mapping-v1.md`.
 
 ## Resume checklist
 

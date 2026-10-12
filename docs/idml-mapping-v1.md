@@ -1,7 +1,9 @@
 # IDML ⇄ `.pen` mapping 1
 
-Status: frozen mapping contract for the v0.14.0 roadmap (task 1). Import and
-export are not implemented yet; this table is what they must do. Layout
+Status: frozen mapping contract for the v0.14.0 roadmap (task 1). `pentool
+idml-import` (`src/idml.rs`) and `pentool idml-export` (`src/idml_export.rs`)
+implement the subset listed under [Implemented subset](#implemented-subset);
+everything else in the table is still the contract, not behavior. Layout
 semantics are in [`layout-v1.md`](layout-v1.md).
 
 IDML is Adobe's published XML interchange format (a ZIP of XML parts). Pentool
@@ -167,3 +169,44 @@ corpus matches InDesign's own PDF line breaks within the documented position
 tolerance (1 LU per glyph advance sum drift, 0.5 pt per line origin) for files
 whose fonts are present. The measurement script and its inputs ship with the
 corpus; the number is recorded in `docs/performance.md`, never assumed.
+
+## Implemented subset
+
+Commands:
+
+```sh
+pentool idml-import mag.idml mag.pen --report fidelity.json [--overwrite]
+pentool idml-export mag.pen mag.idml --report export.json [--allow-approximation] [--overwrite]
+```
+
+The import writes nothing unless the whole package parsed, validated and
+converted; a failure leaves the output path untouched.
+
+| Area | Import | Export |
+| --- | --- | --- |
+| Package | bounded ZIP (entries, ratio, size), path containment, DOCTYPE/entity refusal, XML depth and attribute limits, native `.indd`/`.indb` refusal | deterministic ZIP: stored `mimetype` first, sorted entries, fixed 1980-01-01 timestamps |
+| Spreads, pages | spreads, facing pages, page size, margins, columns, gutter, sections (numbering style, start, prefix) | same elements; spread centred on its binding |
+| Parents | master spreads become parents; rectangles, ovals, lines and paths render; master text frames are carried | parents become master spreads; carried master items return |
+| Items | rectangle (corner radius), oval, graphic line, path/polygon, group, text frame (insets, columns, gutter), placed-graphic frame (link kept, file not embedded) | the same kinds; rotation/skew transforms and effects are reported, not written |
+| Stories | paragraphs, runs, paragraph and character styles, tab, forced line break, spaces, page-number specials (`ACE 18/19/7`), frame threads (IDML links, else document order) | same, threads rebuilt from `next` |
+| Styles | font, weight, italic, size, leading, justification, indents, space before/after, hyphenation, tracking, fill (character), based-on, next | the same properties; others are reported as approximated |
+| Swatches | RGB/CMYK/LAB shown as sRGB fallbacks; the original value is kept in `extension.idml.swatches` and returned verbatim | swatches returned, new colors minted as RGB |
+| Layers | document layers become page layers | layers written once, items reference them |
+| Carried data | unknown items, item options/effects, unknown parts, unmapped style properties: stored in `extension.idml`, reported `carried` | returned at the owning element; a block whose owner is gone is `carried-dropped` |
+| Fidelity report | `counts` and `items` with part, element, ref, message and action | same, plus `carried_dropped` |
+
+Known gaps (not mapped; carried or reported, never silently lost):
+
+- tables, footnotes/endnotes, hyperlinks, cross-references, TOC/index, text
+  variables, conditions, anchored objects and inline character overrides inside
+  story ranges (the story text is kept; the ranges' extra attributes are not);
+- placed images are not embedded and linked files are not relinked;
+- gradients, transparency, effects and tints beyond a single fill/stroke color;
+- master text frames are carried but not rendered on the Pentool parent;
+- the `ACE` special-character table is partial;
+- unsupported or approximated export features need `--allow-approximation`;
+- layer nesting and per-page layer overrides of parents are flattened.
+
+Evidence that cannot be produced offline and is therefore not claimed: InDesign
+opening the exported package, line-break match share against InDesign PDFs, and
+cross-platform CI results.

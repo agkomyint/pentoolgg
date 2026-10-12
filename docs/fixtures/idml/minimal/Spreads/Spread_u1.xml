@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Spread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="8.0">
+  <Spread Self="u1" PageCount="2" BindingLocation="1" ItemTransform="1 0 0 1 0 0">
+    <Page Self="upage1" Name="1" GeometricBounds="0 0 792 612" ItemTransform="1 0 0 1 -612 -396" AppliedMaster="umaster">
+      <MarginPreference ColumnCount="1" ColumnGutter="12" Top="54" Bottom="54" Left="54" Right="54"/>
+    </Page>
+    <Page Self="upage2" Name="2" GeometricBounds="0 0 792 612" ItemTransform="1 0 0 1 0 -396" AppliedMaster="umaster">
+      <MarginPreference ColumnCount="1" ColumnGutter="12" Top="54" Bottom="54" Left="54" Right="54"/>
+    </Page>
+    <TextFrame Self="u100" ParentStory="u10" PreviousTextFrame="n" NextTextFrame="u101" ItemLayer="ulayer1" ItemTransform="1 0 0 1 -558 -324">
+      <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+        <PathPointType Anchor="0 0" LeftDirection="0 0" RightDirection="0 0"/>
+        <PathPointType Anchor="0 600" LeftDirection="0 600" RightDirection="0 600"/>
+        <PathPointType Anchor="216 600" LeftDirection="216 600" RightDirection="216 600"/>
+        <PathPointType Anchor="216 0" LeftDirection="216 0" RightDirection="216 0"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+      <TextFramePreference TextColumnCount="1" TextColumnGutter="12"><Properties><InsetSpacing type="list"><ListItem type="unit">2</ListItem><ListItem type="unit">3</ListItem><ListItem type="unit">4</ListItem><ListItem type="unit">5</ListItem></InsetSpacing></Properties></TextFramePreference>
+    </TextFrame>
+    <TextFrame Self="u101" ParentStory="u10" PreviousTextFrame="u100" NextTextFrame="n" ItemLayer="ulayer1" ItemTransform="1 0 0 1 54 -324">
+      <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+        <PathPointType Anchor="0 0" LeftDirection="0 0" RightDirection="0 0"/>
+        <PathPointType Anchor="0 600" LeftDirection="0 600" RightDirection="0 600"/>
+        <PathPointType Anchor="216 600" LeftDirection="216 600" RightDirection="216 600"/>
+        <PathPointType Anchor="216 0" LeftDirection="216 0" RightDirection="216 0"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+      <TextFramePreference TextColumnCount="1" TextColumnGutter="12"><Properties><InsetSpacing type="list"><ListItem type="unit">2</ListItem><ListItem type="unit">3</ListItem><ListItem type="unit">4</ListItem><ListItem type="unit">5</ListItem></InsetSpacing></Properties></TextFramePreference>
+    </TextFrame>
+    <Oval Self="uoval" ItemLayer="ulayer1" FillColor="Color/Paper" StrokeColor="Color/Black" StrokeWeight="2" ItemTransform="1 0 0 1 300 -100">
+      <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+        <PathPointType Anchor="40 0" LeftDirection="17.9 0" RightDirection="62.1 0"/>
+        <PathPointType Anchor="80 30" LeftDirection="80 13.4" RightDirection="80 46.6"/>
+        <PathPointType Anchor="40 60" LeftDirection="62.1 60" RightDirection="17.9 60"/>
+        <PathPointType Anchor="0 30" LeftDirection="0 46.6" RightDirection="0 13.4"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+    </Oval>
+    <GraphicLine Self="uline" ItemLayer="ulayer1" StrokeColor="Color/Brand" StrokeWeight="3" ItemTransform="1 0 0 1 300 100">
+      <Properties><PathGeometry><GeometryPathType PathOpen="true"><PathPointArray>
+        <PathPointType Anchor="0 0" LeftDirection="0 0" RightDirection="0 0"/>
+        <PathPointType Anchor="120 40" LeftDirection="120 40" RightDirection="120 40"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+    </GraphicLine>
+    <Group Self="ugroup" ItemLayer="ulayer1" ItemTransform="1 0 0 1 -400 200">
+      <Rectangle Self="ugrect" ItemLayer="ulayer1" FillColor="Color/Brand" StrokeColor="Color/Black" StrokeWeight="1">
+      <Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>
+        <PathPointType Anchor="0 0" LeftDirection="0 0" RightDirection="0 0"/>
+        <PathPointType Anchor="0 50" LeftDirection="0 50" RightDirection="0 50"/>
+        <PathPointType Anchor="100 50" LeftDirection="100 50" RightDirection="100 50"/>
+        <PathPointType Anchor="100 0" LeftDirection="100 0" RightDirection="100 0"/>
+      </PathPointArray></GeometryPathType></PathGeometry></Properties>
+      </Rectangle>
+    </Group>
+    <Button Self="ubutton" ItemLayer="ulayer1"><Properties/></Button>
+  </Spread>
+</idPkg:Spread>
