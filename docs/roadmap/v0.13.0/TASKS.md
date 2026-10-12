@@ -47,7 +47,7 @@ commits as one history entry and must be reviewable before execution.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the agent-painting protocol and threat model.** Specify
+- [x] **1. Freeze the agent-painting protocol and threat model.** Specify
   high-level paths, pressure curves, region constraints, sampled colors, palettes,
   vector fields, paint plans, comparison metrics, canonical compilation, hashes,
   engine compatibility, cancellation, resource limits, and stable JSON results.
@@ -55,7 +55,7 @@ commits as one history entry and must be reviewable before execution.
   before adding mutation commands. Explicitly bound path segments, samples,
   generated dabs, fields, regions, palette size, passes, pixels, and output.
 
-- [ ] **2. Add deterministic semantic stroke paths.** Accept SVG-compatible line,
+- [x] **2. Add deterministic semantic stroke paths.** Accept SVG-compatible line,
   quadratic, cubic, and arc paths instead of requiring agents to manufacture
   dense pointer events. Add piecewise size, pressure, flow, opacity, rotation,
   and color curves along normalized path distance. Define flatness, arc-length
@@ -63,35 +63,35 @@ commits as one history entry and must be reviewable before execution.
   Compilation emits the existing canonical raster samples and reports both the
   compact source and generated sample/dab counts.
 
-- [ ] **3. Add color sampling, mixing, and portable palettes.** Sample a point,
+- [x] **3. Add color sampling, mixing, and portable palettes.** Sample a point,
   bounded region, selection, layer, or composite through the authoritative
   renderer. Extract deterministic dominant, median, highlight, midtone, shadow,
   and edge palettes. Add explicit color interpolation/mixing and bounded seeded
   variation per stroke or dab. Store named palettes as readable document data;
   preserve source scope, color space, algorithm version, and source hash.
 
-- [ ] **4. Add fast region previews and structural comparison.** Export a crop,
+- [x] **4. Add fast region previews and structural comparison.** Export a crop,
   node, layer, selection, or changed bounds with `max-edge` and pixel budgets.
   Compare a rendered region with an immutable reference using documented color,
   value, edge, silhouette, structure, and texture-frequency metrics. Results are
   compact JSON with heat-map artifacts available only when requested. Metrics are
   guidance, not a claim of perceptual equivalence or artistic quality.
 
-- [ ] **5. Add region-aware painting constraints.** Allow painting inside or
+- [x] **5. Add region-aware painting constraints.** Allow painting inside or
   outside active/saved selections, avoiding protected selections, clipping to
   opaque pixels, and stopping at bounded color, alpha, luminance, or detected-edge
   barriers. Add `follow contour`, `follow gradient`, and explicit direction modes.
   The exact resolved constraint mask/field is previewable, hashed, journaled, and
   evaluated consistently across tiles without seams or boundary double-application.
 
-- [ ] **6. Add deterministic stroke fields.** Generate bounded direction fields
+- [x] **6. Add deterministic stroke fields.** Generate bounded direction fields
   from contours, gradients, distance transforms, structure tensors, perspective
   guides, or supplied vectors. Paint seeded strokes through a field with explicit
   density, length, curvature, overlap, jitter, taper, and collision rules. Fields
   are inspectable, cacheable derived data; committed strokes pin the exact field
   digest. This enables hair, fur, grass, fabric, wood, and form-following hatching.
 
-- [ ] **7. Add lighting- and material-aware paint modes.** Define deterministic
+- [x] **7. Add lighting- and material-aware paint modes.** Define deterministic
   glaze, dry-brush, bristle, impasto-like, palette-knife, watercolor-wash,
   charcoal, pencil, canvas-grain, and paper-grain behavior without pretending to
   simulate unbounded physical media. Support explicit light direction, shadow /
@@ -100,14 +100,14 @@ commits as one history entry and must be reviewable before execution.
   Algorithms and texture assets are versioned, bounded, content-addressed, and
   replayable; marketing names must not obscure the documented pixel math.
 
-- [ ] **8. Add compact visual analysis for agents.** Report major contours,
+- [x] **8. Add compact visual analysis for agents.** Report major contours,
   silhouettes, value zones, dominant colors, focal candidates, gradient direction,
   texture frequency, coverage gaps, clipping, and suggested stroke orientation for
   an explicit bounded scope. Return polylines, regions, histograms, and summaries,
   never an unbounded pixel dump. Analysis is read-only, paginated, deterministic,
   and tagged with renderer, algorithm, page, scope, revision, and source hashes.
 
-- [ ] **9. Add declarative multi-pass paint plans.** Define a data-only plan with
+- [x] **9. Add declarative multi-pass paint plans.** Define a data-only plan with
   ordered passes such as underpainting, local color, form shadows, highlights,
   edge work, texture, and cleanup. Each pass names its scope, palette, brush,
   constraints, path or field source, blend, opacity, seed, and budget. Planning
@@ -115,41 +115,47 @@ commits as one history entry and must be reviewable before execution.
   changed bounds, and makes no mutation. Commit is atomic, revision-guarded, and
   one undo entry. Partial success is forbidden.
 
-- [ ] **10. Add reusable composition and form guides.** Provide non-exporting
+- [x] **10. Add reusable composition and form guides.** Provide non-exporting
   thirds, golden-ratio, symmetry, horizon, perspective, vanishing-point, gesture,
   face/body proportion, value-map, and custom guide primitives. Snapping and
   stroke fields may reference guides by stable ID. Guides remain ordinary safe
   document data, can be hidden or explicitly included in proof exports, and never
   silently change pixels when edited.
 
-- [ ] **11. Add agent-focused diagnostics and revision scoring.** Mutation
+- [x] **11. Add agent-focused diagnostics and revision scoring.** Mutation
   results report changed bounds, coverage, value range, palette delta, edge spill,
   protected-region violations, stroke/dab/tile counts, comparison deltas, and
   actionable warnings. Diagnostics distinguish measured facts from heuristic
   suggestions. Provide before/after scoring for a declared goal without silently
   accepting, reverting, or continuing a plan.
 
-- [ ] **12. Integrate presets, batch, history, diff, packages, and components.**
+- [x] **12. Integrate presets, batch, history, diff, packages, and components.**
   Portable presets can bundle brushes, palettes, fields, guides, and plan templates
   but no code. Structural diff summarizes plan/pass/constraint changes and tile
   impact. Packages collect all accepted assets and hashes. Component instances and
   masks preserve existing override semantics. History, undo/redo, dry run, locks,
   page selection, revision guards, and unknown fields behave like other mutations.
 
-- [ ] **13. Build editor-native review and authoring controls.** Add path/pressure
+- [x] **13. Build editor-native review and authoring controls.** Add path/pressure
   editors, palette sampling, protected regions, field visualization, material
   controls, pass ordering, crop previews, reference comparison, metric overlays,
   and exact disclosure of generated work. Preview may be approximate; commit must
   replace it with authoritative Rust output. Agent-produced plans appear as normal
   editable operations, not an autonomous chat surface.
 
-- [ ] **14. Harden conformance, performance, and failure recovery.** Add golden
+- [x] **14. Harden conformance, performance, and failure recovery.** Add golden
   tests for path compilation, palette extraction, fields, constrained tile edges,
   materials, plans, metrics, and exports on Linux, Windows, Intel macOS, and Apple
   Silicon. Fuzz schemas, curves, fields, plans, references, palettes, and hostile
   dimensions. Test cancellation at every stage, stale revisions, damaged assets,
   locks, memory/disk budgets, transaction rollback, crash recovery, packaging,
   offline replay, and 10,000-pass/stroke bounded-session behavior.
+
+  Status: complete. Goldens, fuzzing, cancellation at every plan checkpoint,
+  recovery from an interrupted write, budgets, packaging and the 10,048-stroke run
+  (`cargo test --release --test v0130_conformance -- --ignored`, 35 s) pass. The
+  CI matrix (Linux, Windows, Apple Silicon macOS) was green for commit 6f8cf51
+  (run 38207854682), which confirms the pinned digests on every platform.
 
 ## CLI direction
 

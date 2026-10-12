@@ -517,7 +517,7 @@ pub fn separate(
         "[invalid-input] separation scale must be in 0.1..8"
     );
     ensure!(
-        raw["version"] == super::VERSION,
+        crate::color::has_v8(raw),
         "[unsupported-version] plate separation requires a version {} document",
         super::VERSION
     );

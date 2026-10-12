@@ -539,9 +539,13 @@ mod tests {
             crate::page::PageAction::Add {
                 id: "mobile".into(),
                 name: Some("Mobile".into()),
-                width: 390,
-                height: 844,
-                background: "#000000".into(),
+                width: Some(390),
+                height: Some(844),
+                background: Some("#000000".into()),
+                after: None,
+                before: None,
+                parent: None,
+                count: None,
             },
         )
         .unwrap();

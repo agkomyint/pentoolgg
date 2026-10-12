@@ -854,7 +854,7 @@ fn is_empty_catalog(catalog: &Value) -> bool {
 /// `migrate --target 7`: the v6 migration followed by `version: 7`. No catalog is
 /// added; the first photo command creates it.
 pub fn migrate(raw: Value) -> Result<Value> {
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+    if crate::color::has_v8(&raw) {
         return crate::color::catalog::downgrade(raw);
     }
     if raw.get("version").and_then(Value::as_u64) == Some(VERSION) {
@@ -870,7 +870,7 @@ pub fn migrate(raw: Value) -> Result<Value> {
 /// `migrate --target 6`: only a document without photo nodes and with no (or an
 /// empty) catalog can be represented by version 6.
 pub fn downgrade(mut raw: Value) -> Result<Value> {
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::color::VERSION) {
+    if crate::color::has_v8(&raw) {
         raw = crate::color::catalog::downgrade(raw)?;
     }
     crate::scene::validate(&raw)?;
@@ -926,7 +926,10 @@ pub fn raw_import_defaults(camera_profile: Value) -> Value {
 /// absent), and whether it was upgraded.
 fn with_catalog(raw: &Value) -> Result<(Value, bool)> {
     let version = raw.get("version").and_then(Value::as_u64);
-    let current = matches!(version, Some(VERSION | crate::color::VERSION));
+    let current = matches!(
+        version,
+        Some(VERSION | crate::color::VERSION | crate::spreads::VERSION)
+    );
     let mut document = if current {
         crate::scene::validate(raw)?;
         raw.clone()
