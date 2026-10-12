@@ -925,24 +925,26 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 fn reorder_node(page: &mut Value, id: &str, requested: usize) -> Result<usize> {
-    fn apply(nodes: &mut Vec<Value>, id: &str, requested: usize) -> Option<usize> {
+    fn apply(nodes: &mut Vec<Value>, id: &str, requested: usize) -> Result<Option<usize>> {
         if let Some(from) = nodes
             .iter()
             .position(|node| node.get("id").and_then(Value::as_str) == Some(id))
         {
+            if requested >= nodes.len() {
+                bail!("group index out of range");
+            }
             let node = nodes.remove(from);
-            let to = requested.min(nodes.len());
-            nodes.insert(to, node);
-            return Some(to);
+            nodes.insert(requested, node);
+            return Ok(Some(requested));
         }
         for node in nodes {
             if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
-                if let Some(index) = apply(children, id, requested) {
-                    return Some(index);
+                if let Some(index) = apply(children, id, requested)? {
+                    return Ok(Some(index));
                 }
             }
         }
-        None
+        Ok(None)
     }
     for layer in page
         .get_mut("layers")
@@ -956,7 +958,7 @@ fn reorder_node(page: &mut Value, id: &str, requested: usize) -> Result<usize> {
                 .context("layer nodes are missing")?,
             id,
             requested,
-        ) {
+        )? {
             return Ok(index);
         }
     }
@@ -3314,6 +3316,37 @@ mod tests {
         let flattened = flatten_to_v3(&raw).unwrap();
         let doc: crate::document::Document = serde_json::from_value(flattened).unwrap();
         assert_eq!(doc.layers[0].paths.len(), 1);
+    }
+
+    #[test]
+    fn group_reorder_rejects_out_of_range_index() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        let err = apply_group(
+            &mut raw,
+            None,
+            GroupAction::Reorder {
+                id: "card".into(),
+                index: 999999,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("group index out of range"),
+            "unexpected error: {err}"
+        );
+        let index = apply_group(
+            &mut raw,
+            None,
+            GroupAction::Reorder {
+                id: "card".into(),
+                index: 0,
+            },
+        )
+        .unwrap()["index"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(index, 0);
     }
 
     #[test]
