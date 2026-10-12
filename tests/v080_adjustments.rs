@@ -283,6 +283,20 @@ fn cli_adjustments_use_one_guarded_history_entry_and_export_all_formats() {
 }
 
 #[test]
+fn unknown_adjustment_kind_lists_valid_kinds() {
+    let err = composite::validate_settings("bogus", &serde_json::json!({})).unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown adjustment bogus"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("exposure") && message.contains("invert") && message.contains("threshold"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
 fn adjustment_add_defaults_to_first_layer_not_layer_1() {
     let mut raw: Value =
         serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
