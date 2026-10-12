@@ -259,7 +259,7 @@ pub fn run(
     options: &Options,
 ) -> Result<Value> {
     ensure!(
-        raw["version"] == super::VERSION,
+        crate::color::has_v8(raw),
         "[unsupported-version] preflight requires a version {} document",
         super::VERSION
     );

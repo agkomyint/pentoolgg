@@ -52,6 +52,9 @@ pub struct PackageAsset {
     /// Validated offline spot ink definitions declared by the asset document.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spot_inks: Vec<Value>,
+    /// Validated paint data (presets, palettes, guides, plan templates) with hashes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paint_assets: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +169,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         let images = check_asset_document(&raw)?;
         let icc_profiles = crate::color::catalog::package_table_validated(&raw)?;
         let spot_inks = crate::color::spot::package_table(&raw)?;
+        let paint_assets = crate::paint_bundle::package_table(&raw)?;
         if !seen.insert(am.id.clone()) {
             bail!("duplicate asset ID {}", am.id)
         }
@@ -194,6 +198,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
                 images,
                 icc_profiles,
                 spot_inks,
+                paint_assets,
             },
         );
         snapshots.insert(rel, (am.id, bytes));
@@ -221,6 +226,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         entry.images = check_asset_document(&raw)?;
         entry.icc_profiles = crate::color::catalog::package_table_validated(&raw)?;
         entry.spot_inks = crate::color::spot::package_table(&raw)?;
+        entry.paint_assets = crate::paint_bundle::package_table(&raw)?;
         entry.hash = asset::hash_bytes(&bytes);
         snapshots.insert(entry.path.clone(), (id.clone(), bytes));
     }
@@ -401,6 +407,9 @@ pub fn verify(path: &Path) -> Result<Value> {
         }
         if crate::color::spot::package_table(&raw)? != a.spot_inks {
             bail!("asset spot ink table does not match its document: {id}")
+        }
+        if crate::paint_bundle::package_table(&raw)? != a.paint_assets {
+            bail!("asset paint table does not match its document: {id}")
         }
     }
     Ok(

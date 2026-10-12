@@ -1,49 +1,58 @@
-# v0.21.0 — Scripting and extension API
+# v0.21.0 — Collaboration
 
-Give people and agents a safe way to extend Pentool: sandboxed scripts that read
-documents and propose edits through the same planner every command uses.
+Let several people and agents work on one document safely, without giving up
+the single binary, readable `.pen` files and atomic history.
 
 ## Product contract
 
-- Extensions can only do what the CLI can do: every effect is a transaction
-  through the shared planner, with dry run, revision guards, locks and rollback.
-- Sandboxed by default: no filesystem outside the project, no network, no
-  process spawning, and bounded CPU time and memory. Capabilities are explicit,
-  declared in a manifest and shown to the user before first run.
-- Deterministic: a script given the same document and inputs yields the same
-  edit plan. Clocks and randomness are unavailable unless seeded explicitly.
-- No Node.js or system interpreter is required. The script engine is embedded
-  Rust (a small, audited, pure Rust interpreter or WASM runtime), chosen in the
-  specification task against the binary-size budget.
-- Extensions are versioned, content-addressed packages that verify offline,
-  using the existing `package` mechanism.
-
-## Model
-
-```json
-{"name": "align-to-grid", "version": "1.0.0", "api": 1,
- "capabilities": ["document.read", "document.edit"],
- "entry": "main.wasm", "limits": {"cpu_ms": 5000, "memory_mb": 64}}
-```
-
-- The API exposes the same compact, paginated tree and search results as the
-  CLI, plus plan, apply and dry-run calls.
-- Events (selection changed, document opened) are read-only notifications.
+- The `.pen` document remains the source of truth. Collaboration is a protocol
+  over operations, not a different storage format.
+- Edits are operations with stable IDs and revision guards. Concurrent edits
+  merge deterministically or are rejected with a named conflict; nothing is
+  silently overwritten, and locks are respected.
+- Works offline: a peer can work disconnected and reconcile later. No central
+  service is required to open or save a document.
+- Identity and access are explicit. A session shows who may read, comment or
+  edit, and every operation records its author.
+- Bounded: operation size, rate, session size and history are limited, and
+  limits are checked before work starts.
+- Comments and presence data are separate from the scene graph and never change
+  rendering or export.
+- Humans and agents are both first-class collaborators (human-human,
+  human-agent, agent-agent). Every operation records an **actor** with a kind
+  (`human` | `agent`), a stable ID, a display name and, for agents, the model or
+  tool name and the human who directed it.
+- A document carries **contribution stats** derived from the operation log:
+  per actor, the share of operations, objects created, objects modified,
+  properties changed, and net content authored, with human and agent totals.
+  Stats are computed deterministically from the log, never self-reported, and
+  surviving content is attributed (an object an agent created and a human later
+  restyled shows both contributions).
+- Attribution is honest and bounded: it is stored compactly in the document
+  (a bounded summary plus the hidden history), cannot be forged by a peer, and
+  is exported only when the user chooses, since it can identify people.
 
 ## Must ship, in order
 
-- [ ] **1. Choose the engine and freeze the API,** with a binary-size budget and
-  a threat model in `docs/extensions-v1.md`.
-- [ ] **2. Sandbox and limits** with tests for escape attempts and resource
-  exhaustion.
-- [ ] **3. Document API:** read, search, plan, apply, dry-run, all through the
-  shared transaction path.
-- [ ] **4. Manifest, capability prompts, packaging and offline verification.**
-- [ ] **5. CLI:** `extension add|list|run|remove` with JSON results.
-- [ ] **6. Editor:** extension panel and command palette integration.
-- [ ] **7. Examples and conformance tests,** including a hostile-script suite.
+- [ ] **1. Specify the operation log,** merge rules and conflict reporting in
+  `docs/collaboration-v1.md`, with a threat model.
+- [ ] **2. Operation log in the transaction path,** with deterministic replay
+  and a property-based convergence test.
+- [ ] **3. Local-network sync** between instances (`serve --collab`), with
+  authentication tokens and explicit peers.
+- [ ] **3a. Actor identity and contribution stats:** actor kinds in every
+  operation, `pentool stats DOC [--by actor|kind|page] [--json]` reporting
+  percent share of work for humans versus agents, a stats panel in the editor,
+  and tests that stats are deterministic, survive history compaction and
+  cannot be forged by a peer.
+- [ ] **4. Comments, mentions and review states** stored outside the scene.
+- [ ] **5. Presence and cursors,** best-effort and non-persistent.
+- [ ] **6. Permissions** (viewer, commenter, editor) enforced by the server.
+- [ ] **7. Editor:** collaborator list, comments panel, conflict resolution UI.
+- [ ] **8. Evidence:** convergence fuzzing, hostile-peer tests, and recovery
+  tests for crash during sync.
 
 ## Explicitly deferred
 
-- A public marketplace, network-capable extensions, and native (non-sandboxed)
-  plugins.
+- A hosted relay or account system (see v0.22.0), end-to-end encrypted rooms,
+  and real-time co-editing of a single text run at keystroke granularity.

@@ -1,0 +1,10 @@
+{
+  "format": "penbook",
+  "version": 1,
+  "name": "Escape",
+  "documents": [
+    {
+      "path": "../outside.pen"
+    }
+  ]
+}

@@ -282,7 +282,7 @@ pub fn build(
     options: &Options,
 ) -> Result<Exported> {
     ensure!(
-        raw["version"] == super::VERSION,
+        crate::color::has_v8(raw),
         "[unsupported-version] PDF/X export requires a version {} document",
         super::VERSION
     );

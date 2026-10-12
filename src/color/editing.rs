@@ -5,7 +5,6 @@ use super::{
     icc::Intent,
     scene::{self, Scope},
     value::{Destination, Evaluator, NativeColor, ProfileSet},
-    VERSION,
 };
 use anyhow::{ensure, Context, Result};
 use serde_json::{json, Value};
@@ -47,7 +46,7 @@ pub fn plan(raw: &Value, document: &Path, options: &Options<'_>) -> Result<Plan>
         "[invalid-input] --all-pages conflicts with --page"
     );
     ensure!(
-        raw["version"].as_u64() == Some(VERSION),
+        crate::color::has_v8(raw),
         "[unsupported-capability] paint assignment/conversion requires explicit migration to v8"
     );
     crate::scene::validate(raw)?;

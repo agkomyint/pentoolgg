@@ -55,7 +55,7 @@ media is out of scope (see `AGENTS.md`).
   from the same brush engine, then commit as one deterministic request; the
   committed pixels equal a replay of the stroke on the server.
 - [ ] **6. Task workspaces.** Studio organizes by task (Draw, Paint, Photo,
-  Compose, Layout, Print, and Package once v0.18.0 ships) over one document and
+  Compose, Layout, Print, and Package once v0.16.0 ships) over one document and
   one layer stack, without separate editors per area.
 - [ ] **7. Optional `gpu` feature.** WebGPU/`wgpu` acceleration for live
   filters and the 3D viewport, behind the feature flag, with a CPU fallback and
@@ -78,8 +78,8 @@ media is out of scope (see `AGENTS.md`).
 
 ## Explicitly deferred
 
-- Real-time multi-user editing and CRDT merge (v0.24.0 collaboration).
-- Hosted multi-tenant operation (v0.25.0).
+- Real-time multi-user editing and CRDT merge (v0.21.0 collaboration).
+- Hosted multi-tenant operation (v0.22.0).
 - Replacing the browser with a native GUI toolkit. The browser remains the
   front end because it ships everywhere with no per-platform UI code.
 - Video, audio and timeline features.

@@ -39,6 +39,13 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/", get(|| async { Html(STUDIO) }))
         .route("/studio", get(|| async { Html(STUDIO) }))
         .route("/api/raster", post(raster_command))
+        .route("/api/paint/plan", post(paint_plan_command))
+        .route("/api/paint/score", post(paint_score_command))
+        .route("/api/paint/palette", post(paint_palette_command))
+        .route("/api/paint/compare", post(paint_compare_command))
+        .route("/api/paint/preview", post(paint_preview_command))
+        .route("/api/paint/field", post(paint_field_command))
+        .route("/api/paint/media", post(paint_media_command))
         .route("/api/image/bake", post(image_bake))
         .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
@@ -111,7 +118,7 @@ async fn asset_search(
         let project = crate::library::project_index(&state.project_root);
         let user = crate::library::user_index().ok();
         let index = crate::library::merged_indexes(Some(&project), user.as_deref())?;
-        Ok(crate::library::search(
+        crate::library::search(
             &index,
             &crate::library::SearchOptions {
                 query: q.query.as_deref(),
@@ -122,7 +129,7 @@ async fn asset_search(
                 offset: q.offset.unwrap_or(0),
                 limit: q.limit.unwrap_or(50),
             },
-        ))
+        )
     })();
     match result {
         Ok(value) => Json(value).into_response(),
@@ -373,6 +380,363 @@ struct RasterRequest {
 /// document and a compact result out. Nothing is written unless it validates.
 async fn raster_command(Json(body): Json<RasterRequest>) -> Response {
     match raster_apply(body) {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaintPlanRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    plan: serde_json::Value,
+    /// Preview only: the report is identical to a commit but no document is returned.
+    #[serde(default)]
+    dry_run: bool,
+    /// Refuse unless the canonical plan hashes to this value (`[plan-changed]`).
+    expect_plan_hash: Option<String>,
+    /// Cancellable job ID for `/api/composite/cancel`; a cancelled plan writes nothing.
+    job: Option<String>,
+}
+
+/// Stateless plan execution. A preview and a commit share one planner, so the
+/// report a reviewer sees is exactly what the commit returns.
+async fn paint_plan_command(
+    State(state): State<Shared>,
+    Json(body): Json<PaintPlanRequest>,
+) -> Response {
+    let job = body.job.clone();
+    match run_job(&state, job, "plan", move || paint_plan_apply(body)).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+fn paint_plan_apply(body: PaintPlanRequest) -> Result<serde_json::Value> {
+    if let Some(expected) = &body.expect_plan_hash {
+        let actual = crate::paint_plan::validate_template(&body.plan)?;
+        anyhow::ensure!(
+            &actual == expected,
+            "[plan-changed] the plan hashes to {actual}, not the expected {expected}; review the plan again. The document was not changed"
+        );
+    }
+    let mut raw = body.document;
+    crate::transaction::validate_value(&raw)?;
+    let result = crate::paint_plan::execute(&mut raw, body.page.as_deref(), &body.plan)?;
+    crate::transaction::validate_value(&raw)?;
+    if body.dry_run {
+        Ok(serde_json::json!({"result": result, "dry_run": true}))
+    } else {
+        Ok(serde_json::json!({"result": result, "dry_run": false, "document": raw}))
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaintScoreRequest {
+    before: serde_json::Value,
+    after: serde_json::Value,
+    layer: String,
+    goal: serde_json::Value,
+}
+
+#[derive(serde::Deserialize)]
+struct PaintPaletteRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    /// `page`, `node:ID`, `layer:ID` or `group:ID`.
+    #[serde(default = "page_scope")]
+    scope: String,
+    rect: Option<[u32; 4]>,
+    /// `sample` (a point or neighborhood) or `extract` (a role palette).
+    action: String,
+    x: Option<u32>,
+    y: Option<u32>,
+    #[serde(default)]
+    radius: u32,
+    #[serde(default = "dominant_role")]
+    role: String,
+    #[serde(default = "default_palette_count")]
+    count: usize,
+}
+fn page_scope() -> String {
+    "page".into()
+}
+fn dominant_role() -> String {
+    "dominant".into()
+}
+fn default_palette_count() -> usize {
+    6
+}
+
+/// Read-only palette sampling from the rendered canvas, so a pass palette can be
+/// built from what is actually on the page.
+async fn paint_palette_command(
+    State(state): State<Shared>,
+    Json(body): Json<PaintPaletteRequest>,
+) -> Response {
+    let document = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    match run_job(&state, None, "palette", move || {
+        paint_palette_apply(&document, body)
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+fn paint_palette_apply(
+    document: &std::path::Path,
+    body: PaintPaletteRequest,
+) -> Result<serde_json::Value> {
+    {
+        let source = crate::paint_palette::source(
+            &body.document,
+            document,
+            body.page.as_deref(),
+            &body.scope,
+            body.rect,
+            None,
+        )?;
+        match body.action.as_str() {
+            "sample" => {
+                let (Some(x), Some(y)) = (body.x, body.y) else {
+                    anyhow::bail!("[invalid-request] sample needs x and y");
+                };
+                crate::paint_palette::sample(&source, x, y, body.radius)
+            }
+            "extract" => {
+                crate::paint_palette::extract(&source, &body.scope, &body.role, body.count)
+            }
+            other => anyhow::bail!("[invalid-request] action {other:?} must be sample or extract"),
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaintCompareRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    #[serde(default = "page_scope")]
+    scope: String,
+    rect: Option<[u32; 4]>,
+    /// The reference image as base64 PNG/JPEG (at most 8 MiB decoded).
+    reference_image_base64: String,
+    #[serde(default = "white")]
+    background: String,
+    /// Also return the value-difference heat map as a base64 PNG overlay.
+    #[serde(default)]
+    heatmap: bool,
+}
+fn white() -> String {
+    "#ffffff".into()
+}
+
+/// Read-only comparison of the current canvas region with a reference image.
+async fn paint_compare_command(
+    State(state): State<Shared>,
+    Json(body): Json<PaintCompareRequest>,
+) -> Response {
+    let document = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    match run_job(&state, None, "compare", move || {
+        paint_compare_apply(&document, body)
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+fn paint_compare_apply(
+    document: &std::path::Path,
+    body: PaintCompareRequest,
+) -> Result<serde_json::Value> {
+    {
+        use base64::Engine;
+        use rand_core::RngCore;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(body.reference_image_base64.trim())
+            .context("[invalid-request] reference image must be base64")?;
+        anyhow::ensure!(
+            bytes.len() <= 8 * 1024 * 1024,
+            "[limit-exceeded] reference image is larger than 8 MiB"
+        );
+        // The comparer reads a file; stage it under a unique temp name that is
+        // removed on every path.
+        let format = ::image::guess_format(&bytes)
+            .context("[malformed-resource] reference image is not a recognized format")?;
+        let path = std::env::temp_dir().join(format!(
+            "pentool-reference-{:016x}.{}",
+            rand_core::OsRng.next_u64(),
+            format.extensions_str().first().copied().unwrap_or("img")
+        ));
+        std::fs::write(&path, &bytes).context("cannot stage the reference image")?;
+        struct Remove(std::path::PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _remove = Remove(path.clone());
+        let (mut report, heat) = crate::paint_review::compare_with_heat(
+            &body.document,
+            document,
+            body.page.as_deref(),
+            crate::paint_review::CompareOptions {
+                scope: body.scope,
+                rect: body.rect,
+                selection: None,
+                reference_image: Some(path.to_string_lossy().into_owned()),
+                reference_document: None,
+                reference_scope: None,
+                background: crate::paint_review::parse_background(&body.background)?,
+                heatmap: None,
+            },
+        )?;
+        if body.heatmap {
+            anyhow::ensure!(
+                u64::from(heat.width()) * u64::from(heat.height()) <= 4 << 20,
+                "[limit-exceeded] heat map exceeds 4194304 pixels; narrow rect"
+            );
+            report["heatmap_png_base64"] =
+                serde_json::Value::String(png_base64(&::image::DynamicImage::ImageLuma8(heat))?);
+        }
+        Ok(report)
+    }
+}
+
+fn png_base64(image: &::image::DynamicImage) -> Result<String> {
+    use base64::Engine;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut out, ::image::ImageFormat::Png)
+        .context("cannot encode the preview PNG")?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(out.into_inner()))
+}
+
+#[derive(serde::Deserialize)]
+struct PaintPreviewRequest {
+    document: serde_json::Value,
+    page: Option<String>,
+    #[serde(default = "page_scope")]
+    scope: String,
+    rect: Option<[u32; 4]>,
+    max_edge: Option<u32>,
+}
+
+/// Bounded crop preview of a canvas region as `{report, png_base64}`.
+async fn paint_preview_command(
+    State(state): State<Shared>,
+    Json(body): Json<PaintPreviewRequest>,
+) -> Response {
+    let document = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    match run_job(&state, None, "preview", move || {
+        paint_preview_apply(&document, body)
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+fn paint_preview_apply(
+    document: &std::path::Path,
+    body: PaintPreviewRequest,
+) -> Result<serde_json::Value> {
+    let (report, image) = crate::paint_review::preview_image(
+        &body.document,
+        document,
+        body.page.as_deref(),
+        crate::paint_review::PreviewOptions {
+            scope: body.scope,
+            rect: body.rect,
+            selection: None,
+            max_edge: body.max_edge.unwrap_or(512).min(1024),
+            max_pixels: 1 << 20,
+            out: None,
+            background: None,
+        },
+    )?;
+    Ok(serde_json::json!({
+        "report": report,
+        "png_base64": png_base64(&::image::DynamicImage::ImageRgba8(image))?,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct PaintFieldRequest {
+    document: serde_json::Value,
+    layer: String,
+    field: serde_json::Value,
+    params: Option<serde_json::Value>,
+    constraints: Option<serde_json::Value>,
+    #[serde(default)]
+    brush: Option<serde_json::Value>,
+    #[serde(default)]
+    seed: u64,
+    #[serde(default = "default_max_vectors")]
+    max_vectors: usize,
+}
+fn default_max_vectors() -> usize {
+    200
+}
+
+/// Field visualization: the built field's summary and sample vectors, plus the
+/// strokes painting through it would generate when `params` is given.
+async fn paint_field_command(
+    State(state): State<Shared>,
+    Json(body): Json<PaintFieldRequest>,
+) -> Response {
+    let work = move || {
+        crate::paint_fields::preview_value(
+            &body.document,
+            &body.layer,
+            &body.field,
+            body.params,
+            body.constraints,
+            &body.brush.unwrap_or_else(|| serde_json::json!({})),
+            body.seed,
+            body.max_vectors.min(1000),
+        )
+    };
+    match run_job(&state, None, "field", work).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PaintMediaRequest {
+    /// Omit to list the material kinds; give a media object to canonicalise it.
+    media: Option<serde_json::Value>,
+}
+
+/// Material controls: the media kinds, or the canonical form of one media spec.
+async fn paint_media_command(Json(body): Json<PaintMediaRequest>) -> Response {
+    let result = match &body.media {
+        None => Ok(crate::paint_media::list_value()),
+        Some(media) => crate::paint_media::describe_value(media),
+    };
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => problem(e),
+    }
+}
+
+/// Read-only before/after scoring of one layer against a goal.
+async fn paint_score_command(Json(body): Json<PaintScoreRequest>) -> Response {
+    match crate::paint_score::score(&body.before, &body.after, &body.layer, &body.goal) {
         Ok(value) => Json(value).into_response(),
         Err(e) => problem(e),
     }
@@ -828,13 +1192,7 @@ async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneReques
             .map_err(|_| anyhow::anyhow!("document lock failed"))?;
         let bytes = std::fs::read(&file)?;
         let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-        if body
-            .revision
-            .as_deref()
-            .is_some_and(|wanted| wanted != revision(&raw))
-        {
-            anyhow::bail!("document revision changed")
-        };
+        require_revision(body.revision.as_deref(), &raw)?;
         let changes =
             crate::scene::apply_batch_at(&mut raw, body.page.as_deref(), &body.operations, &file)?;
         let expected = crate::transaction::revision(&bytes);
@@ -1326,6 +1684,17 @@ fn revision(value: &serde_json::Value) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Optimistic-concurrency guard for shared-document commits: a missing
+/// revision must fail rather than commit unguarded against concurrent writers.
+fn require_revision(revision: Option<&str>, raw: &serde_json::Value) -> Result<()> {
+    let wanted = revision
+        .with_context(|| "scene batch requires the document revision from GET /api/document")?;
+    if wanted != self::revision(raw) {
+        anyhow::bail!("document revision changed")
+    }
+    Ok(())
+}
+
 #[derive(serde::Deserialize, Default)]
 struct PageQuery {
     page: Option<String>,
@@ -1361,10 +1730,33 @@ async fn composite_job(
     svg: bool,
 ) -> Result<Vec<u8>> {
     let scale = composite_preview_scale(&value, query.page.as_deref(), query.max_edge)?;
+    let document = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    run_job(state, query.job, "export", move || {
+        if svg {
+            Ok(
+                crate::composite::svg(&value, &document, query.page.as_deref(), scale)?
+                    .into_bytes(),
+            )
+        } else {
+            crate::composite::png(&value, &document, query.page.as_deref(), scale)
+        }
+    })
+    .await
+}
+
+/// Run cancellable blocking work under a registered job ID. `/api/composite/cancel`
+/// raises the flag; dropping the request future cancels the work too.
+async fn run_job<T: Send + 'static>(
+    state: &Shared,
+    job: Option<String>,
+    prefix: &str,
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
     use rand_core::RngCore;
-    let job = query
-        .job
-        .unwrap_or_else(|| format!("export-{:016x}", rand_core::OsRng.next_u64()));
+    let job = job.unwrap_or_else(|| format!("{prefix}-{:016x}", rand_core::OsRng.next_u64()));
     if job.is_empty()
         || job.len() > 128
         || !job
@@ -1409,22 +1801,9 @@ async fn composite_job(
         }
     }
     let cancel_on_drop = CancelOnDrop(flag.clone());
-    let document = state
-        .file
-        .clone()
-        .unwrap_or_else(|| state.project_root.join("browser.pen"));
     let result = tokio::task::spawn_blocking(move || {
         let _guard = guard;
-        crate::composite::with_cancel(flag, || {
-            if svg {
-                Ok(
-                    crate::composite::svg(&value, &document, query.page.as_deref(), scale)?
-                        .into_bytes(),
-                )
-            } else {
-                crate::composite::png(&value, &document, query.page.as_deref(), scale)
-            }
-        })
+        crate::composite::with_cancel(flag, work)
     })
     .await
     .context("preview worker failed")?;
@@ -1601,6 +1980,117 @@ fn problem(error: anyhow::Error) -> Response {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn paint_plan_endpoint_previews_and_commits_the_same_report() {
+        use serde_json::json;
+        let mut raw = crate::scene::new_document(64, 64);
+        crate::raster::add(&mut raw, None, None, "p", 0.0, 0.0, 64, 64).unwrap();
+        let plan = json!({
+            "schema": 1, "engine": 1, "id": "ui",
+            "passes": [{"id": "a", "target": "p", "action": "stroke-path",
+                        "args": {"path": "M4 10 L60 10", "color": "#336699",
+                                 "brush": {"size": 8, "hardness": 1}}}]
+        });
+        let request = |dry_run: bool, hash: Option<String>| super::PaintPlanRequest {
+            document: raw.clone(),
+            page: None,
+            plan: plan.clone(),
+            dry_run,
+            expect_plan_hash: hash,
+            job: None,
+        };
+        let preview = super::paint_plan_apply(request(true, None)).unwrap();
+        assert!(preview.get("document").is_none());
+        let hash = preview["result"]["plan_hash"].as_str().unwrap().to_owned();
+        let commit = super::paint_plan_apply(request(false, Some(hash))).unwrap();
+        assert_eq!(preview["result"], commit["result"]);
+        assert_ne!(commit["document"], raw);
+        let stale = super::paint_plan_apply(request(false, Some("sha256:0".into())));
+        assert!(stale.unwrap_err().to_string().contains("plan-changed"));
+    }
+
+    #[test]
+    fn palette_and_compare_endpoints_read_the_canvas_without_mutation() {
+        use base64::Engine;
+        use serde_json::json;
+        let mut raw = crate::scene::new_document(32, 32);
+        crate::raster::add(&mut raw, None, None, "p", 0.0, 0.0, 32, 32).unwrap();
+        let plan = json!({
+            "schema": 1, "engine": 1, "id": "pal",
+            "passes": [{"id": "a", "target": "p", "action": "fill",
+                        "args": {"color": "#cc3322"}}]
+        });
+        crate::paint_plan::execute(&mut raw, None, &plan).unwrap();
+        let before = raw.clone();
+        let here = std::path::Path::new("browser.pen");
+        let request = |action: &str| super::PaintPaletteRequest {
+            document: raw.clone(),
+            page: None,
+            scope: "page".into(),
+            rect: None,
+            action: action.into(),
+            x: Some(4),
+            y: Some(4),
+            radius: 1,
+            role: "dominant".into(),
+            count: 2,
+        };
+        let sampled = super::paint_palette_apply(here, request("sample")).unwrap();
+        assert!(sampled.to_string().contains("#cc3322"), "{sampled}");
+        let extracted = super::paint_palette_apply(here, request("extract")).unwrap();
+        assert!(extracted.to_string().contains("#cc3322"), "{extracted}");
+        assert!(super::paint_palette_apply(here, request("bogus")).is_err());
+
+        // A reference image that is solid blue differs from the red canvas.
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([0, 0, 255, 255]))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let compared = super::paint_compare_apply(
+            here,
+            super::PaintCompareRequest {
+                document: raw.clone(),
+                page: None,
+                scope: "page".into(),
+                rect: None,
+                reference_image_base64: base64::engine::general_purpose::STANDARD
+                    .encode(png.into_inner()),
+                background: "#ffffff".into(),
+                heatmap: true,
+            },
+        )
+        .unwrap();
+        assert!(compared["metrics"].is_object(), "{compared}");
+        assert!(compared["heatmap_png_base64"].as_str().unwrap().len() > 20);
+        let shown = super::paint_preview_apply(
+            here,
+            super::PaintPreviewRequest {
+                document: raw.clone(),
+                page: None,
+                scope: "page".into(),
+                rect: Some([0, 0, 16, 16]),
+                max_edge: Some(64),
+            },
+        )
+        .unwrap();
+        assert_eq!(shown["report"]["source"], serde_json::json!([16, 16]));
+        assert!(shown["png_base64"].as_str().unwrap().len() > 20);
+        let bad = super::paint_compare_apply(
+            here,
+            super::PaintCompareRequest {
+                document: raw.clone(),
+                page: None,
+                scope: "page".into(),
+                rect: None,
+                reference_image_base64: "!!!".into(),
+                background: "#ffffff".into(),
+                heatmap: false,
+            },
+        );
+        assert!(bad.is_err());
+        assert_eq!(raw, before);
+    }
+
+    #[test]
     fn raster_endpoint_adds_a_page_sized_paint_layer_to_a_new_document() {
         let raw = crate::scene::new_document(64, 48);
         let value = super::raster_apply(super::RasterRequest {
@@ -1737,5 +2227,21 @@ mod tests {
         assert_eq!(loaded_token, super::revision(&original));
         assert_ne!(loaded_token, super::revision(&browser));
         assert_ne!(loaded_token, super::revision(&serde_json::json!({"x":101})));
+    }
+
+    #[test]
+    fn scene_commit_requires_a_revision() {
+        let raw = serde_json::json!({"format": "pentool", "version": 4});
+        let err = super::require_revision(None, &raw).unwrap_err();
+        assert!(
+            err.to_string().contains("requires the document revision"),
+            "unexpected error: {err}"
+        );
+        let err = super::require_revision(Some("stale"), &raw).unwrap_err();
+        assert!(
+            err.to_string().contains("document revision changed"),
+            "unexpected error: {err}"
+        );
+        super::require_revision(Some(&super::revision(&raw)), &raw).unwrap();
     }
 }
