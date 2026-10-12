@@ -835,7 +835,38 @@ file:
   mechanism with a book-level journal; any failure restores every member
   byte-for-byte.
 - Book export builds one PDF (through the v0.12.0 PDF/X path) or EPUB. Missing
-  members produce a report and abort; they are never skipped.
+  members produce a report and abort; they are never skipped. PDF export is
+  implemented (`pentool book <book> export out.pdf`); EPUB export is part of
+  task 15 and reports `unsupported-capability` until then.
+- CLI: `pentool book <book> init|status|add|remove|move|renumber|sync|toc|index|
+  preflight|package|export`. Manifest edits (`init`, `add`, `remove`, `move`)
+  are atomic single-file writes. Document operations first recover any
+  interrupted run from the hidden `.<book>.journal/` directory (pre-images and
+  `journal.json`), then stage all members, validate each, and commit through the
+  shared transaction/history path; any failure restores every member byte for
+  byte.
+- Numbering: `renumber` continues each member's first page number from the
+  previous member's last page (`page: continuous`) or restarts at 1
+  (`restart-each`); the first member keeps its own numbers. Chapter and
+  footnote numbers continue through `layout.book_numbering`
+  (`chapter_offset`, `footnote_offset`), which `renumber` writes and which only
+  shifts the chapter-number variable and (for `footnote: continuous`) document
+  footnote counters.
+- Synchronization copies `layout.styles` (all kinds), color swatch tokens
+  (`styles` entries of type `color`, spot inks) and optionally parents from
+  `synchronize.source`. The source wins: a differing local definition is
+  replaced and listed as `replaced-local` in the report; styles that exist only
+  in a member are kept.
+- Book TOC and index are stored in one member as generated stories whose record
+  has `options.scope: "book"`. They are regenerated only by `book toc` /
+  `book index`; the single-document `layout-doc generate` refuses them.
+  Run `book renumber` first so page labels are continuous (the result reports
+  `numbering_continuous`).
+- `preflight` combines per-member layout checks (overset text, unavailable
+  linked images, stale generated stories, invalid or missing members) with the
+  print preflight of every page when `--print` is given (capped at 200 pages).
+- `package` copies the manifest, members and linked images into a new
+  directory, rewriting image paths to `assets/<digest>` beside each member.
 
 ## 12. Limits
 

@@ -234,6 +234,28 @@ back on export. Export is deterministic and fails (writing nothing) when a
 feature has no IDML equivalent unless `--allow-approximation` is given. The
 supported subset and known gaps are in `docs/idml-mapping-v1.md`.
 
+## Books (v0.14 in development)
+
+A `.penbook` is readable JSON that lists member `.pen` documents in order.
+Operations plan across every member first and write all or none; an
+interrupted run is rolled back by the next command.
+
+```sh
+pentool book guide.penbook init --name Guide --member 01-intro.pen --member 02-body.pen
+pentool book guide.penbook status
+pentool book guide.penbook renumber --dry-run
+pentool book guide.penbook sync --styles --swatches
+pentool book guide.penbook toc --style h1 --style h2
+pentool book guide.penbook index --rule contiguous
+pentool book guide.penbook preflight --print
+pentool book guide.penbook package dist/guide
+pentool book guide.penbook export guide.pdf --ppi 300
+```
+
+Members must stay inside the book directory and be version 9 documents for
+layout operations. `export` writes one flattened PDF/X-4 draft with no
+conformance claim; EPUB export arrives with the publishing exports.
+
 ## Optional image models (v0.9)
 
 `pentool ai` connects your own Gemini or OpenAI-compatible account, generates reviewable

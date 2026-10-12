@@ -2185,6 +2185,15 @@ enum Command {
         #[command(subcommand)]
         action: pentool::longdoc::DocAction,
     },
+    /// `.penbook` books: ordered members with continuous numbering, style and
+    /// swatch synchronization, book-wide TOC/index, preflight, package, export.
+    /// Writes are all-or-none across members.
+    Book {
+        /// The `.penbook` manifest.
+        book: PathBuf,
+        #[command(subcommand)]
+        action: pentool::book::BookAction,
+    },
     /// Version 9 sections: numbering styles, prefixes, start numbers.
     Section {
         input: PathBuf,
@@ -6854,6 +6863,11 @@ async fn run() -> Result<()> {
             file_name,
             action,
         ),
+        Command::Book { book, action } => {
+            let result = pentool::book::run(&book, action)?;
+            println!("{result}");
+            Ok(())
+        }
         Command::Parent {
             input,
             dry_run,

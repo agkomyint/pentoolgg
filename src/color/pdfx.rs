@@ -274,76 +274,63 @@ pub struct Exported {
     pub report: Value,
 }
 
-/// Build the PDF/X-4 file in memory; nothing is written.
-pub fn build(
+/// The XMP packet shared by single-page and book exports.
+fn xmp_packet(title: &str, created: &str, id_hex: &str) -> String {
+    format!(
+        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
+<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n\
+<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
+<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
+xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" \
+xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\" xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\" \
+xmlns:pdfx=\"http://ns.adobe.com/pdfx/1.3/\">\n\
+<dc:format>application/pdf</dc:format>\n\
+<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">{title}</rdf:li></rdf:Alt></dc:title>\n\
+<xmp:CreateDate>{created}</xmp:CreateDate>\n<xmp:ModifyDate>{created}</xmp:ModifyDate>\n\
+<xmp:MetadataDate>{created}</xmp:MetadataDate>\n<xmp:CreatorTool>Pentool</xmp:CreatorTool>\n\
+<pdf:Producer>Pentool</pdf:Producer>\n<pdf:Trapped>False</pdf:Trapped>\n\
+<xmpMM:DocumentID>uuid:{docid}</xmpMM:DocumentID>\n<xmpMM:InstanceID>uuid:{docid}</xmpMM:InstanceID>\n\
+<xmpMM:RenditionClass>default</xmpMM:RenditionClass>\n<xmpMM:VersionID>1</xmpMM:VersionID>\n\
+<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>\n\
+</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>",
+        title = xml_escape(title),
+        created = created,
+        docid = format!(
+            "{}-{}-{}-{}-{}",
+            &id_hex[0..8],
+            &id_hex[8..12],
+            &id_hex[12..16],
+            &id_hex[16..20],
+            &id_hex[20..32]
+        ),
+    )
+}
+
+/// One rasterized, cropped and marked page ready for embedding.
+struct PagePart {
+    samples: Vec<u8>,
+    cw: usize,
+    ch: usize,
+    media_pts: [f64; 4],
+    place: [f64; 4],
+    trim: [f64; 4],
+    bleed: [f64; 4],
+    marks: usize,
+    patches: usize,
+    slug_text: usize,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_part(
     raw: &Value,
     document: &Path,
+    page: &Value,
     page_id: Option<&str>,
+    geometry: &production::Geometry,
+    destination: &Destination,
+    intent: Intent,
     options: &Options,
-) -> Result<Exported> {
-    ensure!(
-        crate::color::has_v8(raw),
-        "[unsupported-version] PDF/X export requires a version {} document",
-        super::VERSION
-    );
-    ensure!(
-        (36.0..=1200.0).contains(&options.ppi),
-        "[invalid-input] export resolution must be 36..1200 ppi"
-    );
-    crate::scene::validate(raw)?;
-    let pages = raw["pages"].as_array().context("pages missing")?;
-    let page = match page_id {
-        Some(id) => pages
-            .iter()
-            .find(|page| page["id"] == id)
-            .with_context(|| format!("[missing-resource] page not found: {id}"))?,
-        None => pages.first().context("document has no pages")?,
-    };
-    let id = page["id"].as_str().unwrap_or("page");
-    let geometry = production::resolve(page, true)?.with_context(|| {
-        format!("[invalid-input] page {id} has no production geometry; set a trim box (pentool color production set) before PDF/X export")
-    })?;
-    for (key, what) in [
-        ("spot", "spot-ink paints"),
-        ("overprint", "overprint declarations"),
-    ] {
-        ensure!(
-            !contains_key(page, key),
-            "[unsupported-capability] page {id} uses {what}; this PDF/X subset flattens to process CMYK and would lose them. Use plate separations for spot work"
-        );
-    }
-    let (destination, intent) = match (&options.destination, options.intent) {
-        (Some(d), Some(i)) => (d.clone(), i),
-        _ => {
-            let role = super::roles::effective(raw, super::roles::Role::Output)?;
-            (
-                options
-                    .destination
-                    .clone()
-                    .unwrap_or_else(|| role.destination.clone()),
-                options.intent.unwrap_or(role.intent),
-            )
-        }
-    };
-    ensure!(
-        destination.space() == "icc-cmyk",
-        "[unsupported-capability] PDF/X export needs an ICC CMYK destination, not {}",
-        destination.space()
-    );
-    let reference = destination
-        .profile()
-        .context("[invalid-input] CMYK destination has no profile")?
-        .to_owned();
-    let (identity, profile) = catalog::load(raw, document, &reference)?;
-    ensure!(
-        profile.len() >= 128 && &profile[16..20] == b"CMYK" && &profile[12..16] == b"prtr",
-        "[invalid-input] output intent profile {reference} must be a CMYK output (prtr) profile"
-    );
-    ensure!(
-        profile[8] <= 4,
-        "[unsupported-capability] output intent profile {reference} is ICC v{}; PDF/X-4 embeds profiles up to v4",
-        profile[8]
-    );
+) -> Result<PagePart> {
     let canvas = geometry.canvas;
     let scale = options.ppi / geometry.units_per_inch;
     ensure!(
@@ -355,17 +342,6 @@ pub fn build(
         pixels <= MAX_PIXELS as f64,
         "[limit-exceeded] page raster of {pixels:.0} pixels exceeds {MAX_PIXELS}; lower --ppi or shrink the canvas"
     );
-    let created = creation_date(options)?;
-    let title = options
-        .title
-        .clone()
-        .or_else(|| page["name"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| id.to_owned());
-    ensure!(
-        !title.is_empty() && title.len() <= 256,
-        "[invalid-input] title must be 1..=256 bytes"
-    );
-
     let image = output::render(
         raw,
         document,
@@ -448,6 +424,123 @@ pub fn build(
     };
     let trim = box_of("trim")?;
     let bleed = box_of("bleed")?;
+    Ok(PagePart {
+        samples,
+        cw,
+        ch,
+        media_pts,
+        place,
+        trim,
+        bleed,
+        marks,
+        patches,
+        slug_text,
+    })
+}
+
+/// Build the PDF/X-4 file in memory; nothing is written.
+pub fn build(
+    raw: &Value,
+    document: &Path,
+    page_id: Option<&str>,
+    options: &Options,
+) -> Result<Exported> {
+    ensure!(
+        crate::color::has_v8(raw),
+        "[unsupported-version] PDF/X export requires a version {} document",
+        super::VERSION
+    );
+    ensure!(
+        (36.0..=1200.0).contains(&options.ppi),
+        "[invalid-input] export resolution must be 36..1200 ppi"
+    );
+    crate::scene::validate(raw)?;
+    let pages = raw["pages"].as_array().context("pages missing")?;
+    let page = match page_id {
+        Some(id) => pages
+            .iter()
+            .find(|page| page["id"] == id)
+            .with_context(|| format!("[missing-resource] page not found: {id}"))?,
+        None => pages.first().context("document has no pages")?,
+    };
+    let id = page["id"].as_str().unwrap_or("page");
+    let geometry = production::resolve(page, true)?.with_context(|| {
+        format!("[invalid-input] page {id} has no production geometry; set a trim box (pentool color production set) before PDF/X export")
+    })?;
+    for (key, what) in [
+        ("spot", "spot-ink paints"),
+        ("overprint", "overprint declarations"),
+    ] {
+        ensure!(
+            !contains_key(page, key),
+            "[unsupported-capability] page {id} uses {what}; this PDF/X subset flattens to process CMYK and would lose them. Use plate separations for spot work"
+        );
+    }
+    let (destination, intent) = match (&options.destination, options.intent) {
+        (Some(d), Some(i)) => (d.clone(), i),
+        _ => {
+            let role = super::roles::effective(raw, super::roles::Role::Output)?;
+            (
+                options
+                    .destination
+                    .clone()
+                    .unwrap_or_else(|| role.destination.clone()),
+                options.intent.unwrap_or(role.intent),
+            )
+        }
+    };
+    ensure!(
+        destination.space() == "icc-cmyk",
+        "[unsupported-capability] PDF/X export needs an ICC CMYK destination, not {}",
+        destination.space()
+    );
+    let reference = destination
+        .profile()
+        .context("[invalid-input] CMYK destination has no profile")?
+        .to_owned();
+    let (identity, profile) = catalog::load(raw, document, &reference)?;
+    ensure!(
+        profile.len() >= 128 && &profile[16..20] == b"CMYK" && &profile[12..16] == b"prtr",
+        "[invalid-input] output intent profile {reference} must be a CMYK output (prtr) profile"
+    );
+    ensure!(
+        profile[8] <= 4,
+        "[unsupported-capability] output intent profile {reference} is ICC v{}; PDF/X-4 embeds profiles up to v4",
+        profile[8]
+    );
+    let created = creation_date(options)?;
+    let title = options
+        .title
+        .clone()
+        .or_else(|| page["name"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| id.to_owned());
+    ensure!(
+        !title.is_empty() && title.len() <= 256,
+        "[invalid-input] title must be 1..=256 bytes"
+    );
+
+    let part = render_part(
+        raw,
+        document,
+        page,
+        page_id,
+        &geometry,
+        &destination,
+        intent,
+        options,
+    )?;
+    let PagePart {
+        samples,
+        cw,
+        ch,
+        media_pts,
+        place,
+        trim,
+        bleed,
+        marks,
+        patches,
+        slug_text,
+    } = part;
 
     let mut digest = Sha256::new();
     digest.update(&samples);
@@ -460,34 +553,7 @@ pub fn build(
         "D:{:04}{:02}{:02}{:02}{:02}{:02}Z",
         date.0, date.1, date.2, date.3, date.4, date.5
     );
-    let xmp = format!(
-        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
-<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n\
-<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
-<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
-xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" \
-xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\" xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\" \
-xmlns:pdfx=\"http://ns.adobe.com/pdfx/1.3/\">\n\
-<dc:format>application/pdf</dc:format>\n\
-<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">{title}</rdf:li></rdf:Alt></dc:title>\n\
-<xmp:CreateDate>{created}</xmp:CreateDate>\n<xmp:ModifyDate>{created}</xmp:ModifyDate>\n\
-<xmp:MetadataDate>{created}</xmp:MetadataDate>\n<xmp:CreatorTool>Pentool</xmp:CreatorTool>\n\
-<pdf:Producer>Pentool</pdf:Producer>\n<pdf:Trapped>False</pdf:Trapped>\n\
-<xmpMM:DocumentID>uuid:{docid}</xmpMM:DocumentID>\n<xmpMM:InstanceID>uuid:{docid}</xmpMM:InstanceID>\n\
-<xmpMM:RenditionClass>default</xmpMM:RenditionClass>\n<xmpMM:VersionID>1</xmpMM:VersionID>\n\
-<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>\n\
-</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>",
-        title = xml_escape(&title),
-        created = created,
-        docid = format!(
-            "{}-{}-{}-{}-{}",
-            &id_hex[0..8],
-            &id_hex[8..12],
-            &id_hex[12..16],
-            &id_hex[16..20],
-            &id_hex[20..32]
-        ),
-    );
+    let xmp = xmp_packet(&title, &created, &id_hex);
 
     let mut b = Builder {
         bytes: b"%PDF-1.6\n%\xE2\xE3\xCF\xD3\n".to_vec(),
@@ -579,6 +645,286 @@ startxref\n{xref}\n%%EOF\n"
         "creation_date": created,
         "transparency": "flattened-to-raster",
         "marks": {"rendered": marks, "ink": "registration", "color_bar_patches": patches, "slug_text": slug_text},
+        "fonts": "rasterized; no font programs embedded",
+        "structural_check": "passed",
+        "independent_validation": {
+            "status": "not-run",
+            "validator": null,
+            "version": null,
+            "ruleset": null,
+            "note": "Unvalidated draft: no PDF/X conformance claim until a named validator result is recorded."
+        },
+    });
+    Ok(Exported {
+        bytes: b.bytes,
+        report,
+    })
+}
+
+/// Pages in one book export.
+pub const MAX_BOOK_PAGES: usize = 2000;
+/// Encoded page bytes held for one book export.
+const MAX_BOOK_BYTES: usize = 1 << 30;
+
+struct EncodedPage {
+    id: String,
+    member: usize,
+    filter: String,
+    bytes: Vec<u8>,
+    width: usize,
+    height: usize,
+    media: [f64; 4],
+    place: [f64; 4],
+    trim: [f64; 4],
+    bleed: [f64; 4],
+}
+
+/// Build one multi-page PDF/X-4 file from every page of every member, in
+/// order. All members must resolve to the same output intent. Nothing is
+/// written. Each page is rasterized and encoded in turn so memory stays
+/// bounded by the largest page plus the encoded stream total.
+pub fn build_many(members: &[(&Value, &Path)], options: &Options) -> Result<Exported> {
+    ensure!(
+        !members.is_empty(),
+        "[invalid-input] a book export needs at least one member"
+    );
+    ensure!(
+        (36.0..=1200.0).contains(&options.ppi),
+        "[invalid-input] export resolution must be 36..1200 ppi"
+    );
+    let mut intent_of: Option<(String, Intent, Vec<u8>, String)> = None;
+    let mut pages_out: Vec<EncodedPage> = Vec::new();
+    let mut total = 0usize;
+    let mut marks_total = 0usize;
+    for (member, (raw, document)) in members.iter().enumerate() {
+        ensure!(
+            crate::color::has_v8(raw),
+            "[unsupported-version] PDF/X export requires a version {} document; member {} is older",
+            super::VERSION,
+            document.display()
+        );
+        crate::scene::validate(raw)?;
+        let (destination, intent) = match (&options.destination, options.intent) {
+            (Some(d), Some(i)) => (d.clone(), i),
+            _ => {
+                let role = super::roles::effective(raw, super::roles::Role::Output)?;
+                (
+                    options
+                        .destination
+                        .clone()
+                        .unwrap_or_else(|| role.destination.clone()),
+                    options.intent.unwrap_or(role.intent),
+                )
+            }
+        };
+        ensure!(
+            destination.space() == "icc-cmyk",
+            "[unsupported-capability] PDF/X export needs an ICC CMYK destination, not {} (member {})",
+            destination.space(),
+            document.display()
+        );
+        let reference = destination
+            .profile()
+            .context("[invalid-input] CMYK destination has no profile")?
+            .to_owned();
+        let (identity, profile) = catalog::load(raw, document, &reference)?;
+        ensure!(
+            profile.len() >= 128 && &profile[16..20] == b"CMYK" && &profile[12..16] == b"prtr",
+            "[invalid-input] output intent profile {reference} must be a CMYK output (prtr) profile"
+        );
+        ensure!(
+            profile[8] <= 4,
+            "[unsupported-capability] output intent profile {reference} is ICC v{}; PDF/X-4 embeds profiles up to v4",
+            profile[8]
+        );
+        match &intent_of {
+            None => intent_of = Some((reference.clone(), intent, profile, identity)),
+            Some((first_ref, first_intent, first_profile, _)) => ensure!(
+                *first_ref == reference && *first_intent == intent && *first_profile == profile,
+                "[invalid-input] member {} resolves to a different output intent than the first member; a book PDF/X file has one output intent. Use the same CMYK profile and intent, or pass --profile and --intent",
+                document.display()
+            ),
+        }
+        let pages = raw["pages"].as_array().context("pages missing")?;
+        for page in pages {
+            ensure!(
+                pages_out.len() < MAX_BOOK_PAGES,
+                "[limit-exceeded] a book PDF/X export is limited to {MAX_BOOK_PAGES} pages"
+            );
+            let id = page["id"].as_str().unwrap_or("page").to_string();
+            let geometry = production::resolve(page, true)?.with_context(|| {
+                format!(
+                    "[invalid-input] page {id} of {} has no production geometry; set a trim box (pentool color production set) before PDF/X export",
+                    document.display()
+                )
+            })?;
+            for (key, what) in [
+                ("spot", "spot-ink paints"),
+                ("overprint", "overprint declarations"),
+            ] {
+                ensure!(
+                    !contains_key(page, key),
+                    "[unsupported-capability] page {id} of {} uses {what}; this PDF/X subset flattens to process CMYK and would lose them",
+                    document.display()
+                );
+            }
+            let part = render_part(
+                raw,
+                document,
+                page,
+                Some(&id),
+                &geometry,
+                &destination,
+                intent,
+                options,
+            )?;
+            let (filter, bytes) = encode(&part.samples, options.compress)?;
+            total += bytes.len();
+            ensure!(
+                total <= MAX_BOOK_BYTES,
+                "[limit-exceeded] encoded book pages exceed {MAX_BOOK_BYTES} bytes; lower --ppi"
+            );
+            marks_total += part.marks + part.patches + part.slug_text;
+            pages_out.push(EncodedPage {
+                id,
+                member,
+                filter: filter.to_string(),
+                bytes,
+                width: part.cw,
+                height: part.ch,
+                media: part.media_pts,
+                place: part.place,
+                trim: part.trim,
+                bleed: part.bleed,
+            });
+        }
+    }
+    let (reference, intent, profile, identity) =
+        intent_of.context("[internal] no output intent resolved")?;
+    let created = creation_date(options)?;
+    let title = options
+        .title
+        .clone()
+        .unwrap_or_else(|| "Pentool book".to_string());
+    ensure!(
+        !title.is_empty() && title.len() <= 256,
+        "[invalid-input] title must be 1..=256 bytes"
+    );
+    let mut digest = Sha256::new();
+    digest.update(&profile);
+    for page in &pages_out {
+        digest.update(&page.bytes);
+        digest.update(format!("{:?}{:?}{:?}", page.trim, page.bleed, page.media).as_bytes());
+    }
+    digest.update(format!("{title}{created}").as_bytes());
+    let id_hex = hex::encode(&digest.finalize()[..16]);
+    let date = parse_date(&created)?;
+    let info_date = format!(
+        "D:{:04}{:02}{:02}{:02}{:02}{:02}Z",
+        date.0, date.1, date.2, date.3, date.4, date.5
+    );
+    let xmp = xmp_packet(&title, &created, &id_hex);
+
+    let count = pages_out.len();
+    let first_page = 7;
+    let kids = (0..count)
+        .map(|i| format!("{} 0 R", first_page + i * 3))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut b = Builder {
+        bytes: b"%PDF-1.6\n%\xE2\xE3\xCF\xD3\n".to_vec(),
+        offsets: Vec::new(),
+    };
+    b.object(b"<</Type/Catalog/Pages 2 0 R/OutputIntents[3 0 R]/Metadata 5 0 R>>");
+    b.object(format!("<</Type/Pages/Kids[{kids}]/Count {count}>>").as_bytes());
+    let condition = xml_escape(&reference);
+    b.object(
+        format!(
+            "<</Type/OutputIntent/S/GTS_PDFX/OutputConditionIdentifier({cond})\
+/OutputCondition({cond})/Info({cond})/DestOutputProfile 4 0 R>>",
+            cond = condition.replace(['(', ')', '\\'], "_")
+        )
+        .as_bytes(),
+    );
+    let (profile_filter, profile_bytes) = encode(&profile, options.compress)?;
+    b.stream(
+        &format!("/N 4/Alternate/DeviceCMYK{profile_filter}"),
+        &profile_bytes,
+    );
+    b.stream("/Type/Metadata/Subtype/XML", xmp.as_bytes());
+    b.object(
+        format!(
+            "<</Title{t}/Producer(Pentool)/Creator(Pentool)/CreationDate({d})/ModDate({d})\
+/Trapped/False/GTS_PDFXVersion(PDF/X-4)>>",
+            t = pdf_string(&title),
+            d = info_date
+        )
+        .as_bytes(),
+    );
+    for (i, page) in pages_out.iter().enumerate() {
+        let content_id = first_page + i * 3 + 1;
+        let image_id = first_page + i * 3 + 2;
+        b.object(
+            format!(
+                "<</Type/Page/Parent 2 0 R/MediaBox{}/BleedBox{}/TrimBox{}/Contents {content_id} 0 R\
+/Resources<</XObject<</Im0 {image_id} 0 R>>>>>>",
+                rect(&page.media),
+                rect(&page.bleed),
+                rect(&page.trim)
+            )
+            .as_bytes(),
+        );
+        let content = format!(
+            "q {} 0 0 {} {} {} cm /Im0 Do Q",
+            number(page.place[2]),
+            number(page.place[3]),
+            number(page.place[0]),
+            number(page.place[1])
+        );
+        b.stream("", content.as_bytes());
+        b.stream(
+            &format!(
+                "/Type/XObject/Subtype/Image/Width {}/Height {}/ColorSpace[/ICCBased 4 0 R]\
+/BitsPerComponent 8{}",
+                page.width, page.height, page.filter
+            ),
+            &page.bytes,
+        );
+    }
+    let xref = b.bytes.len();
+    let objects = b.offsets.len() + 1;
+    let mut table = format!("xref\n0 {objects}\n0000000000 65535 f \n");
+    for offset in &b.offsets {
+        table.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    b.bytes.extend_from_slice(table.as_bytes());
+    b.bytes.extend_from_slice(
+        format!(
+            "trailer\n<</Size {objects}/Root 1 0 R/Info 6 0 R/ID[<{id_hex}><{id_hex}>]>>\n\
+startxref\n{xref}\n%%EOF\n"
+        )
+        .as_bytes(),
+    );
+    verify_structure(&b.bytes)?;
+    let report = json!({
+        "scope": "pdfx-4-flattened-cmyk-book-export",
+        "standard": "PDF/X-4",
+        "pages": pages_out.iter().map(|p| json!({"page": p.id, "member": p.member})).collect::<Vec<_>>(),
+        "page_count": count,
+        "bytes": b.bytes.len(),
+        "sha256": hex::encode(Sha256::digest(&b.bytes)),
+        "pixels": {"ppi": options.ppi, "channels": 4, "bits": 8},
+        "compression": if options.compress { "flate" } else { "none" },
+        "output_intent": {
+            "profile": reference,
+            "identity": identity,
+            "profile_sha256": hex::encode(Sha256::digest(&profile)),
+            "profile_bytes": profile.len(),
+            "intent": format!("{intent:?}"),
+        },
+        "creation_date": created,
+        "transparency": "flattened-to-raster",
+        "marks_painted": marks_total,
         "fonts": "rasterized; no font programs embedded",
         "structural_check": "passed",
         "independent_validation": {

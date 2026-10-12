@@ -927,6 +927,21 @@ pub fn validate(raw: &Value) -> Result<()> {
             )?;
         }
     }
+    if let Some(book) = layout.get("book_numbering") {
+        let book = book
+            .as_object()
+            .context("[invalid-input] layout.book_numbering must be an object")?;
+        for (key, value) in book {
+            ensure!(
+                matches!(key.as_str(), "chapter_offset" | "footnote_offset"),
+                "[invalid-input] layout.book_numbering has unknown field {key}"
+            );
+            ensure!(
+                value.as_u64().is_some_and(|n| n <= 1_000_000),
+                "[invalid-input] layout.book_numbering.{key} must be an integer 0-1000000"
+            );
+        }
+    }
     let notes = unique_ids(layout, "notes", "note", MAX_NOTES)?;
     for note in list(layout, "notes") {
         let id = id_of(note);
@@ -1203,8 +1218,12 @@ impl<'a> Doc<'a> {
             })
             .collect();
         sections.sort_by_key(|s| s.page);
+        let chapter_offset = raw
+            .pointer("/layout/book_numbering/chapter_offset")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
         for (i, s) in sections.iter_mut().enumerate() {
-            s.ordinal = i + 1;
+            s.ordinal = i + 1 + chapter_offset;
         }
         let generated_stories = layout_list(raw, "generated")
             .iter()
@@ -1687,6 +1706,10 @@ impl<'a> Doc<'a> {
         };
         let restart = pick("restart", "document");
         let style = pick("style", "arabic");
+        let foot_offset = layout
+            .pointer("/book_numbering/footnote_offset")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
         let mut counters: HashMap<(String, String), usize> = HashMap::new();
         let mut out = Vec::new();
         for story in layout_list(self.raw, "stories") {
@@ -1720,12 +1743,15 @@ impl<'a> Doc<'a> {
                     (_, "section") => page.map_or(0, |p| self.section(p).0).to_string(),
                     _ => page.map_or_else(|| "?".to_string(), |p| p.to_string()),
                 };
+                let continued = kind == "footnote" && restart == "document";
                 let counter = counters.entry((kind.clone(), key)).or_insert(0);
                 *counter += 1;
+                // A book continues footnote numbers across its members.
+                let number = *counter + if continued { foot_offset } else { 0 };
                 out.push(NoteInfo {
                     id: id.to_string(),
-                    number: *counter,
-                    label: number_label(*counter, &style),
+                    number,
+                    label: number_label(number, &style),
                     kind,
                     story: sid.to_string(),
                     paragraph,
@@ -2040,6 +2066,24 @@ impl<'a> Doc<'a> {
     }
 
     fn generated_state(&self, item: &Value) -> Result<Value> {
+        if item.pointer("/options/scope").and_then(Value::as_str) == Some("book") {
+            // Built from every member of a book; one member cannot recompute
+            // it, so only hand edits are detectable here.
+            let recorded = item.get("digest").and_then(Value::as_str);
+            let current = story_ref(self.raw, item["story"].as_str().unwrap_or_default())
+                .map(|s| digest_of(list(s, "paragraphs")));
+            let edited = recorded.is_some() && current.as_deref() != recorded;
+            let reason = match (recorded, edited) {
+                (None, _) => "never-generated",
+                (_, true) => "edited",
+                _ => "book-scoped",
+            };
+            return Ok(json!({
+                "id": item["id"], "kind": item["kind"], "story": item["story"],
+                "entries": item.get("entries"), "digest": recorded,
+                "stale": edited || recorded.is_none(), "reason": reason, "scope": "book",
+            }));
+        }
         let (paragraphs, entries) = self.generate(item)?;
         let now = digest_of(&paragraphs);
         let recorded = item.get("digest").and_then(Value::as_str);
@@ -2898,6 +2942,10 @@ pub fn run(raw: &mut Value, action: DocAction, ctx: &Context) -> Result<(Value, 
         }
         A::Generate { id } => {
             let item = find(raw, "generated", "generated item", &id)?.clone();
+            ensure!(
+                item.pointer("/options/scope").and_then(Value::as_str) != Some("book"),
+                "[invalid-input] generated item {id} is book-wide; regenerate it with `pentool book toc` or `pentool book index`"
+            );
             let (paragraphs, entries, diagnostics) = {
                 let doc = doc_for(raw, ctx, None)?;
                 let (paragraphs, entries) = doc.generate(&item)?;
@@ -2989,6 +3037,225 @@ pub fn run(raw: &mut Value, action: DocAction, ctx: &Context) -> Result<(Value, 
             Ok((doc.report(), true))
         }
     }
+}
+
+// ------------------------------------------------------------------ books
+
+/// One member document's contribution to a book-wide TOC or index.
+#[derive(Debug, Default, Clone)]
+pub struct BookPart {
+    /// Pages in the member.
+    pub pages: usize,
+    /// Headings as `(level, text, page label)` in story order.
+    pub toc: Vec<(usize, String, String)>,
+    /// Index topics defined in the member as `(id, text, sort, see)`.
+    pub topics: Vec<(String, String, String, Option<String>)>,
+    /// Index markers as `(topic, page position in the member, page label)`.
+    pub marks: Vec<(String, usize, String)>,
+    /// Unresolved references met while reading the member.
+    pub diagnostics: Vec<Value>,
+}
+
+/// Read the headings and index markers of one v9 member document. The
+/// member's own generated stories are excluded, exactly as for a single
+/// document, and labels come from the member's computed page numbers.
+pub fn book_part(raw: &Value, ctx: &Context, toc_styles: &[String]) -> Result<BookPart> {
+    require_v9(raw)?;
+    let doc = Doc::new(raw, ctx, None)?;
+    let mut part = BookPart {
+        pages: list(raw, "pages").len(),
+        ..BookPart::default()
+    };
+    for story in doc.source_stories() {
+        let starts = doc.paragraph_starts(story);
+        if !toc_styles.is_empty() {
+            for (i, p) in list(story, "paragraphs").iter().enumerate() {
+                let Some(level) = p
+                    .get("style")
+                    .and_then(Value::as_str)
+                    .and_then(|s| toc_styles.iter().position(|x| x == s))
+                else {
+                    continue;
+                };
+                let page = doc.page_of(id_of(story), starts[i]);
+                let text = doc.paragraph_text(p, page, 0).trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                let label = page.map_or_else(|| "?".to_string(), |p| doc.label(p));
+                part.toc.push((level + 1, text, label));
+            }
+        }
+        let sid = id_of(story);
+        let mut found: Vec<(usize, &str)> = Vec::new();
+        doc.walk_story(story, &mut |_, offset, run| {
+            if let Some(t) = run.get("index").and_then(Value::as_str) {
+                found.push((offset, t));
+            }
+        });
+        for (offset, topic) in found {
+            match doc.page_of(sid, offset) {
+                Some(page) => part.marks.push((topic.to_string(), page, doc.label(page))),
+                None => doc.diag(
+                    "index-unplaced",
+                    topic,
+                    format!("a marker for topic {topic} in story {sid} is not placed on a page"),
+                ),
+            }
+        }
+    }
+    for topic in layout_list(raw, "index_topics") {
+        let text = topic["text"].as_str().unwrap_or_default().to_string();
+        part.topics.push((
+            id_of(topic).to_string(),
+            text.clone(),
+            topic["sort"].as_str().map_or(text, str::to_string),
+            topic.get("see").and_then(Value::as_str).map(str::to_string),
+        ));
+    }
+    part.diagnostics = doc.take_diags();
+    Ok(part)
+}
+
+/// Chapters (sections, at least one) and footnotes a member contributes to a
+/// book's continuing chapter and footnote numbers.
+pub fn book_counts(raw: &Value, ctx: &Context) -> Result<(usize, usize)> {
+    require_v9(raw)?;
+    let doc = Doc::new(raw, ctx, None)?;
+    let footnotes = doc.notes().iter().filter(|n| n.kind == "footnote").count();
+    Ok((layout_list(raw, "sections").len().max(1), footnotes))
+}
+
+/// Book-wide TOC paragraphs in member order, and the entry count.
+pub fn book_toc_paragraphs(parts: &[BookPart]) -> (Vec<Value>, usize) {
+    let mut paragraphs = Vec::new();
+    let mut entries = 0;
+    for part in parts {
+        for (level, text, label) in &part.toc {
+            entries += 1;
+            paragraphs.push(para(
+                &format!("toc-{level}"),
+                vec![text_run(text), json!({"special": "tab"}), text_run(label)],
+            ));
+        }
+    }
+    if paragraphs.is_empty() {
+        paragraphs.push(json!({"runs": []}));
+    }
+    (paragraphs, entries)
+}
+
+/// Book-wide index paragraphs. Topics with the same ID merge across members
+/// and page ranges use the position of the page within the whole book.
+pub fn book_index_paragraphs(
+    parts: &[BookPart],
+    rule: &str,
+    language: &str,
+) -> Result<(Vec<Value>, usize)> {
+    one_of(rule, "page range rule", PAGE_RANGES)?;
+    let mut topics: BTreeMap<String, (String, String, Option<String>)> = BTreeMap::new();
+    let mut marks: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
+    let mut offset = 0;
+    for part in parts {
+        for (id, text, sort, see) in &part.topics {
+            topics
+                .entry(id.clone())
+                .or_insert_with(|| (text.clone(), sort.clone(), see.clone()));
+        }
+        for (topic, page, label) in &part.marks {
+            marks
+                .entry(topic.clone())
+                .or_default()
+                .push((offset + page, label.clone()));
+        }
+        offset += part.pages;
+    }
+    let mut rows: Vec<(String, String, String, String)> = Vec::new();
+    for (id, (text, sort, see)) in &topics {
+        let body = if let Some(see) = see {
+            let target = topics.get(see).map_or("?", |t| t.0.as_str());
+            format!("{text}. See {target}")
+        } else if let Some(pages) = marks.get(id) {
+            format!("{text}, {}", page_range(rule, pages))
+        } else {
+            continue;
+        };
+        rows.push((
+            collation_key(sort, language),
+            text.clone(),
+            id.clone(),
+            body,
+        ));
+    }
+    rows.sort();
+    let count = rows.len();
+    let mut paragraphs = Vec::new();
+    let mut letter = String::new();
+    for (key, _, _, body) in rows {
+        let first = heading_letter(&key, language);
+        if first != letter && !first.is_empty() {
+            paragraphs.push(para("index-letter", vec![text_run(&first)]));
+            letter = first;
+        }
+        paragraphs.push(para("index-entry", vec![text_run(&body)]));
+    }
+    if paragraphs.is_empty() {
+        paragraphs.push(json!({"runs": []}));
+    }
+    Ok((paragraphs, count))
+}
+
+/// Write book-generated paragraphs into a member's generated story, creating
+/// the story and the record (scope `book`) when missing. Returns the digest.
+pub fn store_book_generated(
+    raw: &mut Value,
+    id: &str,
+    kind: &str,
+    story: &str,
+    options: Value,
+    paragraphs: Vec<Value>,
+    entries: usize,
+) -> Result<String> {
+    require_v9(raw)?;
+    check_id("generated item", id)?;
+    check_id("story", story)?;
+    one_of(kind, "generated kind", GENERATED_KINDS)?;
+    if story_ref(raw, story).is_none() {
+        array_mut(raw, "stories")?.push(json!({"id": story, "paragraphs": [{"runs": []}]}));
+    }
+    let mut options = options;
+    options["scope"] = json!("book");
+    let existing = layout_list(raw, "generated").iter().any(|g| id_of(g) == id);
+    if !existing {
+        push_unique(
+            raw,
+            "generated",
+            "generated item",
+            json!({"id": id, "kind": kind, "story": story, "options": options}),
+            MAX_GENERATED,
+        )?;
+    }
+    let digest = digest_of(&paragraphs);
+    let target = array_mut(raw, "stories")?
+        .iter_mut()
+        .find(|s| id_of(s) == story)
+        .with_context(|| format!("[missing-resource] story not found: {story}"))?;
+    target["paragraphs"] = json!(paragraphs);
+    let record = array_mut(raw, "generated")?
+        .iter_mut()
+        .find(|g| id_of(g) == id)
+        .context("generated item vanished")?;
+    ensure!(
+        record["kind"] == kind && record["story"] == story,
+        "[invalid-input] generated item {id} already exists with another kind or story"
+    );
+    record["options"] = options;
+    record["digest"] = json!(digest);
+    record["entries"] = json!(entries);
+    if let Some(map) = record.as_object_mut() {
+        map.remove("stale");
+    }
+    Ok(digest)
 }
 
 #[cfg(test)]
