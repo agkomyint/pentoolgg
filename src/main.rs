@@ -2122,6 +2122,16 @@ enum Command {
         #[command(subcommand)]
         action: pentool::grids::GridAction,
     },
+    /// Version 9 text wrap and anchored objects.
+    LayoutWrap {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::wrap::WrapAction,
+    },
     /// Version 9 sections: numbering styles, prefixes, start numbers.
     Section {
         input: PathBuf,
@@ -6733,6 +6743,12 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_layout_grid(&input, dry_run, if_revision.as_deref(), action),
+        Command::LayoutWrap {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_wrap(&input, dry_run, if_revision.as_deref(), action),
         Command::Parent {
             input,
             dry_run,

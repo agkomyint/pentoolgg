@@ -19,6 +19,7 @@ Nothing was pushed.
 | 5 Paragraph composer | `src/compose.rs`, `text compose` | core done |
 | 6 Styles | `src/styles.rs`, `layout-style` | core done (see below) |
 | 7 Grids, guides, alignment | `src/grids.rs`, `layout-grid` | core done |
+| 8 Text wrap, anchored objects | `src/wrap.rs`, `layout-wrap` | core done; estimator based |
 
 ## Open items inside started tasks
 
@@ -37,7 +38,7 @@ Nothing was pushed.
 
 ## Not started
 
-8 text wrap and anchored objects; 9 tables;
+9 tables;
 10 long-document features; 11 `.penbook` books; 12 data merge and adaptive
 layout; 13 IDML import; 14 IDML export; 15 publishing exports; 16 layout
 preflight; 17 editor layout experience; 18 conformance, performance, recovery.

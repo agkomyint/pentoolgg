@@ -241,6 +241,14 @@ and documentation.
   - Step-and-repeat, and grids of frames.
 
 - [ ] **8. Add text wrap and anchored objects.**
+  Progress: `layout-wrap` (`src/wrap.rs`, `tests/v0140_wrap.rs`) sets, clears,
+  shows and lists node `wrap`, computes per-line free segments of a frame
+  (`intervals`: bounding box, ellipse shape bands, side/spine, invert, jump
+  object, jump to next column, `ignore_wrap`), and adds, edits, removes, lists
+  and applies anchored objects (inline, above-line, custom). Positions come
+  from the task 3 estimator and are reported `estimated: true`; downgrade to v8
+  refuses wrapped objects. Open: wrap in the composer, alpha-channel and
+  clipping-path shapes (reported as bounding-box `approximated`), CI evidence.
   - Wrap around a bounding box, an object shape, an alpha channel or a clipping
     path; jump object and jump to next column; offsets, sides and invert.
   - Inline, above-line and custom anchored objects, with reference points,

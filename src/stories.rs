@@ -344,6 +344,40 @@ fn validate_story(story: &Value) -> Result<usize> {
                     );
                     characters += 1;
                 }
+                "condition" => {
+                    ensure!(
+                        object["condition"].as_str().is_some_and(|c| !c.is_empty()),
+                        "[malformed-resource] story {id} paragraph {index}: condition must name a condition ID"
+                    );
+                    let nested = object
+                        .get("runs")
+                        .and_then(Value::as_array)
+                        .with_context(|| {
+                            format!("[malformed-resource] story {id} paragraph {index}: a condition run needs `runs`")
+                        })?;
+                    ensure!(
+                        nested.len() <= MAX_RUNS_PER_PARAGRAPH,
+                        "[limit-exceeded] story {id} paragraph {index}: too many runs in a condition"
+                    );
+                    for inner in nested {
+                        ensure!(
+                            inner.get("text").is_some_and(Value::is_string)
+                                || inner.get("special").is_some_and(Value::is_string),
+                            "[malformed-resource] story {id} paragraph {index}: a conditional run holds only text and special runs"
+                        );
+                        if let Some(text) = inner.get("text").and_then(Value::as_str) {
+                            validate_text(text, &format!("story {id} paragraph {index}"))?;
+                            characters += text.chars().count();
+                        } else {
+                            ensure!(
+                                inner["special"].as_str().is_some_and(|s| SPECIALS.contains(&s)),
+                                "[malformed-resource] story {id} paragraph {index}: unknown special character {}",
+                                inner["special"]
+                            );
+                            characters += 1;
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -462,6 +496,58 @@ struct Paragraph {
     leading: f64,
 }
 
+/// Characters a run contributes to the estimator: text and special characters,
+/// plus the text inside a visible conditional run. Anchors, notes, tables and
+/// the other generated runs contribute none.
+pub(crate) fn run_chars(raw: &Value, run: &Value) -> usize {
+    if let Some(text) = run.get("text").and_then(Value::as_str) {
+        return text.chars().count();
+    }
+    if run.get("special").is_some() {
+        return 1;
+    }
+    if let Some(condition) = run.get("condition").and_then(Value::as_str) {
+        if !condition_visible(raw, condition) {
+            return 0;
+        }
+        return list(run, "runs")
+            .iter()
+            .map(|nested| match nested.get("text").and_then(Value::as_str) {
+                Some(text) => text.chars().count(),
+                None => usize::from(nested.get("special").is_some()),
+            })
+            .sum();
+    }
+    0
+}
+
+/// Whether a condition is visible under the active condition set.
+pub(crate) fn condition_visible(raw: &Value, id: &str) -> bool {
+    let layout = raw.get("layout").unwrap_or(&Value::Null);
+    let own = list(layout, "conditions")
+        .iter()
+        .find(|c| c["id"] == id)
+        .and_then(|c| c.get("visible").and_then(Value::as_bool))
+        .unwrap_or(true);
+    let Some(active) = layout.get("active_condition_set").and_then(Value::as_str) else {
+        return own;
+    };
+    let Some(set) = list(layout, "condition_sets")
+        .iter()
+        .find(|c| c["id"] == active)
+    else {
+        return own;
+    };
+    let has = |key: &str| list(set, key).iter().any(|v| v == id);
+    if has("hide") {
+        false
+    } else if has("show") {
+        true
+    } else {
+        own
+    }
+}
+
 pub(crate) fn paragraph_style<'a>(raw: &'a Value, name: &str) -> Vec<&'a Value> {
     let styles = raw
         .get("layout")
@@ -489,13 +575,7 @@ fn paragraphs_of(raw: &Value, story: &Value) -> Vec<Paragraph> {
     list(story, "paragraphs")
         .iter()
         .map(|p| {
-            let chars = list(p, "runs")
-                .iter()
-                .map(|run| match run.get("text").and_then(Value::as_str) {
-                    Some(text) => text.chars().count(),
-                    None => usize::from(run.get("special").is_some()),
-                })
-                .sum();
+            let chars = list(p, "runs").iter().map(|run| run_chars(raw, run)).sum();
             let chain = p
                 .get("style")
                 .and_then(Value::as_str)
@@ -2150,4 +2230,124 @@ pub fn run_frame(raw: &mut Value, action: FrameAction) -> Result<Value> {
             )
         }
     }
+}
+
+// ------------------------------------------------- placement (estimator based)
+
+/// Where the estimator puts a stretch of a story.
+#[derive(Clone, Debug)]
+pub(crate) struct Placed {
+    pub frame: String,
+    pub page: usize,
+    pub layer: String,
+    /// Story character offsets `[start, end)` shown by the frame.
+    pub start: usize,
+    pub end: usize,
+}
+
+/// One entry per frame of the story's thread, in thread order.
+pub(crate) fn placements(raw: &Value, story: &str) -> Vec<Placed> {
+    let all = frames(raw);
+    let Some(source) = find_story(raw, story) else {
+        return Vec::new();
+    };
+    let thread = thread_of(&all, story);
+    let result = flow(raw, source, &thread);
+    let mut start = 0;
+    let mut out = Vec::new();
+    for (node, reached) in thread.iter().zip(result.reached.iter()) {
+        let id = node.get("id").and_then(Value::as_str).unwrap_or_default();
+        let found = all.iter().find(|f| f.id == id);
+        out.push(Placed {
+            frame: id.to_string(),
+            page: found.map_or(0, |f| f.page),
+            layer: found.map_or_else(String::new, |f| f.layer.to_string()),
+            start,
+            end: *reached,
+        });
+        start = *reached;
+    }
+    out
+}
+
+/// Character offset (story-wide, paragraph break = 1) of every run start,
+/// returned as `(paragraph, run, offset)`.
+pub(crate) fn run_offsets(raw: &Value, story: &str) -> Vec<(usize, usize, usize)> {
+    let Some(source) = find_story(raw, story) else {
+        return Vec::new();
+    };
+    let mut offset = 0;
+    let mut out = Vec::new();
+    for (p, paragraph) in list(source, "paragraphs").iter().enumerate() {
+        for (r, run) in list(paragraph, "runs").iter().enumerate() {
+            out.push((p, r, offset));
+            offset += run_chars(raw, run);
+        }
+        offset += 1;
+    }
+    out
+}
+
+/// Estimated size and leading of a paragraph (style chain plus overrides).
+pub(crate) fn paragraph_metrics(raw: &Value, paragraph: &Value) -> (f64, f64) {
+    let chain = paragraph
+        .get("style")
+        .and_then(Value::as_str)
+        .map(|s| paragraph_style(raw, s))
+        .unwrap_or_default();
+    let overrides = paragraph.get("overrides");
+    let pick = |key: &str| {
+        overrides
+            .and_then(|o| o.get(key))
+            .and_then(Value::as_f64)
+            .or_else(|| {
+                chain
+                    .iter()
+                    .find_map(|style| style.get(key).and_then(Value::as_f64))
+            })
+            .filter(|n| n.is_finite() && *n > 0.0)
+    };
+    let size = pick("size").unwrap_or(12.0);
+    (size, pick("leading").unwrap_or(size * 1.2))
+}
+
+/// Frame geometry used by wrap and anchoring: columns, gutter and insets.
+pub(crate) struct FrameBox {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub columns: usize,
+    pub column_width: f64,
+    pub gutter: f64,
+    /// top, right, bottom, left
+    pub inset: [f64; 4],
+}
+
+pub(crate) fn frame_box(node: &Value) -> FrameBox {
+    let g = geometry(node);
+    let number = |key: &str| node.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+    let inset: Vec<f64> = node
+        .get("inset")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .filter(|a: &Vec<f64>| a.len() == 4)
+        .unwrap_or_else(|| vec![0.0; 4]);
+    FrameBox {
+        x: number("x"),
+        y: number("y"),
+        width: number("width"),
+        height: number("height"),
+        columns: g.columns.max(1),
+        column_width: g.column_width,
+        gutter: number("gutter"),
+        inset: [inset[0], inset[1], inset[2], inset[3]],
+    }
+}
+
+/// Is `id` a text frame of `story`?
+pub(crate) fn is_frame_of_story(raw: &Value, id: &str, story: &str) -> bool {
+    frames(raw)
+        .iter()
+        .any(|f| f.id == id && f.node["story"] == story)
 }
