@@ -109,6 +109,30 @@ Properties added after the first engine-1 release (`smoothing`, `buildup`, `tip`
 written to the journal only when they differ from their defaults, so existing
 journals, stroke IDs and replay hashes are unchanged.
 
+### Semantic stroke paths
+
+`raster DOC stroke-path ID --path PATH` compiles one compact absolute SVG path
+containing `M`, `L`, `Q`, `C`, and `A` commands into canonical engine-1 samples.
+Paths contain one subpath, cannot close, have 1-4096 source segments, and use
+flatness 0.25 px by default (configurable from 0.01 to 4). The compiler includes
+both endpoints exactly once, rounds generated coordinates to 1/1000 px, and refuses
+more than 8192 flattened points.
+
+`--curves` accepts a JSON object or `@file.json`. Scalar curves are 2-64
+`[distance,value]` pairs with strictly increasing normalized distance from exactly
+0 to exactly 1. Supported keys are `size` (1-2048), `pressure`, `flow`, `opacity`
+(all 0-1), `rotation` (-360 to 360 degrees), and `color` whose values are
+`#RRGGBB`. Missing curves retain the base brush/color value.
+
+Pressure-only paths compile to one ordinary journal stroke. Properties stored per
+brush or color compile the flattened path into ordered ordinary stroke spans,
+limited to 256. This keeps old journals and raster engine 1 replay-compatible.
+The command reports source segment count and generated point, sample, stroke, and
+dab counts. CLI commit is one revision-guarded transaction and history entry;
+`stroke-path` is also available through raster batch/API action dispatch with
+`args.path`, `args.flatness`, and `args.curves`. Failure and dry run leave the
+document byte-for-byte unchanged.
+
 ### Erasing and local blending
 
 `--blend` selects what a stroke does to the pixels its dabs cover. Dab shape, size,

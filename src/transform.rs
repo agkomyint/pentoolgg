@@ -156,7 +156,7 @@ pub fn make(kind: &str, params: &Value, bounds: [f64; 4]) -> Result<Value> {
         "translate" => &["x", "y"],
         "perspective" | "four-corner" => &["quad"],
         "matrix" => &["matrix"],
-        _ => bail!("[unsupported-capability] unknown transform {kind}; mesh warp is not specified"),
+        _ => bail!("[unsupported-capability] unknown transform {kind}; expected scale, rotate, skew, translate, perspective, four-corner, or matrix"),
     };
     for key in object.keys() {
         if !keys.contains(&key.as_str()) {
@@ -675,5 +675,19 @@ mod tests {
             cancelled += 1;
         }
         assert_eq!(cancelled, 8, "one checkpoint per input and output row");
+    }
+
+    #[test]
+    fn unknown_transform_kind_lists_valid_kinds() {
+        let err = make("affine", &json!({}), [0.0, 0.0, 10.0, 10.0]).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("unknown transform affine"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("scale, rotate, skew, translate, perspective, four-corner, or matrix"),
+            "unexpected error: {message}"
+        );
     }
 }

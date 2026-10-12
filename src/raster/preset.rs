@@ -278,7 +278,7 @@ pub fn preset_import(
     let description = object.get("description").and_then(Value::as_str);
     let value = store(&mut next, &name, entry(&brush, description)?, replace)?;
     *raw = next;
-    Ok(json!({"name": name, "preset": value, "imported": "pentool"}))
+    Ok(json!({"name": name, "preset": value, "source_format": "pentool"}))
 }
 
 fn be32(bytes: &[u8], at: usize) -> Result<u32> {
@@ -356,7 +356,7 @@ pub fn preset_import_gbr(raw: &mut Value, bytes: &[u8], name: &str) -> Result<Va
     )?;
     *raw = next;
     Ok(json!({
-        "name": name, "preset": value, "tip": tip, "imported": "gbr",
+        "name": name, "preset": value, "tip": tip, "source_format": "gbr",
         "converted": ["tip pixels", "spacing", "size"],
         "unsupported": [],
     }))
@@ -483,7 +483,7 @@ pub fn preset_import_mypaint(raw: &mut Value, text: &str, name: &str) -> Result<
     )?;
     *raw = next;
     Ok(json!({
-        "name": name, "preset": value, "imported": "mypaint",
+        "name": name, "preset": value, "source_format": "mypaint",
         "converted": converted, "unsupported": unsupported,
         "ignored_color_settings": ignored,
     }))

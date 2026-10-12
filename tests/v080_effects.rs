@@ -86,3 +86,26 @@ fn shared_effect_style_changes_all_references_and_bad_edits_roll_back() {
     .is_err());
     assert_eq!(raw, before);
 }
+
+#[test]
+fn unknown_effect_kind_names_the_kind_and_valid_kinds() {
+    let mut raw = doc();
+    let err = effects::edit(
+        &mut raw,
+        None,
+        "card",
+        "add",
+        "effect",
+        &json!({"kind":"bogus","params":{}}),
+    )
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown effect kind") && message.contains("bogus"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("drop-shadow") && message.contains("blur"),
+        "unexpected error: {message}"
+    );
+}

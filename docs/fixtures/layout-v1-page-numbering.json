@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "description": "Section number formatting vectors; engine and tests must agree exactly.",
+  "vectors": [
+    {
+      "style": "lower-roman",
+      "n": 1,
+      "text": "i"
+    },
+    {
+      "style": "lower-roman",
+      "n": 2,
+      "text": "ii"
+    },
+    {
+      "style": "lower-roman",
+      "n": 3,
+      "text": "iii"
+    },
+    {
+      "style": "lower-roman",
+      "n": 4,
+      "text": "iv"
+    },
+    {
+      "style": "lower-roman",
+      "n": 9,
+      "text": "ix"
+    },
+    {
+      "style": "lower-roman",
+      "n": 14,
+      "text": "xiv"
+    },
+    {
+      "style": "lower-roman",
+      "n": 40,
+      "text": "xl"
+    },
+    {
+      "style": "lower-roman",
+      "n": 90,
+      "text": "xc"
+    },
+    {
+      "style": "lower-roman",
+      "n": 400,
+      "text": "cd"
+    },
+    {
+      "style": "lower-roman",
+      "n": 1994,
+      "text": "mcmxciv"
+    },
+    {
+      "style": "lower-roman",
+      "n": 3999,
+      "text": "mmmcmxcix"
+    },
+    {
+      "style": "upper-roman",
+      "n": 4,
+      "text": "IV"
+    },
+    {
+      "style": "upper-roman",
+      "n": 1994,
+      "text": "MCMXCIV"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 1,
+      "text": "a"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 26,
+      "text": "z"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 27,
+      "text": "aa"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 28,
+      "text": "bb"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 52,
+      "text": "zz"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 53,
+      "text": "aaa"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 78,
+      "text": "zzz"
+    },
+    {
+      "style": "lower-alpha",
+      "n": 79,
+      "text": "aaaa"
+    },
+    {
+      "style": "upper-alpha",
+      "n": 1,
+      "text": "A"
+    },
+    {
+      "style": "upper-alpha",
+      "n": 27,
+      "text": "AA"
+    },
+    {
+      "style": "arabic",
+      "n": 42,
+      "text": "42"
+    },
+    {
+      "style": "arabic",
+      "n": 7,
+      "prefix": "A-",
+      "text": "A-7"
+    }
+  ]
+}

@@ -695,7 +695,7 @@ pub fn interpolate(
     position: f64,
     intent: Intent,
 ) -> Result<Value> {
-    ensure!(raw["version"].as_u64() == Some(super::VERSION), "[unsupported-capability] native color interpolation requires an explicitly migrated v8 document");
+    ensure!(crate::color::has_v8(raw), "[unsupported-capability] native color interpolation requires an explicitly migrated v8 document");
     ensure!(
         position.is_finite() && (0.0..=1.0).contains(&position),
         "[invalid-input] color interpolation position must be finite and in [0,1]"
@@ -742,7 +742,7 @@ pub fn evaluate(
     destination: Option<&Value>,
     intent: Intent,
 ) -> Result<Value> {
-    ensure!(raw["version"].as_u64() == Some(super::VERSION), "[unsupported-capability] native color evaluation requires an explicitly migrated v8 document");
+    ensure!(crate::color::has_v8(raw), "[unsupported-capability] native color evaluation requires an explicitly migrated v8 document");
     let source = NativeColor::parse(value)?;
     let destination = destination.map(Destination::parse).transpose()?;
     let set = ProfileSet::load(
