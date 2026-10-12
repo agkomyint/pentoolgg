@@ -1204,6 +1204,7 @@ pub fn put_text_box(
     {
         bail!("text box dimensions must be finite and positive")
     }
+    crate::text::validate_content(&input.content)?;
     crate::text::validate_typography(
         Some(input.size),
         Some(input.weight as f64),
@@ -1651,6 +1652,9 @@ pub fn apply_batch_at(
                     }
                     let mut node = operation.clone();
                     if kind == "put-text" {
+                        if let Some(content) = node.get("content").and_then(Value::as_str) {
+                            crate::text::validate_content(content)?;
+                        }
                         let number = |key: &str| node.get(key).and_then(Value::as_f64);
                         crate::text::validate_typography(
                             number("font_size").or(number("size")),
@@ -2167,6 +2171,7 @@ pub fn apply_text(
             ..
         } => {
             crate::text::validate_typography(Some(size), Some(weight as f64), Some(line_height))?;
+            crate::text::validate_content(&content)?;
             let align = serde_json::to_value(align)?;
             let replacement = json!({"kind":"text","id":id,"content":content,"x":x,"y":y,"font_family":font,"font_size":size,"font_weight":weight,"italic":italic,"align":align,"letter_spacing":letter_spacing,"line_height":line_height,"style":{"fill":{"fallback":fill}}});
             let nodes = layer_nodes_mut(page, &layer_id)?;
@@ -2198,6 +2203,9 @@ pub fn apply_text(
             ..
         } => {
             crate::text::validate_typography(size, weight.map(|w| w as f64), line_height)?;
+            if let Some(ref content) = content {
+                crate::text::validate_content(content)?;
+            }
             let nodes = layer_nodes_mut(page, &layer_id)?;
             let node = find_node_in_mut(nodes, &id)
                 .with_context(|| format!("text not found in layer {layer_id}: {id}"))?;
@@ -3452,6 +3460,37 @@ mod tests {
         let shapes = inspect_paginated_v4(&raw, None, None, Some("path"), None, 0, 10).unwrap();
         assert_eq!(shapes["matches"], 1);
         assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
+    }
+
+    #[test]
+    fn put_text_rejects_xml_incompatible_content() {
+        use crate::document::TextAlign;
+        use crate::text::TextAction;
+        let mut raw = new_document(320, 240);
+        let err = apply_text(
+            &mut raw,
+            None,
+            TextAction::Put {
+                id: "bad".into(),
+                layer: "layer-1".into(),
+                content: "a\x01b".into(),
+                x: 5.0,
+                y: 5.0,
+                font: "Atkinson Hyperlegible".into(),
+                size: 16.0,
+                weight: 400,
+                italic: false,
+                fill: "#111827".into(),
+                align: TextAlign::Left,
+                letter_spacing: 0.0,
+                line_height: 1.2,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("invalid XML characters"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
