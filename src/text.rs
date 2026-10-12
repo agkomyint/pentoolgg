@@ -203,6 +203,40 @@ fn ink() -> String {
     "#111827".into()
 }
 
+/// Reject text that can never survive serialization: over the size limit or
+/// carrying XML-incompatible control characters. Mirrors the legacy
+/// `Text::validate` rule so v4 writers fail the same way export does.
+pub fn validate_content(content: &str) -> Result<()> {
+    if content.len() > 1_000_000
+        || content.chars().any(|c| {
+            c < ' ' && !matches!(c, '\n' | '\r' | '\t') || c == '\u{fffe}' || c == '\u{ffff}'
+        })
+    {
+        bail!("text exceeds size limit or contains invalid XML characters")
+    }
+    Ok(())
+}
+
+/// Enforce the typography ranges export requires (size 0.1–4096, weight
+/// 100–900, line height 0.1–10) at write time. Each range is checked only
+/// when a value is present.
+pub fn validate_typography(
+    size: Option<f64>,
+    weight: Option<f64>,
+    line_height: Option<f64>,
+) -> Result<()> {
+    if size.is_some_and(|v| !v.is_finite() || !(0.1..=4096.0).contains(&v)) {
+        bail!("font size must be finite and between 0.1 and 4096")
+    }
+    if weight.is_some_and(|v| !v.is_finite() || !(100.0..=900.0).contains(&v)) {
+        bail!("font weight must be finite and between 100 and 900")
+    }
+    if line_height.is_some_and(|v| !v.is_finite() || !(0.1..=10.0).contains(&v)) {
+        bail!("line height must be finite and between 0.1 and 10")
+    }
+    Ok(())
+}
+
 pub fn apply(doc: &mut Document, action: TextAction) -> Result<()> {
     if matches!(
         action,
@@ -415,5 +449,35 @@ pub fn font(doc: &mut Document, action: FontAction) -> Result<()> {
             *doc = updated;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_content_rejects_xml_incompatible_characters() {
+        validate_content("plain text\nwith newline\ttab").unwrap();
+        validate_content("unicode héllo 🎨 ok").unwrap();
+        for bad in ["a\x01b", "a\u{fffe}b", "a\u{ffff}b"] {
+            let err = validate_content(bad).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid XML characters"),
+                "unexpected error for {bad:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_typography_enforces_export_ranges() {
+        validate_typography(Some(48.0), Some(400.0), Some(1.2)).unwrap();
+        validate_typography(None, None, None).unwrap();
+        let err = validate_typography(Some(48.0), Some(9999.0), Some(1.2)).unwrap_err();
+        assert!(err.to_string().contains("font weight"), "unexpected: {err}");
+        let err = validate_typography(Some(48.0), Some(400.0), Some(0.0)).unwrap_err();
+        assert!(err.to_string().contains("line height"), "unexpected: {err}");
+        let err = validate_typography(Some(99999.0), Some(400.0), Some(1.2)).unwrap_err();
+        assert!(err.to_string().contains("font size"), "unexpected: {err}");
     }
 }
