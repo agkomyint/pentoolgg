@@ -171,6 +171,57 @@ fn feedback_scale_scene_is_one_batch_and_compacts_by_over_25_percent() {
 }
 
 #[test]
+fn style_rejects_empty_names_and_invalid_color_values() {
+    let mut value = fixture();
+    let err = style::apply(
+        &mut value,
+        style::Operation::Set,
+        Some(""),
+        Some("color"),
+        Some("#ff0000"),
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("cannot be empty"),
+        "unexpected: {err}"
+    );
+    let err = style::apply(
+        &mut value,
+        style::Operation::Set,
+        Some("tok1"),
+        Some("color"),
+        Some("notacolor"),
+        None,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("not a color"), "unexpected: {err}");
+    style::apply(
+        &mut value,
+        style::Operation::Set,
+        Some("accent"),
+        Some("color"),
+        Some("#22D3EE"),
+        None,
+    )
+    .unwrap();
+    let err = style::apply(
+        &mut value,
+        style::Operation::Rename,
+        Some("accent"),
+        None,
+        None,
+        Some(""),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("cannot be empty"),
+        "unexpected: {err}"
+    );
+    assert!(value["styles"].get("accent").is_some());
+}
+
+#[test]
 fn replace_rejects_unknown_page_layer_and_object_type() {
     fn options<'a>(
         page: Option<&'a str>,
