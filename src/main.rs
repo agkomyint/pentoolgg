@@ -79,6 +79,8 @@ struct AnalyzeArgs {
     /// JSON array of pixel coordinates, e.g. [[10,20]].
     #[arg(long, default_value = "[]")]
     samples: String,
+    /// Also compare the scope against itself with effects disabled and masks
+    /// stripped (effects-on vs effects-off, not a diff between files).
     #[arg(long)]
     compare: bool,
     /// Explicitly create color tokens from the reported palette.
