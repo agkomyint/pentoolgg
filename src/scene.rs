@@ -2473,6 +2473,9 @@ pub fn apply_object(
                     node["style"]["stroke"] = json!({"fallback": v});
                 }
                 if let Some(v) = width {
+                    if !v.is_finite() || *v < 0.0 {
+                        bail!("width must be finite and nonnegative")
+                    }
                     node["style"]["stroke_width"] = json!({"fallback": v});
                 }
                 if let Some(v) = fill {
@@ -2485,6 +2488,9 @@ pub fn apply_object(
                     node["style"]["stroke_linejoin"] = json!({"fallback": v.svg()});
                 }
                 if let Some(v) = miter_limit {
+                    if !v.is_finite() || *v < 1.0 || *v > 1000.0 {
+                        bail!("miter limit must be finite and between 1 and 1000")
+                    }
                     node["style"]["stroke_miterlimit"] = json!({"fallback": v});
                 }
             } else if kind == "text" {
@@ -3431,6 +3437,67 @@ mod tests {
         let shapes = inspect_paginated_v4(&raw, None, None, Some("path"), None, 0, 10).unwrap();
         assert_eq!(shapes["matches"], 1);
         assert_eq!(shapes["layers"][0]["objects"][0]["kind"], "rect");
+    }
+
+    #[test]
+    fn object_set_rejects_bad_stroke_width_and_miter_limit() {
+        use crate::agent::ObjectAction;
+        let mut raw = new_document(320, 240);
+        apply_path(
+            &mut raw,
+            None,
+            crate::editing::PathAction::Put {
+                id: "line".into(),
+                layer: "layer-1".into(),
+                d: "M0 0 L10 10".into(),
+                stroke: "#123456".into(),
+                width: 2.0,
+                fill: "none".into(),
+                closed: false,
+                cap: crate::document::StrokeCap::Butt,
+                join: crate::document::StrokeJoin::Miter,
+                miter_limit: 4.0,
+            },
+        )
+        .unwrap();
+        let set = |width: Option<f32>, miter_limit: Option<f32>| ObjectAction::Set {
+            id: "line".into(),
+            layer: "layer-1".into(),
+            d: None,
+            stroke: None,
+            width,
+            fill: None,
+            cap: None,
+            join: None,
+            miter_limit,
+            content: None,
+            x: None,
+            y: None,
+            font: None,
+            size: None,
+            weight: None,
+            italic: None,
+            align: None,
+            letter_spacing: None,
+            line_height: None,
+            blend: None,
+            blend_space: None,
+            opacity: None,
+            content_opacity: None,
+            isolation: None,
+        };
+        let err = apply_object(&mut raw, None, &set(Some(-1.0), None)).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("width must be finite and nonnegative"),
+            "unexpected error: {err}"
+        );
+        let err = apply_object(&mut raw, None, &set(None, Some(0.0))).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("miter limit must be finite and between 1 and 1000"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
