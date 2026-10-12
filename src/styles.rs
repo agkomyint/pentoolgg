@@ -398,6 +398,7 @@ fn validate_property(kind: &str, key: &str, v: &Value) -> Result<()> {
                 list.iter().all(Value::is_object),
                 "[invalid-input] {what} entries must be objects"
             );
+            crate::style_eval::validate_rules(key, v, &what)?;
             Ok(())
         }
         _ => {
@@ -416,6 +417,7 @@ fn base_of(style: &Value) -> Option<&str> {
 
 /// Validate every style definition, chain, reference and property.
 pub fn validate(raw: &Value) -> Result<()> {
+    crate::style_eval::validate_lists(raw)?;
     let Some(styles) = raw.pointer("/layout/styles") else {
         return Ok(());
     };
@@ -714,6 +716,27 @@ pub enum StyleAction {
     Usage { kind: String, id: String },
     /// Validate every style and report stories that reference undefined styles.
     Check,
+    /// Evaluate nested, line and GREP character styles of a story into spans (read only).
+    Evaluate {
+        story: String,
+        #[arg(long, default_value_t = 0)]
+        #[serde(default)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        #[serde(default = "default_limit")]
+        limit: usize,
+    },
+    /// Compute list labels (numbers and bullets) across stories (read only).
+    Lists {
+        #[arg(long)]
+        story: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        #[serde(default)]
+        offset: usize,
+        #[arg(long, default_value_t = 100)]
+        #[serde(default = "default_limit")]
+        limit: usize,
+    },
     /// Copy a paragraph's overrides into its style and clear them (redefine from selection).
     Redefine { story: String, paragraph: usize },
     /// Remove paragraph and run overrides (one paragraph, or the whole story).
@@ -1030,6 +1053,22 @@ pub fn run_style(raw: &mut Value, action: StyleAction) -> Result<(Value, bool)> 
             ))
         }
         StyleAction::Usage { kind, id } => Ok((usage(raw, &kind, &id)?, true)),
+        StyleAction::Evaluate {
+            story,
+            offset,
+            limit,
+        } => Ok((
+            crate::style_eval::evaluate_story(raw, &story, limit, offset)?,
+            true,
+        )),
+        StyleAction::Lists {
+            story,
+            offset,
+            limit,
+        } => Ok((
+            crate::style_eval::list_labels(raw, story.as_deref(), limit, offset)?,
+            true,
+        )),
         StyleAction::Check => {
             validate(raw)?;
             let mut missing: BTreeMap<String, usize> = BTreeMap::new();

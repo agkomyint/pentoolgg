@@ -219,10 +219,12 @@ and documentation.
   report, create/set/remove (with `--reassign`), redefine from overrides,
   clearing overrides, and import with `rename`/`skip`/`replace` policies from a
   version 9 `.pen`; contract in `docs/layout-v1.md` section 5.7. Still open
-  before this box is ticked: nested, line and GREP (bounded regex) style
-  evaluation, lists (levels, restart, continuation), IDML style import,
-  shortcuts, and wiring style resolution into frame composition so a change
-  recomposes the affected stories.
+  before this box is ticked: composed-line evaluation of line styles in
+  frames, `after-section` list restarts, IDML style import, shortcuts, and
+  wiring style resolution into frame composition so a change recomposes the
+  affected stories. Nested, GREP (`src/style_eval.rs`, bounded dialect with a
+  100,000-step budget) and list evaluation (`layout-style evaluate` / `lists`)
+  are implemented and covered by `tests/v0140_style_eval.rs`.
 
 - [ ] **7. Add grids, guides and alignment.**
   - A baseline grid per document and per frame, with align-to-grid modes.
