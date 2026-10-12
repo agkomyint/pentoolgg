@@ -281,3 +281,25 @@ fn cli_adjustments_use_one_guarded_history_entry_and_export_all_formats() {
     assert_eq!(std::fs::read(&file).unwrap(), committed);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn cli_adjustment_validates_operation_before_requiring_id() {
+    let directory = std::env::temp_dir().join(format!("pentool-v080-op-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let file = directory.join("document.pen");
+    std::fs::write(&file, serde_json::to_vec(&document()).unwrap()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args(["adjustment", "bogus", file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "bogus operation should fail");
+    let message = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        message.contains("unknown adjustment operation bogus"),
+        "unexpected error: {message}"
+    );
+}

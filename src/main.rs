@@ -8693,6 +8693,12 @@ async fn run() -> Result<()> {
                 );
                 return Ok(());
             }
+            if !matches!(
+                args.operation.as_str(),
+                "add" | "set" | "enable" | "disable" | "remove"
+            ) {
+                anyhow::bail!("unknown adjustment operation {}", args.operation)
+            }
             let id = args
                 .id
                 .as_deref()
