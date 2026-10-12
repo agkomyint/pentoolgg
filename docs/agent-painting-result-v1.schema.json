@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/agent-painting-result-v1.json",
+  "title": "Pentool agent-painting result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "engine", "status", "operation", "request_hash"],
+  "properties": {
+    "schema":{"const":1}, "engine":{"type":"integer","minimum":1},
+    "status":{"enum":["planned","committed","empty","error"]},
+    "operation":{"enum":["compile-path","paint-plan","sample","palette","preview","compare","analyze","field"]},
+    "request_hash":{"$ref":"#/$defs/hash"}, "plan_hash":{"$ref":"#/$defs/hash"},
+    "compiled_hash":{"$ref":"#/$defs/hash"}, "revision_before":{"$ref":"#/$defs/hash"},
+    "revision_after":{"$ref":"#/$defs/hash"},
+    "changed_bounds":{"oneOf":[{"type":"null"},{"$ref":"#/$defs/bounds"}]},
+    "counts":{"$ref":"#/$defs/counts"}, "estimates":{"$ref":"#/$defs/counts"},
+    "dependencies":{"type":"array","maxItems":8192,"items":{"$ref":"#/$defs/dependency"}},
+    "warnings":{"type":"array","maxItems":256,"items":{"$ref":"#/$defs/warning"}},
+    "commit":{"type":"object","additionalProperties":false,"required":["if_revision","plan_hash"],"properties":{"if_revision":{"$ref":"#/$defs/hash"},"plan_hash":{"$ref":"#/$defs/hash"}}},
+    "error":{"$ref":"#/$defs/error"}
+  },
+  "$defs": {
+    "hash":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+    "id":{"type":"string","minLength":1,"maxLength":128},
+    "bounds":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number","minimum":0},{"type":"number","minimum":0}],"items":false},
+    "counts":{"type":"object","additionalProperties":false,"properties":{"passes":{"type":"integer","minimum":0},"strokes":{"type":"integer","minimum":0},"samples":{"type":"integer","minimum":0},"dabs":{"type":"integer","minimum":0},"tiles":{"type":"integer","minimum":0},"changed_pixels":{"type":"integer","minimum":0}}},
+    "dependency":{"type":"object","additionalProperties":false,"required":["kind","id","hash"],"properties":{"kind":{"type":"string"},"id":{"$ref":"#/$defs/id"},"hash":{"$ref":"#/$defs/hash"}}},
+    "warning":{"type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"$ref":"#/$defs/id"},"message":{"type":"string","maxLength":4096},"scope":{"$ref":"#/$defs/id"}}},
+    "error":{"type":"object","additionalProperties":false,"required":["code","stage","message"],"properties":{"code":{"enum":["invalid-request","invalid-path","invalid-curve","missing-resource","dependency-changed","unsupported-capability","limit-exceeded","locked","conflict","cancelled","corrupt-raster","internal-error"]},"stage":{"enum":["parse","validate","resolve","compile","render","encode","commit"]},"message":{"type":"string","maxLength":4096},"page":{"$ref":"#/$defs/id"},"layer":{"$ref":"#/$defs/id"},"object":{"$ref":"#/$defs/id"},"limit":{"type":"string"},"allowed":{"type":"integer","minimum":0},"observed":{"type":"integer","minimum":0},"last_completed_stage":{"type":"string"}}}
+  }
+}

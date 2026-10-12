@@ -1,0 +1,10 @@
+{
+  "format": "penbook",
+  "version": 1,
+  "name": "Absolute",
+  "documents": [
+    {
+      "path": "C:/other/a.pen"
+    }
+  ]
+}

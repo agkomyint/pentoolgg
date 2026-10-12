@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/agent-painting-request-v1.json",
+  "title": "Pentool agent-painting path request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "engine", "page", "target", "path", "brush", "color", "seed", "limits"],
+  "properties": {
+    "schema": {"const": 1},
+    "engine": {"const": 1},
+    "page": {"$ref": "#/$defs/id"},
+    "target": {"$ref": "#/$defs/id"},
+    "path": {
+      "type": "object", "additionalProperties": false,
+      "required": ["segments"],
+      "properties": {
+        "flatness": {"type": "number", "minimum": 0.01, "maximum": 4},
+        "segments": {"type": "array", "minItems": 2, "maxItems": 4097, "items": {"$ref": "#/$defs/segment"}}
+      }
+    },
+    "brush": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "size", "spacing", "flow", "opacity"],
+      "properties": {
+        "kind": {"enum": ["hard-round", "soft-round", "pixel", "calligraphic", "textured"]},
+        "size": {"type": "number", "minimum": 1, "maximum": 2048},
+        "spacing": {"type": "number", "minimum": 0, "maximum": 2},
+        "flow": {"type": "number", "minimum": 0, "maximum": 1},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "hardness": {"type": "number", "minimum": 0, "maximum": 1},
+        "rotation": {"type": "number", "minimum": -360, "maximum": 360},
+        "roundness": {"type": "number", "minimum": 0.05, "maximum": 1},
+        "tip_hash": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "color": {"$ref": "#/$defs/color"},
+    "blend": {"enum": ["normal", "erase"], "default": "normal"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "curves": {
+      "type": "object", "additionalProperties": false, "maxProperties": 6,
+      "properties": {
+        "size": {"$ref": "#/$defs/scalarCurve"}, "pressure": {"$ref": "#/$defs/unitCurve"},
+        "flow": {"$ref": "#/$defs/unitCurve"}, "opacity": {"$ref": "#/$defs/unitCurve"},
+        "rotation": {"$ref": "#/$defs/angleCurve"}, "color": {"$ref": "#/$defs/colorCurve"}
+      }
+    },
+    "scope": {"$ref": "#/$defs/scope"},
+    "constraints": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/constraint"}},
+    "palette": {"$ref": "#/$defs/palette"},
+    "field": {"$ref": "#/$defs/fieldRef"},
+    "dry_run": {"type": "boolean", "default": true},
+    "if_revision": {"$ref": "#/$defs/hash"},
+    "limits": {"$ref": "#/$defs/limits"}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "point": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "items": false},
+    "segment": {"oneOf": [
+      {"type":"object","additionalProperties":false,"required":["op","to"],"properties":{"op":{"const":"M"},"to":{"$ref":"#/$defs/point"}}},
+      {"type":"object","additionalProperties":false,"required":["op","to"],"properties":{"op":{"const":"L"},"to":{"$ref":"#/$defs/point"}}},
+      {"type":"object","additionalProperties":false,"required":["op","control","to"],"properties":{"op":{"const":"Q"},"control":{"$ref":"#/$defs/point"},"to":{"$ref":"#/$defs/point"}}},
+      {"type":"object","additionalProperties":false,"required":["op","control1","control2","to"],"properties":{"op":{"const":"C"},"control1":{"$ref":"#/$defs/point"},"control2":{"$ref":"#/$defs/point"},"to":{"$ref":"#/$defs/point"}}},
+      {"type":"object","additionalProperties":false,"required":["op","rx","ry","rotation","large_arc","sweep","to"],"properties":{"op":{"const":"A"},"rx":{"type":"number","minimum":0},"ry":{"type":"number","minimum":0},"rotation":{"type":"number"},"large_arc":{"type":"boolean"},"sweep":{"type":"boolean"},"to":{"$ref":"#/$defs/point"}}}
+    ]},
+    "curvePoint": {"type":"array","prefixItems":[{"type":"number","minimum":0,"maximum":1},{"type":"number"}],"items":false},
+    "scalarCurve": {"type":"array","minItems":2,"maxItems":64,"items":{"$ref":"#/$defs/curvePoint"}},
+    "unitCurve": {"type":"array","minItems":2,"maxItems":64,"items":{"type":"array","prefixItems":[{"type":"number","minimum":0,"maximum":1},{"type":"number","minimum":0,"maximum":1}],"items":false}},
+    "angleCurve": {"type":"array","minItems":2,"maxItems":64,"items":{"type":"array","prefixItems":[{"type":"number","minimum":0,"maximum":1},{"type":"number","minimum":-360,"maximum":360}],"items":false}},
+    "color": {"type":"array","prefixItems":[{"type":"integer","minimum":0,"maximum":255},{"type":"integer","minimum":0,"maximum":255},{"type":"integer","minimum":0,"maximum":255},{"type":"integer","minimum":0,"maximum":255}],"items":false},
+    "colorCurvePoint": {"type":"array","prefixItems":[{"type":"number","minimum":0,"maximum":1},{"$ref":"#/$defs/color"}],"items":false},
+    "colorCurve": {"type":"array","minItems":2,"maxItems":64,"items":{"$ref":"#/$defs/colorCurvePoint"}},
+    "rect": {"type":"array","prefixItems":[{"type":"integer"},{"type":"integer"},{"type":"integer","minimum":1},{"type":"integer","minimum":1}],"items":false},
+    "scope": {"type":"object","additionalProperties":false,"required":["kind","rect","source_hash"],"properties":{"kind":{"enum":["layer","node","selection","composite","reference"]},"id":{"$ref":"#/$defs/id"},"rect":{"$ref":"#/$defs/rect"},"source_hash":{"$ref":"#/$defs/hash"}}},
+    "constraint": {"type":"object","additionalProperties":false,"required":["mode","scope","constraint_hash"],"properties":{"mode":{"enum":["inside","outside","avoid","clip-opaque","barrier-color","barrier-alpha","barrier-luminance","barrier-edge","follow-contour","follow-gradient","direction"]},"scope":{"$ref":"#/$defs/scope"},"threshold":{"type":"number","minimum":0,"maximum":1},"constraint_hash":{"$ref":"#/$defs/hash"}}},
+    "palette": {"type":"object","additionalProperties":false,"required":["id","space","algorithm","source_hash","palette_hash","colors"],"properties":{"id":{"$ref":"#/$defs/id"},"space":{"const":"srgb8-straight"},"algorithm":{"const":1},"source_hash":{"$ref":"#/$defs/hash"},"palette_hash":{"$ref":"#/$defs/hash"},"colors":{"type":"array","minItems":1,"maxItems":256,"items":{"$ref":"#/$defs/color"}}}},
+    "fieldRef": {"type":"object","additionalProperties":false,"required":["id","field_hash"],"properties":{"id":{"$ref":"#/$defs/id"},"field_hash":{"$ref":"#/$defs/hash"}}},
+    "limits": {"type":"object","additionalProperties":false,"required":["max_samples","max_dabs","max_changed_pixels"],"properties":{"max_samples":{"type":"integer","minimum":1,"maximum":262144},"max_dabs":{"type":"integer","minimum":1,"maximum":1000000},"max_changed_pixels":{"type":"integer","minimum":1,"maximum":67108864}}}
+  }
+}

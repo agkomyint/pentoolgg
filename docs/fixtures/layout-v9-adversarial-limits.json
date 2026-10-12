@@ -1,0 +1,45 @@
+{
+  "description": "Generator parameters for a hostile document; the test harness builds it in memory and expects the named error before any layout work.",
+  "cases": [
+    {
+      "name": "thread-length",
+      "frames": 4097,
+      "expect_error": "limit-exceeded",
+      "limit": "thread-length"
+    },
+    {
+      "name": "style-depth",
+      "based_on_depth": 17,
+      "expect_error": "limit-exceeded",
+      "limit": "style-depth"
+    },
+    {
+      "name": "parent-depth",
+      "based_on_depth": 17,
+      "expect_error": "limit-exceeded",
+      "limit": "parent-depth"
+    },
+    {
+      "name": "grep-pattern-length",
+      "pattern_length": 513,
+      "expect_error": "limit-exceeded",
+      "limit": "grep-pattern-length"
+    },
+    {
+      "name": "table-cells",
+      "cells": 100001,
+      "expect_error": "limit-exceeded",
+      "limit": "table-cells"
+    },
+    {
+      "name": "frame-dimension",
+      "width": 1e+300,
+      "expect_error": "invalid-dimension"
+    },
+    {
+      "name": "autoflow-stall",
+      "frame_height": 0,
+      "expect_error": "autoflow-stalled"
+    }
+  ]
+}

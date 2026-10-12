@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "engine": 1,
+  "id": "portrait-finish",
+  "page": "page-1",
+  "description": "One bounded underpainting pass.",
+  "passes": [{
+    "id": "underpainting",
+    "target": "paint",
+    "scope": {
+      "kind": "selection",
+      "id": "subject",
+      "rect": [0, 0, 512, 512],
+      "source_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "brush": "large-soft",
+    "blend": "normal",
+    "opacity": 0.85,
+    "seed": 41,
+    "source": {"kind": "path", "request_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+    "dependencies": [{"kind": "selection", "id": "subject", "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}],
+    "constraints": [],
+    "limits": {"max_samples": 4096, "max_dabs": 20000, "max_changed_pixels": 262144}
+  }],
+  "limits": {"max_passes": 16, "max_generated_strokes": 5000, "max_samples": 1048576, "max_dabs": 250000, "max_changed_pixels": 16000000, "max_tiles": 1024}
+}

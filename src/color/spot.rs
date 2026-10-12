@@ -305,7 +305,7 @@ impl Library {
 /// keeps existing v8 documents valid while giving package/catalog callers one
 /// strict parser for the new optional dependency.
 pub fn document_library(raw: &Value) -> Result<Library> {
-    if raw.get("version").and_then(Value::as_u64) != Some(super::VERSION) {
+    if !crate::color::has_v8(raw) {
         return Ok(Library::default());
     }
     let Some(value) = raw.get("color_management").and_then(|v| v.get("inks")) else {

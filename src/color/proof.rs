@@ -28,7 +28,7 @@ pub fn evaluate_sample(
     preserve_numbers: bool,
 ) -> Result<Value> {
     ensure!(
-        raw["version"].as_u64() == Some(super::VERSION),
+        crate::color::has_v8(raw),
         "[unsupported-capability] soft proof requires an explicitly migrated v8 document"
     );
     let source = NativeColor::parse(sample)?;
