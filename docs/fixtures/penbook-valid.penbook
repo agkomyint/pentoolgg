@@ -1,0 +1,26 @@
+{
+  "format": "penbook",
+  "version": 1,
+  "name": "Guide",
+  "documents": [
+    {
+      "path": "01-intro.pen",
+      "role": "chapter"
+    },
+    {
+      "path": "chapters/02-body.pen",
+      "role": "chapter"
+    }
+  ],
+  "numbering": {
+    "page": "continuous",
+    "chapter": "continuous",
+    "footnote": "per-document"
+  },
+  "synchronize": {
+    "source": "01-intro.pen",
+    "styles": true,
+    "swatches": true,
+    "parents": false
+  }
+}

@@ -165,6 +165,7 @@ pub fn transactional_write(file: &FilePath, bytes: &[u8]) -> Result<std::path::P
         .context("document path has no filename")?
         .to_string_lossy();
     let temp = parent.join(format!(".{name}.pentool-tmp-{}", std::process::id()));
+    recover_interrupted_write(file)?;
     let backup = (1..=999)
         .map(|n| parent.join(format!("{name}.bak.{n}")))
         .find(|p| !p.exists())
@@ -183,8 +184,62 @@ pub fn transactional_write(file: &FilePath, bytes: &[u8]) -> Result<std::path::P
     Ok(backup)
 }
 
+/// Finish or undo a write that was killed between the two renames of
+/// [`atomic_write`]: the document is missing and the previous complete copy sits
+/// beside it as `.NAME.pentool-old-PID`. The newest such copy that is valid JSON is
+/// moved back. Returns the restored source, or `None` when nothing needed repair.
+/// A present document is never touched.
+pub fn recover_interrupted_write(file: &FilePath) -> Result<Option<std::path::PathBuf>> {
+    if file.exists() {
+        return Ok(None);
+    }
+    let parent = match file.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => FilePath::new("."),
+    };
+    let Some(name) = file.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return Ok(None);
+    };
+    let prefix = format!(".{name}.pentool-old-");
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Ok(None);
+    };
+    let mut best: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(bytes) = fs::read(&path) else { continue };
+        if serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        if best.as_ref().is_none_or(|(t, _)| modified > *t) {
+            best = Some((modified, path));
+        }
+    }
+    match best {
+        Some((_, path)) => {
+            fs::rename(&path, file).with_context(|| {
+                format!(
+                    "could not restore {} from {}",
+                    file.display(),
+                    path.display()
+                )
+            })?;
+            Ok(Some(path))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Atomically replace a document without creating a legacy sibling backup.
 pub fn atomic_write(file: &FilePath, bytes: &[u8]) -> Result<()> {
+    recover_interrupted_write(file)?;
     let parent = file.parent().unwrap_or_else(|| FilePath::new("."));
     let name = file
         .file_name()

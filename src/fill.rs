@@ -231,11 +231,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
     }
     match kind {
         "solid" => {
-            validate_color(
-                &fill["color"],
-                styles,
-                raw["version"] == crate::color::VERSION,
-            )?;
+            validate_color(&fill["color"], styles, crate::color::has_v8(raw))?;
         }
         "pattern" => {
             let asset = fill["asset"].as_str().context("pattern asset missing")?;
@@ -260,8 +256,8 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
             }
         }
         _ => {
-            stops(fill, styles, Some(raw["version"] == crate::color::VERSION))?;
-            if raw["version"] == crate::color::VERSION
+            stops(fill, styles, Some(crate::color::has_v8(raw)))?;
+            if crate::color::has_v8(raw)
                 && fill
                     .get("space")
                     .is_some_and(|space| !space.is_string() && !space.is_object())
@@ -501,7 +497,7 @@ pub(crate) fn render_linear_prepared(
     options: &LinearFillOptions,
     engine: &mut crate::color::value::Evaluator<'_>,
 ) -> Result<LinearFillResult> {
-    if raw["version"] != crate::color::VERSION {
+    if !crate::color::has_v8(raw) {
         bail!("[unsupported-capability] working fill rendering requires an explicitly migrated v8 document")
     }
     if node["kind"] != "fill" {

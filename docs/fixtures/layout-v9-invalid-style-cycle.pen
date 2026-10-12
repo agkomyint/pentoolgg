@@ -1,0 +1,187 @@
+{
+  "format": "pentool",
+  "version": 9,
+  "name": "Layout v1 fixture",
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "page-1",
+      "canvas": {
+        "width": 612,
+        "height": 792,
+        "background": "#ffffff"
+      },
+      "layers": [
+        {
+          "id": "content",
+          "name": "Content",
+          "visible": true,
+          "locked": false,
+          "nodes": [
+            {
+              "kind": "text-frame",
+              "id": "body-1",
+              "story": "feature-body",
+              "next": "body-2",
+              "x": 54,
+              "y": 72,
+              "width": 216,
+              "height": 600,
+              "columns": 1,
+              "gutter": 12,
+              "inset": [
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page-2",
+      "name": "page-2",
+      "canvas": {
+        "width": 612,
+        "height": 792,
+        "background": "#ffffff"
+      },
+      "layers": [
+        {
+          "id": "content",
+          "name": "Content",
+          "visible": true,
+          "locked": false,
+          "nodes": [
+            {
+              "kind": "text-frame",
+              "id": "body-2",
+              "story": "feature-body",
+              "next": null,
+              "x": 342,
+              "y": 72,
+              "width": 216,
+              "height": 600,
+              "columns": 1,
+              "gutter": 12,
+              "inset": [
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "layout": {
+    "engine": 1,
+    "page_defaults": {
+      "margins": [
+        54,
+        54,
+        54,
+        54
+      ],
+      "columns": 2,
+      "gutter": 12
+    },
+    "spreads": [
+      {
+        "id": "s1",
+        "pages": [
+          "page-1"
+        ],
+        "facing": false
+      },
+      {
+        "id": "s2",
+        "pages": [
+          "page-2"
+        ],
+        "facing": false
+      }
+    ],
+    "parents": [
+      {
+        "id": "A-body",
+        "based_on": null,
+        "pages": [],
+        "margins": [
+          54,
+          54,
+          54,
+          54
+        ],
+        "columns": 2,
+        "gutter": 12
+      }
+    ],
+    "sections": [
+      {
+        "id": "sec-1",
+        "start_page": "page-1",
+        "start_number": 1,
+        "style": "arabic"
+      }
+    ],
+    "stories": [
+      {
+        "id": "feature-body",
+        "language": "en-US",
+        "paragraphs": [
+          {
+            "style": "body",
+            "runs": [
+              {
+                "text": "Rivers carry more than water",
+                "style": "lead-in"
+              },
+              {
+                "text": " \u2014 they carry the history of a place."
+              },
+              {
+                "special": "line-break"
+              },
+              {
+                "text": "A second line."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "styles": {
+      "paragraph": {
+        "base": {
+          "font": "Atkinson Hyperlegible",
+          "size": 10,
+          "leading": 13
+        },
+        "body": {
+          "based_on": "body",
+          "align": "justify",
+          "hyphenate": true,
+          "composer": "paragraph",
+          "align_to_grid": "all-lines",
+          "next": "body"
+        }
+      },
+      "character": {
+        "lead-in": {
+          "font": "Atkinson Hyperlegible",
+          "size": 10
+        }
+      }
+    },
+    "baseline_grid": {
+      "start": 72,
+      "increment": 13,
+      "relative_to": "page"
+    }
+  }
+}
