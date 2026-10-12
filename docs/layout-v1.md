@@ -713,6 +713,27 @@ header/footer row counts, and a table style. Rules:
   follows RFC 4180, UTF-8, rows ≤ 10,000, columns ≤ 256, cell ≤ 64 KiB, total
   ≤ 8 MiB, and reports ragged rows.
 
+### 9.1 `layout-table` (implemented, `src/tables.rs`)
+
+- `create`, `show`, `list`, `delete`, `set` manage definitions in
+  `layout.tables`; `place TABLE --story S --paragraph N [--at CHAR]` inserts
+  the `{"table": id}` run. A table is placed in exactly one story and a placed
+  table cannot be deleted. Limits: 1,000 tables per document, 100,000 cells per
+  table.
+- `cell-set` edits content (plain text; tabs become `special` runs), insets,
+  alignment, rotation (0/90/180/270), strokes, fill and cell style. `merge` and
+  `split` keep every cell's content (merge concatenates in cell order);
+  `add-row`/`add-column` insert, `remove-row`/`remove-column` refuse to drop
+  non-empty cells unless `--discard` is given.
+- `from-text` converts story paragraphs (or `--text`) using explicit row and
+  column separators; `to-text` reverses it without loss; `import FILE` reads
+  RFC 4180 CSV/TSV (UTF-8) and reports ragged rows. Limits: 8 MiB, 10,000
+  rows, 256 columns, 64 KiB per cell.
+- `plan TABLE` is read only: estimated row heights and the row ranges per
+  frame, with header/footer rows repeated and spans that cannot stay together
+  reported. Results are `estimated: true` until the composer is wired to frames.
+- A document with tables cannot be downgraded to v8.
+
 ## 10. Long-document features
 
 - **Footnotes** are `{"note": "<id>"}` runs with bodies in `layout.notes`;

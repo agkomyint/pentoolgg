@@ -2130,6 +2130,16 @@ enum Command {
         #[command(subcommand)]
         action: pentool::wrap::WrapAction,
     },
+    /// Version 9 tables: cells, merging, header rows, CSV/TSV import and planning.
+    LayoutTable {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::tables::TableAction,
+    },
     /// Version 9 sections: numbering styles, prefixes, start numbers.
     Section {
         input: PathBuf,
@@ -6745,6 +6755,12 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_layout_wrap(&input, dry_run, if_revision.as_deref(), action),
+        Command::LayoutTable {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_table(&input, dry_run, if_revision.as_deref(), action),
         Command::Parent {
             input,
             dry_run,

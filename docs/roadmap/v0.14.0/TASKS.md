@@ -257,6 +257,13 @@ and documentation.
   Composition with wrap and anchors is deterministic and bounded.
 
 - [ ] **9. Add tables.**
+  Progress: `layout-table` (`src/tables.rs`, `tests/v0140_tables.rs`) creates,
+  edits, merges, splits and places tables; adds and removes rows and columns
+  without silently dropping content; converts text to a table and back;
+  imports RFC 4180 CSV/TSV within the documented limits; and plans row breaks
+  with repeated header and footer rows. Heights come from the task 3 estimator
+  (`estimated: true`). Open: composer-driven row heights and rendering,
+  graphic cell content, IDML table mapping, CI evidence.
   - Rows and columns, merging and splitting, and header and footer rows that
     repeat when a table breaks across frames and pages.
   - Cell insets, alignment and rotation, strokes and fills, alternating

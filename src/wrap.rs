@@ -854,7 +854,11 @@ fn estimated_line_top(
     (y, last.0, last.1)
 }
 
-fn insert_anchor_run(paragraph: &mut Value, at: Option<usize>, run: Value) -> Result<()> {
+pub(crate) fn insert_anchor_run(
+    paragraph: &mut Value,
+    at: Option<usize>,
+    run: Value,
+) -> Result<()> {
     let runs = paragraph
         .get_mut("runs")
         .and_then(Value::as_array_mut)
