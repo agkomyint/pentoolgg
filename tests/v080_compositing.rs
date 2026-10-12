@@ -124,3 +124,14 @@ fn group_isolation_and_pass_through_have_distinct_exact_pixels() {
     raw["pages"][0]["layers"][0]["nodes"][1]["opacity"] = json!(0.5);
     assert!(scene::validate(&raw).is_err());
 }
+
+#[test]
+fn clip_rejection_names_the_following_sibling_rule() {
+    let mut raw = doc();
+    let err = composite::clip_edit(&mut raw, None, "add", "base", Some("texture")).unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("following sibling"),
+        "unexpected error: {message}"
+    );
+}

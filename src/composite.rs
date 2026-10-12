@@ -743,7 +743,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                     .as_str()
                     .context("[invalid-clipping] base ID missing")?;
                 if node["kind"] == "adjustment" || clip_base != Some(base) {
-                    bail!("[invalid-clipping] node {} must immediately follow base {base} or its clipping members; detach clipping before reordering",node["id"])
+                    bail!("[invalid-clipping] node {} must be a following sibling of base {base} (immediately after it or its clipping members); detach clipping before reordering",node["id"])
                 }
             } else {
                 clip_base = if node["kind"] == "adjustment" {
