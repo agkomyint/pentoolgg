@@ -317,6 +317,31 @@ pub fn run_layout_table(
     finish(input, "layout-table", dry_run, revision, &raw, result)
 }
 
+pub fn run_layout_doc(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    file_name: Option<String>,
+    action: crate::longdoc::DocAction,
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let ctx = crate::longdoc::Context {
+        file_name: file_name.or_else(|| {
+            input
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        }),
+    };
+    let (result, read_only) = crate::longdoc::run(&mut raw, action, &ctx)?;
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    spreads::validate(&raw, spreads::VERSION)?;
+    finish(input, "layout-doc", dry_run, revision, &raw, result)
+}
+
 pub fn run_parent(
     input: &Path,
     dry_run: bool,

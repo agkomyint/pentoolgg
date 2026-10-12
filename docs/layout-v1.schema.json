@@ -15,9 +15,20 @@
     "styles": {"$ref": "#/$defs/styles"},
     "lists": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
     "tables": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
-    "notes": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
-    "conditions": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
-    "variables": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
+    "notes": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/note"}},
+    "note_settings": {"$ref": "#/$defs/noteSettings"},
+    "conditions": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/condition"}},
+    "condition_sets": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/conditionSet"}},
+    "active_condition_set": {"$ref": "#/$defs/id"},
+    "variables": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/variable"}},
+    "xrefs": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/xref"}},
+    "hyperlinks": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/hyperlink"}},
+    "bookmarks": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/bookmark"}},
+    "index_topics": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/indexTopic"}},
+    "generated_at": {"$ref": "#/$defs/date"},
+    "created_at": {"$ref": "#/$defs/date"},
+    "modified_at": {"$ref": "#/$defs/date"},
+    "output_at": {"$ref": "#/$defs/date"},
     "generated": {"type": "array", "items": {"$ref": "#/$defs/generated"}},
     "guides": {"type": "array", "items": {"$ref": "#/$defs/idObject"}},
     "baseline_grid": {"$ref": "#/$defs/baselineGrid"}
@@ -97,10 +108,10 @@
         {"required": ["variable"], "properties": {"variable": {"$ref": "#/$defs/id"}}},
         {"required": ["xref"], "properties": {"xref": {"$ref": "#/$defs/id"}}},
         {"required": ["index"], "properties": {"index": {"$ref": "#/$defs/id"}}},
-        {"required": ["link"], "properties": {"link": {"$ref": "#/$defs/id"}}},
         {"required": ["table"], "properties": {"table": {"$ref": "#/$defs/id"}}},
         {"required": ["special"], "properties": {"special": {"enum": ["tab", "line-break", "column-break", "frame-break", "page-break", "em-space", "en-space", "thin-space", "hair-space", "flush-space", "right-indent-tab", "section-marker", "page-number", "next-page-number", "previous-page-number", "discretionary-hyphen", "nonbreaking-hyphen"]}}},
-        {"required": ["condition"], "properties": {"condition": {"$ref": "#/$defs/id"}, "runs": {"type": "array", "items": {"type": "object"}}}}
+        {"required": ["condition"], "properties": {"condition": {"$ref": "#/$defs/id"}, "runs": {"type": "array", "items": {"type": "object"}}}},
+        {"required": ["link", "runs"], "properties": {"link": {"$ref": "#/$defs/id"}, "runs": {"type": "array", "items": {"type": "object"}}}}
       ]
     },
     "styles": {
@@ -144,14 +155,115 @@
         "relative_to": {"enum": ["page", "margin"]}
       }
     },
+    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2}Z?)?$"},
+    "note": {
+      "type": "object",
+      "required": ["id", "kind", "paragraphs"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["footnote", "endnote"]},
+        "span_columns": {"type": "boolean"},
+        "paragraphs": {
+          "type": "array", "minItems": 1,
+          "items": {"type": "object", "required": ["runs"], "properties": {"runs": {"type": "array", "items": {"type": "object"}}}}
+        }
+      }
+    },
+    "noteSettings": {
+      "type": "object",
+      "properties": {
+        "restart": {"enum": ["document", "story", "section", "page"]},
+        "style": {"enum": ["arabic", "lower-roman", "upper-roman", "lower-alpha", "upper-alpha"]}
+      }
+    },
+    "condition": {
+      "type": "object", "required": ["id"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "visible": {"type": "boolean"}}
+    },
+    "conditionSet": {
+      "type": "object", "required": ["id"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "show": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "hide": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+      }
+    },
+    "variable": {
+      "type": "object", "required": ["id", "kind"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["chapter-number", "running-header", "creation-date", "modification-date", "output-date", "file-name", "last-page-number", "custom"]},
+        "style": {"$ref": "#/$defs/id"},
+        "pick": {"enum": ["first", "last"]},
+        "value": {"type": "string", "maxLength": 65536},
+        "format": {"type": "string", "maxLength": 64}
+      }
+    },
+    "target": {
+      "type": "object",
+      "oneOf": [
+        {"required": ["story", "paragraph"], "properties": {"story": {"$ref": "#/$defs/id"}, "paragraph": {"type": "integer", "minimum": 0}}},
+        {"required": ["page"], "properties": {"page": {"$ref": "#/$defs/id"}}},
+        {"required": ["bookmark"], "properties": {"bookmark": {"$ref": "#/$defs/id"}}}
+      ]
+    },
+    "xref": {
+      "type": "object", "required": ["id", "target", "format"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "target": {"$ref": "#/$defs/target"},
+        "format": {"enum": ["page", "paragraph-text", "paragraph-number", "chapter", "custom"]},
+        "template": {"type": "string", "maxLength": 256}
+      }
+    },
+    "hyperlink": {
+      "type": "object", "required": ["id"],
+      "oneOf": [
+        {"required": ["url"], "properties": {"url": {"type": "string", "maxLength": 2048, "pattern": "^([Hh][Tt][Tt][Pp][Ss]?|[Mm][Aa][Ii][Ll][Tt][Oo]):[^ ]+$"}}},
+        {"required": ["page"], "properties": {"page": {"$ref": "#/$defs/id"}}},
+        {"required": ["bookmark"], "properties": {"bookmark": {"$ref": "#/$defs/id"}}}
+      ],
+      "properties": {"id": {"$ref": "#/$defs/id"}}
+    },
+    "bookmark": {
+      "type": "object", "required": ["id"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "name": {"type": "string", "maxLength": 256},
+        "story": {"$ref": "#/$defs/id"},
+        "paragraph": {"type": "integer", "minimum": 0},
+        "page": {"$ref": "#/$defs/id"}
+      }
+    },
+    "indexTopic": {
+      "type": "object", "required": ["id", "text"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "text": {"type": "string", "minLength": 1},
+        "sort": {"type": "string"},
+        "see": {"$ref": "#/$defs/id"}
+      }
+    },
     "generated": {
       "type": "object",
       "required": ["id", "kind", "story"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "kind": {"enum": ["toc", "index", "captions", "list-of-figures"]},
+        "kind": {"enum": ["toc", "index", "captions", "list-of-figures", "endnotes"]},
         "story": {"$ref": "#/$defs/id"},
         "inputs": {"type": "array", "items": {"type": "string", "maxLength": 128}},
+        "options": {
+          "type": "object",
+          "properties": {
+            "styles": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+            "style": {"$ref": "#/$defs/id"},
+            "label": {"type": "string", "maxLength": 128},
+            "source": {"enum": ["paragraphs", "metadata", "both"]},
+            "page_range": {"enum": ["first", "contiguous", "all"]},
+            "language": {"type": "string", "maxLength": 35}
+          }
+        },
+        "entries": {"type": "integer", "minimum": 0},
         "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "stale": {"type": "boolean"}
       }

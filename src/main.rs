@@ -2145,6 +2145,20 @@ enum Command {
         #[command(subcommand)]
         action: pentool::tables::TableAction,
     },
+    /// Version 9 long documents: notes, cross-references, links, variables,
+    /// conditional text and generated tables of contents, indexes and captions.
+    LayoutDoc {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        /// File name used by the file-name variable (default: the input file name).
+        #[arg(long)]
+        file_name: Option<String>,
+        #[command(subcommand)]
+        action: pentool::longdoc::DocAction,
+    },
     /// Version 9 sections: numbering styles, prefixes, start numbers.
     Section {
         input: PathBuf,
@@ -6801,6 +6815,19 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_layout_table(&input, dry_run, if_revision.as_deref(), action),
+        Command::LayoutDoc {
+            input,
+            dry_run,
+            if_revision,
+            file_name,
+            action,
+        } => pentool::layout_cli::run_layout_doc(
+            &input,
+            dry_run,
+            if_revision.as_deref(),
+            file_name,
+            action,
+        ),
         Command::Parent {
             input,
             dry_run,
