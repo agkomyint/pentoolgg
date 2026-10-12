@@ -491,6 +491,19 @@ fn apply_group_inner(raw: &mut Value, page_id: Option<&str>, action: GroupAction
             if group == child {
                 bail!("a group cannot contain itself")
             }
+            let target = find_node(page, &group).context("group not found")?;
+            require_group(target)?;
+            if target
+                .get("children")
+                .and_then(Value::as_array)
+                .is_some_and(|children| {
+                    children
+                        .iter()
+                        .any(|node| node.get("id").and_then(Value::as_str) == Some(&child))
+                })
+            {
+                bail!("child {child} is already in group {group}")
+            }
             let node = take_node(page, &child)?;
             let target = find_node_mut(page, &group).context("group not found")?;
             require_group(target)?;
@@ -3356,6 +3369,38 @@ mod tests {
         let flattened = flatten_to_v3(&raw).unwrap();
         let doc: crate::document::Document = serde_json::from_value(flattened).unwrap();
         assert_eq!(doc.layers[0].paths.len(), 1);
+    }
+
+    #[test]
+    fn add_child_rejects_existing_member() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+        apply_group(&mut raw, None, GroupAction::Ungroup { id: "card".into() }).unwrap();
+        apply_group(
+            &mut raw,
+            None,
+            GroupAction::Create {
+                id: "g1".into(),
+                layer: "content".into(),
+                children: vec!["card-bg".into()],
+            },
+        )
+        .unwrap();
+        let before = raw.clone();
+        let err = apply_group(
+            &mut raw,
+            None,
+            GroupAction::AddChild {
+                group: "g1".into(),
+                child: "card-bg".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("already in group"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(raw, before);
     }
 
     #[test]
