@@ -285,6 +285,22 @@ pub fn run_layout_grid(
     finish(input, "layout-grid", dry_run, revision, &raw, result)
 }
 
+pub fn run_layout_wrap(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    action: crate::wrap::WrapAction,
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let (result, read_only) = crate::wrap::run(&mut raw, action)?;
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    spreads::validate(&raw, spreads::VERSION)?;
+    finish(input, "layout-wrap", dry_run, revision, &raw, result)
+}
+
 pub fn run_parent(
     input: &Path,
     dry_run: bool,

@@ -174,6 +174,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
     crate::styles::validate(raw)?;
     crate::stories::validate(raw)?;
     crate::grids::validate(raw)?;
+    crate::wrap::validate(raw)?;
     Ok(())
 }
 
@@ -1806,6 +1807,9 @@ pub fn downgrade(mut raw: Value) -> Result<Value> {
     let refuse = |what: String| -> Result<Value> {
         bail!("[unsupported-capability] version 8 cannot represent {what}; remove it first (flattening composed layout arrives with the paragraph composer)")
     };
+    if let Some(id) = crate::wrap::first_wrapped(&raw) {
+        return refuse(format!("text wrap on object {id}"));
+    }
     if let Some(layout) = raw.get("layout") {
         if let Some(spread) = list(layout, "spreads")
             .iter()

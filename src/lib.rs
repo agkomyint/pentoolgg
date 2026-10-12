@@ -57,3 +57,4 @@ pub mod styles;
 pub mod text;
 pub mod transaction;
 pub mod transform;
+pub mod wrap;

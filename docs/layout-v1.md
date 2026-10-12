@@ -674,6 +674,27 @@ Align, distribute, gaps and key objects remain `pentool layout`.
 - Composition with wrap and anchors is bounded by 8 passes (6.2) and total
   exclusion intervals ≤ 10,000 per frame.
 
+### 8.1 `layout-wrap` (implemented, `src/wrap.rs`)
+
+- `set ID MODE [--offset t,r,b,l] [--side S] [--invert B] [--threshold N]`,
+  `clear`, `show`, `list` store a `wrap` object on any node; locked layers and
+  unknown IDs are refused and leave the file unchanged.
+- `intervals FRAME [--line-height H]` is read only: per column and line, the
+  free `[x0, x1]` segments of the frame after union of all wrapping objects on
+  the page (never the frame itself, never objects anchored into its story,
+  nothing when the frame has `ignore_wrap`). Geometry is integer milli-points.
+  Rectangles use the box; ellipses use up to 256 chord bands; `alpha`,
+  `clipping-path` and other kinds fall back to the bounding box and say so in
+  `wrappers[].approximated`.
+- `jump-object` blocks every line the object overlaps; `jump-next-column` blocks
+  the column from the object's top down. `invert` keeps text inside the shape.
+  More than 10,000 bands is `[limit-exceeded]`.
+- Anchors: `anchor-add OBJECT --story S --paragraph N [--at CHAR]` inserts the
+  anchor run (splitting text), `anchor-set`, `anchor-remove`, `anchor-list`
+  and `anchor-apply`, which moves objects to the anchor's frame, page and
+  layer. Results are `estimated: true` until the composer is wired to frames.
+- Version 8 downgrade refuses documents with wrapped objects.
+
 ## 9. Tables
 
 Tables are story content (`{"table": "<id>"}` run) with a definition in
