@@ -882,8 +882,12 @@ pub fn edit(
     let selected = crate::scene::page_mut(&mut candidate, page)?;
     let result = match operation {
         "add" => {
-            if crate::scene::find_node_mut(selected, id).is_some() {
-                bail!("[invalid-adjustment] node ID {id} already exists")
+            if let Some(existing) = crate::scene::find_node_mut(selected, id) {
+                let kind = existing
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("node");
+                bail!("[invalid-adjustment] node ID {id} already exists as a {kind} node")
             }
             let layer_id = settings["layer"]
                 .as_str()

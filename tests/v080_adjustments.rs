@@ -283,6 +283,26 @@ fn cli_adjustments_use_one_guarded_history_entry_and_export_all_formats() {
 }
 
 #[test]
+fn adjustment_add_collision_names_existing_node_kind() {
+    let mut raw: Value =
+        serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+    raw = composite::migrate(raw).unwrap();
+    let err = composite::edit(
+        &mut raw,
+        None,
+        "add",
+        "card",
+        &serde_json::json!({"adjustment":"invert"}),
+    )
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains("node ID card already exists as a group node"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
 fn unknown_adjustment_kind_lists_valid_kinds() {
     let err = composite::validate_settings("bogus", &serde_json::json!({})).unwrap_err();
     let message = err.to_string();
