@@ -1192,13 +1192,7 @@ async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneReques
             .map_err(|_| anyhow::anyhow!("document lock failed"))?;
         let bytes = std::fs::read(&file)?;
         let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-        if body
-            .revision
-            .as_deref()
-            .is_some_and(|wanted| wanted != revision(&raw))
-        {
-            anyhow::bail!("document revision changed")
-        };
+        require_revision(body.revision.as_deref(), &raw)?;
         let changes =
             crate::scene::apply_batch_at(&mut raw, body.page.as_deref(), &body.operations, &file)?;
         let expected = crate::transaction::revision(&bytes);
@@ -1688,6 +1682,17 @@ fn revision(value: &serde_json::Value) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     value.to_string().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// Optimistic-concurrency guard for shared-document commits: a missing
+/// revision must fail rather than commit unguarded against concurrent writers.
+fn require_revision(revision: Option<&str>, raw: &serde_json::Value) -> Result<()> {
+    let wanted = revision
+        .with_context(|| "scene batch requires the document revision from GET /api/document")?;
+    if wanted != self::revision(raw) {
+        anyhow::bail!("document revision changed")
+    }
+    Ok(())
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -2222,5 +2227,21 @@ mod tests {
         assert_eq!(loaded_token, super::revision(&original));
         assert_ne!(loaded_token, super::revision(&browser));
         assert_ne!(loaded_token, super::revision(&serde_json::json!({"x":101})));
+    }
+
+    #[test]
+    fn scene_commit_requires_a_revision() {
+        let raw = serde_json::json!({"format": "pentool", "version": 4});
+        let err = super::require_revision(None, &raw).unwrap_err();
+        assert!(
+            err.to_string().contains("requires the document revision"),
+            "unexpected error: {err}"
+        );
+        let err = super::require_revision(Some("stale"), &raw).unwrap_err();
+        assert!(
+            err.to_string().contains("document revision changed"),
+            "unexpected error: {err}"
+        );
+        super::require_revision(Some(&super::revision(&raw)), &raw).unwrap();
     }
 }
