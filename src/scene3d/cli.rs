@@ -136,6 +136,28 @@ pub enum Scene3dAction {
         /// Drop every camera setting and frame the model automatically.
         #[arg(long)]
         reset: bool,
+        /// Lens focal length in millimeters (derives the field of view and
+        /// re-frames the model, so only perspective changes).
+        #[arg(long)]
+        focal_length: Option<f64>,
+        /// Sensor size in millimeters as `WxH` (default 36x24).
+        #[arg(long)]
+        sensor: Option<String>,
+        /// f-number; setting it turns depth of field on.
+        #[arg(long)]
+        aperture: Option<f64>,
+        /// Distance to the sharp plane (default: eye to target).
+        #[arg(long)]
+        focus_distance: Option<f64>,
+        /// Lens exposure compensation in EV.
+        #[arg(long, allow_hyphen_values = true)]
+        lens_exposure: Option<f64>,
+        /// Depth-of-field lens samples (1..=64, default 16).
+        #[arg(long)]
+        lens_samples: Option<u32>,
+        /// Remove the physical camera and return to `--fov`.
+        #[arg(long)]
+        no_physical: bool,
     },
     /// Edit the light rig.
     Light {
@@ -587,6 +609,13 @@ pub fn run(
             near,
             far,
             reset,
+            focal_length,
+            sensor,
+            aperture,
+            focus_distance,
+            lens_exposure,
+            lens_samples,
+            no_physical,
         } => {
             require_v10(&raw)?;
             let n = scene3d_node(&mut raw, &id)?;
@@ -624,6 +653,57 @@ pub fn run(
             }
             if cam.is_empty() {
                 n.remove("camera");
+            }
+            if no_physical || reset {
+                n.remove("physical_camera");
+            }
+            let touched = focal_length.is_some()
+                || sensor.is_some()
+                || aperture.is_some()
+                || focus_distance.is_some()
+                || lens_exposure.is_some()
+                || lens_samples.is_some();
+            if touched {
+                let existing = n.get("physical_camera").and_then(Value::as_object).cloned();
+                let mut phys = existing.unwrap_or_default();
+                if let Some(f) = focal_length {
+                    phys.insert("focal_length_mm".into(), json!(f));
+                }
+                if let Some(s) = sensor {
+                    let parts: Vec<&str> = s.split(['x', 'X']).collect();
+                    ensure!(
+                        parts.len() == 2,
+                        "[invalid-input] --sensor must be WxH in millimeters (got `{s}`)"
+                    );
+                    let mut pair = Vec::new();
+                    for p in parts {
+                        pair.push(json!(p.trim().parse::<f64>().with_context(|| format!(
+                            "[invalid-input] --sensor: `{p}` is not a number"
+                        ))?));
+                    }
+                    phys.insert("sensor_mm".into(), Value::Array(pair));
+                }
+                for (key, value) in [
+                    ("aperture_f", aperture),
+                    ("focus_distance", focus_distance),
+                    ("exposure_ev", lens_exposure),
+                ] {
+                    if let Some(v) = value {
+                        phys.insert(key.into(), json!(v));
+                    }
+                }
+                if let Some(s) = lens_samples {
+                    phys.insert("samples".into(), json!(s));
+                }
+                ensure!(
+                    phys.contains_key("focal_length_mm"),
+                    "[invalid-input] a physical camera needs --focal-length"
+                );
+                // The lens now owns the field of view; drop a stale --fov.
+                if let Some(c) = n.get_mut("camera").and_then(Value::as_object_mut) {
+                    c.remove("fov");
+                }
+                n.insert("physical_camera".into(), Value::Object(phys));
             }
             ("scene3d-camera", json!({"id": id}))
         }

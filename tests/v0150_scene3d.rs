@@ -297,3 +297,192 @@ fn crate_digest_matches(doc: &Value, digest: &str) -> bool {
         .unwrap();
     pentool::resource::sha256(&bytes) == digest
 }
+
+fn png_pixels(path: &Path) -> (u32, u32, Vec<u8>) {
+    let img = image::open(path).unwrap().to_rgba8();
+    (img.width(), img.height(), img.into_raw())
+}
+
+#[test]
+fn physical_camera_changes_perspective_and_dof_is_deterministic() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let d = doc.to_str().unwrap();
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+        "--width",
+        "100",
+        "--height",
+        "100",
+    ])
+    .status
+    .success());
+
+    let mut renders = Vec::new();
+    for focal in ["24", "50", "85"] {
+        let out = pentool(&["scene3d", d, "camera", "m", "--focal-length", focal]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let png = dir.join(format!("f{focal}.png"));
+        assert!(pentool(&["export", d, png.to_str().unwrap()])
+            .status
+            .success());
+        renders.push(png_pixels(&png));
+    }
+    assert_ne!(renders[0].2, renders[1].2);
+    assert_ne!(renders[1].2, renders[2].2);
+
+    // Depth of field: deterministic, and different from the pinhole render.
+    let pin = dir.join("pin.png");
+    assert!(pentool(&["export", d, pin.to_str().unwrap()])
+        .status
+        .success());
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "camera",
+        "m",
+        "--focal-length",
+        "85",
+        "--aperture",
+        "1.4",
+        "--focus-distance",
+        "1.0",
+        "--lens-samples",
+        "8",
+    ])
+    .status
+    .success());
+    let (a, b) = (dir.join("a.png"), dir.join("b.png"));
+    assert!(pentool(&["export", d, a.to_str().unwrap()])
+        .status
+        .success());
+    assert!(pentool(&["export", d, b.to_str().unwrap()])
+        .status
+        .success());
+    assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
+    assert_ne!(png_pixels(&a).2, png_pixels(&pin).2);
+}
+
+#[test]
+fn inconsistent_fov_and_physical_camera_is_a_validation_error() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let d = doc.to_str().unwrap();
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+    ])
+    .status
+    .success());
+    assert!(pentool(&["scene3d", d, "camera", "m", "--fov", "20"])
+        .status
+        .success());
+    let before = std::fs::read(&doc).unwrap();
+    // The CLI drops the stale fov when a lens is set, so inject the conflict.
+    let mut raw = read(&doc);
+    raw["pages"][0]["layers"][0]["nodes"][0]["physical_camera"] = json!({"focal_length_mm": 50.0});
+    std::fs::write(&doc, serde_json::to_vec(&raw).unwrap()).unwrap();
+    let out = pentool(&["export", d, dir.join("x.png").to_str().unwrap()]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("disagree"));
+    let _ = before;
+}
+
+#[test]
+fn depth_of_field_leaves_the_focus_plane_sharp() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let d = doc.to_str().unwrap();
+    let model = dir.join("quad.obj");
+    std::fs::write(
+        &model,
+        "v -1 -1 0\nv 1 -1 0\nv 1 1 0\nv -1 1 0\nf 1 2 3\nf 1 3 4\n",
+    )
+    .unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "q",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+        "--width",
+        "100",
+        "--height",
+        "100",
+    ])
+    .status
+    .success());
+    let cam = [
+        "scene3d",
+        d,
+        "camera",
+        "q",
+        "--eye",
+        "0,0,5",
+        "--target",
+        "0,0,0",
+        "--focal-length",
+        "50",
+    ];
+    assert!(pentool(&cam).status.success());
+    let sharp = dir.join("sharp.png");
+    assert!(pentool(&["export", d, sharp.to_str().unwrap()])
+        .status
+        .success());
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "camera",
+        "q",
+        "--aperture",
+        "1.2",
+        "--focus-distance",
+        "5",
+        "--lens-samples",
+        "12",
+    ])
+    .status
+    .success());
+    let dof = dir.join("dof.png");
+    assert!(pentool(&["export", d, dof.to_str().unwrap()])
+        .status
+        .success());
+    let (w, _, a) = png_pixels(&sharp);
+    let (_, _, b) = png_pixels(&dof);
+    // Interior of the quad (well away from its silhouette): identical.
+    for y in 40..60 {
+        for x in 45..55 {
+            let i = ((y * w + x) * 4) as usize;
+            for c in 0..4 {
+                let diff = (a[i + c] as i32 - b[i + c] as i32).abs();
+                // View-dependent shading moves with each lens sample; the
+                // geometry itself must not blur.
+                assert!(diff <= 2, "pixel {x},{y} channel {c}: {diff}");
+            }
+        }
+    }
+}

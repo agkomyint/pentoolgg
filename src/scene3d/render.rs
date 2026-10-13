@@ -7,7 +7,7 @@
 
 use super::math::{self, Mat4, Vec3};
 use super::model::{AlphaMode, Instance, Material, Model, Texture};
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 
 pub const MAX_DIMENSION: u32 = 8192;
 pub const MAX_SUPERSAMPLE: u32 = 4;
@@ -597,6 +597,90 @@ fn check(scene: &Scene, options: &Options) -> Result<()> {
         bail!("[invalid-argument] camera eye and target coincide");
     }
     Ok(())
+}
+
+/// Thin-lens depth of field: a fixed pattern of `samples` points on the
+/// aperture disc, all aimed at the same point on the focus plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lens {
+    /// Aperture radius in world units.
+    pub aperture_radius: f64,
+    /// Distance from the eye to the plane that stays sharp.
+    pub focus_distance: f64,
+    pub samples: u32,
+}
+
+/// Largest total supersampled sample count across all lens samples.
+pub const MAX_LENS_WORK: u64 = 256 * 1024 * 1024;
+pub const MAX_LENS_SAMPLES: u32 = 64;
+
+/// Render with optional depth of field. Without a lens this is `render`.
+pub fn render_with_lens(
+    model: &Model,
+    scene: &Scene,
+    options: &Options,
+    lens: Option<&Lens>,
+) -> Result<Image> {
+    let Some(lens) = lens.filter(|l| l.samples > 1 && l.aperture_radius > 0.0) else {
+        return render(model, scene, options);
+    };
+    ensure!(
+        lens.samples <= MAX_LENS_SAMPLES,
+        "[limit-exceeded] depth of field supports at most {MAX_LENS_SAMPLES} lens samples"
+    );
+    let work = options.width as u64
+        * options.height as u64
+        * (options.supersample as u64).pow(2)
+        * lens.samples as u64;
+    ensure!(
+        work <= MAX_LENS_WORK,
+        "[limit-exceeded] depth of field would take {work} samples; the limit is {MAX_LENS_WORK}; lower samples, supersample or size"
+    );
+    let cam = &scene.camera;
+    let forward = math::normalize(math::sub(cam.target, cam.eye));
+    let right = math::normalize(math::cross(forward, cam.up));
+    let up = math::cross(right, forward);
+    let focus = math::add(cam.eye, math::scale(forward, lens.focus_distance));
+    let golden = 2.399_963_229_728_653;
+    let n = (options.width as usize) * (options.height as usize);
+    let mut acc = vec![[0.0f64; 4]; n];
+    for k in 0..lens.samples {
+        let r = lens.aperture_radius * ((k as f64 + 0.5) / lens.samples as f64).sqrt();
+        let a = k as f64 * golden;
+        let offset = math::add(
+            math::scale(right, r * math::cos(a)),
+            math::scale(up, r * math::sin(a)),
+        );
+        let mut s = scene.clone();
+        s.camera.eye = math::add(cam.eye, offset);
+        s.camera.target = focus;
+        let image = render(model, &s, options)?;
+        for (px, out) in image.rgba.chunks_exact(4).zip(acc.iter_mut()) {
+            let alpha = px[3] as f64 / 255.0;
+            out[0] += px[0] as f64 * alpha;
+            out[1] += px[1] as f64 * alpha;
+            out[2] += px[2] as f64 * alpha;
+            out[3] += alpha;
+        }
+    }
+    let samples = lens.samples as f64;
+    let mut rgba = Vec::with_capacity(n * 4);
+    for p in &acc {
+        let alpha = p[3] / samples;
+        if p[3] > 0.0 {
+            for c in &p[..3] {
+                rgba.push((c / p[3]).round().clamp(0.0, 255.0) as u8);
+            }
+        } else {
+            rgba.extend_from_slice(&[0, 0, 0]);
+        }
+        rgba.push((alpha * 255.0).round().clamp(0.0, 255.0) as u8);
+    }
+    Ok(Image {
+        width: options.width,
+        height: options.height,
+        rgba,
+    })
 }
 
 pub fn render(model: &Model, scene: &Scene, options: &Options) -> Result<Image> {

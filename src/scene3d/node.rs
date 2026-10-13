@@ -333,7 +333,22 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
     let cam = cam.unwrap_or(&empty);
     let azimuth = optional(cam, "azimuth", 30.0, -360.0, 360.0)?;
     let elevation = optional(cam, "elevation", 15.0, -89.0, 89.0)?;
-    let fov = optional(cam, "fov", 35.0, 1.0, 170.0)?;
+    let mut fov = optional(cam, "fov", 35.0, 1.0, 170.0)?;
+    let physical = node.get("physical_camera").and_then(Value::as_object);
+    if let Some(p) = physical {
+        let lens = physical_lens(p)?;
+        let from_lens = lens.vertical_fov_deg;
+        if cam.contains_key("fov") {
+            ensure!(
+                (from_lens - fov).abs() <= 0.01,
+                "[invalid-input] camera fov {fov} and physical_camera ({} mm on a {} mm sensor = {:.3} degrees) disagree; set one or make them match",
+                lens.focal_length_mm,
+                lens.sensor_height_mm,
+                from_lens
+            );
+        }
+        fov = from_lens;
+    }
     let orthographic = match cam.get("projection").and_then(Value::as_str) {
         None | Some("perspective") => false,
         Some("orthographic") => true,
@@ -341,6 +356,10 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
             bail!("[invalid-input] camera projection `{other}` must be perspective or orthographic")
         }
     };
+    ensure!(
+        !(orthographic && physical.is_some()),
+        "[invalid-input] physical_camera applies to perspective cameras only"
+    );
     let mut camera = render::frame_camera(framing, azimuth, elevation, fov);
     if orthographic {
         let (min, max) = framing.bounds().unwrap_or(([-1.0; 3], [1.0; 3]));
@@ -431,7 +450,12 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
             lights,
             environment,
             background,
-            exposure_ev: optional(node, "exposure_ev", 0.0, -16.0, 16.0)?,
+            exposure_ev: (optional(node, "exposure_ev", 0.0, -16.0, 16.0)?
+                + match physical {
+                    Some(p) => optional(p, "exposure_ev", 0.0, -16.0, 16.0)?,
+                    None => 0.0,
+                })
+            .clamp(-16.0, 16.0),
         },
         Options {
             width: px(width),
@@ -439,6 +463,98 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
             supersample: supersample as u32,
         },
     ))
+}
+
+struct PhysicalLens {
+    focal_length_mm: f64,
+    sensor_height_mm: f64,
+    vertical_fov_deg: f64,
+}
+
+/// Parse and validate the `physical_camera` object.
+fn physical_lens(p: &Map<String, Value>) -> Result<PhysicalLens> {
+    for key in p.keys() {
+        ensure!(
+            matches!(
+                key.as_str(),
+                "focal_length_mm"
+                    | "sensor_mm"
+                    | "aperture_f"
+                    | "focus_distance"
+                    | "exposure_ev"
+                    | "samples"
+            ),
+            "[invalid-input] unknown physical_camera field `{key}`"
+        );
+    }
+    let focal = number(p, "focal_length_mm")
+        .context("[invalid-input] physical_camera needs `focal_length_mm`")?;
+    ensure!(
+        (1.0..=2000.0).contains(&focal),
+        "[invalid-input] focal_length_mm must be 1..=2000"
+    );
+    let sensor = match p.get("sensor_mm") {
+        None => [36.0, 24.0],
+        Some(v) => {
+            let a = v
+                .as_array()
+                .filter(|a| a.len() == 2)
+                .context("[invalid-input] sensor_mm must be [width, height]")?;
+            let mut out = [0.0; 2];
+            for (slot, x) in out.iter_mut().zip(a) {
+                *slot = x
+                    .as_f64()
+                    .filter(|x| x.is_finite() && *x > 0.0 && *x <= 1000.0)
+                    .context("[invalid-input] sensor_mm values must be in (0, 1000]")?;
+            }
+            out
+        }
+    };
+    let fov = 2.0 * math::atan(sensor[1] / (2.0 * focal)) * 180.0 / math::PI;
+    ensure!(
+        (1.0..=170.0).contains(&fov),
+        "[invalid-input] {focal} mm on a {} mm sensor gives a {fov:.2} degree field of view; it must be 1..=170",
+        sensor[1]
+    );
+    if let Some(v) = p.get("aperture_f") {
+        let f = v
+            .as_f64()
+            .filter(|f| f.is_finite() && (0.5..=64.0).contains(f));
+        ensure!(f.is_some(), "[invalid-input] aperture_f must be 0.5..=64");
+    }
+    if p.contains_key("focus_distance") {
+        optional(p, "focus_distance", 1.0, 1e-6, 1e9)?;
+    }
+    if p.contains_key("samples") {
+        let s = optional(p, "samples", 16.0, 1.0, render::MAX_LENS_SAMPLES as f64)?;
+        ensure!(
+            s.fract() == 0.0,
+            "[invalid-input] physical_camera `samples` must be an integer"
+        );
+    }
+    Ok(PhysicalLens {
+        focal_length_mm: focal,
+        sensor_height_mm: sensor[1],
+        vertical_fov_deg: fov,
+    })
+}
+
+/// Depth-of-field lens for a node, or `None` when `aperture_f` is unset.
+/// World units are meters: the aperture diameter is `focal_length / f-number`.
+pub fn lens_for(node: &Map<String, Value>, scene: &Scene) -> Result<Option<render::Lens>> {
+    let Some(p) = node.get("physical_camera").and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    let lens = physical_lens(p)?;
+    let Some(f) = p.get("aperture_f").and_then(Value::as_f64) else {
+        return Ok(None);
+    };
+    let default_focus = math::length(math::sub(scene.camera.target, scene.camera.eye));
+    Ok(Some(render::Lens {
+        aperture_radius: lens.focal_length_mm / f / 2.0 / 1000.0,
+        focus_distance: optional(p, "focus_distance", default_focus, 1e-6, 1e9)?,
+        samples: optional(p, "samples", 16.0, 1.0, render::MAX_LENS_SAMPLES as f64)? as u32,
+    }))
 }
 
 type ModelCache = Mutex<Vec<(String, Arc<Model>)>>;
@@ -575,6 +691,7 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
             "height",
             "pixel_ratio",
             "camera",
+            "physical_camera",
             "lights",
             "environment",
             "background",
@@ -595,7 +712,8 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
     }
     let model = load_model(raw, document_dir, digest)?;
     let (scene, options) = scene_for(node, Some(&model))?;
-    let image = render::render(&model, &scene, &options)?;
+    let lens = lens_for(node, &scene)?;
+    let image = render::render_with_lens(&model, &scene, &options, lens.as_ref())?;
     let buffer = image::RgbaImage::from_raw(image.width, image.height, image.rgba)
         .context("renderer produced a malformed image")?;
     let mut out = std::io::Cursor::new(Vec::new());
