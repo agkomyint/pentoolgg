@@ -43,6 +43,9 @@ This is a minor release: it adds format data, commands and editor features.
  "model": "sha256:…",
  "camera": {"kind": "perspective", "fov_deg": 35, "position": [0, 1, 4],
             "target": [0, 0.5, 0]},
+ "physical_camera": {"focal_length_mm": 50, "sensor_mm": [36, 24],
+                     "aperture_f": 4.0, "focus_distance": 4.0,
+                     "exposure_ev": 0.0},
  "lights": [{"kind": "directional", "direction": [-1, -2, -1], "intensity": 3}],
  "environment": {"kind": "color", "value": "#ffffffff"},
  "quality": {"samples": 4, "shadows": true}}
@@ -53,6 +56,21 @@ This is a minor release: it adds format data, commands and editor features.
   metallic-roughness, occlusion and emissive textures.
 - Lights: directional, point, spot and a bounded image-based environment.
 - Cameras: perspective and orthographic, with explicit units and handedness.
+- Physical camera (optional, perspective only): focal length and sensor size
+  derive the field of view, so a photographer's lens choice is the input rather
+  than a bare angle; `aperture_f` and `focus_distance` give depth of field;
+  `exposure_ev` scales scene light before tone mapping. Depth of field is a
+  bounded, fixed-pattern multi-sample approximation (no ray tracing), is
+  deterministic like the rest of the CPU path, and is off unless `aperture_f`
+  is set. `fov_deg` and `physical_camera` are two spellings of one lens; setting
+  both inconsistently is a validation error.
+- A raster image (a photograph from the document) may be the environment
+  backdrop and the source of image-based lighting, within the existing bounded
+  environment policy.
+- UVs are first-class data: each mesh primitive reports its UV sets, island
+  count, bounds and overlap/out-of-range coverage. Imported UVs are preserved
+  unchanged; Pentool generates UVs only by explicit, deterministic projection
+  (below), never by silent rewrite.
 - Transparency uses documented sorting; unsupported glTF extensions are listed in
   the import report instead of being dropped silently.
 
@@ -76,6 +94,20 @@ This is a minor release: it adds format data, commands and editor features.
 - [ ] **6. Agent commands:** place, move, orbit, frame-to-fit, light and material
   edits, and a compact `scene3d inspect` listing nodes, meshes, materials and
   bounds with stable IDs and pagination.
+- [ ] **6a. UV mapping CLI:** `scene3d uv` inspects UV sets and islands with
+  stable IDs and pagination, reports stretch, overlap and out-of-range texels,
+  adds or replaces a UV set by explicit projection (planar, box, cylindrical,
+  spherical) with documented axes and units, applies a 2D transform (offset,
+  scale, rotate) to a set, and exports the UV layout as PNG or SVG so artwork
+  can be drawn against it. All edits go through the shared planner (dry run
+  matches commit) and never change the source model: UV edits are an
+  overlay record on the `scene3d` node keyed by model digest and mesh ID.
+- [ ] **6b. Physical camera and photographic render:** implement the optional
+  `physical_camera` of the Model section (focal length and sensor to field of
+  view, deterministic depth of field, exposure), `scene3d camera` flags for it,
+  and a framing helper that fits a model to a chosen focal length. Golden
+  tests cover the same scene at 24, 50 and 85 mm and with depth of field on
+  and off.
 - [ ] **7. Optional `wgpu` accelerator** behind the `gpu` feature with automatic
   fallback, a parity test against the CPU reference, and a recorded size delta.
 - [ ] **8. Editor:** orbit/pan/zoom, light and material panels, import dialog,
@@ -91,7 +123,11 @@ This is a minor release: it adds format data, commands and editor features.
 ```sh
 pentool scene3d add DOC model.glb --layer art --width 800 --height 600
 pentool scene3d camera DOC hero --fov 35 --position 0,1,4 --target 0,0.5,0
+pentool scene3d camera DOC hero --focal-length 50 --sensor 36x24 --aperture 4 --focus-distance 4
 pentool scene3d light DOC hero add --kind directional --direction -1,-2,-1
+pentool scene3d uv DOC hero show --limit 50
+pentool scene3d uv DOC hero project --mesh body --kind box --set uv1
+pentool scene3d uv DOC hero layout --mesh body --out body-uv.svg
 pentool scene3d inspect DOC hero --limit 50
 pentool export DOC out.png --renderer reference   # or accelerated
 ```
@@ -102,11 +138,18 @@ pentool export DOC out.png --renderer reference   # or accelerated
   byte-identically on Linux, Windows and Apple Silicon macOS.
 - A GPU render of the same scenes stays within the documented tolerance.
 - A 100k-triangle model renders within a recorded time budget on the CPU path.
+- `scene3d uv` reports the UV islands of the textured-cube fixture, a box
+  projection of the reference sphere is reproducible byte for byte on every
+  target, and the exported UV layout rasterizes identically on every target.
+- The same scene at 24, 50 and 85 mm focal length changes only perspective, and
+  depth of field never changes pixels at the focus distance.
 - Every hostile model is refused with a named error and no mutation.
 
 ## Explicitly deferred
 
-- Modeling, sculpting, UV unwrapping, rigging and physics.
+- Modeling, sculpting, automatic UV unwrapping of arbitrary meshes (seam
+  detection and island packing), rigging and physics. Explicit projections and
+  UV inspection in task 6a are in scope.
 - Ray tracing and global illumination.
 - Animation (out of scope for Pentool) and print-accurate color of 3D output beyond the existing
   v0.12.0 policy.

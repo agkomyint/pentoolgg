@@ -43,7 +43,9 @@ print and packaging.
 - [ ] **5a. One data model, two synced views.** The dieline is the source of
   truth; panel ID ↔ 3D face ↔ dieline region is a single mapping in the `.pen`.
   Each panel's UVs are its rectangle on the dieline, so the artwork is one flat
-  texture the folded model samples. Picking is exact: the 3D viewport renders an
+  texture the folded model samples. UV inspection and UV-layout
+  export use the `scene3d uv` commands from v0.15.0 task 6a; dielines and presets
+  generate their UVs through that same overlay record rather than a private path. Picking is exact: the 3D viewport renders an
   ID buffer, so clicking a face selects and highlights the matching 2D panel and
   selecting a 2D panel highlights its face. Edits in either view update the
   other. Dielines are parametric (L × W × H, board thickness) and carry bleed,
