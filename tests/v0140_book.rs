@@ -576,10 +576,10 @@ fn export_writes_one_deterministic_multi_page_pdf() {
     assert_eq!(bytes, ws.bytes("book2.pdf"));
     pentool::color::pdfx::verify_structure(&bytes).unwrap();
     assert!(bytes.windows(b"/Count 2".len()).any(|w| w == b"/Count 2"));
-    // Existing output requires --overwrite; EPUB is a documented gap.
+    // Existing output requires --overwrite; EPUB export needs version 9 members.
     assert!(fails(&a.iter().map(String::as_str).collect::<Vec<_>>()).contains("--overwrite"));
     let epub = fails(&["book", &book, "export", &ws.s("b.epub"), "--format", "epub"]);
-    assert!(epub.contains("EPUB"), "{epub}");
+    assert!(epub.contains("version 9"), "{epub}");
     assert!(!Path::new(&ws.s("b.epub")).exists());
     // Missing members abort the export instead of skipping.
     std::fs::remove_file(ws.p("b.pen")).unwrap();
