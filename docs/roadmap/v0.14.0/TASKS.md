@@ -441,6 +441,11 @@ and documentation.
     rollback, including for books; and crash recovery.
   - Benchmarks for composing and exporting a 500-page book, recorded in
     `docs/performance.md`.
+
+  Progress (partial, checkbox left open): the 500-page compose and export
+  benchmark is recorded in `docs/performance.md`. Golden composition on all
+  four targets, fuzzing, cancellation at every stage, crash-recovery coverage
+  and the release smoke test are not done.
   - Release smoke tests that import IDML, compose, and export PDF, EPUB and IDML.
 
 ## CLI direction

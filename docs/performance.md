@@ -235,3 +235,23 @@ Binary SHA-256 before:
 `2edf2cfdc39af6954381542f98df417dedc4c74059a56c1f3cc5d1fecdba5aa0`;
 after:
 `6624e3e04c073919cd5cfbee480366ebf98565653354f1626d15a4b48f076c73`.
+
+## Long-document layout (0.14)
+
+500 one-page spreads, one two-column text frame per page (540x720 pt), a single
+threaded story of 3,500 paragraphs, `h1`/`body` styles. Release build, Windows 11,
+one run each, wall time of the CLI process including load and write:
+
+| Operation | 125 pages | 500 pages |
+| --- | --- | --- |
+| `layout-preflight` (compose and measure) | 0.23 s | 0.64 s |
+| `layout-export` EPUB | 0.19 s | 0.58 s |
+| `idml-export` | 0.04 s | 0.08 s |
+| `layout-export` tagged PDF | 6.7 s | 28.8 s (7 MB) |
+
+Composition and the structured exports scale linearly and stay under a second.
+The tagged PDF dominates because each page is rasterized as a background image
+beneath the real text; it was 43 s before page rasters stopped round-tripping
+through PNG. Skipping rasterization of pages with no non-text content is the
+next candidate. Reproduce with a generated document of this shape; the numbers
+are one-machine measurements, not a guarantee.

@@ -458,9 +458,8 @@ pub fn export_pdf(
     for (index, page) in pages.iter().enumerate() {
         let (width, height) = page_dims(page);
         let id = page["id"].as_str().unwrap_or_default();
-        let png = crate::composite::png(&stripped, document, Some(id), options.scale)
+        let rgba = crate::composite::render(&stripped, document, Some(id), options.scale)
             .with_context(|| format!("[render-failed] page {id}"))?;
-        let rgba = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?.into_rgba8();
         let (iw, ih) = rgba.dimensions();
         let mut rgb = Vec::with_capacity(iw as usize * ih as usize * 3);
         for pixel in rgba.pixels() {
