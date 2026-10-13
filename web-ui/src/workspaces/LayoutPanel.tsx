@@ -7,6 +7,9 @@ import { FrameSection } from "./layout/FrameSection";
 import { PagesSection } from "./layout/PagesSection";
 import { StoriesSection } from "./layout/StoriesSection";
 import { StylesSection } from "./layout/StylesSection";
+import { TablesSection } from "./layout/TablesSection";
+import { WrapSection } from "./layout/WrapSection";
+import { LongDocSection } from "./layout/LongDocSection";
 import { ViewSection } from "./layout/ViewSection";
 import { useLayout } from "./layout/layoutStore";
 
@@ -40,6 +43,9 @@ export function LayoutPanel() {
       <PagesSection />
       <StoriesSection />
       <FrameSection />
+      <WrapSection />
+      <TablesSection />
+      <LongDocSection />
       <StylesSection />
       <ViewSection />
       <CheckSection />

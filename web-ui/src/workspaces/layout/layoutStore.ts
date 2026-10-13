@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { layoutOps, type LayoutOp, type LayoutOverview } from "@/lib/api";
 import { useStudio } from "@/store";
 
-export type Overlays = { frames: boolean; threads: boolean; overset: boolean; margins: boolean };
+export type Overlays = { frames: boolean; threads: boolean; overset: boolean; margins: boolean; baseline: boolean; hidden: boolean };
 
 type LayoutState = {
   overview: LayoutOverview | null;
@@ -21,6 +21,11 @@ type LayoutState = {
   setOverlay: (key: keyof Overlays, on: boolean) => void;
   setThreadFrom: (id: string | null) => void;
   setIndesignKeys: (on: boolean) => void;
+  /** Text waiting to be dropped by the next canvas click (loaded cursor). */
+  loaded: { name: string; text: string } | null;
+  setLoaded: (loaded: { name: string; text: string } | null) => void;
+  /** Create a story from the loaded text and a frame at the page point. */
+  placeLoaded: (at: { x: number; y: number }) => Promise<string | null>;
   refresh: () => Promise<void>;
   /** Run one planner op on the open document; returns the planner report. */
   run: <T = Record<string, unknown>>(op: LayoutOp, label: string) => Promise<T | null>;
@@ -46,7 +51,7 @@ export const useLayout = create<LayoutState>((set, get) => ({
   overview: null,
   loading: false,
   error: null,
-  overlays: stored<Overlays>("overlays", { frames: true, threads: true, overset: true, margins: false }),
+  overlays: { frames: true, threads: true, overset: true, margins: false, baseline: false, hidden: false, ...stored<Partial<Overlays>>("overlays", {}) },
   threadFrom: null,
   indesignKeys: stored("indesign-keys", false),
   setOverlay(key, on) {
@@ -55,6 +60,31 @@ export const useLayout = create<LayoutState>((set, get) => ({
     set({ overlays });
   },
   setThreadFrom: (threadFrom) => set({ threadFrom }),
+  loaded: null,
+  setLoaded: (loaded) => set({ loaded }),
+  async placeLoaded(at) {
+    const { loaded, run } = get();
+    const studio = useStudio.getState();
+    if (!loaded || !studio.doc) return null;
+    const stories = new Set(((studio.doc.layout as { stories?: { id: string }[] } | undefined)?.stories ?? []).map((s) => s.id));
+    const base = loaded.name.replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "story";
+    let story = base;
+    for (let i = 2; stories.has(story); i += 1) story = `${base}-${i}`;
+    set({ loaded: null });
+    if (!(await run({ type: "story", action: { type: "add", id: story, text: loaded.text } }, "Place text"))) return null;
+    const frame = `${story}-frame`;
+    const page = studio.doc.pages.find((p) => p.id === studio.pageId);
+    const w = page?.canvas?.width ?? 612;
+    const h = page?.canvas?.height ?? 792;
+    const width = Math.min(300, Math.max(60, w - at.x));
+    const height = Math.min(360, Math.max(60, h - at.y));
+    const ok = await run(
+      { type: "frame", action: { type: "add", id: frame, story, page: studio.pageId, layer: studio.layerId, x: at.x, y: at.y, width, height } },
+      "Add text frame",
+    );
+    if (ok) useStudio.getState().select(frame);
+    return ok ? frame : null;
+  },
   setIndesignKeys(on) {
     remember("indesign-keys", on);
     set({ indesignKeys: on });

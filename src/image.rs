@@ -412,11 +412,13 @@ pub(crate) fn fragment_svg(
     parent: kurbo::Affine,
 ) -> Result<SceneSvg> {
     let width = page["canvas"]["width"]
-        .as_u64()
-        .context("canvas width missing")? as u32;
+        .as_f64()
+        .context("canvas width missing")?
+        .round() as u32;
     let height = page["canvas"]["height"]
-        .as_u64()
-        .context("canvas height missing")? as u32;
+        .as_f64()
+        .context("canvas height missing")?
+        .round() as u32;
     let context = SvgContext {
         document,
         root: crate::resource::document_root(document),

@@ -37,9 +37,10 @@ async fn core_wasm() -> Response {
     match CORE_WASM {
         Some(bytes) => {
             let mut response = Body::from(bytes).into_response();
-            response
-                .headers_mut()
-                .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/wasm"));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/wasm"),
+            );
             response
                 .headers_mut()
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
@@ -783,8 +784,8 @@ fn raster_apply(body: RasterRequest) -> Result<serde_json::Value> {
                     Some(wanted) => pages.iter().find(|p| p["id"] == wanted),
                     None => pages.first(),
                 })
-                .and_then(|page| page["canvas"][side].as_u64())
-                .unwrap_or(1200) as u32
+                .and_then(|page| page["canvas"][side].as_f64())
+                .map_or(1200, |v| v.round() as u32)
         };
         let arg = |name: &str, fallback: u32| -> u32 {
             body.args
@@ -2476,6 +2477,21 @@ enum LayoutOp {
         spread: String,
         facing: bool,
     },
+    Table {
+        action: crate::tables::TableAction,
+    },
+    Wrap {
+        action: crate::wrap::WrapAction,
+    },
+    Style {
+        action: crate::styles::StyleAction,
+    },
+    Grid {
+        action: crate::grids::GridAction,
+    },
+    Doc {
+        action: crate::longdoc::DocAction,
+    },
 }
 
 /// `POST /api/layout`: `{document, op}` -> `{document, result}`. Read-only ops
@@ -2546,7 +2562,20 @@ async fn layout_command(State(state): State<Shared>, Json(body): Json<LayoutRequ
             LayoutOp::SpreadFacing { spread, facing } => {
                 crate::spreads::spread_set_facing(&mut raw, &spread, facing)?
             }
+            LayoutOp::Table { action } => crate::tables::run(&mut raw, action)?.0,
+            LayoutOp::Wrap { action } => crate::wrap::run(&mut raw, action)?.0,
+            LayoutOp::Style { action } => crate::styles::run_style(&mut raw, action)?.0,
+            LayoutOp::Grid { action } => crate::grids::run(&mut raw, action)?.0,
+            LayoutOp::Doc { action } => {
+                let ctx = crate::longdoc::Context {
+                    file_name: base
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned()),
+                };
+                crate::longdoc::run(&mut raw, action, &ctx)?.0
+            }
         };
+        crate::transaction::validate_value(&raw)?;
         Ok(serde_json::json!({"document": raw, "result": result}))
     })();
     match result {

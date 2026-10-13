@@ -424,11 +424,15 @@ and documentation.
   overset markers, margins and columns, a preflight panel with clickable issues,
   tagged PDF and EPUB downloads, and an opt-in InDesign key set (V, T,
   Page Up/Down, Ctrl+Shift+P). Every edit goes through `POST /api/layout`, so
-  the planners are the Rust ones and each op is one undo step. Not built yet:
-  table editing, anchored-object handles, TOC/index/cross-reference
-  interfaces, loaded-cursor placement, the text-wrap UI, object/table/cell
-  style panels, hidden-characters and baseline-grid overlays, and incremental
-  recomposition.
+  the planners are the Rust ones and each op is one undo step. Also built:
+  table editing (create, cell grid, rows/columns, merge/split, header rows,
+  place), text-wrap and anchored-object controls, TOC/index/cross-reference and
+  links panels with stale flags, style panels for all five kinds with property
+  editing, baseline-grid, guide and hidden-character overlays, and
+  loaded-cursor placement of text files (click the canvas to place). Not built:
+  loaded-cursor placement of images, on-canvas anchor handles, and incremental
+  recomposition (every edit recomposes the whole document, 616 ms for 500
+  pages cold and about 20 ms when cached, so typing is not yet per-range).
 
   Pentool's visual design remains its own. Typing and editing stay responsive
   on a 300-page document: Rust recomposes only the affected story range, and
@@ -443,9 +447,12 @@ and documentation.
     `docs/performance.md`.
 
   Progress (partial, checkbox left open): the 500-page compose and export
-  benchmark is recorded in `docs/performance.md`. Golden composition on all
-  four targets, fuzzing, cancellation at every stage, crash-recovery coverage
-  and the release smoke test are not done.
+  benchmark is recorded in `docs/performance.md`. `scripts/layout-smoke.py`
+  imports IDML, preflights, exports PDF and EPUB, exports IDML and re-imports
+  it; it runs in the release workflow. It found and fixed a real bug: pages
+  with float canvas sizes (as IDML import writes them) failed to render.
+  Golden composition on all four targets, fuzzing, cancellation at every stage
+  and crash-recovery coverage are not done.
   - Release smoke tests that import IDML, compose, and export PDF, EPUB and IDML.
 
 ## CLI direction

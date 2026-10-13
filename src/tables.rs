@@ -22,6 +22,14 @@ const ALIGNS: &[&str] = &["left", "center", "right", "justify"];
 const VALIGNS: &[&str] = &["top", "center", "bottom"];
 const ROTATIONS: &[u64] = &[0, 90, 180, 270];
 
+fn default_one() -> usize {
+    1
+}
+
+fn default_width() -> f64 {
+    72.0
+}
+
 fn default_limit() -> usize {
     100
 }
@@ -38,7 +46,7 @@ pub enum TableAction {
         columns: usize,
         /// Width of every column in points.
         #[arg(long, default_value_t = 72.0)]
-        #[serde(default)]
+        #[serde(default = "default_width")]
         column_width: f64,
         /// Fixed height of every row (omit for text-driven rows).
         #[arg(long)]
@@ -158,7 +166,7 @@ pub enum TableAction {
         #[arg(long)]
         at: usize,
         #[arg(long, default_value_t = 1)]
-        #[serde(default)]
+        #[serde(default = "default_one")]
         count: usize,
     },
     /// Remove a row; content is never dropped silently.
@@ -176,10 +184,10 @@ pub enum TableAction {
         #[arg(long)]
         at: usize,
         #[arg(long, default_value_t = 1)]
-        #[serde(default)]
+        #[serde(default = "default_one")]
         count: usize,
         #[arg(long, default_value_t = 72.0)]
-        #[serde(default)]
+        #[serde(default = "default_width")]
         width: f64,
     },
     /// Remove a column; content is never dropped silently.
@@ -209,7 +217,7 @@ pub enum TableAction {
         #[serde(default = "newline")]
         row_separator: String,
         #[arg(long, default_value_t = 72.0)]
-        #[serde(default)]
+        #[serde(default = "default_width")]
         column_width: f64,
     },
     /// Convert a table back to text paragraphs in its story.
@@ -230,7 +238,7 @@ pub enum TableAction {
         #[serde(default)]
         header_rows: usize,
         #[arg(long, default_value_t = 72.0)]
-        #[serde(default)]
+        #[serde(default = "default_width")]
         column_width: f64,
     },
     /// Estimate row heights and how the table breaks across frames.

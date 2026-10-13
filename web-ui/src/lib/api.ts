@@ -180,7 +180,8 @@ export type LayoutOp =
   | { type: "page-move"; id: string; index: number }
   | { type: "page-rename"; id: string; name: string }
   | { type: "page-parent"; page: string; parent: string | null }
-  | { type: "spread-facing"; spread: string; facing: boolean };
+  | { type: "spread-facing"; spread: string; facing: boolean }
+  | { type: "table" | "wrap" | "style" | "grid" | "doc"; action: Record<string, unknown> };
 
 export const layoutOps = {
   run: <T = unknown>(document: Doc, op: LayoutOp) =>

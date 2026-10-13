@@ -24,6 +24,11 @@ export function LayoutOverlay({ px }: { px: number }) {
   const margins = own.margins ?? defaults.margins;
   const columns = own.columns ?? defaults.columns ?? 1;
   const gutter = own.gutter ?? defaults.gutter ?? 12;
+  const grid = (layout as { baseline_grid?: { increment: number; start?: number; relative_to?: string } }).baseline_grid;
+  const gridStart = (grid?.start ?? 0) + (grid?.relative_to === "margin" ? (margins?.[0] ?? 0) : 0);
+  const guides = ((layout as { guides?: { orientation?: string; position?: number; page?: string }[] }).guides ?? [])
+    .filter((g) => typeof g.position === "number" && (!g.page || g.page === page.id))
+    .map((g) => ({ orientation: g.orientation === "v" ? "v" : "h", position: g.position as number }));
   const spread = (layout.spreads ?? []).find((s) => s.pages.includes(page.id));
   const mirrored = !!spread?.facing && spread.pages.length > 1;
   const left = margins && mirrored ? (spread!.pages[0] === page.id ? margins[3]! : margins[1]!) : margins?.[1];
@@ -47,6 +52,25 @@ export function LayoutOverlay({ px }: { px: number }) {
           })}
         </g>
       )}
+      {overlays.baseline && grid && (
+        <g stroke="#06b6d4" strokeWidth={px * 0.5} opacity={0.55}>
+          {Array.from({ length: Math.min(2000, Math.floor((canvas.height - gridStart) / grid.increment) + 1) }, (_, i) => (
+            <line key={i} x1={0} x2={canvas.width} y1={gridStart + i * grid.increment} y2={gridStart + i * grid.increment} />
+          ))}
+        </g>
+      )}
+      {overlays.margins &&
+        guides.map((g, i) => (
+          <line
+            key={`g-${i}`}
+            stroke="#06b6d4"
+            strokeWidth={px}
+            x1={g.orientation === "v" ? g.position : 0}
+            x2={g.orientation === "v" ? g.position : canvas.width}
+            y1={g.orientation === "v" ? 0 : g.position}
+            y2={g.orientation === "v" ? canvas.height : g.position}
+          />
+        ))}
       {overlays.frames &&
         frames.map((f) => (
           <rect

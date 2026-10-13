@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link2, Link2Off, Plus, Trash2, WrapText } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileText, Link2, Link2Off, Plus, Trash2, WrapText } from "lucide-react";
 import { useStudio } from "@/store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ function ParagraphRow({
   styles: string[];
 }) {
   const edit = useStudio((s) => s.edit);
+  const hidden = useLayout((s) => s.overlays.hidden);
   const plain = isPlainParagraph(paragraph);
   const [text, setText] = useState(paragraphText(paragraph));
   useEffect(() => setText(paragraphText(paragraph)), [paragraph]);
@@ -110,14 +111,24 @@ function ParagraphRow({
           <Badge>{paragraph.runs.length} runs, read-only</Badge>
         </p>
       )}
+      {hidden && (
+        <p aria-label="Hidden characters" className="px-0.5 font-mono text-[10.5px] text-primary/70 break-all">
+          {visibleChars(text)}
+        </p>
+      )}
     </div>
   );
 }
+
+const visibleChars = (text: string) =>
+  text.replace(/ /g, "·").replace(/\t/g, "→").replace(/ /g, "°").replace(/\n/g, "↵") + "¶";
 
 export function StoriesSection() {
   const { doc, pageId, layerId, selectedId, select } = useStudio();
   const { overview, error, run, threadFrom, setThreadFrom } = useLayout();
   const [open, setOpen] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const { loaded, setLoaded } = useLayout();
   const stories = layoutOf(doc).stories ?? [];
   const styles = useMemo(() => Object.keys(layoutOf(doc).styles?.paragraph ?? {}), [doc]);
   const rows = new Map((overview?.stories ?? []).map((s) => [s.id, s]));
@@ -160,13 +171,39 @@ export function StoriesSection() {
       id="layout-stories"
       title={`Stories (${stories.length})`}
       actions={
+        <>
+        <Tip label="Load a text file, then click the page to place it">
+          <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="Place text file" onClick={() => fileInput.current?.click()}>
+            <FileText size={13} />
+          </Button>
+        </Tip>
         <Tip label="New story with a text frame on this page">
           <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="New story" onClick={addStory}>
             <Plus size={13} />
           </Button>
         </Tip>
+        </>
       }
     >
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".txt,.md,text/plain,text/markdown"
+        hidden
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file && file.size <= 2_000_000) setLoaded({ name: file.name, text: await file.text() });
+        }}
+      />
+      {loaded && (
+        <p className="flex items-center gap-1.5 rounded border border-primary/50 px-2 py-1 text-[11px] text-primary">
+          <span className="min-w-0 flex-1 truncate">Loaded “{loaded.name}” — click the page to place it.</span>
+          <button className="underline" onClick={() => setLoaded(null)}>
+            Cancel
+          </button>
+        </p>
+      )}
       {error && <p className="rounded border border-destructive/50 px-2 py-1 text-[11px] text-destructive">{error}</p>}
       {stories.length === 0 && <Empty>No stories yet. Use + to add a story with a frame.</Empty>}
       <ul className="space-y-1">

@@ -2272,11 +2272,13 @@ pub fn mask_coverage(
         .context("mask missing")?;
     let (width, height) = (
         page["canvas"]["width"]
-            .as_u64()
-            .context("canvas width missing")?,
+            .as_f64()
+            .context("canvas width missing")?
+            .round() as u64,
         page["canvas"]["height"]
-            .as_u64()
-            .context("canvas height missing")?,
+            .as_f64()
+            .context("canvas height missing")?
+            .round() as u64,
     );
     let mut renderer = Renderer {
         raw,
@@ -2419,11 +2421,13 @@ fn render_scene(
         None => &pages[0],
     };
     let width = page["canvas"]["width"]
-        .as_u64()
-        .context("canvas width missing")?;
+        .as_f64()
+        .context("canvas width missing")?
+        .round() as u64;
     let height = page["canvas"]["height"]
-        .as_u64()
-        .context("canvas height missing")?;
+        .as_f64()
+        .context("canvas height missing")?
+        .round() as u64;
     if width == 0 || height == 0 || width > 16384 || height > 16384 {
         bail!("canvas dimensions must be in 1..=16384")
     }

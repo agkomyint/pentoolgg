@@ -5,6 +5,7 @@ import { dragLayers } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import { LayoutOverlay } from "@/workspaces/layout/LayoutOverlay";
+import { useLayout } from "@/workspaces/layout/layoutStore";
 import {
   addObject,
   addImage,
@@ -206,6 +207,10 @@ export function Canvas() {
     }
     if (e.button !== 0) return;
     const p = toPage(e);
+    if (useStudio.getState().workspaceId === "layout" && useLayout.getState().loaded) {
+      void useLayout.getState().placeLoaded(p);
+      return;
+    }
     const target = e.target as SVGElement;
     svg.current!.setPointerCapture(e.pointerId);
     if (tool === "select") {

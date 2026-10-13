@@ -18,6 +18,12 @@ export function ViewSection() {
       <Check checked={overlays.margins} onChange={(v) => setOverlay("margins", v)}>
         Margins and columns
       </Check>
+      <Check checked={overlays.baseline} onChange={(v) => setOverlay("baseline", v)}>
+        Baseline grid and guides
+      </Check>
+      <Check checked={overlays.hidden} onChange={(v) => setOverlay("hidden", v)}>
+        Hidden characters (story editor)
+      </Check>
       <Check checked={indesignKeys} onChange={setIndesignKeys}>
         InDesign-style keys
       </Check>
