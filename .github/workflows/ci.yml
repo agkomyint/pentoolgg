@@ -7,6 +7,7 @@ on:
   pull_request:
 jobs:
   test:
+    timeout-minutes: 30
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -27,6 +28,7 @@ jobs:
           path: target/render-diffs
           if-no-files-found: ignore
   policy:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,10 +42,22 @@ jobs:
         with:
           command: check advisories
   binary-size:
+    # Builds the exact binaries the release workflow ships (same runners), checks
+    # the size budget, and hands them to the release so it does not rebuild.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            name: x86_64-unknown-linux-gnu
+            binary: pentool
+          - os: macos-15
+            name: aarch64-apple-darwin
+            binary: pentool
+          - os: windows-latest
+            name: x86_64-pc-windows-msvc
+            binary: pentool.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -52,17 +66,10 @@ jobs:
       - run: cargo build --release --locked
       - name: Check release binary size on every target (40 MB budget since v0.14.0, embeds the WASM preview core)
         shell: bash
-        run: |
-          bin=target/release/pentool
-          [ -f "$bin.exe" ] && bin="$bin.exe"
-          sh scripts/check-binary-size.sh "$bin" 40000000
-  fuzz-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo install cargo-fuzz --locked
-      - run: |
-          for target in decode_source validate_document operation_stack image_assets processed_record package_verify; do
-            cargo fuzz run "$target" -- -max_total_time=30 -rss_limit_mb=2048
-          done
+        run: sh scripts/check-binary-size.sh target/release/${{ matrix.binary }} 40000000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-binary-${{ matrix.name }}
+          path: target/release/${{ matrix.binary }}
+          retention-days: 14
+          if-no-files-found: error

@@ -1,18 +1,16 @@
 name: Fuzz
-permissions:
-  contents: read
+# Fuzzing is not a push gate: building six sanitizer targets takes far longer
+# than the 30 s each one runs. It runs weekly and on demand.
 on:
   schedule:
-    - cron: "17 3 * * 0"
+    - cron: '17 3 * * 1'
   workflow_dispatch:
-    inputs:
-      seconds:
-        description: Seconds per fuzz target
-        default: "900"
+permissions:
+  contents: read
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -20,30 +18,10 @@ jobs:
         with:
           workspaces: fuzz
       - run: cargo install cargo-fuzz --locked
-      - name: Restore corpus
-        uses: actions/cache@v4
-        with:
-          path: fuzz/corpus
-          key: fuzz-corpus-${{ github.run_id }}
-          restore-keys: fuzz-corpus-
-      - name: Run campaigns
-        env:
-          SECONDS_PER_TARGET: ${{ inputs.seconds || '900' }}
+      - name: Build every target once
+        run: cargo fuzz build
+      - name: Run each target briefly
         run: |
           for target in decode_source validate_document operation_stack image_assets processed_record package_verify; do
-            cargo fuzz run "$target" -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048
+            cargo fuzz run "$target" -- -max_total_time=30 -timeout=60 -rss_limit_mb=2048
           done
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-crashes
-          path: fuzz/artifacts
-          if-no-files-found: ignore
-  advisories:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories

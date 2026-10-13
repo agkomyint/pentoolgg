@@ -10,14 +10,19 @@ jobs:
     # The test suite is not repeated here: the tagged commit must already have a
     # successful run of the CI workflow.
     runs-on: ubuntu-latest
+    outputs:
+      ci_run: ${{ steps.ci.outputs.run }}
     steps:
       - name: Require a passing CI run for this commit
+        id: ci
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           count=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}&status=success" -q '.total_count')
           echo "successful CI runs for ${{ github.sha }}: $count"
           [ "$count" -ge 1 ] || { echo "tag a commit that has passed CI" >&2; exit 1; }
+          run=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}&status=success" -q '.workflow_runs[0].id')
+          echo "run=$run" >> "$GITHUB_OUTPUT"
   build:
     needs: verify-ci
     strategy:
@@ -37,6 +42,9 @@ jobs:
             archive: zip
             binary: pentool.exe
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      BIN: target/${{ matrix.target }}/release/${{ matrix.binary }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,29 +53,48 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Reuse the binary CI built for this exact commit, else build it
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=target/${{ matrix.target }}/release
+          mkdir -p "$out" ci-bin
+          if gh run download "${{ needs.verify-ci.outputs.ci_run }}" -n release-binary-${{ matrix.target }} -D ci-bin              && [ -f "ci-bin/${{ matrix.binary }}" ]; then
+            cp "ci-bin/${{ matrix.binary }}" "$out/${{ matrix.binary }}"
+            chmod +x "$out/${{ matrix.binary }}"
+            echo "reused the CI binary"
+          else
+            echo "CI binary unavailable; building"
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
       - name: Smoke test CLI rendering
-        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/eye.pen smoke.png
+        shell: bash
+        run: $BIN export examples/eye.pen smoke.png
       - name: Smoke test native typography
-        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.png
+        shell: bash
+        run: $BIN export examples/text-demo.pen text-smoke.png
       - name: Smoke test sharp stroke edges
-        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/stroke-edges.pen stroke-smoke.png
+        shell: bash
+        run: $BIN export examples/stroke-edges.pen stroke-smoke.png
       - name: Smoke test agent discovery
-        run: cargo run --release --locked --target ${{ matrix.target }} -- search examples/text-demo.pen subtitle --kind text
+        shell: bash
+        run: $BIN search examples/text-demo.pen subtitle --kind text
       - name: Smoke test v4 tree and search
         shell: bash
         run: |
-          cargo run --release --locked --target ${{ matrix.target }} -- tree docs/fixtures/v4-scene.pen --limit 1
-          cargo run --release --locked --target ${{ matrix.target }} -- search docs/fixtures/v4-scene.pen semantic --kind text
+          "$BIN" tree docs/fixtures/v4-scene.pen --limit 1
+          "$BIN" search docs/fixtures/v4-scene.pen semantic --kind text
       - name: Smoke test v4 creation and basic editing
         shell: bash
         run: |
-          cargo run --release --locked --target ${{ matrix.target }} -- new v4-smoke.pen --width 320 --height 240
-          cargo run --release --locked --target ${{ matrix.target }} -- canvas v4-smoke.pen --width 640
-          cargo run --release --locked --target ${{ matrix.target }} -- path v4-smoke.pen put outline --layer layer-1 --d 'M0 0 L10 10' --stroke '#112233' --width 2
-          cargo run --release --locked --target ${{ matrix.target }} -- tree v4-smoke.pen
+          "$BIN" new v4-smoke.pen --width 320 --height 240
+          "$BIN" canvas v4-smoke.pen --width 640
+          "$BIN" path v4-smoke.pen put outline --layer layer-1 --d 'M0 0 L10 10' --stroke '#112233' --width 2
+          "$BIN" tree v4-smoke.pen
       - name: Smoke test large-document budget
-        run: cargo run --release --locked --target ${{ matrix.target }} -- benchmark --layers 50 --objects 5000 --max-ms 60000
+        shell: bash
+        run: $BIN benchmark --layers 50 --objects 5000 --max-ms 60000
       - name: Record platform baseline
         shell: bash
         run: |
@@ -78,36 +105,37 @@ jobs:
         shell: bash
         run: |
           cp docs/fixtures/v4-scene.pen raster-smoke.pen
-          cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen add p --width 100 --height 60
-          cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen stroke p --samples '[[30,30],[60,40]]' --color '#FF0000'
-          cargo run --release --locked --target ${{ matrix.target }} -- raster raster-smoke.pen verify p --replay
+          "$BIN" raster raster-smoke.pen add p --width 100 --height 60
+          "$BIN" raster raster-smoke.pen stroke p --samples '[[30,30],[60,40]]' --color '#FF0000'
+          "$BIN" raster raster-smoke.pen verify p --replay
       - name: Smoke test photography
         shell: bash
         run: |
           cp docs/fixtures/v4-scene.pen photo-smoke.pen
           cp docs/fixtures/photo-dng-rggb16.dng hero.dng
-          cargo run --release --locked --target ${{ matrix.target }} -- raw add photo-smoke.pen hero --file hero.dng
-          cargo run --release --locked --target ${{ matrix.target }} -- raw develop photo-smoke.pen hero --exposure 0.3
-          cargo run --release --locked --target ${{ matrix.target }} -- photo render photo-smoke.pen hero --out photo-smoke.png
-          cargo run --release --locked --target ${{ matrix.target }} -- photo place photo-smoke.pen hero --layer content --width 120
-          cargo run --release --locked --target ${{ matrix.target }} -- export photo-smoke.pen photo-page.png
-          cargo run --release --locked --target ${{ matrix.target }} -- export photo-smoke.pen photo-page.png
-          cargo run --release --locked --target ${{ matrix.target }} -- photo export photo-smoke.pen --selection hero --recipe web-gallery --out photo-out
-          cargo run --release --locked --target ${{ matrix.target }} -- benchmark --photo --photos 4 --megapixels 0.5 --repetitions 2 --max-ms 60000
+          "$BIN" raw add photo-smoke.pen hero --file hero.dng
+          "$BIN" raw develop photo-smoke.pen hero --exposure 0.3
+          "$BIN" photo render photo-smoke.pen hero --out photo-smoke.png
+          "$BIN" photo place photo-smoke.pen hero --layer content --width 120
+          "$BIN" export photo-smoke.pen photo-page.png
+          "$BIN" export photo-smoke.pen photo-page.png
+          "$BIN" photo export photo-smoke.pen --selection hero --recipe web-gallery --out photo-out
+          "$BIN" benchmark --photo --photos 4 --megapixels 0.5 --repetitions 2 --max-ms 60000
       - name: Smoke test pages and import
         shell: bash
         run: |
           cp examples/logo.pen import-smoke.pen
-          cargo run --release --locked --target ${{ matrix.target }} -- page import-smoke.pen add assets --name Assets --width 800 --height 600
-          cargo run --release --locked --target ${{ matrix.target }} -- --page assets import import-smoke.pen examples/eye.pen --prefix eye --at 40 40
-          cargo run --release --locked --target ${{ matrix.target }} -- --page assets search import-smoke.pen eye --limit 2
+          "$BIN" page import-smoke.pen add assets --name Assets --width 800 --height 600
+          "$BIN" --page assets import import-smoke.pen examples/eye.pen --prefix eye --at 40 40
+          "$BIN" --page assets search import-smoke.pen eye --limit 2
       - name: Smoke test page layout and IDML
         shell: bash
         run: |
           mkdir -p layout-smoke
           python3 scripts/layout-smoke.py target/${{ matrix.target }}/release/${{ matrix.binary }} layout-smoke || python scripts/layout-smoke.py target/${{ matrix.target }}/release/${{ matrix.binary }} layout-smoke
       - name: Smoke test outlined typography
-        run: cargo run --release --locked --target ${{ matrix.target }} -- export examples/text-demo.pen text-smoke.svg --outline-text
+        shell: bash
+        run: $BIN export examples/text-demo.pen text-smoke.svg --outline-text
       - name: Record binary size
         shell: bash
         run: sh scripts/check-binary-size.sh "$(ls target/${{ matrix.target }}/release/pentool target/${{ matrix.target }}/release/pentool.exe 2>/dev/null | head -1)" 40000000

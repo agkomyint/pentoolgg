@@ -280,6 +280,11 @@ binaries and smoke-tests them. Before tagging:
 6. monitor every target through packaging, checksums, and draft-release creation;
 7. publish the draft only after artifact and release-note review.
 
+Fuzzing is not a push gate: `.github/workflows/fuzz.yml` runs weekly and on
+demand. CI's `binary-size` jobs build the exact release binaries and upload them;
+the release workflow reuses those for the tagged commit (falling back to a build),
+so the push-to-published flow is CI plus packaging, not two full LTO builds.
+
 Treat a green local run as necessary but not sufficient for a release. Hosted CI
 uses the current stable Rust toolchain and is the cross-platform authority.
 
