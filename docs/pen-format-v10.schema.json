@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/pen-v10.json",
+  "title": "Pentool document v10 (static 3D)",
+  "description": "v10 envelope: all v9 content plus the scene3d node kind and the top-level models map (docs/scene3d-v1.md). Page and node content is otherwise validated by the v4-v9 schemas and by Rust. Unknown fields are preserved.",
+  "type": "object",
+  "required": ["format", "version", "name", "pages"],
+  "properties": {
+    "format": {"const": "pentool"},
+    "version": {"const": 10},
+    "name": {"type": "string"},
+    "pages": {"type": "array", "minItems": 1, "maxItems": 5000, "items": {"$ref": "#/$defs/page"}},
+    "models": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": {"pattern": "^sha256:[0-9a-f]{64}$"},
+      "additionalProperties": {"$ref": "#/$defs/model"}
+    }
+  },
+  "$defs": {
+    "vec3": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+    "pair": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+    "color": {"type": "string", "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"},
+    "model": {
+      "type": "object",
+      "required": ["format", "storage"],
+      "properties": {
+        "format": {"enum": ["glb", "gltf", "obj"]},
+        "name": {"type": "string"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "storage": {
+          "oneOf": [
+            {"type": "object", "required": ["kind", "data"], "properties": {"kind": {"const": "embedded"}, "data": {"type": "string", "contentEncoding": "base64"}}},
+            {"type": "object", "required": ["kind", "path"], "properties": {"kind": {"const": "external"}, "path": {"type": "string", "minLength": 1}}}
+          ]
+        },
+        "uv": {
+          "type": "object",
+          "description": "UV overlays keyed by primitive index or \"*\"; the source model is never rewritten.",
+          "patternProperties": {
+            "^(\\*|[0-9]+)$": {
+              "type": "object",
+              "required": ["projection"],
+              "additionalProperties": false,
+              "properties": {
+                "projection": {"enum": ["planar", "box", "cylindrical", "spherical"]},
+                "axis": {"enum": ["x", "y", "z"]},
+                "scale": {"$ref": "#/$defs/pair"},
+                "offset": {"$ref": "#/$defs/pair"},
+                "rotate": {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "light": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["directional", "point", "spot"]},
+        "direction": {"$ref": "#/$defs/vec3"},
+        "position": {"$ref": "#/$defs/vec3"},
+        "color": {"$ref": "#/$defs/color"},
+        "intensity": {"type": "number", "minimum": 0},
+        "outer_deg": {"type": "number", "minimum": 1, "maximum": 89},
+        "inner_deg": {"type": "number", "minimum": 0, "maximum": 89}
+      }
+    },
+    "scene3d": {
+      "type": "object",
+      "required": ["kind", "id", "x", "y", "width", "height", "model"],
+      "properties": {
+        "kind": {"const": "scene3d"},
+        "id": {"type": "string", "minLength": 1},
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+        "width": {"type": "number", "exclusiveMinimum": 0},
+        "height": {"type": "number", "exclusiveMinimum": 0},
+        "model": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "camera": {
+          "type": "object",
+          "properties": {
+            "azimuth": {"type": "number"},
+            "elevation": {"type": "number", "minimum": -89, "maximum": 89},
+            "fov": {"type": "number", "minimum": 1, "maximum": 170},
+            "projection": {"enum": ["perspective", "orthographic"]},
+            "height": {"type": "number", "exclusiveMinimum": 0},
+            "eye": {"$ref": "#/$defs/vec3"},
+            "target": {"$ref": "#/$defs/vec3"},
+            "up": {"$ref": "#/$defs/vec3"},
+            "near": {"type": "number", "exclusiveMinimum": 0},
+            "far": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        "physical_camera": {
+          "type": "object",
+          "required": ["focal_length_mm"],
+          "additionalProperties": false,
+          "properties": {
+            "focal_length_mm": {"type": "number", "minimum": 1, "maximum": 2000},
+            "sensor_mm": {"$ref": "#/$defs/pair"},
+            "aperture_f": {"type": "number", "minimum": 0.5, "maximum": 64},
+            "focus_distance": {"type": "number", "exclusiveMinimum": 0},
+            "exposure_ev": {"type": "number", "minimum": -16, "maximum": 16},
+            "samples": {"type": "integer", "minimum": 1, "maximum": 64}
+          }
+        },
+        "lights": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/light"}},
+        "environment": {
+          "type": "object",
+          "properties": {
+            "sky": {"$ref": "#/$defs/color"},
+            "ground": {"$ref": "#/$defs/color"},
+            "intensity": {"type": "number", "minimum": 0, "maximum": 100}
+          }
+        },
+        "background": {"type": "string"},
+        "exposure_ev": {"type": "number", "minimum": -16, "maximum": 16},
+        "supersample": {"type": "integer", "minimum": 1, "maximum": 4},
+        "pixel_ratio": {"type": "number", "minimum": 0.1, "maximum": 8},
+        "shadows": {"type": "boolean"},
+        "shadow_map_size": {"type": "integer", "minimum": 64, "maximum": 2048},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "page": {
+      "type": "object",
+      "required": ["id", "canvas", "layers"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "canvas": {"type": "object", "required": ["width", "height"]},
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "nodes"],
+            "properties": {"nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}}}
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "scene3d"}}, "required": ["kind"]}, "then": {"$ref": "#/$defs/scene3d"}}
+      ]
+    }
+  }
+}
