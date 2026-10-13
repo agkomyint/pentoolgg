@@ -211,10 +211,9 @@ pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Re
                 let _ = fs::remove_dir_all(&self.0);
             }
         }
-        let staging_path = parent.canonicalize()?.join(format!(
-            ".pentool-collect-{:016x}",
-            staging_nonce()
-        ));
+        let staging_path = parent
+            .canonicalize()?
+            .join(format!(".pentool-collect-{:016x}", staging_nonce()));
         fs::create_dir(&staging_path)?;
         let staging = Staging(staging_path);
         fs::create_dir(staging.0.join("assets"))?;
