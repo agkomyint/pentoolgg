@@ -58,6 +58,7 @@ pub mod render;
 pub mod replace;
 pub mod resource;
 pub mod scene;
+pub mod scene3d;
 pub mod selection;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
