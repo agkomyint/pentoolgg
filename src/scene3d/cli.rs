@@ -13,9 +13,15 @@ use std::path::{Path, PathBuf};
 pub enum LightAction {
     /// Add a directional or point light.
     Add {
-        /// `directional` or `point`.
+        /// `directional`, `point` or `spot`.
         #[arg(long)]
         kind: String,
+        /// Spot cone half angle (degrees) where light reaches zero.
+        #[arg(long)]
+        outer_deg: Option<f64>,
+        /// Spot cone half angle (degrees) at full intensity.
+        #[arg(long)]
+        inner_deg: Option<f64>,
         /// Direction the light travels, `x,y,z` (directional).
         #[arg(long, allow_hyphen_values = true)]
         direction: Option<String>,
@@ -186,6 +192,12 @@ pub enum Scene3dAction {
         supersample: Option<u32>,
         #[arg(long)]
         pixel_ratio: Option<f64>,
+        /// Turn shadow maps on or off.
+        #[arg(long)]
+        shadows: Option<bool>,
+        /// Shadow map edge in texels (64..=2048).
+        #[arg(long)]
+        shadow_map_size: Option<u32>,
         #[arg(long, allow_hyphen_values = true)]
         x: Option<f64>,
         #[arg(long, allow_hyphen_values = true)]
@@ -719,6 +731,8 @@ pub fn run(
                 }
                 LightAction::Add {
                     kind,
+                    outer_deg,
+                    inner_deg,
                     direction,
                     position,
                     color,
@@ -742,8 +756,28 @@ pub fn run(
                                 "--position",
                             )?;
                         }
+                        "spot" => {
+                            light["position"] = triple(
+                                position.as_deref().context(
+                                    "[invalid-input] a spot light needs --position x,y,z",
+                                )?,
+                                "--position",
+                            )?;
+                            light["direction"] = triple(
+                                direction.as_deref().context(
+                                    "[invalid-input] a spot light needs --direction x,y,z",
+                                )?,
+                                "--direction",
+                            )?;
+                            if let Some(v) = outer_deg {
+                                light["outer_deg"] = json!(v);
+                            }
+                            if let Some(v) = inner_deg {
+                                light["inner_deg"] = json!(v);
+                            }
+                        }
                         other => bail!(
-                            "[invalid-input] light kind `{other}` must be directional or point"
+                            "[invalid-input] light kind `{other}` must be directional, point or spot"
                         ),
                     }
                     let lights = n
@@ -786,6 +820,8 @@ pub fn run(
             exposure_ev,
             supersample,
             pixel_ratio,
+            shadows,
+            shadow_map_size,
             x,
             y,
             width,
@@ -810,6 +846,12 @@ pub fn run(
             }
             if let Some(s) = supersample {
                 n.insert("supersample".into(), json!(s));
+            }
+            if let Some(s) = shadows {
+                n.insert("shadows".into(), json!(s));
+            }
+            if let Some(s) = shadow_map_size {
+                n.insert("shadow_map_size".into(), json!(s));
             }
             ("scene3d-set", json!({"id": id}))
         }

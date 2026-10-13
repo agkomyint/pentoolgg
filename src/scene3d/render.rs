@@ -42,6 +42,16 @@ pub enum Light {
         color: [f64; 3],
         intensity: f64,
     },
+    /// A point light limited to a cone. `direction` is normalized; the
+    /// cosines of the inner (full) and outer (zero) cone half angles.
+    Spot {
+        position: Vec3,
+        direction: Vec3,
+        color: [f64; 3],
+        intensity: f64,
+        inner_cos: f64,
+        outer_cos: f64,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +79,8 @@ pub struct Scene {
     /// Straight sRGB background; alpha 0 leaves the image transparent.
     pub background: [f64; 4],
     pub exposure_ev: f64,
+    /// Shadow map edge in texels; 0 turns shadows off.
+    pub shadow_size: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -170,6 +182,8 @@ struct Shared<'a> {
     decode: [f64; 256],
     eye: Vec3,
     exposure: f64,
+    /// One entry per light, `None` when shadows are off.
+    shadows: Vec<Option<super::shadow::ShadowSet>>,
 }
 
 fn sample(tex: &Texture, uv: [f64; 2], decode: &[f64; 256], srgb: bool) -> [f64; 4] {
@@ -306,8 +320,24 @@ fn shade(
     ];
     let mut out = [0.0f64; 3];
 
-    for light in &shared.scene.lights {
+    for (light_index, light) in shared.scene.lights.iter().enumerate() {
         let (l, radiance) = match light {
+            Light::Spot {
+                position,
+                direction,
+                color,
+                intensity,
+                inner_cos,
+                outer_cos,
+            } => {
+                let d = math::sub(*position, vertex.world);
+                let d2 = math::dot(d, d).max(1e-4);
+                let l = math::normalize(d);
+                let cd = -math::dot(l, *direction);
+                let t = math::clamp01((cd - outer_cos) / (inner_cos - outer_cos).max(1e-6));
+                let s = intensity / d2 * t * t * (3.0 - 2.0 * t);
+                (l, [color[0] * s, color[1] * s, color[2] * s])
+            }
             Light::Directional {
                 direction,
                 color,
@@ -338,6 +368,16 @@ fn shade(
         if n_dot_l <= 0.0 {
             continue;
         }
+        let radiance = match shared.shadows.get(light_index).and_then(Option::as_ref) {
+            Some(set) => {
+                let vis = set.visibility(vertex.world, n);
+                if vis <= 0.0 {
+                    continue;
+                }
+                [radiance[0] * vis, radiance[1] * vis, radiance[2] * vis]
+            }
+            None => radiance,
+        };
         let h = math::normalize(math::add(l, v));
         let n_dot_h = math::dot(n, h).max(0.0);
         let v_dot_h = math::dot(v, h).max(0.0);
@@ -693,12 +733,31 @@ pub fn render(model: &Model, scene: &Scene, options: &Options) -> Result<Image> 
         depth: vec![f64::INFINITY; w * h],
         color: vec![[0.0; 4]; w * h],
     };
+    let mut shadows: Vec<Option<super::shadow::ShadowSet>> = Vec::new();
+    if scene.shadow_size > 0 {
+        let size = scene.shadow_size.clamp(
+            super::shadow::MIN_SHADOW_SIZE,
+            super::shadow::MAX_SHADOW_SIZE,
+        );
+        let maps: u64 = scene.lights.iter().map(super::shadow::maps_for).sum();
+        let texels = maps * size as u64 * size as u64;
+        ensure!(
+            texels <= super::shadow::MAX_SHADOW_TEXELS,
+            "[limit-exceeded] shadow maps would need {texels} texels; the limit is {}; lower shadow_map_size or the number of lights",
+            super::shadow::MAX_SHADOW_TEXELS
+        );
+        let sphere = super::shadow::scene_sphere(model);
+        for light in &scene.lights {
+            shadows.push(sphere.and_then(|s| super::shadow::build(model, light, size, s)));
+        }
+    }
     let shared = Shared {
         model,
         scene,
         decode: decode_table(),
         eye: scene.camera.eye,
         exposure: math::pow(2.0, scene.exposure_ev),
+        shadows,
     };
     let vp = view_projection(&scene.camera, options.width as f64 / options.height as f64);
     let default_material = Material::default();
@@ -893,6 +952,7 @@ mod tests {
             environment: Environment::default(),
             background: [0.0, 0.0, 0.0, 0.0],
             exposure_ev: 0.0,
+            shadow_size: 0,
         }
     }
 

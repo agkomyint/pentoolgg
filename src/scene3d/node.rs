@@ -422,8 +422,35 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
                         color,
                         intensity,
                     },
+                    Some("spot") => {
+                        let outer = optional(o, "outer_deg", 35.0, 1.0, 89.0)?;
+                        let inner = optional(o, "inner_deg", outer * 0.8, 0.0, outer)?;
+                        ensure!(
+                            inner <= outer,
+                            "[invalid-input] spot inner_deg must not exceed outer_deg"
+                        );
+                        let rad = math::PI / 180.0;
+                        Light::Spot {
+                            position: vec3(
+                                o.get("position")
+                                    .context("[invalid-input] a spot light needs `position`")?,
+                                "light position",
+                            )?,
+                            direction: math::normalize(vec3(
+                                o.get("direction")
+                                    .context("[invalid-input] a spot light needs `direction`")?,
+                                "light direction",
+                            )?),
+                            color,
+                            intensity,
+                            inner_cos: math::cos(inner * rad),
+                            outer_cos: math::cos(outer * rad),
+                        }
+                    }
                     other => {
-                        bail!("[invalid-input] light kind {other:?} must be directional or point")
+                        bail!(
+                            "[invalid-input] light kind {other:?} must be directional, point or spot"
+                        )
                     }
                 });
             }
@@ -450,6 +477,22 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
             lights,
             environment,
             background,
+            shadow_size: if node.get("shadows").and_then(Value::as_bool).unwrap_or(true) {
+                let size = optional(
+                    node,
+                    "shadow_map_size",
+                    super::shadow::DEFAULT_SHADOW_SIZE as f64,
+                    super::shadow::MIN_SHADOW_SIZE as f64,
+                    super::shadow::MAX_SHADOW_SIZE as f64,
+                )?;
+                ensure!(
+                    size.fract() == 0.0,
+                    "[invalid-input] scene3d `shadow_map_size` must be an integer"
+                );
+                size as u32
+            } else {
+                0
+            },
             exposure_ev: (optional(node, "exposure_ev", 0.0, -16.0, 16.0)?
                 + match physical {
                     Some(p) => optional(p, "exposure_ev", 0.0, -16.0, 16.0)?,
@@ -697,6 +740,8 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
             "background",
             "exposure_ev",
             "supersample",
+            "shadows",
+            "shadow_map_size",
         ] {
             if let Some(v) = node.get(k) {
                 spec.insert(k.into(), v.clone());

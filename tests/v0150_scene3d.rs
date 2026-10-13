@@ -486,3 +486,74 @@ fn depth_of_field_leaves_the_focus_plane_sharp() {
         }
     }
 }
+
+#[test]
+fn spot_light_and_shadows_change_the_render_deterministically() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let d = doc.to_str().unwrap();
+    // A ground plane with a small blocker above it.
+    let obj = "v -2 0 -2\nv 2 0 -2\nv 2 0 2\nv -2 0 2\nf 1 3 2\nf 1 4 3\n\
+               v -0.5 1 -0.5\nv 0.5 1 -0.5\nv 0.5 1 0.5\nv -0.5 1 0.5\nf 5 7 6\nf 5 8 7\n";
+    let model = dir.join("scene.obj");
+    std::fs::write(&model, obj).unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "s",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+        "--width",
+        "100",
+        "--height",
+        "100",
+    ])
+    .status
+    .success());
+    assert!(pentool(&["scene3d", d, "light", "s", "clear"])
+        .status
+        .success());
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "light",
+        "s",
+        "add",
+        "--kind",
+        "spot",
+        "--position",
+        "0,4,0",
+        "--direction",
+        "0,-1,0",
+        "--outer-deg",
+        "40",
+        "--intensity",
+        "60",
+    ])
+    .status
+    .success());
+    assert!(pentool(&["scene3d", d, "camera", "s", "--elevation", "60"])
+        .status
+        .success());
+    let on = dir.join("on.png");
+    let on2 = dir.join("on2.png");
+    let off = dir.join("off.png");
+    assert!(pentool(&["export", d, on.to_str().unwrap()])
+        .status
+        .success());
+    assert!(pentool(&["export", d, on2.to_str().unwrap()])
+        .status
+        .success());
+    assert_eq!(std::fs::read(&on).unwrap(), std::fs::read(&on2).unwrap());
+    assert!(pentool(&["scene3d", d, "set", "s", "--shadows", "false"])
+        .status
+        .success());
+    assert!(pentool(&["export", d, off.to_str().unwrap()])
+        .status
+        .success());
+    let sum = |p: &Path| png_pixels(p).2.iter().map(|b| *b as u64).sum::<u64>();
+    assert!(sum(&on) < sum(&off), "shadows must darken the ground");
+}
