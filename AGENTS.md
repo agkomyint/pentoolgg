@@ -149,13 +149,29 @@ Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
 5. Update public docs, schema, fixtures, and CLI help when the contract changes.
 6. Run the same checks used by CI before committing.
 
-Required checks:
+Verification is tiered; do not run the full suite during iteration.
+
+Inner loop (every edit; seconds to ~1 minute). Each `tests/*.rs` file is a
+separate binary, so target the one file or test you touched:
+
+```sh
+cargo test --test <touched_test_file> --locked
+cargo test --lib <name_filter> --locked
+cargo check --all-targets --locked
+```
+
+Pre-push gate (once, before committing or pushing):
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets --locked
 ```
+
+The full suite and the 3-OS CI matrix are the authority for merge/release,
+not for iteration. Local builds use `rust-lld` on Windows MSVC
+(`.cargo/config.toml`) and line-only debuginfo (`[profile.dev]` in
+`Cargo.toml`); release artifacts keep the `release` profile unchanged.
 
 For release-sensitive changes also run:
 

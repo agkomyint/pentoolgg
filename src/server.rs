@@ -27,6 +27,28 @@ struct Shared {
 /// Built from `web-ui/` (`bun run build`); committed so cargo needs no Node or Bun.
 const STUDIO: &str = include_str!("../web/studio.html");
 
+/// The browser renderer (`wasm/`), embedded when present at build time (see `build.rs`).
+#[cfg(has_wasm_core)]
+const CORE_WASM: Option<&[u8]> = Some(include_bytes!("../web/pentool_core.wasm"));
+#[cfg(not(has_wasm_core))]
+const CORE_WASM: Option<&[u8]> = None;
+
+async fn core_wasm() -> Response {
+    match CORE_WASM {
+        Some(bytes) => {
+            let mut response = Body::from(bytes).into_response();
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/wasm"));
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            response
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool) -> Result<()> {
     if let Some(path) = &file {
         let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
@@ -38,6 +60,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
     let app = Router::new()
         .route("/", get(|| async { Html(STUDIO) }))
         .route("/studio", get(|| async { Html(STUDIO) }))
+        .route("/core/pentool_core.wasm", get(core_wasm))
         .route("/api/raster", post(raster_command))
         .route("/api/paint/plan", post(paint_plan_command))
         .route("/api/paint/score", post(paint_score_command))

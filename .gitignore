@@ -16,3 +16,6 @@ fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
 fuzz/Cargo.lock
+
+# Optional embedded browser renderer; build with `cargo build -p pentool-wasm` (see build.rs).
+web/pentool_core.wasm

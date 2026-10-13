@@ -205,7 +205,6 @@ pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Re
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        use rand_core::RngCore;
         struct Staging(std::path::PathBuf);
         impl Drop for Staging {
             fn drop(&mut self) {
@@ -214,7 +213,7 @@ pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Re
         }
         let staging_path = parent.canonicalize()?.join(format!(
             ".pentool-collect-{:016x}",
-            rand_core::OsRng.next_u64()
+            staging_nonce()
         ));
         fs::create_dir(&staging_path)?;
         let staging = Staging(staging_path);
@@ -231,4 +230,16 @@ pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Re
     Ok(
         json!({"output":output,"document":"document.pen","assets":encoded.len(),"byte_length":total,"dry_run":dry_run}),
     )
+}
+
+/// Unique suffix for staging directories. The browser build never writes a project.
+#[cfg(not(target_arch = "wasm32"))]
+fn staging_nonce() -> u64 {
+    use rand_core::RngCore;
+    rand_core::OsRng.next_u64()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn staging_nonce() -> u64 {
+    0
 }

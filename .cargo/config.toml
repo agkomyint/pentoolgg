@@ -1,0 +1,5 @@
+# Fast linker for local development. rust-lld ships with rustc, so no extra
+# install is needed. Scoped to Windows MSVC (the slow default linker); Linux
+# and macOS CI targets keep their platform defaults.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

@@ -1,7 +1,9 @@
 //! Browser-independent document, editing, geometry, and rendering engine.
 pub mod agent;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ai;
 pub mod asset;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod benchmark;
 pub mod blend;
 pub mod book;
@@ -28,11 +30,13 @@ pub mod json;
 pub mod layout;
 pub mod layout_cli;
 pub mod layout_preflight;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod library;
 pub mod linked;
 pub mod longdoc;
 pub mod mask;
 pub mod merge;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod package;
 pub mod page;
 pub mod paint_analysis;
@@ -55,6 +59,7 @@ pub mod replace;
 pub mod resource;
 pub mod scene;
 pub mod selection;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 pub mod shaping;
 pub mod spreads;

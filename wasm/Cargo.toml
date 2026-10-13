@@ -1,0 +1,17 @@
+[package]
+name = "pentool-wasm"
+version = "0.13.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Browser build of the Pentool renderer: the live-canvas preview. Exports stay on the native CPU renderer."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pentool = { path = ".." }
+serde_json = "1"
+
+# Size over speed is a measured trade-off; see docs/architecture.md.
