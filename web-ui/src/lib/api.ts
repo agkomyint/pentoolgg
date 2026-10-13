@@ -102,3 +102,50 @@ export const api = {
   asset: (spec: string) =>
     getJson<{ document: Record<string, unknown>; asset: { name: string } }>(`/api/asset?spec=${encodeURIComponent(spec)}`),
 };
+
+export type LayoutIssue = {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  action: string;
+  page?: string;
+  frame?: string;
+  story?: string;
+  offset?: number;
+  node?: string;
+};
+export type LayoutPreflightReport = {
+  ok: boolean;
+  errors: number;
+  warnings: number;
+  issues_total: number;
+  truncated: boolean;
+  issues: LayoutIssue[];
+  composed: { lines: number; stories_overset: number; fonts: number };
+};
+export type LayoutOverview = {
+  stories: {
+    id: string;
+    paragraphs: number;
+    characters: number;
+    frames: string[];
+    placed: boolean;
+    overset: boolean;
+    overset_characters: number;
+  }[];
+  frames: { id: string; story: string; page: string; overset: boolean }[];
+};
+
+export const layoutApi = {
+  preflight(opts: { bleed: number; max_overrides: number; no_alt: boolean }) {
+    const q = new URLSearchParams({
+      bleed: String(opts.bleed),
+      max_overrides: String(opts.max_overrides),
+      no_alt: String(opts.no_alt),
+    });
+    return getJson<LayoutPreflightReport>(`/api/layout/preflight?${q}`);
+  },
+  overview: () => getJson<LayoutOverview>("/api/layout/overview"),
+  exportUrl: (format: "pdf" | "epub", fixed = false) =>
+    `/api/layout/export?format=${format}${fixed ? "&fixed=true" : ""}`,
+};

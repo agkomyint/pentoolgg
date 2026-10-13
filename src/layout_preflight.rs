@@ -369,3 +369,62 @@ pub fn run(raw: &Value, document: &Path, options: &Options) -> Result<Value> {
         "mutated": false,
     }))
 }
+
+/// Stories and frames with composed overset state, for editor overlays.
+pub fn overview(raw: &Value) -> Result<Value> {
+    if !crate::spreads::is_v9(raw) {
+        bail!("[unsupported-version] the layout overview needs a version 9 document");
+    }
+    let set = typeset::typeset_cached(raw)?;
+    let overset_by_story: BTreeMap<&str, &typeset::Overset> =
+        set.overset.iter().map(|o| (o.story.as_str(), o)).collect();
+    let frames = typeset::frame_list(raw);
+    let mut frames_of: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut frame_rows = Vec::new();
+    for (page, node) in &frames {
+        let id = node["id"].as_str().unwrap_or_default();
+        let story = node["story"].as_str().unwrap_or_default();
+        let overset = overset_by_story.get(story).is_some_and(|o| o.frame == id);
+        frames_of
+            .entry(story.to_string())
+            .or_default()
+            .push(json!(id));
+        frame_rows.push(json!({
+            "id": id, "story": story, "page": page_id(raw, *page),
+            "x": node["x"], "y": node["y"], "width": node["width"], "height": node["height"],
+            "next": node["next"], "overset": overset,
+        }));
+    }
+    let stories: Vec<Value> = raw
+        .pointer("/layout/stories")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            let id = s["id"].as_str().unwrap_or_default();
+            let paragraphs = s["paragraphs"].as_array().map_or(0, Vec::len);
+            let chars: usize = s["paragraphs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|p| p["runs"].as_array().into_iter().flatten())
+                .map(|r| crate::stories::run_text(raw, r).chars().count())
+                .sum();
+            let frames = frames_of.get(id).cloned().unwrap_or_default();
+            let overset = overset_by_story.get(id);
+            json!({
+                "id": id, "paragraphs": paragraphs, "characters": chars,
+                "frames": frames, "placed": !frames.is_empty(),
+                "overset": overset.is_some(),
+                "overset_characters": overset.map_or(0, |o| o.characters_remaining),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "operation": "layout-overview",
+        "stories": stories,
+        "frames": frame_rows,
+        "lines": set.lines.len(),
+        "truncated": set.truncated,
+    }))
+}

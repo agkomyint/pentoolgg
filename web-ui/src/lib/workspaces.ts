@@ -22,5 +22,5 @@ export const workspaces: Workspace[] = [
   { id: "photo", label: "Photo", icon: Camera, status: "available", since: "0.11", summary: "Catalog, culling, RAW development, masks, crop and copy/sync.", planned: [] },
   { id: "print", label: "Print", icon: Printer, status: "partial", since: "0.12", summary: "Color roles, preflight, plates and soft proof.", planned: [] },
   { id: "paint", label: "Paint", icon: Brush, status: "partial", since: "0.10", summary: "Raster brush, clone, heal, selections and quick mask. Plan passes with protected regions, preview, commit and scoring (0.13).", planned: [] },
-  { id: "layout", label: "Layout", icon: Newspaper, status: "planned", since: "0.14", summary: "Page layout, styles, books and IDML.", planned: ["Spreads and parents", "Threaded text frames", "Paragraph and character styles", "Books and IDML interchange"] },
+  { id: "layout", label: "Layout", icon: Newspaper, status: "partial", since: "0.14", summary: "Composed stories, overset and layout preflight, tagged PDF and EPUB export. Spreads, style panels and threading tools are still CLI-only.", planned: [] },
 ];

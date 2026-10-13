@@ -13,6 +13,7 @@ import { Toolbar, ToolHint } from "@/components/Toolbar";
 import { DesignPanel } from "@/workspaces/DesignPanel";
 import { CompositePanel, ImagePanel, SceneConsole } from "@/workspaces/OperationsPanel";
 import { PrintPanel } from "@/workspaces/PrintPanel";
+import { LayoutPanel } from "@/workspaces/LayoutPanel";
 import { Planned } from "@/workspaces/Planned";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
 import { PhotoStage } from "@/workspaces/PhotoStage";
@@ -40,6 +41,8 @@ function WorkspaceBody() {
       return <CompositePanel />;
     case "print":
       return <PrintPanel />;
+    case "layout":
+      return <LayoutPanel />;
     case "photo":
       return <PhotoPanel />;
     case "paint":

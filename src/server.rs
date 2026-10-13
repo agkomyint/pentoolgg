@@ -50,6 +50,9 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
         .route("/api/color/preflight", get(color_preflight))
+        .route("/api/layout/preflight", get(layout_preflight))
+        .route("/api/layout/overview", get(layout_overview))
+        .route("/api/layout/export", get(layout_export))
         .route("/api/color/plates", get(color_plates))
         .route("/api/color/proof", get(color_proof))
         .route("/api/color/gamut", get(color_gamut))
@@ -1153,6 +1156,117 @@ async fn color_preflight(
         Ok(value) => Json(value).into_response(),
         Err(error) => problem(error),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct LayoutQuery {
+    bleed: Option<f64>,
+    max_overrides: Option<f64>,
+    no_alt: Option<bool>,
+    format: Option<String>,
+    fixed: Option<bool>,
+}
+
+fn layout_document(state: &Shared) -> Result<(serde_json::Value, std::path::PathBuf)> {
+    let file = state
+        .file
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("[missing-resource] no shared document"))?;
+    let raw = serde_json::from_slice(&crate::resource::read_bounded(
+        &file,
+        crate::color::catalog::MAX_CATALOG_DOCUMENT_BYTES,
+    )?)?;
+    Ok((raw, file))
+}
+
+/// Read-only composer-measured layout preflight of the shared document.
+async fn layout_preflight(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<LayoutQuery>,
+) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let (raw, file) = layout_document(&state)?;
+        let defaults = crate::layout_preflight::Options::default();
+        crate::layout_preflight::run(
+            &raw,
+            &file,
+            &crate::layout_preflight::Options {
+                bleed: q.bleed.unwrap_or(defaults.bleed),
+                max_override_pct: q.max_overrides.unwrap_or(defaults.max_override_pct),
+                require_alt: !q.no_alt.unwrap_or(false),
+            },
+        )
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+/// Stories and frames with composed overset state.
+async fn layout_overview(State(state): State<Shared>) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        let (raw, _) = layout_document(&state)?;
+        crate::layout_preflight::overview(&raw)
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+/// Tagged PDF or EPUB 3 of the shared document, returned as a download.
+async fn layout_export(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<LayoutQuery>,
+) -> Response {
+    let result = (|| -> Result<(Vec<u8>, &'static str, &'static str)> {
+        let (raw, file) = layout_document(&state)?;
+        let format = q.format.as_deref().unwrap_or("pdf");
+        let dir = std::env::temp_dir().join(format!("pentool-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let out = dir.join(format!("export-{}.{format}", rand_suffix()));
+        let built = match format {
+            "pdf" => crate::publish::export_pdf(&raw, &file, &out, &Default::default())
+                .map(|_| ("application/pdf", "pdf")),
+            "epub" => crate::publish::export_epub(
+                &[(&raw, file.as_path())],
+                &out,
+                &crate::publish::EpubOptions {
+                    fixed: q.fixed.unwrap_or(false),
+                    ..Default::default()
+                },
+            )
+            .map(|_| ("application/epub+zip", "epub")),
+            other => Err(anyhow::anyhow!(
+                "[invalid-input] format must be pdf or epub, not {other}"
+            )),
+        };
+        let bytes = built.and_then(|meta| Ok((std::fs::read(&out)?, meta)));
+        let _ = std::fs::remove_file(&out);
+        let (bytes, (mime, ext)) = bytes?;
+        Ok((bytes, mime, ext))
+    })();
+    match result {
+        Ok((bytes, mime, ext)) => (
+            [
+                (axum::http::header::CONTENT_TYPE, mime.to_string()),
+                (
+                    axum::http::header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"layout.{ext}\""),
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+fn rand_suffix() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    N.fetch_add(1, Ordering::SeqCst)
 }
 
 async fn composite_dependencies(State(state): State<Shared>) -> Response {
