@@ -2,39 +2,52 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Pentool Studio design system.
+ * Dark graphite chrome (Photoshop), module switcher (Lightroom), contextual
+ * properties (Illustrator). One accent, hairline borders, compact density:
+ * html font-size 14px scales every rem-based spacing and text size.
+ * Tokens only: components never hard-code a colour.
+ */
 :root {
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.2 0 0);
-  --card: oklch(1 0 0);
-  --muted: oklch(0.965 0 0);
+  --background: oklch(0.935 0 0); /* app chrome */
+  --card: oklch(0.975 0 0); /* panels, bars */
+  --muted: oklch(0.915 0 0); /* wells, secondary buttons */
+  --input: oklch(1 0 0);
+  --foreground: oklch(0.22 0 0);
   --muted-foreground: oklch(0.5 0 0);
-  --border: oklch(0.9 0 0);
-  --primary: oklch(0.45 0.18 265);
+  --border: oklch(0.86 0 0);
+  --primary: oklch(0.55 0.17 250);
   --primary-foreground: oklch(0.99 0 0);
-  --accent: oklch(0.95 0.02 265);
+  --accent: oklch(0.9 0.01 250);
   --destructive: oklch(0.55 0.22 27);
-  --warning: oklch(0.7 0.15 75);
-  --success: oklch(0.6 0.15 150);
-  --canvas: oklch(0.93 0 0);
+  --warning: oklch(0.68 0.15 75);
+  --success: oklch(0.55 0.15 150);
+  --canvas: oklch(0.82 0 0);
+  --radius: 4px;
 }
 .dark {
-  --background: oklch(0.17 0 0);
-  --foreground: oklch(0.96 0 0);
-  --card: oklch(0.2 0 0);
-  --muted: oklch(0.25 0 0);
-  --muted-foreground: oklch(0.7 0 0);
-  --border: oklch(0.32 0 0);
-  --primary: oklch(0.7 0.14 265);
-  --primary-foreground: oklch(0.15 0 0);
-  --accent: oklch(0.28 0.04 265);
-  --destructive: oklch(0.65 0.2 27);
-  --canvas: oklch(0.13 0 0);
+  --background: oklch(0.2 0 0);
+  --card: oklch(0.245 0 0);
+  --muted: oklch(0.29 0 0);
+  --input: oklch(0.18 0 0);
+  --foreground: oklch(0.9 0 0);
+  --muted-foreground: oklch(0.68 0 0);
+  --border: oklch(0.33 0 0);
+  --primary: oklch(0.68 0.15 250);
+  --primary-foreground: oklch(0.14 0 0);
+  --accent: oklch(0.32 0.03 250);
+  --destructive: oklch(0.68 0.19 27);
+  --warning: oklch(0.8 0.14 80);
+  --success: oklch(0.72 0.15 150);
+  --canvas: oklch(0.15 0 0);
 }
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-muted: var(--muted);
+  --color-input: var(--input);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-primary: var(--primary);
@@ -45,11 +58,30 @@
   --color-success: var(--success);
   --color-canvas: var(--canvas);
 }
+html {
+  font-size: 14px;
+}
 html, body, #root { height: 100%; }
 body {
   margin: 0;
+  overflow: hidden;
   background: var(--background);
   color: var(--foreground);
-  font: 13px/1.45 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font: 12.5px/1.4 ui-sans-serif, system-ui, "Segoe UI", Inter, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 * { border-color: var(--border); }
+input, select, textarea, button { font: inherit; color: inherit; }
+input[type="number"], input[type="text"], input:not([type]), select, textarea {
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 1.5px solid var(--primary);
+  outline-offset: 0;
+}
+input[type="range"], input[type="checkbox"] { accent-color: var(--primary); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 8px; border: 2px solid var(--card); }
+::-webkit-scrollbar-track { background: transparent; }

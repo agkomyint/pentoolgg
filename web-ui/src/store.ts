@@ -61,12 +61,12 @@ function initialDark(): boolean {
   } catch {
     // storage can be unavailable
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return !window.matchMedia("(prefers-color-scheme: light)").matches;
 }
 
 const HISTORY_LIMIT = 100;
-/** Newest `.pen` format the server can migrate to (`pentool migrate --target 8`). */
-export const LATEST_FORMAT = 8;
+/** Newest `.pen` format the server can migrate to (`pentool migrate --target 9`). */
+export const LATEST_FORMAT = 9;
 
 function blankDoc(): Doc {
   return {

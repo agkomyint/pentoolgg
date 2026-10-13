@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { dragLayers } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
+import { LayoutOverlay } from "@/workspaces/layout/LayoutOverlay";
 import {
   addObject,
   addImage,
@@ -510,6 +511,7 @@ export function Canvas() {
                   if (tool === "pen") finishPen(false);
                 }}
               >
+                <LayoutOverlay px={px} />
                 {liveBox && tool === "select" && (
                   <g>
                     <rect {...liveBox} fill="none" stroke="#2563eb" strokeWidth={px * 1.5} pointerEvents="none" />

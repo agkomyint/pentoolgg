@@ -223,7 +223,7 @@ export function localBounds(node: SceneNode, layer?: Layer): Rect | null {
   const kind = nodeKind(node, layer);
   const n = (key: string) => Number(node[key] ?? 0);
   let box: Rect | null = null;
-  if (kind === "rect" || kind === "image" || kind === "raster" || kind === "photo") {
+  if (kind === "rect" || kind === "image" || kind === "raster" || kind === "photo" || kind === "text-frame" || kind === "graphic-frame") {
     if (typeof node.width === "number" && typeof node.height === "number") {
       box = { x: n("x"), y: n("y"), width: n("width"), height: n("height") };
     }

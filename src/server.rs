@@ -50,9 +50,13 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
         .route("/api/color/preflight", get(color_preflight))
+        .route("/api/layout", post(layout_command))
         .route("/api/layout/preflight", get(layout_preflight))
         .route("/api/layout/overview", get(layout_overview))
-        .route("/api/layout/export", get(layout_export))
+        .route(
+            "/api/layout/export",
+            get(layout_export).post(layout_export_document),
+        )
         .route("/api/color/plates", get(color_plates))
         .route("/api/color/proof", get(color_proof))
         .route("/api/color/gamut", get(color_gamut))
@@ -1220,8 +1224,44 @@ async fn layout_export(
     State(state): State<Shared>,
     axum::extract::Query(q): axum::extract::Query<LayoutQuery>,
 ) -> Response {
+    let document = layout_document(&state);
+    layout_export_bytes(document, q)
+}
+
+#[derive(serde::Deserialize)]
+struct LayoutExportRequest {
+    document: serde_json::Value,
+    format: Option<String>,
+    fixed: Option<bool>,
+}
+
+/// Same export, but of the document open in the browser (unsaved edits included).
+async fn layout_export_document(
+    State(state): State<Shared>,
+    Json(body): Json<LayoutExportRequest>,
+) -> Response {
+    let file = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    layout_export_bytes(
+        Ok((body.document, file)),
+        LayoutQuery {
+            bleed: None,
+            max_overrides: None,
+            no_alt: None,
+            format: body.format,
+            fixed: body.fixed,
+        },
+    )
+}
+
+fn layout_export_bytes(
+    document: Result<(serde_json::Value, std::path::PathBuf)>,
+    q: LayoutQuery,
+) -> Response {
     let result = (|| -> Result<(Vec<u8>, &'static str, &'static str)> {
-        let (raw, file) = layout_document(&state)?;
+        let (raw, file) = document?;
         let format = q.format.as_deref().unwrap_or("pdf");
         let dir = std::env::temp_dir().join(format!("pentool-export-{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
@@ -1419,11 +1459,8 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             .get("version")
             .and_then(serde_json::Value::as_u64)
             .context("[invalid-input] the document has no version")?;
-        if !(4..=crate::color::VERSION).contains(&body.target) {
-            bail!(
-                "[invalid-input] migration target must be between 4 and {}",
-                crate::color::VERSION
-            );
+        if !(4..=9).contains(&body.target) {
+            bail!("[invalid-input] migration target must be between 4 and 9");
         }
         if body.target <= from {
             bail!(
@@ -1431,6 +1468,7 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             );
         }
         let migrated = match body.target {
+            9 => crate::spreads::migrate(body.document)?,
             8 => crate::color::catalog::migrate(body.document)?,
             7 => crate::photo::catalog::migrate(body.document)?,
             6 => crate::composite::migrate(body.document)?,
@@ -2357,5 +2395,139 @@ mod tests {
             "unexpected error: {err}"
         );
         super::require_revision(Some(&super::revision(&raw)), &raw).unwrap();
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct LayoutRequest {
+    document: serde_json::Value,
+    op: LayoutOp,
+}
+
+/// One layout read or edit applied to the in-browser document. Edits run the
+/// same planners as the CLI (`story`, `frame`, `page`, `spread`) so the editor
+/// never keeps a second layout model.
+#[derive(serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum LayoutOp {
+    Overview,
+    Preflight {
+        bleed: Option<f64>,
+        max_overrides: Option<f64>,
+        #[serde(default)]
+        no_alt: bool,
+    },
+    Story {
+        action: crate::stories::StoryAction,
+    },
+    Frame {
+        action: crate::stories::FrameAction,
+    },
+    PageAdd {
+        id: String,
+        after: Option<String>,
+        parent: Option<String>,
+    },
+    PageDuplicate {
+        id: String,
+        new_id: String,
+    },
+    PageRemove {
+        id: String,
+        #[serde(default)]
+        drop_story: bool,
+    },
+    PageMove {
+        id: String,
+        index: usize,
+    },
+    PageRename {
+        id: String,
+        name: String,
+    },
+    PageParent {
+        page: String,
+        parent: Option<String>,
+    },
+    SpreadFacing {
+        spread: String,
+        facing: bool,
+    },
+}
+
+/// `POST /api/layout`: `{document, op}` -> `{document, result}`. Read-only ops
+/// omit `document`. Nothing is written to disk; the client commits with Save.
+async fn layout_command(State(state): State<Shared>, Json(body): Json<LayoutRequest>) -> Response {
+    let result = (|| -> Result<serde_json::Value> {
+        use crate::page::PageAction;
+        let mut raw = body.document;
+        let base = state
+            .file
+            .clone()
+            .unwrap_or_else(|| state.project_root.join("browser.pen"));
+        let page_edit =
+            |raw: &mut serde_json::Value, action| crate::spreads::apply_page(raw, action);
+        let result = match body.op {
+            LayoutOp::Overview => {
+                return crate::layout_preflight::overview(&raw)
+                    .map(|r| serde_json::json!({"result": r}))
+            }
+            LayoutOp::Preflight {
+                bleed,
+                max_overrides,
+                no_alt,
+            } => {
+                let defaults = crate::layout_preflight::Options::default();
+                let report = crate::layout_preflight::run(
+                    &raw,
+                    &base,
+                    &crate::layout_preflight::Options {
+                        bleed: bleed.unwrap_or(defaults.bleed),
+                        max_override_pct: max_overrides.unwrap_or(defaults.max_override_pct),
+                        require_alt: !no_alt,
+                    },
+                )?;
+                return Ok(serde_json::json!({"result": report}));
+            }
+            LayoutOp::Story { action } => crate::stories::run_story(&mut raw, action)?,
+            LayoutOp::Frame { action } => crate::stories::run_frame(&mut raw, action)?,
+            LayoutOp::PageAdd { id, after, parent } => page_edit(
+                &mut raw,
+                PageAction::Add {
+                    id,
+                    name: None,
+                    width: None,
+                    height: None,
+                    background: None,
+                    after,
+                    before: None,
+                    parent,
+                    count: None,
+                },
+            )?,
+            LayoutOp::PageDuplicate { id, new_id } => {
+                page_edit(&mut raw, PageAction::Duplicate { id, new_id })?
+            }
+            LayoutOp::PageRemove { id, drop_story } => {
+                page_edit(&mut raw, PageAction::Remove { id, drop_story })?
+            }
+            LayoutOp::PageMove { id, index } => {
+                page_edit(&mut raw, PageAction::Move { id, index })?
+            }
+            LayoutOp::PageRename { id, name } => {
+                page_edit(&mut raw, PageAction::Rename { id, name })?
+            }
+            LayoutOp::PageParent { page, parent } => {
+                crate::spreads::page_set_parent(&mut raw, &page, parent.as_deref())?
+            }
+            LayoutOp::SpreadFacing { spread, facing } => {
+                crate::spreads::spread_set_facing(&mut raw, &spread, facing)?
+            }
+        };
+        Ok(serde_json::json!({"document": raw, "result": result}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
     }
 }

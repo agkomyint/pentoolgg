@@ -417,11 +417,18 @@ and documentation.
     preflight panel.
   - An optional keyboard-shortcut set familiar to InDesign users.
 
-  Progress (partial, checkbox left open): the Studio Layout workspace shows
-  composed stories with overset counts, runs layout preflight with clickable
-  issues, and downloads tagged PDF and EPUB via `/api/layout/*`. Pages panel,
-  threading tools, style panels, overlays, text-wrap UI and shortcuts are not
-  built yet.
+  Progress (partial, checkbox left open): the Studio Layout workspace has a
+  pages panel (spreads, facing toggle, parents, add/duplicate/move/remove), a
+  story editor with frame creation, threading by click and flow, a frame panel,
+  a styles panel with override counts, overlays for frame edges, thread links,
+  overset markers, margins and columns, a preflight panel with clickable issues,
+  tagged PDF and EPUB downloads, and an opt-in InDesign key set (V, T,
+  Page Up/Down, Ctrl+Shift+P). Every edit goes through `POST /api/layout`, so
+  the planners are the Rust ones and each op is one undo step. Not built yet:
+  table editing, anchored-object handles, TOC/index/cross-reference
+  interfaces, loaded-cursor placement, the text-wrap UI, object/table/cell
+  style panels, hidden-characters and baseline-grid overlays, and incremental
+  recomposition.
 
   Pentool's visual design remains its own. Typing and editing stay responsive
   on a 300-page document: Rust recomposes only the affected story range, and

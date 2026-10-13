@@ -46,8 +46,7 @@ white balance, crop, radial/linear/brush masks, copy/sync, variants, snapshots, 
 navigator) workspaces use the same `/api/photo/*` and `/api/raster` endpoints as before.
 Known limits: hit-testing is bounding-box based; during a drag only the
 selection box moves and the rendered preview updates on release; there is no
-in-browser PDF export (use `pentool export x.pen x.pdf`); Layout is a
-"coming soon" placeholder.
+in-browser PDF export (use `pentool export x.pen x.pdf`).
 
 ### Paint plan authoring (0.13)
 
@@ -67,3 +66,30 @@ field on the plan overlay via `POST /api/paint/field`; the per-pass Material lis
 comes from `POST /api/paint/media` and sets `brush.media`. Plans appear as
 normal editable passes, not a chat surface, and the panel states that every pass is
 generated work and which warnings are measured versus heuristic.
+
+## Design system and shell (0.14)
+
+Studio is dark-first and dense, arranged like a pro raster/vector suite:
+
+- **Application bar**: file actions, undo/redo, and a centered module switcher
+  (Design, Images, Composite, Photo, Print, Paint, Layout) in the manner of
+  Lightroom modules.
+- **Options bar**: document name, page select, format and upgrade.
+- **Toolbox** (left) and **canvas** (center); Photo and Paint swap in their own stage.
+- **Dock** (right): stacked collapsible panels (Properties, Layers, and the
+  active module's panel). Open/closed state is remembered per panel.
+- **Status bar**: tool hint, zoom, page n of m, format version.
+
+Tokens live in `web-ui/src/index.css` as oklch custom properties (`background`,
+`card`, `input`, `muted`, `border`, `primary`, `accent`, `destructive`,
+`warning`, `success`); components use the Tailwind names, never raw colors.
+Base font size is 14px for density. Shared primitives are in
+`web-ui/src/components/ui/kit.tsx`: `Section`, `Row`, `NumberField`,
+`Segmented`, `Check`, `Kbd`, `Empty`, plus `Button`, `Badge` and `Tip`.
+
+### Layout workspace
+
+The Layout module edits `.pen` v9 layout through `POST /api/layout`
+(`{document, op}`); the browser never measures text. Composition, overset and
+preflight come from `GET/POST /api/layout/{overview,preflight,export}`. The
+optional InDesign-style keys are toggled in Layout > View.

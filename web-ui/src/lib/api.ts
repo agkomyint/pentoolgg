@@ -133,7 +133,7 @@ export type LayoutOverview = {
     overset: boolean;
     overset_characters: number;
   }[];
-  frames: { id: string; story: string; page: string; overset: boolean }[];
+  frames: LayoutFrame[];
 };
 
 export const layoutApi = {
@@ -149,3 +149,55 @@ export const layoutApi = {
   exportUrl: (format: "pdf" | "epub", fixed = false) =>
     `/api/layout/export?format=${format}${fixed ? "&fixed=true" : ""}`,
 };
+
+export type LayoutFrame = {
+  id: string;
+  story: string;
+  page: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  next?: string | null;
+  overset: boolean;
+};
+
+/** One layout edit or read, run by the Rust planners on the open document. */
+export type LayoutOp =
+  | { type: "overview" }
+  | { type: "preflight"; bleed?: number; max_overrides?: number; no_alt?: boolean }
+  | { type: "story"; action: Record<string, unknown> }
+  | { type: "frame"; action: Record<string, unknown> }
+  | { type: "page-add"; id: string; after?: string; parent?: string }
+  | { type: "page-duplicate"; id: string; new_id: string }
+  | { type: "page-remove"; id: string; drop_story?: boolean }
+  | { type: "page-move"; id: string; index: number }
+  | { type: "page-rename"; id: string; name: string }
+  | { type: "page-parent"; page: string; parent: string | null }
+  | { type: "spread-facing"; spread: string; facing: boolean };
+
+export const layoutOps = {
+  run: <T = unknown>(document: Doc, op: LayoutOp) =>
+    postJson<{ document?: Doc; result: T }>("/api/layout", { document, op }),
+  overview: (document: Doc) =>
+    layoutOps.run<LayoutOverview>(document, { type: "overview" }).then((r) => r.result),
+  preflight: (document: Doc, opts: { bleed: number; max_overrides: number; no_alt: boolean }) =>
+    layoutOps.run<LayoutPreflightReport>(document, { type: "preflight", ...opts }).then((r) => r.result),
+  /** Download the open document (unsaved edits included) as tagged PDF or EPUB. */
+  async download(doc: Doc, format: "pdf" | "epub", fixed = false) {
+    const r = await check(
+      await fetch("/api/layout/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ document: doc, format, fixed }),
+      }),
+    );
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${String(doc.name ?? "layout")}${fixed ? "-fixed" : ""}.${format}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  },
+};
+
