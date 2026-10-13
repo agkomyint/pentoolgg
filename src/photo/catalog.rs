@@ -928,7 +928,12 @@ fn with_catalog(raw: &Value) -> Result<(Value, bool)> {
     let version = raw.get("version").and_then(Value::as_u64);
     let current = matches!(
         version,
-        Some(VERSION | crate::color::VERSION | crate::spreads::VERSION)
+        Some(
+            VERSION
+                | crate::color::VERSION
+                | crate::spreads::VERSION
+                | crate::scene3d::node::VERSION
+        )
     );
     let mut document = if current {
         crate::scene::validate(raw)?;

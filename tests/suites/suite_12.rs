@@ -38,3 +38,6 @@ mod v080_hardening;
 
 #[path = "../v0140_layout_api.rs"]
 mod v0140_layout_api;
+
+#[path = "../v0150_scene3d.rs"]
+mod v0150_scene3d;

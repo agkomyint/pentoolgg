@@ -1,0 +1,674 @@
+//! The `scene3d` document node: a rectangle whose pixels come from rendering
+//! an embedded or external model with the deterministic CPU renderer.
+//!
+//! Format version 10 adds the `scene3d` node kind and the top-level `models`
+//! map (digest -> record). Everything else is unchanged from version 9.
+
+use super::model::{Model, LIMITS};
+use super::render::{self, Environment, Light, Options, Projection, Scene};
+use super::{gltf, math, obj};
+use anyhow::{bail, ensure, Context, Result};
+use base64::Engine as _;
+use serde_json::{json, Map, Value};
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
+
+pub const VERSION: u64 = 10;
+/// Longest rendered edge in pixels.
+pub const MAX_RENDER_EDGE: f64 = 4096.0;
+const FORMATS: [&str; 3] = ["glb", "gltf", "obj"];
+
+pub fn is_v10(raw: &Value) -> bool {
+    raw.get("version")
+        .and_then(Value::as_u64)
+        .is_some_and(|v| v >= VERSION)
+}
+
+fn number(o: &Map<String, Value>, key: &str) -> Result<f64> {
+    let v = o
+        .get(key)
+        .and_then(Value::as_f64)
+        .with_context(|| format!("[invalid-input] scene3d `{key}` must be a number"))?;
+    ensure!(
+        v.is_finite(),
+        "[invalid-input] scene3d `{key}` must be finite"
+    );
+    Ok(v)
+}
+
+fn optional(o: &Map<String, Value>, key: &str, default: f64, lo: f64, hi: f64) -> Result<f64> {
+    match o.get(key) {
+        None => Ok(default),
+        Some(_) => {
+            let v = number(o, key)?;
+            ensure!(
+                (lo..=hi).contains(&v),
+                "[invalid-input] scene3d `{key}` must be within {lo}..={hi}"
+            );
+            Ok(v)
+        }
+    }
+}
+
+fn vec3(value: &Value, what: &str) -> Result<[f64; 3]> {
+    let a = value
+        .as_array()
+        .filter(|a| a.len() == 3)
+        .with_context(|| format!("[invalid-input] scene3d {what} must be [x, y, z]"))?;
+    let mut out = [0.0; 3];
+    for (slot, v) in out.iter_mut().zip(a) {
+        *slot = v
+            .as_f64()
+            .filter(|v| v.is_finite() && v.abs() <= 1e9)
+            .with_context(|| format!("[invalid-input] scene3d {what} must be finite numbers"))?;
+    }
+    Ok(out)
+}
+
+/// `#rgb`, `#rrggbb`, `#rrggbbaa` or `none` -> straight sRGB 0..1 RGBA.
+pub fn parse_color(text: &str) -> Result<[f64; 4]> {
+    if text == "none" {
+        return Ok([0.0; 4]);
+    }
+    let hex = text.strip_prefix('#').with_context(|| {
+        format!("[invalid-input] color `{text}` must be #rgb, #rrggbb or #rrggbbaa")
+    })?;
+    let expanded: String = match hex.len() {
+        3 => hex.chars().flat_map(|c| [c, c]).collect(),
+        6 | 8 => hex.to_string(),
+        _ => bail!("[invalid-input] color `{text}` must be #rgb, #rrggbb or #rrggbbaa"),
+    };
+    let byte = |i: usize| -> Result<f64> {
+        let part = expanded
+            .get(i..i + 2)
+            .with_context(|| format!("[invalid-input] color `{text}` is malformed"))?;
+        Ok(f64::from(
+            u8::from_str_radix(part, 16)
+                .with_context(|| format!("[invalid-input] color `{text}` is not hexadecimal"))?,
+        ) / 255.0)
+    };
+    Ok([
+        byte(0)?,
+        byte(2)?,
+        byte(4)?,
+        if expanded.len() == 8 { byte(6)? } else { 1.0 },
+    ])
+}
+
+fn color_field(value: &Value, what: &str) -> Result<[f64; 3]> {
+    let c = parse_color(
+        value
+            .as_str()
+            .with_context(|| format!("[invalid-input] scene3d {what} must be a color string"))?,
+    )?;
+    Ok([c[0], c[1], c[2]])
+}
+
+/// Validate the top-level `models` map for a version-10 document.
+pub fn validate_models(raw: &Value, version: u64) -> Result<()> {
+    if version < VERSION {
+        return Ok(());
+    }
+    let Some(models) = raw.get("models") else {
+        return Ok(());
+    };
+    let models = models
+        .as_object()
+        .context("[invalid-input] `models` must be an object")?;
+    ensure!(
+        models.len() <= 256,
+        "[limit-exceeded] a document holds at most 256 models"
+    );
+    for (digest, record) in models {
+        let record = record
+            .as_object()
+            .with_context(|| format!("[invalid-input] model {digest} must be an object"))?;
+        let format = record.get("format").and_then(Value::as_str).unwrap_or("");
+        ensure!(
+            FORMATS.contains(&format),
+            "[unsupported-capability] model {digest} has unsupported format `{format}` (glb, gltf, obj)"
+        );
+        let storage = record
+            .get("storage")
+            .and_then(Value::as_object)
+            .with_context(|| format!("[invalid-input] model {digest} has no storage"))?;
+        match storage.get("kind").and_then(Value::as_str) {
+            Some("embedded") => {
+                let data = storage
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .with_context(|| format!("[invalid-input] model {digest} has no data"))?;
+                ensure!(
+                    data.len() / 4 * 3 <= LIMITS.max_bytes,
+                    "[limit-exceeded] model {digest} exceeds the {} byte limit",
+                    LIMITS.max_bytes
+                );
+            }
+            Some("external") => {
+                let path = storage
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .with_context(|| format!("[invalid-input] model {digest} has no path"))?;
+                crate::resource::safe_relative_path(Path::new(path))?;
+            }
+            other => bail!(
+                "[unsupported-capability] model {digest} storage kind {other:?} is unsupported"
+            ),
+        }
+    }
+    Ok(())
+}
+
+/// Structural validation of one node (document-level references included).
+pub fn validate_node(node: &Map<String, Value>, raw: &Value) -> Result<()> {
+    let id = node.get("id").and_then(Value::as_str).unwrap_or("?");
+    let ctx = || format!("scene3d node {id}");
+    let width = number(node, "width").with_context(ctx)?;
+    let height = number(node, "height").with_context(ctx)?;
+    ensure!(
+        width > 0.0 && height > 0.0,
+        "[invalid-input] {} needs a positive width and height",
+        ctx()
+    );
+    let ratio = optional(node, "pixel_ratio", 1.0, 0.1, 8.0).with_context(ctx)?;
+    ensure!(
+        width.max(height) * ratio <= MAX_RENDER_EDGE,
+        "[limit-exceeded] {} would render {} pixels on its longest side; the limit is {MAX_RENDER_EDGE}",
+        ctx(),
+        (width.max(height) * ratio).round()
+    );
+    let digest = node
+        .get("model")
+        .and_then(Value::as_str)
+        .with_context(|| format!("[invalid-input] {} needs a `model` digest", ctx()))?;
+    ensure!(
+        raw.get("models").and_then(|m| m.get(digest)).is_some(),
+        "[missing-resource] {} refers to model {digest}, which is not in `models`",
+        ctx()
+    );
+    scene_for(node, None).with_context(ctx)?;
+    Ok(())
+}
+
+/// Every `scene3d` node in the document (pages and parent pages).
+fn collect<'a>(raw: &'a Value, out: &mut Vec<&'a Map<String, Value>>) {
+    fn walk<'a>(node: &'a Value, out: &mut Vec<&'a Map<String, Value>>) {
+        if let Some(o) = node.as_object() {
+            if o.get("kind").and_then(Value::as_str) == Some("scene3d") {
+                out.push(o);
+            }
+            for child in o
+                .get("children")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                walk(child, out);
+            }
+        }
+    }
+    fn layers<'a>(container: &'a Value, out: &mut Vec<&'a Map<String, Value>>) {
+        for layer in container
+            .get("layers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            for node in layer
+                .get("nodes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                walk(node, out);
+            }
+        }
+    }
+    for page in raw
+        .get("pages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        layers(page, out);
+    }
+    for parent in raw["layout"]["parents"].as_array().into_iter().flatten() {
+        layers(parent, out);
+    }
+}
+
+/// Document-wide node check: gates the kind by format version and validates
+/// every node against the `models` map.
+pub fn validate_nodes(raw: &Value, version: u64) -> Result<()> {
+    let mut nodes = Vec::new();
+    collect(raw, &mut nodes);
+    for node in nodes {
+        let id = node.get("id").and_then(Value::as_str).unwrap_or("?");
+        ensure!(
+            version >= VERSION,
+            "[unsupported-capability] scene3d node {id} requires document format version 10; run `pentool migrate --target 10` first"
+        );
+        validate_node(node, raw)?;
+    }
+    Ok(())
+}
+
+/// `migrate --target 10`: version 9 plus the (initially empty) `models` map.
+pub fn migrate(raw: Value) -> Result<Value> {
+    if is_v10(&raw) {
+        crate::scene::validate(&raw)?;
+        return Ok(raw);
+    }
+    ensure!(
+        raw.get("models").is_none(),
+        "[unsupported-capability] an existing \"models\" extension conflicts with version 10; rename the extension before migration"
+    );
+    let mut raw = crate::spreads::migrate(raw)?;
+    raw["version"] = json!(VERSION);
+    crate::scene::validate(&raw)?;
+    Ok(raw)
+}
+
+/// Bring a version-10 document down to 9. Refused, naming the node or model,
+/// while the document uses 3D; other versions pass through untouched.
+pub fn to_v9(mut raw: Value) -> Result<Value> {
+    if !is_v10(&raw) {
+        return Ok(raw);
+    }
+    let mut nodes = Vec::new();
+    collect(&raw, &mut nodes);
+    if let Some(node) = nodes.first() {
+        bail!(
+            "[unsupported-capability] version 9 cannot represent scene3d node {}; remove it first",
+            node.get("id").and_then(Value::as_str).unwrap_or("?")
+        );
+    }
+    if let Some(digest) = raw
+        .get("models")
+        .and_then(Value::as_object)
+        .and_then(|m| m.keys().next())
+    {
+        bail!(
+            "[unsupported-capability] version 9 cannot represent model {digest}; remove it first"
+        );
+    }
+    let object = raw.as_object_mut().context("document must be an object")?;
+    object.remove("models");
+    raw["version"] = json!(crate::spreads::VERSION);
+    Ok(raw)
+}
+
+/// Build the renderer scene and options from a node. `model` supplies bounds
+/// for automatic framing; validation passes `None` and uses a unit stand-in.
+pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Scene, Options)> {
+    let width = number(node, "width")?;
+    let height = number(node, "height")?;
+    let ratio = optional(node, "pixel_ratio", 1.0, 0.1, 8.0)?;
+    let supersample = optional(
+        node,
+        "supersample",
+        2.0,
+        1.0,
+        render::MAX_SUPERSAMPLE as f64,
+    )?;
+    ensure!(
+        supersample.fract() == 0.0,
+        "[invalid-input] scene3d `supersample` must be an integer"
+    );
+    let px = |v: f64| ((v * ratio).round() as u32).max(1);
+
+    let stand_in;
+    let framing: &Model = match model {
+        Some(m) => m,
+        None => {
+            stand_in = Model::default();
+            &stand_in
+        }
+    };
+    let cam = node.get("camera").and_then(Value::as_object);
+    let empty = Map::new();
+    let cam = cam.unwrap_or(&empty);
+    let azimuth = optional(cam, "azimuth", 30.0, -360.0, 360.0)?;
+    let elevation = optional(cam, "elevation", 15.0, -89.0, 89.0)?;
+    let fov = optional(cam, "fov", 35.0, 1.0, 170.0)?;
+    let orthographic = match cam.get("projection").and_then(Value::as_str) {
+        None | Some("perspective") => false,
+        Some("orthographic") => true,
+        Some(other) => {
+            bail!("[invalid-input] camera projection `{other}` must be perspective or orthographic")
+        }
+    };
+    let mut camera = render::frame_camera(framing, azimuth, elevation, fov);
+    if orthographic {
+        let (min, max) = framing.bounds().unwrap_or(([-1.0; 3], [1.0; 3]));
+        let diameter = math::length(math::sub(max, min)).max(1e-6);
+        camera.projection = Projection::Orthographic {
+            height: optional(cam, "height", diameter * 1.1, 1e-6, 1e9)?,
+        };
+    }
+    if let Some(eye) = cam.get("eye") {
+        camera.eye = vec3(eye, "camera eye")?;
+        camera.target = vec3(
+            cam.get("target")
+                .context("[invalid-input] camera `eye` needs a `target`")?,
+            "camera target",
+        )?;
+        camera.near = optional(cam, "near", 0.1, 1e-6, 1e9)?;
+        camera.far = optional(cam, "far", 1000.0, 1e-6, 1e12)?;
+    }
+    if let Some(up) = cam.get("up") {
+        camera.up = vec3(up, "camera up")?;
+    }
+
+    let lights = match node.get("lights") {
+        None => render::default_lights(),
+        Some(list) => {
+            let list = list
+                .as_array()
+                .context("[invalid-input] scene3d `lights` must be an array")?;
+            ensure!(
+                list.len() <= render::MAX_LIGHTS,
+                "[limit-exceeded] at most {} lights are supported",
+                render::MAX_LIGHTS
+            );
+            let mut out = Vec::new();
+            for light in list {
+                let o = light
+                    .as_object()
+                    .context("[invalid-input] a light must be an object")?;
+                let color = match o.get("color") {
+                    Some(c) => color_field(c, "light color")?,
+                    None => [1.0; 3],
+                };
+                let intensity = optional(o, "intensity", 1.0, 0.0, 1e6)?;
+                out.push(match o.get("kind").and_then(Value::as_str) {
+                    Some("directional") => Light::Directional {
+                        direction: math::normalize(vec3(
+                            o.get("direction")
+                                .context("[invalid-input] a directional light needs `direction`")?,
+                            "light direction",
+                        )?),
+                        color,
+                        intensity,
+                    },
+                    Some("point") => Light::Point {
+                        position: vec3(
+                            o.get("position")
+                                .context("[invalid-input] a point light needs `position`")?,
+                            "light position",
+                        )?,
+                        color,
+                        intensity,
+                    },
+                    other => {
+                        bail!("[invalid-input] light kind {other:?} must be directional or point")
+                    }
+                });
+            }
+            out
+        }
+    };
+    let mut environment = Environment::default();
+    if let Some(env) = node.get("environment").and_then(Value::as_object) {
+        if let Some(c) = env.get("sky") {
+            environment.sky = color_field(c, "environment sky")?;
+        }
+        if let Some(c) = env.get("ground") {
+            environment.ground = color_field(c, "environment ground")?;
+        }
+        environment.intensity = optional(env, "intensity", environment.intensity, 0.0, 100.0)?;
+    }
+    let background = match node.get("background").and_then(Value::as_str) {
+        Some(text) => parse_color(text)?,
+        None => [0.0; 4],
+    };
+    Ok((
+        Scene {
+            camera,
+            lights,
+            environment,
+            background,
+            exposure_ev: optional(node, "exposure_ev", 0.0, -16.0, 16.0)?,
+        },
+        Options {
+            width: px(width),
+            height: px(height),
+            supersample: supersample as u32,
+        },
+    ))
+}
+
+type ModelCache = Mutex<Vec<(String, Arc<Model>)>>;
+type PngCache = Mutex<Vec<(String, Arc<Vec<u8>>)>>;
+
+fn model_cache() -> &'static ModelCache {
+    static C: OnceLock<ModelCache> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn png_cache() -> &'static PngCache {
+    static C: OnceLock<PngCache> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn remember<T>(cache: &Mutex<Vec<(String, T)>>, key: String, value: T, limit: usize) {
+    if let Ok(mut c) = cache.lock() {
+        c.retain(|(k, _)| k != &key);
+        c.push((key, value));
+        while c.len() > limit {
+            c.remove(0);
+        }
+    }
+}
+
+/// Load, verify and import a model. `document_dir` anchors external paths.
+pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<Model>> {
+    if let Ok(c) = model_cache().lock() {
+        if let Some((_, m)) = c.iter().find(|(k, _)| k == digest) {
+            return Ok(Arc::clone(m));
+        }
+    }
+    let record = raw["models"]
+        .get(digest)
+        .and_then(Value::as_object)
+        .with_context(|| format!("[missing-resource] model {digest} is not in `models`"))?;
+    let storage = record["storage"]
+        .as_object()
+        .context("[invalid-input] model storage is missing")?;
+    let document = document_dir.join("document.pen");
+    let (bytes, base): (Vec<u8>, Option<std::path::PathBuf>) = match storage["kind"].as_str() {
+        Some("embedded") => (
+            base64::engine::general_purpose::STANDARD
+                .decode(storage["data"].as_str().unwrap_or(""))
+                .context("[malformed-resource] embedded model is not valid base64")?,
+            None,
+        ),
+        Some("external") => {
+            let path = Path::new(storage["path"].as_str().unwrap_or(""));
+            (
+                crate::resource::read_external_offline_limited(
+                    &document,
+                    path,
+                    digest,
+                    LIMITS.max_bytes,
+                )?,
+                path.parent().map(Path::to_path_buf),
+            )
+        }
+        other => bail!("[unsupported-capability] model storage kind {other:?} is unsupported"),
+    };
+    crate::resource::verify(&bytes, digest)?;
+    let resolver = |uri: &str| -> Result<Vec<u8>> {
+        let Some(base) = &base else {
+            bail!("[unsafe-path] embedded models cannot reference external file `{uri}`");
+        };
+        ensure!(
+            !uri.contains(':') && !uri.contains('?'),
+            "[unsafe-path] model resource `{uri}` must be a relative file path"
+        );
+        let decoded = uri.replace("%20", " ");
+        let relative = base.join(decoded);
+        crate::resource::safe_relative_path(&relative)?;
+        let full = document_dir.join(&relative);
+        let canonical_root = document_dir
+            .canonicalize()
+            .context("[missing-resource] document directory")?;
+        let canonical = full
+            .canonicalize()
+            .with_context(|| format!("[missing-resource] {}", full.display()))?;
+        ensure!(
+            canonical.starts_with(&canonical_root),
+            "[unsafe-path] model resource `{uri}` resolves outside the document root"
+        );
+        let meta = std::fs::metadata(&canonical)?;
+        ensure!(
+            meta.len() as usize <= LIMITS.max_bytes,
+            "[limit-exceeded] model resource `{uri}` is too large"
+        );
+        Ok(std::fs::read(&canonical)?)
+    };
+    let model = match record["format"].as_str() {
+        Some("glb") | Some("gltf") => gltf::import(&bytes, &resolver)?,
+        Some("obj") => obj::import(&bytes, &resolver)?,
+        other => bail!("[unsupported-capability] model format {other:?} is unsupported"),
+    };
+    let model = Arc::new(model);
+    remember(model_cache(), digest.to_string(), Arc::clone(&model), 2);
+    Ok(model)
+}
+
+/// Render a node to PNG bytes (straight alpha sRGB).
+pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -> Result<Vec<u8>> {
+    let digest = node
+        .get("model")
+        .and_then(Value::as_str)
+        .context("[invalid-input] scene3d node needs a `model` digest")?;
+    // Everything that affects pixels, and nothing else (not x/y/id/opacity).
+    let key = {
+        let mut spec = Map::new();
+        for k in [
+            "model",
+            "width",
+            "height",
+            "pixel_ratio",
+            "camera",
+            "lights",
+            "environment",
+            "background",
+            "exposure_ev",
+            "supersample",
+        ] {
+            if let Some(v) = node.get(k) {
+                spec.insert(k.into(), v.clone());
+            }
+        }
+        crate::resource::sha256(serde_json::to_string(&Value::Object(spec))?.as_bytes())
+    };
+    if let Ok(c) = png_cache().lock() {
+        if let Some((_, png)) = c.iter().find(|(k, _)| k == &key) {
+            return Ok(png.as_ref().clone());
+        }
+    }
+    let model = load_model(raw, document_dir, digest)?;
+    let (scene, options) = scene_for(node, Some(&model))?;
+    let image = render::render(&model, &scene, &options)?;
+    let buffer = image::RgbaImage::from_raw(image.width, image.height, image.rgba)
+        .context("renderer produced a malformed image")?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(buffer)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .context("could not encode the 3D render")?;
+    let png = out.into_inner();
+    remember(png_cache(), key, Arc::new(png.clone()), 8);
+    Ok(png)
+}
+
+/// Compact description for `scene3d inspect`.
+pub fn inspect(model: &Model) -> Value {
+    let bounds = model.bounds();
+    json!({
+        "format": model.report.format,
+        "vertices": model.report.vertices,
+        "triangles": model.report.triangles,
+        "primitives": model.primitives.len(),
+        "materials": model.materials.len(),
+        "textures": model.textures.len(),
+        "instances": model.instances.iter().map(|i| json!({
+            "id": i.id,
+            "primitive": i.primitive,
+            "triangles": model.primitives[i.primitive].triangle_count(),
+            "uv_sets": model.primitives[i.primitive].uvs.len(),
+            "material": model.primitives[i.primitive].material,
+        })).collect::<Vec<_>>(),
+        "bounds": bounds.map(|(min, max)| json!({"min": min, "max": max})),
+        "unsupported": model.report.unsupported,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc_with_cube() -> (Value, String) {
+        // Minimal OBJ cube embedded in a v10 document.
+        let obj =
+            "v -1 -1 -1\nv 1 -1 -1\nv 1 1 -1\nv -1 1 -1\nv -1 -1 1\nv 1 -1 1\nv 1 1 1\nv -1 1 1\n\
+                   f 1 3 2\nf 1 4 3\nf 5 6 7\nf 5 7 8\nf 1 2 6\nf 1 6 5\nf 2 3 7\nf 2 7 6\n\
+                   f 3 4 8\nf 3 8 7\nf 4 1 5\nf 4 5 8\n";
+        let digest = crate::resource::sha256(obj.as_bytes());
+        let doc = json!({
+            "version": 10,
+            "models": {digest.clone(): {
+                "format": "obj",
+                "storage": {"kind": "embedded",
+                    "data": base64::engine::general_purpose::STANDARD.encode(obj)}
+            }}
+        });
+        (doc, digest)
+    }
+
+    #[test]
+    fn colors_parse_and_reject() {
+        assert_eq!(parse_color("#fff").unwrap(), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(parse_color("none").unwrap()[3], 0.0);
+        assert!(parse_color("red").is_err());
+        assert!(parse_color("#12345").is_err());
+        assert!(parse_color("#gggggg").is_err());
+    }
+
+    #[test]
+    fn validates_models_and_nodes() {
+        let (mut raw, digest) = doc_with_cube();
+        validate_models(&raw, 10).unwrap();
+        let node =
+            json!({"id":"n","kind":"scene3d","x":0,"y":0,"width":200,"height":200,"model":digest});
+        validate_node(node.as_object().unwrap(), &raw).unwrap();
+        let mut bad = node.clone();
+        bad["model"] = json!("sha256:missing");
+        assert!(validate_node(bad.as_object().unwrap(), &raw).is_err());
+        let mut huge = node.clone();
+        huge["width"] = json!(100000);
+        assert!(validate_node(huge.as_object().unwrap(), &raw).is_err());
+        let mut light = node.clone();
+        light["lights"] = json!([{"kind":"laser"}]);
+        assert!(validate_node(light.as_object().unwrap(), &raw).is_err());
+        raw["models"][&digest]["format"] = json!("fbx");
+        assert!(validate_models(&raw, 10).is_err());
+    }
+
+    #[test]
+    fn renders_a_cube_deterministically_and_caches() {
+        let (raw, digest) = doc_with_cube();
+        let node = json!({"id":"n","kind":"scene3d","x":0,"y":0,"width":64,"height":64,"model":digest,
+                          "background":"#202020"});
+        let dir = std::env::temp_dir();
+        let a = render_png(&raw, &dir, node.as_object().unwrap()).unwrap();
+        let b = render_png(&raw, &dir, node.as_object().unwrap()).unwrap();
+        assert_eq!(a, b);
+        let img = image::load_from_memory(&a).unwrap().to_rgba8();
+        assert_eq!(img.dimensions(), (64, 64));
+        // The cube is lit, so the center differs from the flat background.
+        assert_ne!(img.get_pixel(32, 32).0[..3], [0x20, 0x20, 0x20]);
+        assert_eq!(img.get_pixel(0, 0).0, [0x20, 0x20, 0x20, 255]);
+    }
+}

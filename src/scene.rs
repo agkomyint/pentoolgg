@@ -18,6 +18,7 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::photo::VERSION)
             | Some(crate::color::VERSION)
             | Some(crate::spreads::VERSION)
+            | Some(crate::scene3d::node::VERSION)
     )
 }
 
@@ -723,7 +724,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                     });
                 Rect::new(x, y - size, x + width, y - size + height)
             }
-            "image" | "raster" | "photo" | "text-frame" | "graphic-frame" => Rect::new(
+            "image" | "raster" | "photo" | "scene3d" | "text-frame" | "graphic-frame" => Rect::new(
                 node["x"].as_f64().context("image x missing")?,
                 node["y"].as_f64().context("image y missing")?,
                 node["x"].as_f64().unwrap()
@@ -2802,6 +2803,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 | crate::photo::VERSION
                 | crate::color::VERSION
                 | crate::spreads::VERSION
+                | crate::scene3d::node::VERSION
         )
     {
         bail!("not a supported Pentool scene document")
@@ -2898,6 +2900,8 @@ pub fn validate(raw: &Value) -> Result<()> {
         crate::composite::validate(raw)?;
     }
     crate::spreads::validate(raw, version)?;
+    crate::scene3d::node::validate_models(raw, version)?;
+    crate::scene3d::node::validate_nodes(raw, version)?;
     if version >= crate::spreads::VERSION {
         for (parent, layer) in crate::spreads::parent_layers(raw) {
             let mut ids = HashSet::new();
@@ -2921,7 +2925,7 @@ pub fn validate(raw: &Value) -> Result<()> {
 
 pub fn flatten_to_v3(raw: &Value) -> Result<Value> {
     validate(raw)?;
-    if raw.get("version").and_then(Value::as_u64) == Some(crate::spreads::VERSION) {
+    if crate::spreads::is_v9(raw) {
         return flatten_to_v3(&crate::spreads::downgrade(raw.clone())?);
     }
     if crate::color::has_v8(raw) {
@@ -3305,6 +3309,9 @@ pub(crate) fn validate_node(
             "raster" if compositing => crate::raster::validate_node(node)?,
             "photo" if compositing => crate::photo::catalog::validate_node(o)?,
             "text-frame" | "graphic-frame" => crate::stories::validate_frame_node(o)?,
+            // Version gating and model references are checked document-wide
+            // by `scene3d::node::validate_nodes`, which has the whole document.
+            "scene3d" => {}
             "image" => crate::image::validate_node_for_version(
                 o,
                 image_assets.context(

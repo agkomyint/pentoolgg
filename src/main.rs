@@ -2097,6 +2097,16 @@ enum Command {
         #[command(subcommand)]
         action: pentool::layout_cli::SpreadAction,
     },
+    /// Version 10 static 3D: import models, camera, lights, inspect.
+    Scene3d {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::scene3d::cli::Scene3dAction,
+    },
     /// Version 9 parent pages: create, items, assignment, resolution.
     Parent {
         input: PathBuf,
@@ -2488,7 +2498,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate between compatible v3 through v8 document formats.
+    /// Explicitly migrate between compatible v3 through v10 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -6942,6 +6952,12 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_spread(&input, dry_run, if_revision.as_deref(), action),
+        Command::Scene3d {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::scene3d::cli::run(&input, dry_run, if_revision.as_deref(), action),
         Command::LayoutStyle {
             input,
             dry_run,
@@ -8315,8 +8331,8 @@ async fn run() -> Result<()> {
             if selected_page.is_some() {
                 bail!("[invalid-input] format migration affects the entire document; --page is not applicable");
             }
-            if !matches!(target, 3..=9) {
-                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, 8, or 9")
+            if !matches!(target, 3..=10) {
+                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, 8, 9, or 10")
             }
             let before = if u64::from(target) >= pentool::color::VERSION {
                 pentool::resource::read_bounded(
@@ -8330,6 +8346,7 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
+                10 => pentool::scene3d::node::migrate(raw)?,
                 9 => pentool::spreads::migrate(raw)?,
                 8 => pentool::color::catalog::migrate(raw)?,
                 7 => pentool::photo::catalog::migrate(raw)?,

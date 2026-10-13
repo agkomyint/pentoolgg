@@ -296,7 +296,13 @@ pub const ADJUSTMENTS: [&str; 13] = [
 pub fn is_document(raw: &Value) -> bool {
     matches!(
         raw.get("version").and_then(Value::as_u64),
-        Some(VERSION | crate::photo::VERSION | crate::color::VERSION | crate::spreads::VERSION)
+        Some(
+            VERSION
+                | crate::photo::VERSION
+                | crate::color::VERSION
+                | crate::spreads::VERSION
+                | crate::scene3d::node::VERSION
+        )
     )
 }
 

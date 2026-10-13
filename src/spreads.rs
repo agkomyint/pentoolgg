@@ -27,8 +27,11 @@ const STYLES: [&str; 5] = [
     "lower-alpha",
 ];
 
+/// True for version 9 and any later version (10 only adds `scene3d` nodes).
 pub fn is_v9(raw: &Value) -> bool {
-    raw.get("version").and_then(Value::as_u64) == Some(VERSION)
+    raw.get("version")
+        .and_then(Value::as_u64)
+        .is_some_and(|v| v >= VERSION)
 }
 
 // ---------------------------------------------------------------- numbering
@@ -1779,6 +1782,7 @@ fn default_layout(raw: &Value) -> Value {
 /// spread per page. Lossless; rendering is unchanged.
 pub fn migrate(raw: Value) -> Result<Value> {
     if is_v9(&raw) {
+        let raw = crate::scene3d::node::to_v9(raw)?;
         crate::scene::validate(&raw)?;
         return Ok(raw);
     }
@@ -1801,7 +1805,8 @@ pub fn migrate(raw: Value) -> Result<Value> {
 /// `migrate --target 8`: only a document whose layout is representable in v8
 /// (one non-facing page per spread, nothing else) can go back. Anything else
 /// fails naming the first construct, and nothing is written.
-pub fn downgrade(mut raw: Value) -> Result<Value> {
+pub fn downgrade(raw: Value) -> Result<Value> {
+    let mut raw = crate::scene3d::node::to_v9(raw)?;
     crate::scene::validate(&raw)?;
     ensure!(
         is_v9(&raw),

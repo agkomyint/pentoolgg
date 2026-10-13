@@ -689,6 +689,7 @@ fn write_node(
         "image" => write_image(svg, object, raw, root, clip_index)?,
         "raster" => write_raster(svg, node, raw)?,
         "photo" => write_photo(svg, object, raw, root, clip_index)?,
+        "scene3d" => write_scene3d(svg, object, raw, root)?,
         kind => bail!("[unsupported-capability] cannot render node kind {kind}"),
     }
     svg.push_str("</g>");
@@ -764,6 +765,27 @@ fn write_mask_geometry(svg: &mut String, node: &Value, fill_rule: &str) -> Resul
         kind => bail!("[invalid-mask] node kind {kind} cannot be a mask"),
     }
     svg.push_str("</g>");
+    Ok(())
+}
+
+fn write_scene3d(
+    svg: &mut String,
+    node: &Map<String, Value>,
+    raw: &Value,
+    context: &SvgContext,
+) -> Result<()> {
+    let png = crate::scene3d::node::render_png(raw, context.root, node)?;
+    let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
+    write!(
+        svg,
+        r#"<image x="{}" y="{}" width="{}" height="{}" opacity="{}" preserveAspectRatio="none" href="data:image/png;base64,{}"/>"#,
+        finite(node, "x")?,
+        finite(node, "y")?,
+        finite(node, "width")?,
+        finite(node, "height")?,
+        opacity,
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )?;
     Ok(())
 }
 
