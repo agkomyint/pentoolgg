@@ -342,6 +342,46 @@ pub fn run_layout_doc(
     finish(input, "layout-doc", dry_run, revision, &raw, result)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn run_layout_adapt(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    page: &str,
+    width: f64,
+    height: f64,
+    rule: &str,
+    uniform: bool,
+    objects: &[String],
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let options = crate::merge::AdaptOptions {
+        rule: crate::merge::Rule::parse(rule)?,
+        uniform,
+        objects: objects
+            .iter()
+            .map(|o| crate::merge::parse_object_rule(o))
+            .collect::<Result<Vec<_>>>()?,
+    };
+    let result = crate::merge::adapt(&mut raw, page, width, height, &options)?;
+    finish(input, "layout-adapt", dry_run, revision, &raw, result)
+}
+
+pub fn run_layout_alt(
+    input: &Path,
+    dry_run: bool,
+    revision: Option<&str>,
+    action: crate::merge::AltAction,
+) -> Result<()> {
+    let mut raw = read(input)?;
+    let (result, read_only) = crate::merge::run_alt(&mut raw, action)?;
+    if read_only {
+        println!("{result}");
+        return Ok(());
+    }
+    finish(input, "layout-alt", dry_run, revision, &raw, result)
+}
+
 pub fn run_parent(
     input: &Path,
     dry_run: bool,
@@ -498,4 +538,75 @@ pub fn run_text_layout(
         return Ok(());
     }
     finish(input, "text", dry_run, revision, &raw, result)
+}
+
+/// `layout-preflight`: read-only, composer-measured layout checks.
+pub fn run_layout_preflight(
+    input: &Path,
+    bleed: f64,
+    max_overrides: f64,
+    no_alt: bool,
+) -> Result<()> {
+    let raw = read(input)?;
+    let options = crate::layout_preflight::Options {
+        bleed,
+        max_override_pct: max_overrides,
+        require_alt: !no_alt,
+    };
+    let result = crate::layout_preflight::run(&raw, input, &options)?;
+    println!("{result}");
+    Ok(())
+}
+
+/// `layout-export`: tagged PDF with real text, or EPUB 3, from composed stories.
+#[allow(clippy::too_many_arguments)]
+pub fn run_layout_export(
+    input: &Path,
+    out: &Path,
+    format: Option<String>,
+    fixed: bool,
+    scale: Option<f32>,
+    title: Option<String>,
+    language: Option<String>,
+    overwrite: bool,
+) -> Result<()> {
+    let format = format.unwrap_or_else(|| {
+        out.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("pdf")
+            .to_ascii_lowercase()
+    });
+    anyhow::ensure!(
+        overwrite || !out.exists(),
+        "[output-exists] {} exists; pass --overwrite",
+        out.display()
+    );
+    let raw = read(input)?;
+    let result = match format.as_str() {
+        "pdf" => {
+            anyhow::ensure!(
+                !fixed,
+                "[invalid-input] --fixed applies to EPUB output only"
+            );
+            let mut options = crate::publish::PdfOptions::default();
+            if let Some(s) = scale {
+                options.scale = s;
+            }
+            options.title = title;
+            options.language = language;
+            crate::publish::export_pdf(&raw, input, out, &options)?
+        }
+        "epub" => {
+            let options = crate::publish::EpubOptions {
+                fixed,
+                title,
+                language,
+                scale,
+            };
+            crate::publish::export_epub(&[(&raw, input)], out, &options)?
+        }
+        other => anyhow::bail!("[invalid-input] --format must be pdf or epub, not {other}"),
+    };
+    println!("{result}");
+    Ok(())
 }

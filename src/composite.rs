@@ -2383,6 +2383,8 @@ fn render_scene(
     if !is_document(raw) {
         bail!("compositing requires document version 6")
     }
+    let materialized = crate::typeset::materialize(raw)?;
+    let raw = materialized.as_ref().unwrap_or(raw);
     let working_setting = if working {
         let setting = crate::color::roles::effective(raw, crate::color::roles::Role::Working)?;
         if !setting.destination.is_linear_rgb() {
@@ -2541,6 +2543,8 @@ pub fn text_lines(
     page_id: Option<&str>,
 ) -> Result<Vec<crate::image::TextLine>> {
     crate::scene::validate(raw)?;
+    let materialized = crate::typeset::materialize(raw)?;
+    let raw = materialized.as_ref().unwrap_or(raw);
     let mut resolved = crate::scene::with_resolved_tokens(raw)?;
     crate::color::scene::preview(&mut resolved, document, page_id)?;
     let raw = &resolved;

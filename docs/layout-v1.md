@@ -300,8 +300,8 @@ that does not advance the story (zero-height frame) aborts with
   frame the command fails with `[story-last-frame]` unless `--drop-story`.
   Duplicating a page gives its frames fresh IDs and fresh empty stories.
 - Story text is NFC-normalized; control characters other than newline and tab
-  are refused. Frames render nothing before the composer; `auto_size: width`
-  is stored but not yet applied.
+  are refused. Frames render their composed text in PNG, SVG and PDF exports; `auto_size:
+  width` is stored but not yet applied.
 
 ## 5. Styles
 
@@ -604,9 +604,10 @@ script runs via `unicode-script` and subsetting via `subsetter`.
   (`balance`), optical margin alignment and hanging punctuation
   (small per-glyph table) and the pure `split_lines` widow/orphan/keep helper
   are implemented and unit tested.
-- Not yet implemented: tab stops with leaders, span/split columns, replacing
-  the task 3 overset estimator with the composer, and rendering of composed
-  frames.
+- Composed frames render in every export (`src/typeset.rs` flows stories
+  through the composer; layout preflight and `book preflight` use its overset).
+- Not yet implemented: tab stops with leaders, span/split columns, character
+  styles inside composition, and per-column paragraph recomposition.
 
 ## 7. Grids and guides
 
@@ -867,6 +868,73 @@ file:
   print preflight of every page when `--print` is given (capped at 200 pages).
 - `package` copies the manifest, members and linked images into a new
   directory, rewriting image paths to `assets/<digest>` beside each member.
+
+### 11.1 Data merge and adaptive layout (task 12, `src/merge.rs`)
+
+- `layout-merge TEMPLATE --data FILE --out OUT` fills `{{field}}` placeholders
+  in the stories of one template page and fills named graphic frames from an
+  image-path field (`--image-field FRAME=FIELD`, paths relative to the data
+  file). Data is CSV, TSV or a JSON array of flat objects, at most 16 MiB,
+  10,000 records and 256 fields; a value is at most 64 KiB, and control
+  characters are removed and counted in the report.
+- One record per page by default; `--records-per-page N --grid COLSxROWS
+  --cell WIDTHxHEIGHT` places N records per page in cells (N ≤ 1,000). The
+  template is never modified; output page, frame and story IDs derive from the
+  template IDs plus `m<page>` / `m<page>c<cell>`, so output is deterministic.
+  The template page is removed from the output unless `--keep-template`.
+- A placeholder with no data field, a missing or hostile image path, an
+  anchored object inside a template story, or an ID that would collide fails
+  before anything is written. `--dry-run` plans and reports without writing.
+- The report lists `overflow` per record with page, story, frame and
+  `characters_remaining`. Overflow is **estimated** (marked `estimated: true`);
+  run `text overset` on the output for composed truth.
+- `layout-adapt FILE --page P --width W --height H --rule scale|recenter|guide|object`
+  resizes one page and re-places its objects: `scale` (`--uniform` keeps the
+  aspect ratio and centers), `recenter` (keep size, keep the center), `guide`
+  (objects keep their distance to the nearest guide, which moves
+  proportionally) and `object` (per-object `--object ID=h:left|right|center|
+  stretch|scale,v:top|bottom|center|stretch|scale`). Text size is unchanged.
+- `layout-alt FILE create SOURCE ID --width W --height H` copies a page to a new
+  size (same rules). Each copied story records `linked_to` and `link_digest`.
+  `sync` refreshes linked stories from their sources; a story whose digest no
+  longer matches was edited locally and is skipped and reported unless
+  `--force`. `unlink PAGE` drops the link, `list` is read only. At most 500
+  alternates.
+- All three require a version 9 document and commit through the shared
+  transaction path (`layout-merge` writes a new file atomically).
+
+### 11.2 `layout-export` (implemented, `src/publish.rs`)
+
+`pentool layout-export FILE OUT [--format pdf|epub] [--fixed] [--scale N]
+[--title T] [--language BCP47] [--overwrite]` composes every placed story with
+the same engine as rendering and preflight, then writes:
+
+- **PDF** — page artwork is a raster of the page rendered *without* story
+  text; composed lines are real text using embedded font subsets (Type 0,
+  Identity-H, ToUnicode) placed from shaped advances, justified lines with
+  per-space adjustment. The file is tagged (`MarkInfo`, `StructTreeRoot`,
+  `Document`/`H1`-`H6`/`P`, `Figure` with `Alt` from `alt`, `alt_text` or
+  `description`), has bookmarks from paragraph styles named like `heading-N`,
+  `title`, `chapter` or `hN`, URL and page/bookmark link annotations from
+  `layout.hyperlinks` link runs, `/Lang` and a document title.
+- **EPUB 3** — reflowable by default: one XHTML file per placed story with
+  headings, paragraphs, link runs, per-style CSS, embedded fonts and a
+  navigation document. `--fixed` writes pre-paginated pages: page artwork as a
+  PNG with positioned text. Identifiers are content-derived and the modified
+  date is fixed so output is deterministic.
+- `book export --format epub` joins the members in order into one EPUB.
+
+Not covered: PDF/X real-text output (use `export-pdfx`), PDF articles, right-to-left
+placement, images in reflowable EPUB, and validator runs (veraPDF, EPUBCheck).
+
+### 11.3 `layout-preflight` (implemented, `src/layout_preflight.rs`)
+
+Read-only. Issues carry `severity`, `code`, `message`, `action` and, where
+they apply, `page`, `frame`, `story`, `offset`: errors `text-overset`,
+`link-missing`, `text-outside-bleed` and unresolved references; warnings
+`font-substituted`, `link-modified`, `generated-stale`, `frame-empty`,
+`pasteboard-object`, `alt-text-missing`, `style-overrides`, `note-unused`.
+At most 500 issues are listed (`issues_total` and `truncated` say the rest).
 
 ## 12. Limits
 

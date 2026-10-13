@@ -234,6 +234,24 @@ back on export. Export is deterministic and fails (writing nothing) when a
 feature has no IDML equivalent unless `--allow-approximation` is given. The
 supported subset and known gaps are in `docs/idml-mapping-v1.md`.
 
+## Data merge and adaptive layout (v0.14 in development)
+
+```sh
+pentool layout-merge card.pen --data people.csv --out cards.pen --image-field photo=pic
+pentool layout-merge labels.pen --data a.csv --out out.pen --records-per-page 4 --grid 2x2 --cell 200x100
+pentool layout-adapt poster.pen --page p1 --width 600 --height 800 --rule scale --uniform
+pentool layout-alt poster.pen create p1 p1-tablet --width 768 --height 1024
+pentool layout-alt poster.pen sync
+pentool layout-preflight book.pen --bleed 9
+pentool layout-export book.pen book.pdf        # tagged PDF, real text, bookmarks, links
+pentool layout-export book.pen book.epub       # EPUB 3 reflowable; add --fixed for pre-paginated
+```
+
+Merge fills `{{field}}` placeholders and image frames from CSV, TSV or JSON
+without changing the template and reports estimated overflow per record.
+Alternate layouts share linked stories; `sync` never overwrites local edits
+unless `--force`. See `docs/layout-v1.md` section 11.1.
+
 ## Books (v0.14 in development)
 
 A `.penbook` is readable JSON that lists member `.pen` documents in order.

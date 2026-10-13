@@ -177,6 +177,7 @@ pub fn validate(raw: &Value, version: u64) -> Result<()> {
     crate::wrap::validate(raw)?;
     crate::tables::validate(raw)?;
     crate::longdoc::validate(raw)?;
+    crate::merge::validate(raw)?;
     Ok(())
 }
 

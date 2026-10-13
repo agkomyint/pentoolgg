@@ -1326,7 +1326,10 @@ fn preflight(book: &Book, print: bool) -> Result<Value> {
             );
         } else {
             let stories = crate::stories::summary(raw);
-            let overset = stories["overset_count"].as_u64().unwrap_or(0);
+            let estimated = stories["overset_count"].as_u64().unwrap_or(0);
+            let overset = crate::typeset::typeset_cached(raw)
+                .map(|t| t.overset.len() as u64)
+                .unwrap_or(estimated);
             if overset > 0 {
                 push(
                     &mut issues,
@@ -1569,9 +1572,7 @@ fn export(
 ) -> Result<Value> {
     match format {
         "pdf" => {}
-        "epub" => bail!(
-            "[unsupported-capability] EPUB book export is part of the publishing exports (v0.14.0 task 15) and is not available yet; use --format pdf"
-        ),
+        "epub" => {}
         other => bail!("[invalid-input] --format must be pdf or epub, not {other}"),
     }
     ensure!(
@@ -1580,6 +1581,21 @@ fn export(
         out.display()
     );
     let members = read_members(book)?;
+    if format == "epub" {
+        let refs: Vec<(&Value, &Path)> = members
+            .iter()
+            .map(|m| (&m.value, m.path.as_path()))
+            .collect();
+        let epub = crate::publish::EpubOptions {
+            title: title.or_else(|| book.manifest["name"].as_str().map(str::to_string)),
+            ..Default::default()
+        };
+        let mut report = crate::publish::export_epub(&refs, out, &epub)?;
+        report["operation"] = json!("book-export");
+        report["book"] = json!(book.path);
+        report["members"] = json!(members.iter().map(|m| m.rel.clone()).collect::<Vec<_>>());
+        return Ok(report);
+    }
     let mut options = crate::color::pdfx::Options::default();
     if let Some(ppi) = ppi {
         options.ppi = ppi;

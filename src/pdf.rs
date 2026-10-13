@@ -93,7 +93,15 @@ pub fn write(documents: &[Document], output: &std::path::Path) -> Result<()> {
     write_objects(objects, output)
 }
 
-fn write_objects(objects: Vec<Vec<u8>>, output: &std::path::Path) -> Result<()> {
+pub(crate) fn write_objects(objects: Vec<Vec<u8>>, output: &std::path::Path) -> Result<()> {
+    write_objects_info(objects, None, output)
+}
+
+pub(crate) fn write_objects_info(
+    objects: Vec<Vec<u8>>,
+    info: Option<usize>,
+    output: &std::path::Path,
+) -> Result<()> {
     let mut pdf = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
     let mut offsets = Vec::new();
     for (index, object) in objects.iter().enumerate() {
@@ -111,8 +119,9 @@ fn write_objects(objects: Vec<Vec<u8>>, output: &std::path::Path) -> Result<()> 
     }
     pdf.extend_from_slice(
         format!(
-            "trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-            objects.len() + 1
+            "trailer << /Size {} /Root 1 0 R{} >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1,
+            info.map_or(String::new(), |i| format!(" /Info {i} 0 R"))
         )
         .as_bytes(),
     );

@@ -2187,6 +2187,118 @@ enum Command {
         #[command(subcommand)]
         action: pentool::longdoc::DocAction,
     },
+    /// Export composed stories as a tagged PDF with real text, bookmarks and
+    /// links, or as EPUB 3 (reflowable, or pre-paginated with `--fixed`).
+    LayoutExport {
+        input: PathBuf,
+        out: PathBuf,
+        /// pdf or epub (default: from the output extension).
+        #[arg(long)]
+        format: Option<String>,
+        /// EPUB only: pre-paginated pages instead of reflowable stories.
+        #[arg(long)]
+        fixed: bool,
+        /// Page artwork raster scale (default 2).
+        #[arg(long)]
+        scale: Option<f32>,
+        #[arg(long)]
+        title: Option<String>,
+        /// BCP-47 document language (default: first story language, else en).
+        #[arg(long)]
+        language: Option<String>,
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Composer-measured layout preflight of a version 9 document: overset
+    /// text, fonts, links, generated stories, geometry and alt text. Read-only.
+    LayoutPreflight {
+        input: PathBuf,
+        /// Allowed text overhang past the page edge, in points.
+        #[arg(long, default_value_t = 0.0)]
+        bleed: f64,
+        /// Percent of paragraphs with local overrides that triggers a warning.
+        #[arg(long, default_value_t = 20.0)]
+        max_overrides: f64,
+        /// Do not report missing alternative text.
+        #[arg(long)]
+        no_alt: bool,
+    },
+    /// Merge CSV, TSV or JSON records into `{{field}}` text placeholders and
+    /// image frames of a template page, one record per page or several per
+    /// page. Writes a new document and reports estimated overflow.
+    LayoutMerge {
+        /// Template document (never modified).
+        input: PathBuf,
+        /// CSV, TSV or JSON (array of flat objects) data file.
+        #[arg(long)]
+        data: PathBuf,
+        /// New merged document.
+        #[arg(long)]
+        out: PathBuf,
+        /// csv, tsv or json (default: from the data file extension).
+        #[arg(long)]
+        format: Option<String>,
+        /// Single-character field delimiter for csv/tsv.
+        #[arg(long)]
+        delimiter: Option<char>,
+        /// Template page (default: the first page).
+        #[arg(long)]
+        template_page: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        records_per_page: usize,
+        /// COLSxROWS cells per page (needs --records-per-page and --cell).
+        #[arg(long)]
+        grid: Option<String>,
+        /// WIDTHxHEIGHT offset between cells.
+        #[arg(long)]
+        cell: Option<String>,
+        /// FRAME=FIELD: fill a graphic frame with the image path in FIELD
+        /// (relative to the data file; repeatable).
+        #[arg(long = "image-field")]
+        image_fields: Vec<String>,
+        /// Keep the template page in the output.
+        #[arg(long)]
+        keep_template: bool,
+        /// Plan and report without writing the output.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        overwrite: bool,
+    },
+    /// Resize one page and re-place its objects: scale, recenter, guide or
+    /// object rules.
+    LayoutAdapt {
+        input: PathBuf,
+        #[arg(long)]
+        page: String,
+        #[arg(long)]
+        width: f64,
+        #[arg(long)]
+        height: f64,
+        /// scale, recenter, guide or object.
+        #[arg(long, default_value = "scale")]
+        rule: String,
+        /// With scale: keep the aspect ratio and center the content.
+        #[arg(long)]
+        uniform: bool,
+        /// ID=h:left|right|center|stretch|scale,v:top|bottom|center|stretch|scale (repeatable).
+        #[arg(long = "object")]
+        objects: Vec<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+    },
+    /// Alternate layouts (print, tablet, ...) whose stories are linked copies.
+    LayoutAlt {
+        input: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::merge::AltAction,
+    },
     /// `.penbook` books: ordered members with continuous numbering, style and
     /// swatch synchronization, book-wide TOC/index, preflight, package, export.
     /// Writes are all-or-none across members.
@@ -6867,6 +6979,144 @@ async fn run() -> Result<()> {
             file_name,
             action,
         ),
+        Command::LayoutExport {
+            input,
+            out,
+            format,
+            fixed,
+            scale,
+            title,
+            language,
+            overwrite,
+        } => pentool::layout_cli::run_layout_export(
+            &input, &out, format, fixed, scale, title, language, overwrite,
+        ),
+        Command::LayoutPreflight {
+            input,
+            bleed,
+            max_overrides,
+            no_alt,
+        } => pentool::layout_cli::run_layout_preflight(&input, bleed, max_overrides, no_alt),
+        Command::LayoutMerge {
+            input,
+            data,
+            out,
+            format,
+            delimiter,
+            template_page,
+            records_per_page,
+            grid,
+            cell,
+            image_fields,
+            keep_template,
+            dry_run,
+            overwrite,
+        } => {
+            if out.exists() && !overwrite && !dry_run {
+                anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written", out.display())
+            }
+            let pair = |text: &str, what: &str| -> Result<(f64, f64)> {
+                let (a, b) = text
+                    .split_once(['x', 'X'])
+                    .with_context(|| format!("[invalid-input] {what} must be AxB"))?;
+                Ok((
+                    a.trim()
+                        .parse()
+                        .with_context(|| format!("[invalid-input] {what} {text:?}"))?,
+                    b.trim()
+                        .parse()
+                        .with_context(|| format!("[invalid-input] {what} {text:?}"))?,
+                ))
+            };
+            let grid = match &grid {
+                Some(g) => {
+                    let (c, r) = pair(g, "--grid")?;
+                    anyhow::ensure!(
+                        c.fract() == 0.0 && r.fract() == 0.0 && c >= 1.0 && r >= 1.0,
+                        "[invalid-input] --grid must be whole numbers COLSxROWS"
+                    );
+                    Some((c as usize, r as usize))
+                }
+                None => None,
+            };
+            let cell = match &cell {
+                Some(c) => Some(pair(c, "--cell")?),
+                None => None,
+            };
+            let mut fields = Vec::new();
+            for spec in &image_fields {
+                let (frame, field) = spec
+                    .split_once('=')
+                    .context("[invalid-input] --image-field must be FRAME=FIELD")?;
+                fields.push((frame.to_string(), field.to_string()));
+            }
+            let format = pentool::merge::data_format(&data, format.as_deref())?;
+            let bytes = pentool::resource::read_bounded(&data, pentool::merge::MAX_DATA_BYTES)?;
+            let records = pentool::merge::parse_records(&bytes, &format, delimiter)?;
+            let template: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&input).with_context(|| {
+                    format!("[missing-resource] could not read {}", input.display())
+                })?)
+                .context("[malformed-resource] invalid .pen document")?;
+            let dir_of = |path: &std::path::Path| -> PathBuf {
+                match path.parent() {
+                    Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+                    _ => PathBuf::from("."),
+                }
+            };
+            let outcome = pentool::merge::merge(
+                &template,
+                &records,
+                &pentool::merge::MergeOptions {
+                    template_page,
+                    records_per_page,
+                    grid,
+                    cell,
+                    image_fields: fields,
+                    keep_template,
+                    data_dir: dir_of(&data),
+                    out_dir: dir_of(&out),
+                },
+            )?;
+            let mut report = outcome.report;
+            if !dry_run {
+                let bytes = serde_json::to_vec_pretty(&outcome.document)?;
+                editing::atomic_write(&out, &bytes)
+                    .with_context(|| format!("could not write {}", out.display()))?;
+                report["output"] = serde_json::json!(out.display().to_string());
+                report["revision"] = serde_json::json!(pentool::transaction::revision(&bytes));
+            }
+            report["dry_run"] = serde_json::json!(dry_run);
+            println!("{report}");
+            Ok(())
+        }
+        Command::LayoutAdapt {
+            input,
+            page,
+            width,
+            height,
+            rule,
+            uniform,
+            objects,
+            dry_run,
+            if_revision,
+        } => pentool::layout_cli::run_layout_adapt(
+            &input,
+            dry_run,
+            if_revision.as_deref(),
+            &page,
+            width,
+            height,
+            &rule,
+            uniform,
+            &objects,
+        ),
+        Command::LayoutAlt {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::layout_cli::run_layout_alt(&input, dry_run, if_revision.as_deref(), action),
         Command::Book { book, action } => {
             let result = pentool::book::run(&book, action)?;
             println!("{result}");

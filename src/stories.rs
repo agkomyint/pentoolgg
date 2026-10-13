@@ -1109,6 +1109,26 @@ pub fn summary(raw: &Value) -> Value {
     })
 }
 
+/// Estimated overset reports for the listed stories only (no listing cap).
+pub fn overset_stories(raw: &Value, only: &HashSet<String>) -> Vec<Value> {
+    let all = frames(raw);
+    let by_story = threads(&all);
+    let mut out = Vec::new();
+    for story in story_list(raw) {
+        let id = story["id"].as_str().unwrap_or_default();
+        if !only.contains(id) {
+            continue;
+        }
+        let Some(thread) = by_story.get(id).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        if let Some(report) = flow(raw, story, thread).overset {
+            out.push(report);
+        }
+    }
+    out
+}
+
 /// Number of stories whose estimated text does not fit their thread.
 fn overset_count(raw: &Value) -> usize {
     summary(raw)["overset_count"].as_u64().unwrap_or(0) as usize
@@ -2354,4 +2374,85 @@ pub(crate) fn is_frame_of_story(raw: &Value, id: &str, story: &str) -> bool {
     frames(raw)
         .iter()
         .any(|f| f.id == id && f.node["story"] == story)
+}
+
+// ------------------------------------------------------- composer feed
+
+/// One story with its frames in thread order (page index, node) for the
+/// composed-text consumers: rendering, exports and preflight.
+pub(crate) struct StoryThread<'a> {
+    pub story: &'a Value,
+    pub frames: Vec<(usize, &'a Value)>,
+}
+
+/// Placed stories in document order of their stories list. Stories without a
+/// frame are omitted.
+pub(crate) fn story_threads(raw: &Value) -> Vec<StoryThread<'_>> {
+    let all = frames(raw);
+    let page_of: HashMap<&str, usize> = all.iter().map(|f| (f.id, f.page)).collect();
+    let by_story = threads(&all);
+    let mut out = Vec::new();
+    for story in story_list(raw) {
+        let id = story["id"].as_str().unwrap_or_default();
+        let Some(thread) = by_story.get(id).filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        out.push(StoryThread {
+            story,
+            frames: thread
+                .iter()
+                .map(|node| {
+                    let id = node["id"].as_str().unwrap_or_default();
+                    (page_of.get(id).copied().unwrap_or(0), *node)
+                })
+                .collect(),
+        });
+    }
+    out
+}
+
+/// Columns, column width and usable height of a frame, in points.
+pub(crate) fn frame_columns(node: &Value) -> (usize, f64, f64, f64) {
+    let g = geometry(node);
+    let gutter = node.get("gutter").and_then(Value::as_f64).unwrap_or(0.0);
+    let height = if g.auto_height { 1.0e9 } else { g.height };
+    (g.columns.max(1), g.column_width, height, gutter)
+}
+
+/// Text a run contributes to composition (mirrors `run_chars`).
+pub(crate) fn run_text(raw: &Value, run: &Value) -> String {
+    if let Some(text) = run.get("text").and_then(Value::as_str) {
+        return text.to_string();
+    }
+    if let Some(special) = run.get("special").and_then(Value::as_str) {
+        return special_text(special);
+    }
+    let nested = run.get("link").is_some()
+        || run
+            .get("condition")
+            .and_then(Value::as_str)
+            .is_some_and(|c| condition_visible(raw, c));
+    if nested {
+        return list(run, "runs")
+            .iter()
+            .map(|r| run_text(raw, r))
+            .collect::<String>();
+    }
+    String::new()
+}
+
+fn special_text(special: &str) -> String {
+    match special {
+        "tab" | "right-indent-tab" | "flush-space" => " ".into(),
+        "em-space" => "\u{2003}".into(),
+        "en-space" => "\u{2002}".into(),
+        "thin-space" => "\u{2009}".into(),
+        "hair-space" => "\u{200A}".into(),
+        "nonbreaking-hyphen" => "\u{2011}".into(),
+        "page-number" | "next-page-number" | "previous-page-number" | "section-marker" => {
+            "#".into()
+        }
+        "line-break" => "\n".into(),
+        _ => String::new(),
+    }
 }

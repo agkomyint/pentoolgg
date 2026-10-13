@@ -312,6 +312,13 @@ and documentation.
   CI evidence, Studio UI (task 17).
 
 - [ ] **12. Add data merge and adaptive layout.**
+  Progress: `pentool layout-merge`, `layout-adapt` and `layout-alt`
+  (`src/merge.rs`, `tests/v0140_merge.rs`, `docs/layout-v1.md` section 11.1)
+  cover CSV/TSV/JSON merge into text and image placeholders (one or several
+  records per page, estimated overflow report), scale/recenter/guide/object
+  adaptation and linked alternate layouts. Open: composed (not estimated)
+  overflow in the merge report, Studio UI (task 17), cross-platform CI
+  evidence.
   - Data merge from bounded CSV or JSON into text and image placeholders, giving
     one record per page or several, with an overflow report.
   - Layout adjustment rules for page size changes: guide-based, scale, recenter
@@ -356,6 +363,18 @@ and documentation.
   release evidence.
 
 - [ ] **15. Add publishing exports.**
+  Progress: `pentool layout-export FILE OUT [--format pdf|epub] [--fixed]`
+  and `book export --format epub` (`src/publish.rs`,
+  `tests/v0140_publish.rs`, `docs/layout-v1.md` section 11.2) write a tagged
+  PDF with real, searchable text (embedded font subsets, ToUnicode), a
+  structure tree with heading roles and figure alt text, bookmarks from
+  heading styles, URL and internal link annotations, and EPUB 3 reflowable
+  (story text, paragraph styles, navigation document, embedded fonts) and
+  fixed-layout (pre-paginated, positioned real text over page artwork).
+  Open: PDF/X path with real text (the v0.12.0 flattened draft stays raster),
+  PDF articles/threads, Link structure elements, right-to-left and
+  complex-script placement, character-style application in composition,
+  veraPDF and EPUBCheck validation in CI, images in reflowable EPUB.
   - Interactive PDF with links, bookmarks and articles.
   - Print PDF through v0.12.0's PDF/X path, with composed text kept as real,
     selectable and searchable text.
@@ -375,6 +394,15 @@ and documentation.
 
   Results are structured JSON with page, frame, story and offset, plus a
   corrective action. Live preflight runs in the editor.
+
+  Progress: `pentool layout-preflight FILE [--bleed PT] [--max-overrides PCT]
+  [--no-alt]` (`src/layout_preflight.rs`, `docs/layout-v1.md` section 11.3)
+  reports composer-measured overset, substituted fonts, missing or modified
+  links, unresolved references, stale generated stories, empty frames, text
+  outside the bleed, pasteboard objects, style overrides and missing alt text
+  as structured JSON with page, frame, story, offset and action. `book
+  preflight` uses the composed overset count. Open: low-resolution link check
+  against placed size, live preflight in the editor (task 17), CI evidence.
 
 - [ ] **17. Build the editor's layout experience.**
   - A pages panel with spreads, parents and drag-to-apply, and a story editor.
