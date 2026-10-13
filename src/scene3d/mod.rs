@@ -10,5 +10,6 @@ pub mod model;
 pub mod node;
 pub mod obj;
 pub mod render;
+pub mod uv;
 
 pub use model::{Limits, Model, LIMITS};

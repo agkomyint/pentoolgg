@@ -155,6 +155,9 @@ pub fn validate_models(raw: &Value, version: u64) -> Result<()> {
                 "[unsupported-capability] model {digest} storage kind {other:?} is unsupported"
             ),
         }
+        if let Some(uv) = record.get("uv") {
+            super::uv::validate(uv).with_context(|| format!("model {digest}"))?;
+        }
     }
     Ok(())
 }
@@ -461,10 +464,23 @@ fn remember<T>(cache: &Mutex<Vec<(String, T)>>, key: String, value: T, limit: us
     }
 }
 
+/// Cache key: the model digest plus its UV overlay, so editing an overlay
+/// never serves a stale model or render.
+fn model_key(raw: &Value, digest: &str) -> String {
+    match raw["models"][digest].get("uv") {
+        Some(uv) if uv.as_object().is_some_and(|m| !m.is_empty()) => format!(
+            "{digest}+{}",
+            crate::resource::sha256(uv.to_string().as_bytes())
+        ),
+        _ => digest.to_string(),
+    }
+}
+
 /// Load, verify and import a model. `document_dir` anchors external paths.
 pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<Model>> {
+    let cache_key = model_key(raw, digest);
     if let Ok(c) = model_cache().lock() {
-        if let Some((_, m)) = c.iter().find(|(k, _)| k == digest) {
+        if let Some((_, m)) = c.iter().find(|(k, _)| k == &cache_key) {
             return Ok(Arc::clone(m));
         }
     }
@@ -532,8 +548,15 @@ pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<
         Some("obj") => obj::import(&bytes, &resolver)?,
         other => bail!("[unsupported-capability] model format {other:?} is unsupported"),
     };
+    let mut model = model;
+    if let Some(uv) = record
+        .get("uv")
+        .filter(|u| u.as_object().is_some_and(|m| !m.is_empty()))
+    {
+        super::uv::apply(&mut model, uv)?;
+    }
     let model = Arc::new(model);
-    remember(model_cache(), digest.to_string(), Arc::clone(&model), 2);
+    remember(model_cache(), cache_key, Arc::clone(&model), 2);
     Ok(model)
 }
 
@@ -562,6 +585,7 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
                 spec.insert(k.into(), v.clone());
             }
         }
+        spec.insert("uv".into(), json!(model_key(raw, digest)));
         crate::resource::sha256(serde_json::to_string(&Value::Object(spec))?.as_bytes())
     };
     if let Ok(c) = png_cache().lock() {

@@ -34,7 +34,55 @@ pub enum LightAction {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+pub enum UvAction {
+    /// Report UV sets, bounds, coverage and degenerate triangles per primitive.
+    Show,
+    /// Project UVs onto a primitive as a re-applied overlay; the source model
+    /// is never rewritten.
+    Project {
+        /// Primitive index, or `*` for every primitive.
+        #[arg(long, default_value = "*")]
+        primitive: String,
+        /// `planar`, `box`, `cylindrical` or `spherical`.
+        #[arg(long)]
+        projection: String,
+        /// Projection axis: x, y or z.
+        #[arg(long)]
+        axis: Option<String>,
+        /// UV scale `u,v`.
+        #[arg(long, allow_hyphen_values = true)]
+        scale: Option<String>,
+        /// UV offset `u,v`.
+        #[arg(long, allow_hyphen_values = true)]
+        offset: Option<String>,
+        /// Rotation in degrees about the UV center.
+        #[arg(long, allow_hyphen_values = true)]
+        rotate: Option<f64>,
+    },
+    /// Remove the overlay for a primitive (or all of them).
+    Clear {
+        #[arg(long, default_value = "*")]
+        primitive: String,
+    },
+    /// Write the UV wireframe as .svg or .png.
+    Layout {
+        #[arg(long, default_value_t = 0)]
+        primitive: usize,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 1024)]
+        size: u32,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
 pub enum Scene3dAction {
+    /// UV inspection, projection and layout export.
+    Uv {
+        id: String,
+        #[command(subcommand)]
+        action: UvAction,
+    },
     /// Import a .glb, .gltf or .obj model and place it as a scene3d node.
     Add {
         id: String,
@@ -377,6 +425,111 @@ pub fn run(
                 json!({"scene3d": nodes, "models": raw["models"].as_object().map_or(0, |m| m.len())})
             );
             return Ok(());
+        }
+        Scene3dAction::Uv { id, action } => {
+            require_v10(&raw)?;
+            let node = scene3d_node(&mut raw, &id)?;
+            let digest = node["model"].as_str().unwrap_or_default().to_string();
+            match action {
+                UvAction::Show => {
+                    let model = node::load_model(&raw, &doc_dir, &digest)?;
+                    let mut report = super::uv::show(&model);
+                    report["id"] = json!(id);
+                    report["model"] = json!(digest);
+                    println!("{report}");
+                    return Ok(());
+                }
+                UvAction::Layout {
+                    primitive,
+                    out,
+                    size,
+                } => {
+                    let model = node::load_model(&raw, &doc_dir, &digest)?;
+                    let prim = model.primitives.get(primitive).with_context(|| {
+                        format!(
+                            "[missing-resource] primitive {primitive} does not exist (model has {})",
+                            model.primitives.len()
+                        )
+                    })?;
+                    let ext = out
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(str::to_ascii_lowercase);
+                    let bytes = match ext.as_deref() {
+                        Some("svg") => super::uv::layout_svg(prim, size)?.into_bytes(),
+                        Some("png") => super::uv::layout_png(prim, size)?,
+                        _ => bail!("[invalid-input] --out must end in .svg or .png"),
+                    };
+                    std::fs::write(&out, &bytes)
+                        .with_context(|| format!("could not write {}", out.display()))?;
+                    println!(
+                        "{}",
+                        json!({"id": id, "primitive": primitive, "out": out.display().to_string(),
+                               "size": size, "bytes": bytes.len()})
+                    );
+                    return Ok(());
+                }
+                UvAction::Project {
+                    primitive,
+                    projection,
+                    axis,
+                    scale,
+                    offset,
+                    rotate,
+                } => {
+                    ensure!(
+                        primitive == "*" || primitive.parse::<usize>().is_ok(),
+                        "[invalid-input] --primitive must be an index or `*`"
+                    );
+                    let mut spec = json!({"projection": projection});
+                    if let Some(a) = axis {
+                        spec["axis"] = json!(a);
+                    }
+                    for (key, value) in [("scale", scale), ("offset", offset)] {
+                        if let Some(v) = value {
+                            let parts: Vec<&str> = v.split(',').map(str::trim).collect();
+                            ensure!(
+                                parts.len() == 2,
+                                "[invalid-input] --{key} must be u,v (got `{v}`)"
+                            );
+                            let mut pair = Vec::new();
+                            for p in parts {
+                                pair.push(json!(p.parse::<f64>().with_context(|| format!(
+                                    "[invalid-input] --{key}: `{p}` is not a number"
+                                ))?));
+                            }
+                            spec[key] = Value::Array(pair);
+                        }
+                    }
+                    if let Some(r) = rotate {
+                        spec["rotate"] = json!(r);
+                    }
+                    super::uv::validate(&json!({ primitive.clone(): spec.clone() }))?;
+                    let record = raw["models"][&digest]
+                        .as_object_mut()
+                        .context("[missing-resource] model record is missing")?;
+                    let overlays = record.entry("uv").or_insert_with(|| json!({}));
+                    overlays[&primitive] = spec;
+                    // Prove the overlay applies (index range, vertex limits).
+                    let model = node::load_model(&raw, &doc_dir, &digest)?;
+                    let report = super::uv::show(&model);
+                    ("scene3d-uv-project", json!({"id": id, "uv": report}))
+                }
+                UvAction::Clear { primitive } => {
+                    let record = raw["models"][&digest]
+                        .as_object_mut()
+                        .context("[missing-resource] model record is missing")?;
+                    if primitive == "*" {
+                        record.remove("uv");
+                    } else if let Some(map) = record.get_mut("uv").and_then(Value::as_object_mut) {
+                        map.remove(&primitive);
+                        if map.is_empty() {
+                            record.remove("uv");
+                        }
+                    }
+                    ("scene3d-uv-clear", json!({"id": id}))
+                }
+            }
         }
         Scene3dAction::Inspect { id } => {
             require_v10(&raw)?;

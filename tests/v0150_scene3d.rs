@@ -203,3 +203,97 @@ fn scene3d_node_in_a_v9_document_is_rejected_with_a_hint() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("migrate --target 10"));
 }
+
+#[test]
+fn uv_project_is_an_overlay_and_layout_exports() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let d = doc.to_str().unwrap();
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l"
+    ])
+    .status
+    .success());
+    let shown = pentool(&["scene3d", d, "uv", "m", "show"]);
+    let shown: Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert_eq!(shown["primitives"][0]["uv_sets"], 0);
+
+    let out = pentool(&[
+        "scene3d",
+        d,
+        "uv",
+        "m",
+        "project",
+        "--projection",
+        "box",
+        "--scale",
+        "2,2",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let after = read(&doc);
+    let digest = after["pages"][0]["layers"][0]["nodes"][0]["model"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(after["models"][&digest]["uv"]["*"]["projection"], "box");
+    // The source model bytes are unchanged by the overlay.
+    assert!(crate_digest_matches(&after, &digest));
+
+    let svg = dir.join("uv.svg");
+    let png = dir.join("uv.png");
+    for out in [&svg, &png] {
+        let r = pentool(&[
+            "scene3d",
+            d,
+            "uv",
+            "m",
+            "layout",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    }
+    assert!(std::fs::read_to_string(&svg).unwrap().contains("<path"));
+    assert_eq!(&std::fs::read(&png).unwrap()[1..4], b"PNG");
+
+    let bad = pentool(&[
+        "scene3d",
+        d,
+        "uv",
+        "m",
+        "project",
+        "--primitive",
+        "9",
+        "--projection",
+        "planar",
+    ]);
+    assert!(!bad.status.success());
+    assert_eq!(read(&doc), after, "failed projection must not write");
+
+    assert!(pentool(&["scene3d", d, "uv", "m", "clear"])
+        .status
+        .success());
+    assert!(read(&doc)["models"][&digest].get("uv").is_none());
+}
+
+fn crate_digest_matches(doc: &Value, digest: &str) -> bool {
+    use base64::Engine as _;
+    let data = doc["models"][digest]["storage"]["data"].as_str().unwrap();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .unwrap();
+    pentool::resource::sha256(&bytes) == digest
+}

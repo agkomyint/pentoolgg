@@ -146,6 +146,65 @@ pub fn tan(x: f64) -> f64 {
     sin(x) / cos(x)
 }
 
+/// Arctangent: reduce to `|x| <= 1`, halve the angle twice, then a fixed series.
+pub fn atan(x: f64) -> f64 {
+    if x.is_nan() {
+        return 0.0;
+    }
+    let negative = x < 0.0;
+    let mut a = x.abs();
+    let inverted = a > 1.0;
+    if inverted {
+        a = 1.0 / a;
+    }
+    // atan(a) = 2 atan(a / (1 + sqrt(1 + a^2))); two halvings bound a below 0.2.
+    for _ in 0..2 {
+        a /= 1.0 + (1.0 + a * a).sqrt();
+    }
+    let a2 = a * a;
+    let mut term = a;
+    let mut sum = a;
+    for k in 1..12 {
+        term = -term * a2;
+        sum += term / (2 * k + 1) as f64;
+    }
+    let mut r = sum * 4.0;
+    if inverted {
+        r = PI / 2.0 - r;
+    }
+    if negative {
+        -r
+    } else {
+        r
+    }
+}
+
+/// Four-quadrant arctangent of `y / x`, in `(-pi, pi]`.
+pub fn atan2(y: f64, x: f64) -> f64 {
+    if x == 0.0 && y == 0.0 {
+        return 0.0;
+    }
+    if x > 0.0 {
+        atan(y / x)
+    } else if x < 0.0 {
+        if y >= 0.0 {
+            atan(y / x) + PI
+        } else {
+            atan(y / x) - PI
+        }
+    } else if y > 0.0 {
+        PI / 2.0
+    } else {
+        -PI / 2.0
+    }
+}
+
+/// Arccosine of a value clamped to `[-1, 1]`, in `[0, pi]`.
+pub fn acos(x: f64) -> f64 {
+    let x = x.clamp(-1.0, 1.0);
+    atan2((1.0 - x * x).max(0.0).sqrt(), x)
+}
+
 /// `base^exponent` for a small non-negative integer exponent (repeated squaring).
 pub fn powi(mut base: f64, mut exponent: u32) -> f64 {
     let mut result = 1.0;
@@ -284,6 +343,16 @@ mod tests {
         assert!((cos(PI) + 1.0).abs() < 1e-12);
         assert!((sin(100.0) - (-0.506_365_641_109_758_8)).abs() < 1e-10);
         assert!((tan(PI / 4.0) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn inverse_trig_matches_known_values() {
+        assert!((atan(1.0) - PI / 4.0).abs() < 1e-12);
+        assert!((atan(-3.0) + 1.249_045_772_398_254_4).abs() < 1e-10);
+        assert!((atan2(1.0, -1.0) - 3.0 * PI / 4.0).abs() < 1e-12);
+        assert!((atan2(-1.0, -1.0) + 3.0 * PI / 4.0).abs() < 1e-12);
+        assert!((acos(0.5) - PI / 3.0).abs() < 1e-11);
+        assert!((acos(-1.0) - PI).abs() < 1e-12);
     }
 
     #[test]
