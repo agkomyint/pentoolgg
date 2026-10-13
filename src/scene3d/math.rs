@@ -159,6 +159,68 @@ pub fn powi(mut base: f64, mut exponent: u32) -> f64 {
     result
 }
 
+/// Natural exponential. Range-reduced Taylor series; no platform libm.
+pub fn exp(x: f64) -> f64 {
+    if x.is_nan() {
+        return x;
+    }
+    let x = x.clamp(-700.0, 700.0);
+    const LN2: f64 = std::f64::consts::LN_2;
+    let k = (x / LN2).round();
+    let r = x - k * LN2;
+    let mut term = 1.0;
+    let mut sum = 1.0;
+    for n in 1..=18 {
+        term *= r / n as f64;
+        sum += term;
+    }
+    // Scale by 2^k through the exponent bits (exact).
+    let k = k as i64;
+    sum * f64::from_bits(((1023 + k) as u64) << 52)
+}
+
+/// Natural logarithm for positive finite `x` (non-positive returns -inf/NaN).
+pub fn ln(x: f64) -> f64 {
+    if x.is_nan() || x < 0.0 {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    let bits = x.to_bits();
+    let mut exponent = ((bits >> 52) & 0x7ff) as i64;
+    if exponent == 0 {
+        // Subnormal: scale into the normal range exactly.
+        return ln(x * f64::from_bits(0x4330_0000_0000_0000)) - 52.0 * std::f64::consts::LN_2;
+    }
+    exponent -= 1023;
+    let mut m = f64::from_bits((bits & 0x000f_ffff_ffff_ffff) | (1023u64 << 52));
+    if m > std::f64::consts::SQRT_2 {
+        m *= 0.5;
+        exponent += 1;
+    }
+    // ln(m) = 2 atanh((m-1)/(m+1))
+    let z = (m - 1.0) / (m + 1.0);
+    let z2 = z * z;
+    let mut term = z;
+    let mut sum = 0.0;
+    let mut n = 1.0;
+    for _ in 0..24 {
+        sum += term / n;
+        term *= z2;
+        n += 2.0;
+    }
+    2.0 * sum + exponent as f64 * std::f64::consts::LN_2
+}
+
+/// `base^exponent` for `base >= 0`.
+pub fn pow(base: f64, exponent: f64) -> f64 {
+    if base <= 0.0 {
+        return if exponent == 0.0 { 1.0 } else { 0.0 };
+    }
+    exp(exponent * ln(base))
+}
+
 pub fn clamp01(x: f64) -> f64 {
     x.clamp(0.0, 1.0)
 }
@@ -230,5 +292,14 @@ mod tests {
         assert_eq!(m, IDENTITY);
         let p = transform_point(&mul(&m, &IDENTITY), [1.0, 2.0, 3.0]);
         assert_eq!(p, [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn exp_ln_pow_match_known_values() {
+        assert!((exp(1.0) - std::f64::consts::E).abs() < 1e-12);
+        assert!((ln(std::f64::consts::E) - 1.0).abs() < 1e-12);
+        assert!((pow(2.0, 10.0) - 1024.0).abs() < 1e-9);
+        assert!((pow(0.5, 1.0 / 2.4) - 0.749_153_538).abs() < 1e-6);
+        assert_eq!(exp(0.5).to_bits(), exp(0.5).to_bits());
     }
 }

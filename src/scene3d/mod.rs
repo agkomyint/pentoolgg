@@ -7,5 +7,6 @@ pub mod gltf;
 pub mod math;
 pub mod model;
 pub mod obj;
+pub mod render;
 
 pub use model::{Limits, Model, LIMITS};
