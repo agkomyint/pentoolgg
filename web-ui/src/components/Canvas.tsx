@@ -462,7 +462,7 @@ export function Canvas() {
     <div className="relative flex min-h-0 flex-1 flex-col bg-canvas">
       <div
         ref={scroller}
-        className="flex-1 overflow-auto"
+        className="flex-1 select-none overflow-auto [&_img]:pointer-events-none [&_img]:select-none [-webkit-user-drag:none]"
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
         onWheel={(e) => {
@@ -498,6 +498,7 @@ export function Canvas() {
                 viewBox={`0 0 ${canvas.width} ${canvas.height}`}
                 className="absolute inset-0 h-full w-full touch-none"
                 style={{ cursor }}
+                onMouseDown={(e) => e.preventDefault()}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}

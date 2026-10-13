@@ -1,3 +1,4 @@
+import { noteServerRender, renderLocal } from "@/lib/wasmCore";
 // Thin client for the Pentool server. The server stays the single source of
 // truth; this file never re-implements document logic.
 export type Doc = { version: number; pages: Page[]; [key: string]: unknown };
@@ -74,6 +75,9 @@ export const api = {
   undo: () => postJson<unknown>("/api/undo", {}),
   redo: () => postJson<unknown>("/api/redo", {}),
   async renderPng(doc: Doc, page: string | undefined, maxEdge: number): Promise<Blob> {
+    const local = await renderLocal(doc, page, maxEdge);
+    if (local) return local;
+    const started = performance.now();
     const q = new URLSearchParams({ max_edge: String(maxEdge) });
     if (page) q.set("page", page);
     const r = await check(
@@ -83,7 +87,9 @@ export const api = {
         body: JSON.stringify(doc),
       }),
     );
-    return r.blob();
+    const blob = await r.blob();
+    noteServerRender(performance.now() - started);
+    return blob;
   },
   preflight(opts: { page?: string; min_ppi: number; min_bleed_inches: number; max_total_ink?: number }) {
     const q = new URLSearchParams();

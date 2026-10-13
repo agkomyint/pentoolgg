@@ -25,6 +25,7 @@ import { nextId, pageParent } from "@/workspaces/layout/layoutModel";
 import { findNode, pageOf } from "@/lib/model";
 import { exportAs } from "@/lib/actions";
 import { cn } from "@/lib/utils";
+import { useRenderStats } from "@/lib/wasmCore";
 
 const HINTS = {
   select: "Click to select, drag to move, drag handles to resize (Shift keeps proportions). Arrow keys nudge.",
@@ -127,6 +128,7 @@ function Dock() {
 
 export default function App() {
   const s = useStudio();
+  const render = useRenderStats();
   const openInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     void s.load();
@@ -344,6 +346,27 @@ export default function App() {
         {/* Status bar. */}
         <footer className="flex h-6 shrink-0 items-center gap-3 border-t bg-card px-3 text-[11px] text-muted-foreground">
           <span className="min-w-0 flex-1 truncate">{stage === "canvas" ? HINTS[s.tool] : "Module stage"}</span>
+          <Tip
+            label={
+              render.available === false
+                ? "Local renderer not built into this binary; the server renders previews."
+                : "Render previews in the browser with the WebAssembly core. Exports always use the native renderer."
+            }
+          >
+            <button
+              aria-pressed={render.enabled}
+              disabled={render.available === false}
+              onClick={() => render.setEnabled(!render.enabled)}
+              className={cn("rounded px-1.5 hover:text-foreground", render.enabled && render.available !== false && "text-primary")}
+            >
+              Local render {render.available === false ? "n/a" : render.enabled ? "on" : "off"}
+            </button>
+          </Tip>
+          {render.last && (
+            <span className="tabular-nums" title="Time to produce the last preview">
+              {render.last.source === "wasm" ? "wasm" : "server"} {render.last.ms} ms
+            </span>
+          )}
           <span className="tabular-nums">{Math.round(s.zoom * 100)}%</span>
           <span className="tabular-nums">{pages.length ? `Page ${pageIndex + 1} of ${pages.length}` : "No pages"}</span>
           {s.version && <Badge>v{s.version}</Badge>}

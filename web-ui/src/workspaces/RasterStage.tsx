@@ -28,6 +28,33 @@ export function useRasterLayers(): RasterNode[] {
 const SNAP = 6;
 const CURSOR_TOOLS = ["brush", "eraser", "clone", "heal", "quickmask"];
 
+/** Soft-edged dabs along a path: what you see while painting matches the committed look. */
+function dabs(ctx: CanvasRenderingContext2D, pts: { px: number; py: number }[], diameter: number, color: string, hardness: number, flow: number, erase: boolean) {
+  const r = Math.max(0.5, diameter / 2);
+  const step = Math.max(1, r * 0.25);
+  const rgb = erase ? "255,255,255" : color.startsWith("#") && color.length >= 7 ? [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)).join(",") : "0,0,0";
+  const a = Math.min(1, Math.max(0.05, flow)) * (erase ? 0.9 : 1);
+  const h = Math.min(0.98, Math.max(0, hardness));
+  const stamp = (x: number, y: number) => {
+    const g = ctx.createRadialGradient(x, y, r * h, x, y, r);
+    g.addColorStop(0, `rgba(${rgb},${a})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 7);
+    ctx.fill();
+  };
+  let carry = 0;
+  stamp(pts[0]!.px, pts[0]!.py);
+  for (let i = 1; i < pts.length; i++) {
+    const a0 = pts[i - 1]!;
+    const b0 = pts[i]!;
+    const len = Math.hypot(b0.px - a0.px, b0.py - a0.py);
+    for (let d = step - carry; d <= len; d += step) stamp(a0.px + ((b0.px - a0.px) * d) / (len || 1), a0.py + ((b0.py - a0.py) * d) / (len || 1));
+    carry = (carry + len) % step;
+  }
+}
+
 export function RasterStage() {
   const { doc, pageId, replaceDoc } = useStudio();
   const layers = useRasterLayers();
@@ -50,7 +77,13 @@ export function RasterStage() {
     lasso: Pt[];
     selection: { x: number; y: number; width: number; height: number } | null;
     source: { x: number; y: number } | null;
-  }>({ pointer: null, stroke: null, lasso: [], selection: null, source: null });
+    /** Strokes already released but not yet confirmed by the engine; drawn so the mark never disappears. */
+    pending: { preview: Pt[]; size: number; color: string; erase: boolean; hardness: number; flow: number; done: boolean; gen: number }[];
+  }>({ pointer: null, stroke: null, lasso: [], selection: null, source: null, pending: [] });
+  /** Commits run strictly in order; input is never blocked while one is in flight. */
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const inflight = useRef(0);
+  const urlGen = useRef(0);
 
   // The preview is a proxy of the page rendered by the Rust engine.
   useEffect(() => {
@@ -60,6 +93,7 @@ export function RasterStage() {
       .renderPng(doc as Doc, pageId, 1024)
       .then((blob) => {
         if (mine !== generation.current) return;
+        urlGen.current = mine;
         setUrl((old) => {
           if (old) URL.revokeObjectURL(old);
           return URL.createObjectURL(blob);
@@ -159,14 +193,10 @@ export function RasterStage() {
       l.lasso.forEach((q, i) => (i ? ctx.lineTo(q.px, q.py) : ctx.moveTo(q.px, q.py)));
       ctx.stroke();
     }
+    for (const q of l.pending) if (q.preview.length) dabs(ctx, q.preview, q.size * g.sx, q.color, q.hardness, q.flow, q.erase);
     const s = l.stroke;
     if (s && "samples" in s) {
-      ctx.strokeStyle = "rgba(0,0,0,.5)";
-      ctx.lineWidth = Math.max(1, p.size * g.sx);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      s.preview.forEach((q, i) => (i ? ctx.lineTo(q.px, q.py) : ctx.moveTo(q.px, q.py)));
-      ctx.stroke();
+      if (s.preview.length) dabs(ctx, s.preview, p.size * g.sx, p.color, p.hardness, p.flow, p.tool === "eraser");
       // Stabilizer feedback: the engine smooths with this lag, so show where the dab will land.
       ctx.strokeStyle = "#30d158";
       ctx.lineWidth = 1;
@@ -264,26 +294,38 @@ export function RasterStage() {
   };
 
   // Pixels change only through the shared Rust engine.
-  const call = async (action: string, args: Record<string, unknown>) => {
-    const s = usePaint.getState();
-    const current = useStudio.getState();
-    if (s.busy || !current.doc || !layer) return;
-    s.set({ busy: true });
-    try {
-      const body = await postJson<{ document: Doc }>("/api/raster", { document: current.doc, page: current.pageId, id: layer.id, action, args });
-      replaceDoc(body.document);
-      usePaint.getState().set({ status: `${action}: done. Save .pen to keep it; Undo restores the previous state.` });
-    } catch (e) {
-      usePaint.getState().set({ status: e instanceof Error ? e.message : "Request rejected." });
-    } finally {
-      usePaint.getState().set({ busy: false });
-    }
+  const call = (action: string, args: Record<string, unknown>, ghost?: { preview: Pt[]; size: number; color: string; erase: boolean; hardness: number; flow: number }) => {
+    const entry = ghost ? { ...ghost, done: false, gen: Infinity } : null;
+    if (entry) live.current.pending.push(entry);
+    inflight.current += 1;
+    usePaint.getState().set({ busy: true });
+    const run = async () => {
+      const current = useStudio.getState();
+      if (!current.doc || !layer) return;
+      try {
+        const body = await postJson<{ document: Doc }>("/api/raster", { document: current.doc, page: current.pageId, id: layer.id, action, args });
+        replaceDoc(body.document);
+        usePaint.getState().set({ status: `${action}: done. Save .pen to keep it; Undo restores the previous state.` });
+      } catch (e) {
+        usePaint.getState().set({ status: e instanceof Error ? e.message : "Request rejected." });
+        if (entry) live.current.pending = live.current.pending.filter((q) => q !== entry);
+      } finally {
+        if (entry) {
+          entry.done = true;
+          entry.gen = generation.current + 1; // the render of the committed document
+        }
+        inflight.current -= 1;
+        if (inflight.current === 0) usePaint.getState().set({ busy: false });
+      }
+    };
+    queue.current = queue.current.then(run);
+    return queue.current;
   };
 
   const down = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const s = usePaint.getState();
     let p = toLayer(event);
-    if (!p || s.busy) return;
+    if (!p) return;
     if (s.rulers && (p.py < 12 || p.px < 12)) {
       // A click on a ruler drops a guide: top ruler -> horizontal, left ruler -> vertical.
       s.set({ guides: [...s.guides, p.py < 12 ? { axis: "y", at: Math.round(p.y) } : { axis: "x", at: Math.round(p.x) }] });
@@ -339,11 +381,15 @@ export function RasterStage() {
     if ("samples" in s) {
       const action = ({ brush: "stroke", eraser: "stroke", clone: "clone", heal: "heal", quickmask: "quickmask" } as Record<string, string>)[st.tool];
       if (action)
-        await call(action, { ...common, samples: s.samples, blend: st.tool === "eraser" ? "erase" : "normal", erase: st.tool === "quickmask" && st.mode === "subtract" });
+        void call(
+          action,
+          { ...common, samples: s.samples, blend: st.tool === "eraser" ? "erase" : "normal", erase: st.tool === "quickmask" && st.mode === "subtract" },
+          { preview: s.preview, size: st.size, color: st.color, erase: st.tool === "eraser", hardness: st.hardness, flow: st.flow },
+        );
     } else if ("lasso" in s && l.lasso.length >= 3) {
-      await call("select-lasso", { points: l.lasso.map((q) => [q.x, q.y]), mode: st.mode });
+      void call("select-lasso", { points: l.lasso.map((q) => [q.x, q.y]), mode: st.mode });
     } else if ("marquee" in s && l.selection && l.selection.width > 0 && l.selection.height > 0) {
-      await call("select-marquee", { ...l.selection, shape: st.shape, mode: st.mode });
+      void call("select-marquee", { ...l.selection, shape: st.shape, mode: st.mode });
     }
     l.lasso = [];
     l.selection = null;
@@ -382,7 +428,10 @@ export function RasterStage() {
               alt="Raster page preview"
               draggable={false}
               className="block max-h-[calc(100vh-8rem)] max-w-full"
-              onLoad={() => setLoaded((n) => n + 1)}
+              onLoad={() => {
+                live.current.pending = live.current.pending.filter((q) => !(q.done && urlGen.current >= q.gen));
+                setLoaded((n) => n + 1);
+              }}
             />
           )}
           <canvas
