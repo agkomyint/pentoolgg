@@ -50,12 +50,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked
-      - name: Check release binary size on every target
+      - name: Check release binary size on every target (40 MB since v0.14.0: embeds the 5.6 MB WASM preview core)
         shell: bash
         run: |
           bin=target/release/pentool
           [ -f "$bin.exe" ] && bin="$bin.exe"
-          sh scripts/check-binary-size.sh "$bin" 30000000
+          sh scripts/check-binary-size.sh "$bin" 40000000
   fuzz-smoke:
     runs-on: ubuntu-latest
     steps:
