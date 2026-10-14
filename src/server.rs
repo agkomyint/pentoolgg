@@ -73,6 +73,8 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/image/bake", post(image_bake))
         .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
+        .route("/api/scene3d/import", post(scene3d_import))
+        .route("/api/scene3d/status", get(scene3d_status))
         .route("/api/color/preflight", get(color_preflight))
         .route("/api/layout", post(layout_command))
         .route("/api/layout/preflight", get(layout_preflight))
@@ -859,6 +861,108 @@ struct SceneRequest {
     dry_run: bool,
 }
 
+#[derive(Clone, serde::Deserialize)]
+struct Scene3dImportRequest {
+    document: serde_json::Value,
+    data: String,
+    format: String,
+    id: String,
+    layer: String,
+    page: Option<String>,
+    #[serde(default)]
+    x: f64,
+    #[serde(default)]
+    y: f64,
+    #[serde(default = "scene3d_default_extent")]
+    width: f64,
+    #[serde(default = "scene3d_default_extent")]
+    height: f64,
+}
+
+fn scene3d_default_extent() -> f64 {
+    400.0
+}
+
+fn plan_scene3d_import(
+    raw: &mut serde_json::Value,
+    body: &Scene3dImportRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    use base64::Engine as _;
+    let format = body.format.to_ascii_lowercase();
+    if !matches!(format.as_str(), "glb" | "gltf" | "obj") {
+        bail!("[unsupported-capability] model format `{format}` is unsupported; use .glb, .gltf or .obj");
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&body.data)
+        .context("[malformed-resource] model data is not valid base64")?;
+    if bytes.len() > crate::scene3d::LIMITS.max_bytes {
+        bail!(
+            "[limit-exceeded] model is larger than {} bytes",
+            crate::scene3d::LIMITS.max_bytes
+        );
+    }
+    let temp_dir = std::env::temp_dir().join(format!(
+        "pentool-scene3d-{}-{}",
+        std::process::id(),
+        rand_suffix()
+    ));
+    std::fs::create_dir_all(&temp_dir)?;
+    let model_path = temp_dir.join(format!("model.{format}"));
+    let mut candidate = raw.clone();
+    let result = (|| {
+        std::fs::write(&model_path, &bytes)?;
+        crate::scene3d::cli::add(
+            &mut candidate,
+            &project_root.join("browser.pen"),
+            (
+                &body.id,
+                &model_path,
+                &body.layer,
+                body.page.as_deref(),
+                [body.x, body.y, body.width, body.height],
+                false,
+                Some(&format),
+            ),
+        )
+    })();
+    let _ = std::fs::remove_file(&model_path);
+    let _ = std::fs::remove_dir(&temp_dir);
+    let value = result?;
+    crate::transaction::validate_value(&candidate)?;
+    *raw = candidate;
+    Ok(value)
+}
+
+async fn scene3d_import(
+    State(state): State<Shared>,
+    Json(mut body): Json<Scene3dImportRequest>,
+) -> Response {
+    let request = body.clone();
+    let result = plan_scene3d_import(&mut body.document, &request, &state.project_root);
+    match result {
+        Ok(value) => Json(serde_json::json!({
+            "document": body.document,
+            "result": value,
+            "local": true
+        }))
+        .into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+async fn scene3d_status() -> Response {
+    let status = crate::scene3d::gpu::availability();
+    Json(serde_json::json!({
+        "active": "reference",
+        "accelerated_available": status.available,
+        "adapter": status.adapter,
+        "backend": status.backend,
+        "fallback_reason": status.reason,
+    }))
+    .into_response()
+}
+
 #[derive(serde::Deserialize)]
 struct AnalysisRequest {
     document: serde_json::Value,
@@ -1483,8 +1587,8 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             .get("version")
             .and_then(serde_json::Value::as_u64)
             .context("[invalid-input] the document has no version")?;
-        if !(4..=9).contains(&body.target) {
-            bail!("[invalid-input] migration target must be between 4 and 9");
+        if !(4..=10).contains(&body.target) {
+            bail!("[invalid-input] migration target must be between 4 and 10");
         }
         if body.target <= from {
             bail!(
@@ -1492,6 +1596,7 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             );
         }
         let migrated = match body.target {
+            10 => crate::scene3d::node::migrate(body.document)?,
             9 => crate::spreads::migrate(body.document)?,
             8 => crate::color::catalog::migrate(body.document)?,
             7 => crate::photo::catalog::migrate(body.document)?,
@@ -2155,6 +2260,57 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn browser_scene3d_import_is_bounded_validated_and_atomic() {
+        use base64::Engine as _;
+        let raw = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let layer = raw["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        let request = super::Scene3dImportRequest {
+            document: raw.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(obj),
+            format: "obj".into(),
+            id: "model-1".into(),
+            layer,
+            page: None,
+            x: 10.0,
+            y: 20.0,
+            width: 200.0,
+            height: 180.0,
+        };
+        let mut imported = raw.clone();
+        let result =
+            super::plan_scene3d_import(&mut imported, &request, &std::env::temp_dir()).unwrap();
+        assert_eq!(result["id"], "model-1");
+        assert_eq!(result["report"]["triangles"], 1);
+        assert_eq!(
+            imported["pages"][0]["layers"][0]["nodes"][0]["kind"],
+            "scene3d"
+        );
+        assert_eq!(imported["models"].as_object().unwrap().len(), 1);
+
+        let mut unchanged = raw.clone();
+        let bad = super::Scene3dImportRequest {
+            format: "fbx".into(),
+            ..request
+        };
+        assert!(super::plan_scene3d_import(&mut unchanged, &bad, &std::env::temp_dir()).is_err());
+        assert_eq!(unchanged, raw);
+
+        let malformed = super::Scene3dImportRequest {
+            format: "obj".into(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"not an obj"),
+            ..bad
+        };
+        assert!(
+            super::plan_scene3d_import(&mut unchanged, &malformed, &std::env::temp_dir()).is_err()
+        );
+        assert_eq!(unchanged, raw);
+    }
+
     #[test]
     fn paint_plan_endpoint_previews_and_commits_the_same_report() {
         use serde_json::json;

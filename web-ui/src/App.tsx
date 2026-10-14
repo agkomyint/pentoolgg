@@ -20,6 +20,7 @@ import { PhotoStage } from "@/workspaces/PhotoStage";
 import { RasterPanel } from "@/workspaces/RasterPanel";
 import { RasterStage } from "@/workspaces/RasterStage";
 import { ImageAdjust } from "@/workspaces/ImageAdjust";
+import { Scene3dPanel } from "@/workspaces/Scene3dPanel";
 import { useLayout } from "@/workspaces/layout/layoutStore";
 import { nextId, pageParent } from "@/workspaces/layout/layoutModel";
 import { findNode, pageOf } from "@/lib/model";
@@ -78,6 +79,12 @@ function WorkspaceBody() {
       return (
         <div className="p-2">
           <RasterPanel />
+        </div>
+      );
+    case "3d":
+      return (
+        <div className="p-2">
+          <Scene3dPanel />
         </div>
       );
     default:

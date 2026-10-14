@@ -389,7 +389,7 @@ fn detect_format(path: &Path, forced: Option<&str>) -> Result<String> {
     Ok(name)
 }
 
-fn add(
+pub(crate) fn add(
     raw: &mut Value,
     input: &Path,
     args: (

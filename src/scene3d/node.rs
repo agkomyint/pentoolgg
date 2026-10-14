@@ -506,6 +506,13 @@ pub fn scene_for(node: &Map<String, Value>, model: Option<&Model>) -> Result<(Sc
         )?;
         camera.near = optional(cam, "near", 0.1, 1e-6, 1e9)?;
         camera.far = optional(cam, "far", 1000.0, 1e-6, 1e12)?;
+    } else if let Some(target) = cam.get("target") {
+        // A target by itself pans an automatically framed/orbit camera while
+        // preserving its distance and direction to the subject.
+        let target = vec3(target, "camera target")?;
+        let offset = math::sub(target, camera.target);
+        camera.eye = math::add(camera.eye, offset);
+        camera.target = target;
     }
     if let Some(up) = cam.get("up") {
         camera.up = vec3(up, "camera up")?;
@@ -986,6 +993,24 @@ mod tests {
         assert!(parse_color("red").is_err());
         assert!(parse_color("#12345").is_err());
         assert!(parse_color("#gggggg").is_err());
+    }
+
+    #[test]
+    fn target_only_pans_the_automatic_camera() {
+        let (raw, digest) = doc_with_cube();
+        let model = load_model(&raw, Path::new("."), &digest).unwrap();
+        let base =
+            json!({"id":"n","kind":"scene3d","x":0,"y":0,"width":200,"height":200,"model":digest});
+        let (before, _) = scene_for(base.as_object().unwrap(), Some(&model)).unwrap();
+        let mut panned = base;
+        panned["camera"] = json!({"target": [3.0, 4.0, 5.0]});
+        let (after, _) = scene_for(panned.as_object().unwrap(), Some(&model)).unwrap();
+        assert_eq!(after.camera.target, [3.0, 4.0, 5.0]);
+        let before_offset = math::sub(before.camera.eye, before.camera.target);
+        let after_offset = math::sub(after.camera.eye, after.camera.target);
+        for i in 0..3 {
+            assert!((before_offset[i] - after_offset[i]).abs() < 1e-9);
+        }
     }
 
     #[test]

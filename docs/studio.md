@@ -15,7 +15,7 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
   document logic in the browser.
 - Workspaces map to the roadmap (`web-ui/src/lib/workspaces.ts`): Design,
   Images (0.7), Composite (0.8), Photo (0.11), Print (0.12), Paint (0.13),
-  Layout (0.14). A workspace whose format or CLI is
+  Layout (0.14), 3D (0.15). A workspace whose format or CLI is
   not implemented says so and lists what the roadmap promises; it has no
   controls that cannot work.
 
@@ -72,7 +72,7 @@ generated work and which warnings are measured versus heuristic.
 Studio is dark-first and dense, arranged like a pro raster/vector suite:
 
 - **Application bar**: file actions, undo/redo, and a centered module switcher
-  (Design, Images, Composite, Photo, Print, Paint, Layout) in the manner of
+  (Design, Images, Composite, Photo, Print, Paint, Layout, 3D) in the manner of
   Lightroom modules.
 - **Options bar**: document name, page select, format and upgrade.
 - **Toolbox** (left) and **canvas** (center); Photo and Paint swap in their own stage.
@@ -93,3 +93,13 @@ The Layout module edits `.pen` v9 layout through `POST /api/layout`
 (`{document, op}`); the browser never measures text. Composition, overset and
 preflight come from `GET/POST /api/layout/{overview,preflight,export}`. The
 optional InDesign-style keys are toggled in Layout > View.
+
+### 3D workspace
+
+The 3D module imports embedded GLB, glTF, and OBJ files through
+`POST /api/scene3d/import`; the Rust importer applies format and resource limits
+before returning an undoable document replacement. Selected `scene3d` nodes
+expose orbit, target pan, zoom, light-rig, and material-override controls.
+Preview rendering remains progressive through the debounced native renderer.
+The panel reports the active reference renderer plus any explicit accelerator
+fallback reason from `GET /api/scene3d/status`.

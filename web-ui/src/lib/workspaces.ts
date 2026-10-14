@@ -1,7 +1,7 @@
 // One entry per product area. `since` ties each workspace to the roadmap so the
 // shell shows what exists now and what each future milestone adds.
 import type { LucideIcon } from "lucide-react";
-import { Brush, Camera, Image, Layers, Newspaper, PenTool, Printer } from "lucide-react";
+import { Box, Brush, Camera, Image, Layers, Newspaper, PenTool, Printer } from "lucide-react";
 
 export type Status = "available" | "partial" | "planned";
 export type Workspace = {
@@ -23,4 +23,5 @@ export const workspaces: Workspace[] = [
   { id: "print", label: "Print", icon: Printer, status: "partial", since: "0.12", summary: "Color roles, preflight, plates and soft proof.", planned: [] },
   { id: "paint", label: "Paint", icon: Brush, status: "partial", since: "0.10", summary: "Raster brush, clone, heal, selections and quick mask. Plan passes with protected regions, preview, commit and scoring (0.13).", planned: [] },
   { id: "layout", label: "Layout", icon: Newspaper, status: "partial", since: "0.14", summary: "Composed stories, overset and layout preflight, tagged PDF and EPUB export. Spreads, style panels and threading tools are still CLI-only.", planned: [] },
+  { id: "3d", label: "3D", icon: Box, status: "partial", since: "0.15", summary: "Import, frame, light and render static 3D objects.", planned: ["Viewport orbit, pan and zoom", "Material controls", "Lighting controls"] },
 ];

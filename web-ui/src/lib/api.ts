@@ -107,6 +107,10 @@ export const api = {
     ),
   asset: (spec: string) =>
     getJson<{ document: Record<string, unknown>; asset: { name: string } }>(`/api/asset?spec=${encodeURIComponent(spec)}`),
+  scene3dStatus: () =>
+    getJson<{ active: "reference" | "accelerated"; accelerated_available: boolean; adapter?: string; backend?: string; fallback_reason?: string }>("/api/scene3d/status"),
+  scene3dImport: (body: { document: Doc; data: string; format: "glb" | "gltf" | "obj"; id: string; layer: string; page?: string; x: number; y: number; width: number; height: number }) =>
+    postJson<{ document: Doc; result: { id: string; model: string; report: unknown } }>("/api/scene3d/import", body),
 };
 
 export type LayoutIssue = {

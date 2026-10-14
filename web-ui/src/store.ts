@@ -65,8 +65,8 @@ function initialDark(): boolean {
 }
 
 const HISTORY_LIMIT = 100;
-/** Newest `.pen` format the server can migrate to (`pentool migrate --target 9`). */
-export const LATEST_FORMAT = 9;
+/** Newest `.pen` format the server can migrate to (`pentool migrate --target 10`). */
+export const LATEST_FORMAT = 10;
 
 function blankDoc(): Doc {
   return {
