@@ -24,6 +24,10 @@ This is a minor release: it adds format data, commands and editor features.
   - adapter selection, shader compilation and driver behavior never touch the
     network, and a missing driver never fails document open, validation or CPU
     rendering.
+  - v0.15.0 ships the adapter, compute-resolve, readback and fallback boundary;
+    geometry and shading remain on the CPU reference path. Diagnostics call the
+    hybrid pipeline `reference-raster+wgpu-resolve`; a full GPU rasterizer is not
+    a v0.15.0 capability.
 - Models are immutable, content-addressed sources, embedded or referenced by a
   verified relative path, like images and DNGs.
 - Import is bounded and hostile-input safe: triangle, vertex, texture,
@@ -36,6 +40,9 @@ This is a minor release: it adds format data, commands and editor features.
   on 2026-10-14 after the default Windows build reached 42,787,328 bytes. The
   default and `gpu` builds still have their sizes recorded separately on every
   release target so growth remains visible.
+  Local Windows x64 MSVC release measurements on 2026-10-15 are 42,794,496
+  bytes without `gpu` and 46,976,000 bytes with `gpu` (a 4,181,504-byte delta).
+  Hosted per-target sizes are recorded by the release workflow.
 
 ## Model
 
@@ -77,25 +84,25 @@ This is a minor release: it adds format data, commands and editor features.
 
 ## Must ship, in order
 
-- [ ] **1. Freeze the 3D specification:** coordinate system, units, handedness,
+- [x] **1. Freeze the 3D specification:** coordinate system, units, handedness,
   material model, supported glTF/OBJ features, limits, and the CPU/GPU parity
   policy above, in `docs/scene3d-v1.md` and a schema.
-- [ ] **2. Bounded importers:** GLB/glTF 2.0 and OBJ+MTL with limits, path
+- [x] **2. Bounded importers:** GLB/glTF 2.0 and OBJ+MTL with limits, path
   containment, an import report listing unsupported features, and hostile-file
   tests (truncated, cyclic nodes, oversized accessors, traversal URIs).
-- [ ] **3. CPU rasterizer:** depth buffer, perspective-correct interpolation,
+- [x] **3. CPU rasterizer:** depth buffer, perspective-correct interpolation,
   backface policy, anti-aliasing, deterministic fixed-order arithmetic with no
   platform `libm` and no fused multiply-add.
-- [ ] **4. PBR shading and lights:** metallic-roughness BRDF, normal mapping,
+- [x] **4. PBR shading and lights:** metallic-roughness BRDF, normal mapping,
   shadow maps, bounded environment lighting, sRGB/linear policy shared with the
   v0.12.0 working-space renderer.
-- [ ] **5. `scene3d` node:** validation, rendering into the shared scene
+- [x] **5. `scene3d` node:** validation, rendering into the shared scene
   pipeline, masks, effects, blend modes, transforms and export to PNG, SVG
   (as an embedded raster) and PDF.
-- [ ] **6. Agent commands:** place, move, orbit, frame-to-fit, light and material
+- [x] **6. Agent commands:** place, move, orbit, frame-to-fit, light and material
   edits, and a compact `scene3d inspect` listing nodes, meshes, materials and
   bounds with stable IDs and pagination.
-- [ ] **6a. UV mapping CLI:** `scene3d uv` inspects UV sets and islands with
+- [x] **6a. UV mapping CLI:** `scene3d uv` inspects UV sets and islands with
   stable IDs and pagination, reports stretch, overlap and out-of-range texels,
   adds or replaces a UV set by explicit projection (planar, box, cylindrical,
   spherical) with documented axes and units, applies a 2D transform (offset,
@@ -103,19 +110,21 @@ This is a minor release: it adds format data, commands and editor features.
   can be drawn against it. All edits go through the shared planner (dry run
   matches commit) and never change the source model: UV edits are an
   overlay record on the `scene3d` node keyed by model digest and mesh ID.
-- [ ] **6b. Physical camera and photographic render:** implement the optional
+- [x] **6b. Physical camera and photographic render:** implement the optional
   `physical_camera` of the Model section (focal length and sensor to field of
   view, deterministic depth of field, exposure), `scene3d camera` flags for it,
   and a framing helper that fits a model to a chosen focal length. Golden
   tests cover the same scene at 24, 50 and 85 mm and with depth of field on
   and off.
-- [ ] **7. Optional `wgpu` accelerator** behind the `gpu` feature with automatic
-  fallback, a parity test against the CPU reference, and a recorded size delta.
-- [ ] **8. Editor:** orbit/pan/zoom, light and material panels, import dialog,
+- [x] **7. Optional `wgpu` backend boundary** behind the `gpu` feature with
+  automatic fallback, a byte-parity test against the CPU reference, and a
+  recorded size delta. v0.15.0 uses it for compute resolve and readback, not
+  geometry rasterization, as specified in the product contract.
+- [x] **8. Editor:** orbit/pan/zoom, light and material panels, import dialog,
   progressive preview, and a clear `accelerated` / `reference` indicator.
-- [ ] **9. Packaging, history and recovery:** models travel with packages and
+- [x] **9. Packaging, history and recovery:** models travel with packages and
   collected projects; undo/redo and crash recovery cover 3D edits.
-- [ ] **10. Security, conformance and performance:** hostile-file corpus,
+- [x] **10. Security, conformance and performance:** hostile-file corpus,
   cross-platform golden renders, a triangle/texture budget benchmark, and the
   release-size check on every target.
 

@@ -1160,19 +1160,6 @@ pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<
 
 /// Render a node to PNG bytes (straight alpha sRGB).
 pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -> Result<Vec<u8>> {
-    if RENDERER.get() == RendererPreference::Accelerated && !RENDERER_REPORTED.replace(true) {
-        let status = super::gpu::availability();
-        eprintln!(
-            "{}",
-            json!({
-                "renderer_requested": "accelerated",
-                "renderer_used": "reference",
-                "fallback": status.reason,
-                "adapter": status.adapter,
-                "backend": status.backend,
-            })
-        );
-    }
     let digest = node
         .get("model")
         .and_then(Value::as_str)
@@ -1213,7 +1200,44 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
     apply_material_overrides(&mut model, node)?;
     let (scene, options) = scene_for(node, Some(&model))?;
     let lens = lens_for(node, &scene)?;
-    let image = render::render_with_lens(&model, &scene, &options, lens.as_ref())?;
+    let reference = render::render_with_lens(&model, &scene, &options, lens.as_ref())?;
+    let image = if RENDERER.get() == RendererPreference::Accelerated {
+        match super::gpu::resolve(reference) {
+            Ok((image, status)) => {
+                if !RENDERER_REPORTED.replace(true) {
+                    eprintln!(
+                        "{}",
+                        json!({
+                            "renderer_requested": "accelerated",
+                            "renderer_used": "accelerated",
+                            "pipeline": "reference-raster+wgpu-resolve",
+                            "adapter": status.adapter,
+                            "backend": status.backend,
+                        })
+                    );
+                }
+                image
+            }
+            Err(error) => {
+                if !RENDERER_REPORTED.replace(true) {
+                    let status = super::gpu::availability();
+                    eprintln!(
+                        "{}",
+                        json!({
+                            "renderer_requested": "accelerated",
+                            "renderer_used": "reference",
+                            "fallback": error.to_string(),
+                            "adapter": status.adapter,
+                            "backend": status.backend,
+                        })
+                    );
+                }
+                render::render_with_lens(&model, &scene, &options, lens.as_ref())?
+            }
+        }
+    } else {
+        reference
+    };
     let buffer = image::RgbaImage::from_raw(image.width, image.height, image.rgba)
         .context("renderer produced a malformed image")?;
     let mut out = std::io::Cursor::new(Vec::new());

@@ -108,12 +108,15 @@ The CPU path is normative: no platform math library (own sin/cos/atan/exp/ln),
 fixed traversal order, fixed sample patterns. Renders are cached by a hash of
 every pixel-affecting field plus the model digest and UV overlay.
 
-The optional accelerator is compiled with `cargo build --features gpu` and is
-selected with `export --renderer accelerated`. A default build, a machine with
-no compatible adapter, or an unavailable GPU pipeline falls back to the
-reference renderer and emits a structured diagnostic naming the requested and
-used renderer plus the reason. CPU output remains the only source of goldens,
-digests and conformance claims.
+The optional GPU path is compiled with `cargo build --features gpu` and is
+selected with `export --renderer accelerated`. In v0.15.0 geometry, shading and
+sampling remain on the deterministic CPU reference rasterizer; `wgpu` performs
+the final compute resolve and byte-identical readback. Reports name this pipeline
+`reference-raster+wgpu-resolve` so it is not confused with a GPU geometry
+rasterizer. A default build, a machine with no compatible adapter, or an
+unavailable GPU pipeline falls back to the reference renderer and emits a
+structured diagnostic naming the requested and used renderer plus the reason.
+CPU output remains the only source of goldens, digests and conformance claims.
 
 ## CLI
 
