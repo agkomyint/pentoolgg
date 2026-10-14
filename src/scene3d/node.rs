@@ -179,6 +179,64 @@ pub fn validate_models(raw: &Value, version: u64) -> Result<()> {
                     "[limit-exceeded] model {digest} exceeds the {} byte limit",
                     LIMITS.max_bytes
                 );
+                if let Some(resources) = storage.get("resources") {
+                    let resources = resources.as_object().with_context(|| {
+                        format!("[invalid-input] model {digest} resources must be an object")
+                    })?;
+                    ensure!(
+                        resources.len() <= 1024,
+                        "[limit-exceeded] model {digest} has more than 1024 sidecar resources"
+                    );
+                    let mut encoded_bytes = 0usize;
+                    for (path, resource) in resources {
+                        crate::resource::safe_relative_path(Path::new(path))?;
+                        let resource = resource.as_object().with_context(|| {
+                            format!(
+                                "[invalid-input] model {digest} resource {path} must be an object"
+                            )
+                        })?;
+                        let data =
+                            resource
+                                .get("data")
+                                .and_then(Value::as_str)
+                                .with_context(|| {
+                                    format!(
+                                    "[invalid-input] model {digest} resource {path} has no data"
+                                )
+                                })?;
+                        let resource_digest = resource
+                            .get("digest")
+                            .and_then(Value::as_str)
+                            .with_context(|| {
+                                format!(
+                                    "[invalid-input] model {digest} resource {path} has no digest"
+                                )
+                            })?;
+                        ensure!(
+                            resource_digest.len() == 71
+                                && resource_digest.starts_with("sha256:")
+                                && resource_digest[7..].bytes().all(|b| b.is_ascii_hexdigit()),
+                            "[invalid-input] model {digest} resource {path} has an invalid digest"
+                        );
+                        let byte_length = resource
+                            .get("byte_length")
+                            .and_then(Value::as_u64)
+                            .with_context(|| {
+                                format!("[invalid-input] model {digest} resource {path} has no byte_length")
+                            })?;
+                        ensure!(
+                            byte_length <= crate::resource::MAX_RESOURCE_BYTES as u64,
+                            "[limit-exceeded] model {digest} resource {path} is too large"
+                        );
+                        encoded_bytes = encoded_bytes
+                            .checked_add(data.len() / 4 * 3)
+                            .context("model resource size overflow")?;
+                    }
+                    ensure!(
+                        encoded_bytes <= crate::resource::MAX_RESOURCE_BYTES,
+                        "[limit-exceeded] model {digest} sidecars exceed the resource byte limit"
+                    );
+                }
             }
             Some("external") => {
                 let path = storage
@@ -186,6 +244,44 @@ pub fn validate_models(raw: &Value, version: u64) -> Result<()> {
                     .and_then(Value::as_str)
                     .with_context(|| format!("[invalid-input] model {digest} has no path"))?;
                 crate::resource::safe_relative_path(Path::new(path))?;
+                if let Some(resources) = storage.get("resources") {
+                    let resources = resources.as_object().with_context(|| {
+                        format!("[invalid-input] model {digest} resources must be an object")
+                    })?;
+                    ensure!(
+                        resources.len() <= 1024,
+                        "[limit-exceeded] model {digest} has more than 1024 sidecar resources"
+                    );
+                    for (path, resource) in resources {
+                        crate::resource::safe_relative_path(Path::new(path))?;
+                        let resource = resource.as_object().with_context(|| {
+                            format!(
+                                "[invalid-input] model {digest} resource {path} must be an object"
+                            )
+                        })?;
+                        let sidecar_digest = resource
+                            .get("digest")
+                            .and_then(Value::as_str)
+                            .with_context(|| {
+                                format!(
+                                    "[invalid-input] model {digest} resource {path} has no digest"
+                                )
+                            })?;
+                        ensure!(
+                            sidecar_digest.len() == 71
+                                && sidecar_digest.starts_with("sha256:")
+                                && sidecar_digest[7..].bytes().all(|b| b.is_ascii_hexdigit()),
+                            "[invalid-input] model {digest} resource {path} has an invalid digest"
+                        );
+                        ensure!(
+                            resource
+                                .get("byte_length")
+                                .and_then(Value::as_u64)
+                                .is_some(),
+                            "[invalid-input] model {digest} resource {path} has no byte_length"
+                        );
+                    }
+                }
             }
             other => bail!(
                 "[unsupported-capability] model {digest} storage kind {other:?} is unsupported"
@@ -762,13 +858,178 @@ fn remember<T>(cache: &Mutex<Vec<(String, T)>>, key: String, value: T, limit: us
 /// Cache key: the model digest plus its UV overlay, so editing an overlay
 /// never serves a stale model or render.
 fn model_key(raw: &Value, digest: &str) -> String {
-    match raw["models"][digest].get("uv") {
-        Some(uv) if uv.as_object().is_some_and(|m| !m.is_empty()) => format!(
-            "{digest}+{}",
-            crate::resource::sha256(uv.to_string().as_bytes())
-        ),
-        _ => digest.to_string(),
+    let record = &raw["models"][digest];
+    let variant = json!({
+        "resources": record["storage"].get("resources"),
+        "uv": record.get("uv"),
+    });
+    format!(
+        "{digest}+{}",
+        crate::resource::sha256(variant.to_string().as_bytes())
+    )
+}
+
+/// Read an external model and every sidecar actually consumed by its importer,
+/// returning self-contained embedded storage. All paths remain rooted at the
+/// document directory and the aggregate resource budget is enforced.
+pub fn collect_external_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Value> {
+    use std::cell::{Cell, RefCell};
+    let record = raw["models"]
+        .get(digest)
+        .and_then(Value::as_object)
+        .with_context(|| format!("[missing-resource] model {digest} is not in `models`"))?;
+    let storage = record["storage"]
+        .as_object()
+        .context("[invalid-input] model storage is missing")?;
+    if storage.get("kind").and_then(Value::as_str) == Some("embedded") {
+        return Ok(Value::Object(storage.clone()));
     }
+    ensure!(
+        storage.get("kind").and_then(Value::as_str) == Some("external"),
+        "[unsupported-capability] model storage must be embedded or external"
+    );
+    let path = Path::new(storage["path"].as_str().unwrap_or(""));
+    let document = document_dir.join("document.pen");
+    let bytes = crate::resource::read_external_offline_limited(
+        &document,
+        path,
+        digest,
+        LIMITS.max_bytes,
+    )
+    .with_context(|| format!("[missing-resource] collect model source {}", path.display()))?;
+    let base = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let expected_resources = storage.get("resources").and_then(Value::as_object);
+    let resources = RefCell::new(std::collections::BTreeMap::<String, Value>::new());
+    let total = Cell::new(bytes.len());
+    if let Some(expected_resources) = expected_resources {
+        for (uri, expected) in expected_resources {
+            crate::resource::safe_relative_path(Path::new(uri))?;
+            let relative = base.join(uri);
+            crate::resource::safe_relative_path(&relative)?;
+            let full = document_dir.join(relative);
+            let root = document_dir
+                .canonicalize()
+                .context("[missing-resource] document directory")?;
+            let canonical = full.canonicalize().with_context(|| {
+                format!(
+                    "[missing-resource] collect model sidecar {}",
+                    full.display()
+                )
+            })?;
+            ensure!(
+                canonical.starts_with(&root),
+                "[unsafe-path] model resource `{uri}` resolves outside the document root"
+            );
+            let sidecar = std::fs::read(&canonical)?;
+            let expected_digest = expected["digest"]
+                .as_str()
+                .context("[malformed-resource] model resource manifest has no digest")?;
+            crate::resource::verify(&sidecar, expected_digest)?;
+            ensure!(
+                expected.get("byte_length").and_then(Value::as_u64) == Some(sidecar.len() as u64),
+                "[hash-mismatch] model resource `{uri}` byte length changed"
+            );
+            let next = total
+                .get()
+                .checked_add(sidecar.len())
+                .context("model collection size overflow")?;
+            ensure!(
+                next <= crate::resource::MAX_RESOURCE_BYTES,
+                "[limit-exceeded] collected model resources exceed the resource byte limit"
+            );
+            total.set(next);
+            resources.borrow_mut().insert(
+                uri.clone(),
+                json!({
+                    "digest": expected_digest,
+                    "byte_length": sidecar.len(),
+                    "data": base64::engine::general_purpose::STANDARD.encode(&sidecar),
+                }),
+            );
+        }
+    }
+    let resolver = |uri: &str| -> Result<Vec<u8>> {
+        ensure!(
+            !uri.contains(':') && !uri.contains('?'),
+            "[unsafe-path] model resource `{uri}` must be a relative file path"
+        );
+        let decoded = uri.replace("%20", " ");
+        crate::resource::safe_relative_path(Path::new(&decoded))?;
+        let relative = base.join(&decoded);
+        crate::resource::safe_relative_path(&relative)?;
+        let full = document_dir.join(&relative);
+        let root = document_dir
+            .canonicalize()
+            .context("[missing-resource] document directory")?;
+        let canonical = full
+            .canonicalize()
+            .with_context(|| format!("[missing-resource] {}", full.display()))?;
+        ensure!(
+            canonical.starts_with(&root),
+            "[unsafe-path] model resource `{uri}` resolves outside the document root"
+        );
+        let sidecar = std::fs::read(&canonical).with_context(|| {
+            format!(
+                "[missing-resource] collect model sidecar {}",
+                canonical.display()
+            )
+        })?;
+        if resources.borrow().contains_key(&decoded) {
+            return Ok(sidecar);
+        }
+        if let Some(expected_resources) = expected_resources {
+            let expected = expected_resources.get(&decoded).with_context(|| {
+                format!("[hash-mismatch] model resource `{decoded}` is not in the import manifest")
+            })?;
+            crate::resource::verify(
+                &sidecar,
+                expected["digest"]
+                    .as_str()
+                    .context("[malformed-resource] model resource manifest has no digest")?,
+            )?;
+            ensure!(
+                expected.get("byte_length").and_then(Value::as_u64) == Some(sidecar.len() as u64),
+                "[hash-mismatch] model resource `{decoded}` byte length changed"
+            );
+        }
+        let next = total
+            .get()
+            .checked_add(sidecar.len())
+            .context("model collection size overflow")?;
+        ensure!(
+            next <= crate::resource::MAX_RESOURCE_BYTES,
+            "[limit-exceeded] collected model resources exceed the resource byte limit"
+        );
+        total.set(next);
+        let resource_digest = crate::resource::sha256(&sidecar);
+        resources.borrow_mut().insert(
+            decoded,
+            json!({
+                "digest": resource_digest,
+                "byte_length": sidecar.len(),
+                "data": base64::engine::general_purpose::STANDARD.encode(&sidecar),
+            }),
+        );
+        Ok(sidecar)
+    };
+    match record["format"].as_str() {
+        Some("glb") | Some("gltf") => {
+            gltf::import(&bytes, &resolver)?;
+        }
+        Some("obj") => {
+            obj::import(&bytes, &resolver)?;
+        }
+        other => bail!("[unsupported-capability] model format {other:?} is unsupported"),
+    }
+    let resources = resources.into_inner();
+    let mut embedded = json!({
+        "kind": "embedded",
+        "data": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    });
+    if !resources.is_empty() {
+        embedded["resources"] = serde_json::to_value(resources)?;
+    }
+    Ok(embedded)
 }
 
 /// Load, verify and import a model. `document_dir` anchors external paths.
@@ -787,15 +1048,21 @@ pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<
         .as_object()
         .context("[invalid-input] model storage is missing")?;
     let document = document_dir.join("document.pen");
+    let mut embedded_resources: Option<&Map<String, Value>> = None;
+    let mut external_resources: Option<&Map<String, Value>> = None;
     let (bytes, base): (Vec<u8>, Option<std::path::PathBuf>) = match storage["kind"].as_str() {
-        Some("embedded") => (
-            base64::engine::general_purpose::STANDARD
-                .decode(storage["data"].as_str().unwrap_or(""))
-                .context("[malformed-resource] embedded model is not valid base64")?,
-            None,
-        ),
+        Some("embedded") => {
+            embedded_resources = storage.get("resources").and_then(Value::as_object);
+            (
+                base64::engine::general_purpose::STANDARD
+                    .decode(storage["data"].as_str().unwrap_or(""))
+                    .context("[malformed-resource] embedded model is not valid base64")?,
+                None,
+            )
+        }
         Some("external") => {
             let path = Path::new(storage["path"].as_str().unwrap_or(""));
+            external_resources = storage.get("resources").and_then(Value::as_object);
             (
                 crate::resource::read_external_offline_limited(
                     &document,
@@ -810,15 +1077,37 @@ pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<
     };
     crate::resource::verify(&bytes, digest)?;
     let resolver = |uri: &str| -> Result<Vec<u8>> {
-        let Some(base) = &base else {
-            bail!("[unsafe-path] embedded models cannot reference external file `{uri}`");
-        };
         ensure!(
             !uri.contains(':') && !uri.contains('?'),
             "[unsafe-path] model resource `{uri}` must be a relative file path"
         );
         let decoded = uri.replace("%20", " ");
-        let relative = base.join(decoded);
+        crate::resource::safe_relative_path(Path::new(&decoded))?;
+        if let Some(resources) = embedded_resources {
+            let resource = resources.get(&decoded).with_context(|| {
+                format!("[missing-resource] embedded model resource `{decoded}` is missing")
+            })?;
+            let data = resource["data"].as_str().with_context(|| {
+                format!("[malformed-resource] embedded model resource `{decoded}` has no data")
+            })?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .with_context(|| {
+                    format!("[malformed-resource] model resource `{decoded}` is not valid base64")
+                })?;
+            if let Some(digest) = resource.get("digest").and_then(Value::as_str) {
+                crate::resource::verify(&bytes, digest)?;
+            }
+            ensure!(
+                resource.get("byte_length").and_then(Value::as_u64) == Some(bytes.len() as u64),
+                "[malformed-resource] model resource `{decoded}` byte length does not match"
+            );
+            return Ok(bytes);
+        }
+        let Some(base) = &base else {
+            bail!("[unsafe-path] embedded models cannot reference external file `{uri}`");
+        };
+        let relative = base.join(&decoded);
         crate::resource::safe_relative_path(&relative)?;
         let full = document_dir.join(&relative);
         let canonical_root = document_dir
@@ -836,7 +1125,21 @@ pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<
             meta.len() as usize <= LIMITS.max_bytes,
             "[limit-exceeded] model resource `{uri}` is too large"
         );
-        Ok(std::fs::read(&canonical)?)
+        let bytes = std::fs::read(&canonical)?;
+        if let Some(resources) = external_resources {
+            let resource = resources.get(&decoded).with_context(|| {
+                format!("[hash-mismatch] model resource `{decoded}` is not in the import manifest")
+            })?;
+            let expected = resource["digest"]
+                .as_str()
+                .context("[malformed-resource] external model resource manifest has no digest")?;
+            crate::resource::verify(&bytes, expected)?;
+            ensure!(
+                resource.get("byte_length").and_then(Value::as_u64) == Some(bytes.len() as u64),
+                "[hash-mismatch] model resource `{decoded}` byte length changed"
+            );
+        }
+        Ok(bytes)
     };
     let model = match record["format"].as_str() {
         Some("glb") | Some("gltf") => gltf::import(&bytes, &resolver)?,

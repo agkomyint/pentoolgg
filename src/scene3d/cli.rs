@@ -460,6 +460,20 @@ pub(crate) fn add(
                 .to_string()
         }
     })?;
+    if external {
+        let collected = node::collect_external_model(raw, &doc_dir, &digest)?;
+        if let Some(resources) = collected.get("resources").and_then(Value::as_object) {
+            let manifest: Map<String, Value> = resources
+                .iter()
+                .map(|(path, resource)| {
+                    let mut entry = resource.clone();
+                    entry.as_object_mut().unwrap().remove("data");
+                    (path.clone(), entry)
+                })
+                .collect();
+            raw["models"][&digest]["storage"]["resources"] = Value::Object(manifest);
+        }
+    }
     let report = node::inspect(&model, 0, 256);
 
     let pages = raw["pages"]

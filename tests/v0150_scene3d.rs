@@ -436,6 +436,146 @@ fn packages_audit_embedded_models_and_reject_external_sources() {
 }
 
 #[test]
+fn collect_embeds_external_models_and_sidecars_for_offline_packages() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("mesh.obj");
+    let material = dir.join("mesh.mtl");
+    std::fs::write(
+        &model,
+        "mtllib mesh.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl red\nf 1 2 3\n",
+    )
+    .unwrap();
+    std::fs::write(&material, "newmtl red\nKd 0.8 0.1 0.1\n").unwrap();
+    let d = doc.to_str().unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "mesh",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+        "--external",
+    ])
+    .status
+    .success());
+    let external = read(&doc);
+    let digest = external["models"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap();
+    assert!(
+        external["models"][digest]["storage"]["resources"]["mesh.mtl"]["digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
+    let before = std::fs::read(&doc).unwrap();
+    std::fs::write(&material, "newmtl red\nKd 0.1 0.8 0.1\n").unwrap();
+    let stale_dir = dir.join("stale");
+    let stale = pentool(&[
+        "linked",
+        "collect",
+        d,
+        "--path",
+        stale_dir.to_str().unwrap(),
+        "--dry-run",
+    ]);
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("hash-mismatch"));
+    assert_eq!(std::fs::read(&doc).unwrap(), before);
+    std::fs::write(&material, "newmtl red\nKd 0.8 0.1 0.1\n").unwrap();
+    let collected = dir.join("portable");
+    let out = pentool(&[
+        "linked",
+        "collect",
+        d,
+        "--path",
+        collected.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read(&doc).unwrap(), before);
+    let portable = read(&collected.join("document.pen"));
+    let digest = portable["models"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap();
+    let storage = &portable["models"][digest]["storage"];
+    assert_eq!(storage["kind"], "embedded");
+    assert!(storage["resources"]["mesh.mtl"]["data"].is_string());
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["models"], 1);
+
+    std::fs::remove_file(model).unwrap();
+    std::fs::remove_file(material).unwrap();
+    let rendered = dir.join("portable.png");
+    let exported = pentool(&[
+        "export",
+        collected.join("document.pen").to_str().unwrap(),
+        rendered.to_str().unwrap(),
+    ]);
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+
+    let package_dir = dir.join("portable-kit");
+    assert!(pentool(&[
+        "package",
+        "init",
+        package_dir.to_str().unwrap(),
+        "--name",
+        "portable-model-kit",
+    ])
+    .status
+    .success());
+    let mut asset = portable;
+    asset["asset"] = json!({
+        "schema": 1, "id": "portable-model", "name": "Portable model",
+        "asset_version": "0.1.0", "kind": "component"
+    });
+    std::fs::write(
+        package_dir.join("assets/model.pen"),
+        serde_json::to_vec_pretty(&asset).unwrap(),
+    )
+    .unwrap();
+    let package = dir.join("portable-model.penpkg");
+    assert!(pentool(&[
+        "package",
+        "pack",
+        package_dir.to_str().unwrap(),
+        "--output",
+        package.to_str().unwrap(),
+    ])
+    .status
+    .success());
+    let verified = pentool(&["package", "verify", package.to_str().unwrap()]);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let report: Value = serde_json::from_slice(&verified.stdout).unwrap();
+    let resources = &report["package"]["assets"]["portable-model"]["models"][0]["resources"];
+    assert_eq!(resources[0]["path"], "mesh.mtl");
+    assert!(resources[0]["digest"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+}
+
+#[test]
 fn camera_edits_round_trip_through_shared_undo_and_redo() {
     let dir = scratch();
     let doc = base(&dir);

@@ -174,7 +174,7 @@ pub fn locate(raw: &Value, document: &Path, id: &str, paths: &[String]) -> Resul
 }
 
 pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Result<Value> {
-    crate::transaction::validate_value(raw)?;
+    crate::transaction::validate_value(raw).context("validate collection source")?;
     if output.exists() {
         bail!("[output-exists] collection requires a new directory")
     }
@@ -198,7 +198,44 @@ pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Re
             crate::image::external_storage(Path::new(&relative))?;
         encoded.push((relative, bytes));
     }
-    crate::transaction::validate_value(&candidate)?;
+    let mut collected_models = 0usize;
+    if let Some(models) = raw.get("models").and_then(Value::as_object) {
+        use base64::Engine as _;
+        let root = crate::resource::document_root(document);
+        for (digest, record) in models {
+            if record["storage"]["kind"] != "external" {
+                continue;
+            }
+            let storage = crate::scene3d::node::collect_external_model(raw, root, digest)
+                .with_context(|| format!("collect model {digest}"))?;
+            let mut model_bytes = base64::engine::general_purpose::STANDARD
+                .decode(storage["data"].as_str().unwrap_or(""))?
+                .len();
+            for resource in storage["resources"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(_, v)| v)
+            {
+                model_bytes = model_bytes
+                    .checked_add(
+                        base64::engine::general_purpose::STANDARD
+                            .decode(resource["data"].as_str().unwrap_or(""))?
+                            .len(),
+                    )
+                    .context("collection size overflow")?;
+            }
+            total = total
+                .checked_add(model_bytes)
+                .context("collection size overflow")?;
+            if total > crate::resource::MAX_RESOURCE_BYTES {
+                bail!("[limit-exceeded] collection exceeds 512 MiB")
+            }
+            candidate["models"][digest]["storage"] = storage;
+            collected_models += 1;
+        }
+    }
+    crate::transaction::validate_value(&candidate).context("validate collected document")?;
     if !dry_run {
         // Publish the entire portable project by a single same-filesystem rename.
         let parent = output
@@ -214,20 +251,29 @@ pub fn collect(raw: &Value, document: &Path, output: &Path, dry_run: bool) -> Re
         let staging_path = parent
             .canonicalize()?
             .join(format!(".pentool-collect-{:016x}", staging_nonce()));
-        fs::create_dir(&staging_path)?;
+        fs::create_dir(&staging_path).with_context(|| {
+            format!(
+                "[write-failed] create collection staging {}",
+                staging_path.display()
+            )
+        })?;
         let staging = Staging(staging_path);
-        fs::create_dir(staging.0.join("assets"))?;
+        fs::create_dir(staging.0.join("assets"))
+            .context("[write-failed] create collection assets")?;
         for (path, bytes) in &encoded {
-            fs::write(staging.0.join(path), bytes)?;
+            fs::write(staging.0.join(path), bytes)
+                .with_context(|| format!("[write-failed] collect {path}"))?;
         }
         fs::write(
             staging.0.join("document.pen"),
             serde_json::to_vec_pretty(&candidate)?,
-        )?;
-        fs::rename(&staging.0, output)?;
+        )
+        .context("[write-failed] write collected document")?;
+        fs::rename(&staging.0, output)
+            .with_context(|| format!("[write-failed] publish collection {}", output.display()))?;
     }
     Ok(
-        json!({"output":output,"document":"document.pen","assets":encoded.len(),"byte_length":total,"dry_run":dry_run}),
+        json!({"output":output,"document":"document.pen","assets":encoded.len(),"models":collected_models,"byte_length":total,"dry_run":dry_run}),
     )
 }
 

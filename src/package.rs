@@ -406,12 +406,42 @@ fn check_model_document(raw: &Value) -> Result<Vec<Value>> {
             bail!("[limit-exceeded] packaged model {digest} exceeds the model byte limit")
         }
         crate::resource::verify(&bytes, digest)?;
+        let mut resources = Vec::new();
+        for (path, resource) in storage
+            .get("resources")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            crate::resource::safe_relative_path(Path::new(path))?;
+            let encoded = resource["data"].as_str().with_context(|| {
+                format!("[invalid-input] packaged model {digest} resource {path} has no data")
+            })?;
+            let sidecar = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .with_context(|| {
+                    format!("[malformed-resource] packaged model {digest} resource {path} is not base64")
+                })?;
+            let sidecar_digest = resource["digest"].as_str().with_context(|| {
+                format!("[invalid-input] packaged model {digest} resource {path} has no digest")
+            })?;
+            crate::resource::verify(&sidecar, sidecar_digest)?;
+            if resource.get("byte_length").and_then(Value::as_u64) != Some(sidecar.len() as u64) {
+                bail!("[malformed-resource] packaged model {digest} resource {path} byte length does not match")
+            }
+            resources.push(json!({
+                "path": path,
+                "digest": sidecar_digest,
+                "byte_length": sidecar.len(),
+            }));
+        }
         let mut users = consumers.remove(digest).unwrap_or_default();
         users.sort();
         table.push(json!({
             "digest": digest,
             "format": model["format"],
             "byte_length": bytes.len(),
+            "resources": resources,
             "consumers": users,
         }));
     }

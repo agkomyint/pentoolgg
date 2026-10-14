@@ -22,15 +22,21 @@ exported layouts.
 
 ```json
 {"format": "glb|gltf|obj",
- "storage": {"kind": "embedded", "data": "<base64>"}
-          | {"kind": "external", "path": "assets/model.gltf"},
+ "storage": {"kind": "embedded", "data": "<base64>",
+             "resources": {"buffer.bin": {"digest": "sha256:…",
+                            "byte_length": 123, "data": "<base64>"}}}
+          | {"kind": "external", "path": "assets/model.gltf",
+             "resources": {"buffer.bin": {"digest": "sha256:…", "byte_length": 123}}},
  "uv": {"*": {"projection": "box", "scale": [2, 2]}}}
 ```
 
 The digest is verified on every load. External paths are document-relative,
 must stay inside the document directory, and sidecar buffers/textures resolve
-under the same containment. Embedded models cannot reference other files; use
-`--external` for `.gltf`/`.obj` with sidecars.
+under the same containment. Embedded sidecars live in the optional `resources`
+map, keyed by the source-relative URI with verified digest and byte length. Use
+`--external` while authoring `.gltf`/`.obj` with sidecars; import records an
+immutable digest/length manifest for those files, and `linked collect`
+captures every sidecar consumed by the importer into this map.
 
 ### Importer scope and limits
 
@@ -130,7 +136,7 @@ failure leaves the file byte-identical.
 
 Embedded model sources are carried inside `.penpkg` assets and listed in the
 package manifest with their digest, format, byte length and consuming scene
-IDs. Package verification re-decodes and re-hashes every model. External model
+IDs. Package verification re-decodes and re-hashes every model and sidecar. External model
 sources are refused during packing until they have been collected into a
 self-contained document; package creation never follows or silently omits an
 external model or sidecar.

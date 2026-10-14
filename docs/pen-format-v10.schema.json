@@ -30,8 +30,28 @@
         "bytes": {"type": "integer", "minimum": 0},
         "storage": {
           "oneOf": [
-            {"type": "object", "required": ["kind", "data"], "properties": {"kind": {"const": "embedded"}, "data": {"type": "string", "contentEncoding": "base64"}}},
-            {"type": "object", "required": ["kind", "path"], "properties": {"kind": {"const": "external"}, "path": {"type": "string", "minLength": 1}}}
+            {"type": "object", "required": ["kind", "data"], "properties": {
+              "kind": {"const": "embedded"},
+              "data": {"type": "string", "contentEncoding": "base64"},
+              "resources": {
+                "type": "object", "maxProperties": 1024,
+                "additionalProperties": {"type": "object", "required": ["digest", "byte_length", "data"], "properties": {
+                  "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                  "byte_length": {"type": "integer", "minimum": 0},
+                  "data": {"type": "string", "contentEncoding": "base64"}
+                }}
+              }
+            }},
+            {"type": "object", "required": ["kind", "path"], "properties": {
+              "kind": {"const": "external"}, "path": {"type": "string", "minLength": 1},
+              "resources": {
+                "type": "object", "maxProperties": 1024,
+                "additionalProperties": {"type": "object", "required": ["digest", "byte_length"], "properties": {
+                  "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                  "byte_length": {"type": "integer", "minimum": 0}
+                }}
+              }
+            }}
           ]
         },
         "uv": {
