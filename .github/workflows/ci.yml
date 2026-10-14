@@ -65,9 +65,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked
-      - name: Check release binary size on every target (40 MB budget since v0.14.0, embeds the WASM preview core)
+      - name: Check release binary size on every target (60 MB budget approved for v0.15.0 GPU work)
         shell: bash
-        run: sh scripts/check-binary-size.sh target/release/${{ matrix.binary }} 40000000
+        run: sh scripts/check-binary-size.sh target/release/${{ matrix.binary }} 60000000
       - name: Check static 3D CPU render budget
         shell: bash
         run: ./target/release/${{ matrix.binary }} benchmark --scene3d --triangles 100000 --repetitions 1 --max-ms 30000

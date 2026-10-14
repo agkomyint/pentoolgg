@@ -138,7 +138,7 @@ jobs:
         run: $BIN export examples/text-demo.pen text-smoke.svg --outline-text
       - name: Record binary size
         shell: bash
-        run: sh scripts/check-binary-size.sh "$(ls target/${{ matrix.target }}/release/pentool target/${{ matrix.target }}/release/pentool.exe 2>/dev/null | head -1)" 40000000
+        run: sh scripts/check-binary-size.sh "$(ls target/${{ matrix.target }}/release/pentool target/${{ matrix.target }}/release/pentool.exe 2>/dev/null | head -1)" 60000000
       - name: Package Unix
         if: matrix.archive == 'tar.gz'
         shell: bash

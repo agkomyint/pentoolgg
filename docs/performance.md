@@ -85,11 +85,12 @@ Output bytes must be identical across cold and warm runs.
 The editor requests approximate previews with `/api/render/svg?max_edge=N`
 (16–4096). Proxies reduce embedded pixel detail only; exports never use them.
 
-Release binaries are gated by `scripts/check-binary-size.sh` at 30,000,000 bytes in
-CI and for every release target. The gate was raised from 24,000,000 bytes on
-2026-10-10, by owner decision, when the developing v0.12 color engine took the
-Windows release build to 24,247,808 bytes. Record the per-target sizes in the
-release notes.
+Release binaries are gated by `scripts/check-binary-size.sh` at 60,000,000 bytes
+in CI and for every release target. The owner raised the gate from 40,000,000
+bytes on 2026-10-14 for the optional `wgpu` accelerator and the static-3D engine.
+The default Windows v0.15 development build measured 42,787,328 bytes before the
+GPU pipeline was linked. Record default and GPU sizes per target in the release
+notes.
 
 ## Raster paint benchmarks (v0.10)
 

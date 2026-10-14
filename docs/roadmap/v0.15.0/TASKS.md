@@ -32,9 +32,10 @@ This is a minor release: it adds format data, commands and editor features.
 - 3D edits are ordinary mutations. Dry run and commit share one planner and
   failed edits leave the document byte for byte unchanged.
 - Documents without 3D, and every earlier version, render exactly as before.
-- Size budget: the CPU path adds under 2 MiB to the release binary; the `gpu`
-  feature has its own recorded size and is excluded from the default gate only
-  by an explicit, documented owner decision.
+- Size budget: the owner approved a 60,000,000-byte absolute release-binary gate
+  on 2026-10-14 after the default Windows build reached 42,787,328 bytes. The
+  default and `gpu` builds still have their sizes recorded separately on every
+  release target so growth remains visible.
 
 ## Model
 
