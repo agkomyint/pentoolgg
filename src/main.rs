@@ -2730,6 +2730,9 @@ enum Command {
         /// instead of embedding them. Fails for cropped or processed images.
         #[arg(long)]
         link_images: bool,
+        /// 3D renderer: deterministic `reference` or optional `accelerated`.
+        #[arg(long, default_value = "reference")]
+        renderer: String,
     },
 }
 
@@ -9637,7 +9640,16 @@ async fn run() -> Result<()> {
             all_pages,
             format,
             link_images,
+            renderer,
         } => {
+            let renderer = match renderer.as_str() {
+                "reference" => pentool::scene3d::node::RendererPreference::Reference,
+                "accelerated" => pentool::scene3d::node::RendererPreference::Accelerated,
+                other => anyhow::bail!(
+                    "[invalid-input] renderer `{other}` must be reference or accelerated"
+                ),
+            };
+            let _renderer = pentool::scene3d::node::select_renderer(renderer);
             if all_pages && selected_page.is_some() {
                 anyhow::bail!("[invalid-input] --page cannot be combined with --all-pages")
             }

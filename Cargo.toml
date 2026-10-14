@@ -15,6 +15,10 @@ repository = "https://github.com/agkomyint/pentoolgg"
 members = ["wasm"]
 exclude = ["fuzz"]
 
+[features]
+default = []
+gpu = ["dep:wgpu", "dep:pollster"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -42,6 +46,8 @@ roxmltree = "0.20"
 # DNG deflate (compression 8); already in the tree through `zip`.
 flate2 = "1"
 semver = { version = "1", features = ["serde"] }
+wgpu = { version = "24.0.3", optional = true }
+pollster = { version = "0.4", optional = true }
 
 # Host-only dependencies: the browser (wasm32) build has no sockets, files or OS RNG.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -59,6 +59,7 @@ document mutation. No network access ever happens.
 | `exposure_ev` | scene exposure, stops |
 | `supersample` | 1–4 (default 2) |
 | `shadows`, `shadow_map_size` | shadow maps on (default) and 64–2048 texels |
+| `material_overrides` | per-node PBR edits keyed by the stable zero-based material index; source bytes stay unchanged |
 
 ### Physical camera
 
@@ -101,18 +102,35 @@ The CPU path is normative: no platform math library (own sin/cos/atan/exp/ln),
 fixed traversal order, fixed sample patterns. Renders are cached by a hash of
 every pixel-affecting field plus the model digest and UV overlay.
 
+The optional accelerator is compiled with `cargo build --features gpu` and is
+selected with `export --renderer accelerated`. A default build, a machine with
+no compatible adapter, or an unavailable GPU pipeline falls back to the
+reference renderer and emits a structured diagnostic naming the requested and
+used renderer plus the reason. CPU output remains the only source of goldens,
+digests and conformance claims.
+
 ## CLI
 
 ```sh
 pentool scene3d DOC add hero --model hero.glb --layer art --width 800 --height 600
 pentool scene3d DOC camera hero --azimuth 35 --elevation 20
 pentool scene3d DOC camera hero --focal-length 85 --sensor 36x24 --aperture 2 --focus-distance 3
+pentool scene3d DOC frame hero --azimuth 35 --elevation 20 --focal-length 50
 pentool scene3d DOC light hero add --kind spot --position 0,4,0 --direction 0,-1,0 --outer-deg 35
 pentool scene3d DOC set hero --background none --shadow-map-size 2048
+pentool scene3d DOC material hero set 0 --base-color '#d97706' --roughness 0.35
 pentool scene3d DOC uv hero project --projection box --scale 2,2
 pentool scene3d DOC uv hero layout --primitive 0 --out hero-uv.svg
-pentool scene3d DOC inspect hero
+pentool scene3d DOC inspect hero --offset 0 --limit 50
+pentool export DOC hero.png --renderer accelerated
 ```
 
 Every edit is a transaction: `--dry-run` plans, `--if-revision` guards, a
 failure leaves the file byte-identical.
+
+Embedded model sources are carried inside `.penpkg` assets and listed in the
+package manifest with their digest, format, byte length and consuming scene
+IDs. Package verification re-decodes and re-hashes every model. External model
+sources are refused during packing until they have been collected into a
+self-contained document; package creation never follows or silently omits an
+external model or sidecar.

@@ -21,6 +21,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all-targets --locked
+      - run: cargo check --all-targets --features gpu --locked
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

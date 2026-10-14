@@ -46,6 +46,9 @@ pub struct PackageAsset {
     /// Image blobs the asset document carries, with consumers, for audit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<Value>,
+    /// Verified embedded 3D model sources carried by the asset document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<Value>,
     /// Verified, redistributable ICC dependencies embedded in the asset document.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub icc_profiles: Vec<Value>,
@@ -167,6 +170,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         let am = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
         asset::validate_properties(&raw)?;
         let images = check_asset_document(&raw)?;
+        let models = check_model_document(&raw)?;
         let icc_profiles = crate::color::catalog::package_table_validated(&raw)?;
         let spot_inks = crate::color::spot::package_table(&raw)?;
         let paint_assets = crate::paint_bundle::package_table(&raw)?;
@@ -196,6 +200,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
                 hash: asset::hash_bytes(&bytes),
                 preview: None,
                 images,
+                models,
                 icc_profiles,
                 spot_inks,
                 paint_assets,
@@ -224,6 +229,7 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
         }
         asset::validate_properties(&raw)?;
         entry.images = check_asset_document(&raw)?;
+        entry.models = check_model_document(&raw)?;
         entry.icc_profiles = crate::color::catalog::package_table_validated(&raw)?;
         entry.spot_inks = crate::color::spot::package_table(&raw)?;
         entry.paint_assets = crate::paint_bundle::package_table(&raw)?;
@@ -349,6 +355,69 @@ fn check_asset_document(raw: &Value) -> Result<Vec<Value>> {
     Ok(table)
 }
 
+/// Validate and audit 3D model sources carried by a package asset. Packages
+/// are offline artifacts, so model bytes must be embedded; external models and
+/// sidecars must be collected before packing.
+fn check_model_document(raw: &Value) -> Result<Vec<Value>> {
+    let Some(models) = raw.get("models").and_then(Value::as_object) else {
+        return Ok(vec![]);
+    };
+    let mut consumers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    fn walk(value: &Value, out: &mut BTreeMap<String, Vec<String>>) {
+        match value {
+            Value::Object(object) => {
+                if object.get("kind").and_then(Value::as_str) == Some("scene3d") {
+                    if let (Some(model), Some(id)) = (
+                        object.get("model").and_then(Value::as_str),
+                        object.get("id").and_then(Value::as_str),
+                    ) {
+                        out.entry(model.into()).or_default().push(id.into());
+                    }
+                }
+                object.values().for_each(|child| walk(child, out));
+            }
+            Value::Array(array) => array.iter().for_each(|child| walk(child, out)),
+            _ => {}
+        }
+    }
+    walk(raw, &mut consumers);
+    let mut digests: Vec<_> = models.keys().collect();
+    digests.sort();
+    let mut table = Vec::with_capacity(digests.len());
+    for digest in digests {
+        let model = &models[digest];
+        let storage = model["storage"]
+            .as_object()
+            .with_context(|| format!("[invalid-input] packaged model {digest} has no storage"))?;
+        if storage.get("kind").and_then(Value::as_str) != Some("embedded") {
+            bail!("[unsupported-capability] packaged model {digest} must be embedded; collect external models and sidecars before packing")
+        }
+        let encoded = storage
+            .get("data")
+            .and_then(Value::as_str)
+            .with_context(|| format!("[invalid-input] packaged model {digest} has no data"))?;
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .with_context(|| {
+                format!("[malformed-resource] packaged model {digest} is not base64")
+            })?;
+        if bytes.len() > crate::scene3d::LIMITS.max_bytes {
+            bail!("[limit-exceeded] packaged model {digest} exceeds the model byte limit")
+        }
+        crate::resource::verify(&bytes, digest)?;
+        let mut users = consumers.remove(digest).unwrap_or_default();
+        users.sort();
+        table.push(json!({
+            "digest": digest,
+            "format": model["format"],
+            "byte_length": bytes.len(),
+            "consumers": users,
+        }));
+    }
+    Ok(table)
+}
+
 fn canonical_json(v: &Value) -> Result<Vec<u8>> {
     Ok(serde_json::to_vec_pretty(v)?)
 }
@@ -401,6 +470,9 @@ pub fn verify(path: &Path) -> Result<Value> {
         }
         if check_asset_document(&raw)? != a.images {
             bail!("asset image table does not match its document: {id}")
+        }
+        if check_model_document(&raw)? != a.models {
+            bail!("asset model table does not match its document: {id}")
         }
         if crate::color::catalog::package_table_validated(&raw)? != a.icc_profiles {
             bail!("asset ICC profile table does not match its document: {id}")

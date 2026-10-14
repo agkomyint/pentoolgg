@@ -82,6 +82,29 @@ pub enum UvAction {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+pub enum MaterialAction {
+    /// Override editable PBR values for one imported material.
+    Set {
+        /// Zero-based material index from `scene3d inspect`.
+        material: usize,
+        #[arg(long)]
+        base_color: Option<String>,
+        #[arg(long)]
+        metallic: Option<f64>,
+        #[arg(long)]
+        roughness: Option<f64>,
+        #[arg(long)]
+        emissive: Option<String>,
+        #[arg(long)]
+        double_sided: Option<bool>,
+    },
+    /// Remove the override for one imported material.
+    Clear { material: usize },
+    /// Remove every material override from this scene.
+    Reset,
+}
+
+#[derive(Debug, Clone, Subcommand)]
 pub enum Scene3dAction {
     /// UV inspection, projection and layout export.
     Uv {
@@ -165,11 +188,31 @@ pub enum Scene3dAction {
         #[arg(long)]
         no_physical: bool,
     },
+    /// Frame the complete model and store the resulting explicit camera.
+    Frame {
+        id: String,
+        #[arg(long, default_value_t = 30.0, allow_hyphen_values = true)]
+        azimuth: f64,
+        #[arg(long, default_value_t = 15.0, allow_hyphen_values = true)]
+        elevation: f64,
+        /// Optionally frame using a physical focal length in millimeters.
+        #[arg(long)]
+        focal_length: Option<f64>,
+        /// Sensor size in millimeters as `WxH` (default 36x24).
+        #[arg(long)]
+        sensor: Option<String>,
+    },
     /// Edit the light rig.
     Light {
         id: String,
         #[command(subcommand)]
         action: LightAction,
+    },
+    /// Edit per-node PBR material overrides without changing the source model.
+    Material {
+        id: String,
+        #[command(subcommand)]
+        action: MaterialAction,
     },
     /// Set the sky/ground gradient environment.
     Environment {
@@ -208,7 +251,13 @@ pub enum Scene3dAction {
         height: Option<f64>,
     },
     /// Report the model (counts, bounds, instances, unsupported features).
-    Inspect { id: String },
+    Inspect {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
     /// List scene3d nodes and models.
     List,
 }
@@ -234,6 +283,26 @@ fn triple(text: &str, what: &str) -> Result<Value> {
         out.push(json!(v));
     }
     Ok(Value::Array(out))
+}
+
+fn sensor_pair(text: &str) -> Result<Value> {
+    let parts: Vec<&str> = text.split(['x', 'X']).collect();
+    ensure!(
+        parts.len() == 2,
+        "[invalid-input] --sensor must be WxH in millimeters (got `{text}`)"
+    );
+    let values = parts
+        .into_iter()
+        .map(|part| {
+            let value = part
+                .trim()
+                .parse::<f64>()
+                .with_context(|| format!("[invalid-input] --sensor: `{part}` is not a number"))?;
+            ensure!(value.is_finite(), "[invalid-input] --sensor must be finite");
+            Ok(json!(value))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Value::Array(values))
 }
 
 fn require_v10(raw: &Value) -> Result<()> {
@@ -391,7 +460,7 @@ fn add(
                 .to_string()
         }
     })?;
-    let report = node::inspect(&model);
+    let report = node::inspect(&model, 0, 256);
 
     let pages = raw["pages"]
         .as_array_mut()
@@ -565,13 +634,17 @@ pub fn run(
                 }
             }
         }
-        Scene3dAction::Inspect { id } => {
+        Scene3dAction::Inspect { id, offset, limit } => {
             require_v10(&raw)?;
+            ensure!(
+                (1..=256).contains(&limit),
+                "[invalid-input] inspect limit must be 1..=256"
+            );
             let n = scene3d_node(&mut raw, &id)?.clone();
             let digest = n["model"].as_str().unwrap_or_default().to_string();
             let model = node::load_model(&raw, &doc_dir, &digest)?;
             let (scene, options) = node::scene_for(&n, Some(&model))?;
-            let mut report = node::inspect(&model);
+            let mut report = node::inspect(&model, offset, limit);
             report["id"] = json!(id);
             report["model"] = json!(digest);
             report["render"] = json!({
@@ -682,18 +755,7 @@ pub fn run(
                     phys.insert("focal_length_mm".into(), json!(f));
                 }
                 if let Some(s) = sensor {
-                    let parts: Vec<&str> = s.split(['x', 'X']).collect();
-                    ensure!(
-                        parts.len() == 2,
-                        "[invalid-input] --sensor must be WxH in millimeters (got `{s}`)"
-                    );
-                    let mut pair = Vec::new();
-                    for p in parts {
-                        pair.push(json!(p.trim().parse::<f64>().with_context(|| format!(
-                            "[invalid-input] --sensor: `{p}` is not a number"
-                        ))?));
-                    }
-                    phys.insert("sensor_mm".into(), Value::Array(pair));
+                    phys.insert("sensor_mm".into(), sensor_pair(&s)?);
                 }
                 for (key, value) in [
                     ("aperture_f", aperture),
@@ -718,6 +780,66 @@ pub fn run(
                 n.insert("physical_camera".into(), Value::Object(phys));
             }
             ("scene3d-camera", json!({"id": id}))
+        }
+        Scene3dAction::Frame {
+            id,
+            azimuth,
+            elevation,
+            focal_length,
+            sensor,
+        } => {
+            require_v10(&raw)?;
+            let mut framed = scene3d_node(&mut raw, &id)?.clone();
+            let digest = framed["model"].as_str().unwrap_or_default().to_string();
+            let model = node::load_model(&raw, &doc_dir, &digest)?;
+            let camera = framed
+                .entry("camera")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .context("[invalid-input] camera must be an object")?;
+            for key in ["eye", "target", "up", "near", "far", "height"] {
+                camera.remove(key);
+            }
+            camera.insert("projection".into(), json!("perspective"));
+            camera.insert("azimuth".into(), json!(azimuth));
+            camera.insert("elevation".into(), json!(elevation));
+            if let Some(focal) = focal_length {
+                camera.remove("fov");
+                let physical = framed
+                    .entry("physical_camera")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()
+                    .context("[invalid-input] physical_camera must be an object")?;
+                physical.insert("focal_length_mm".into(), json!(focal));
+                if let Some(sensor) = sensor {
+                    physical.insert("sensor_mm".into(), sensor_pair(&sensor)?);
+                }
+            } else if sensor.is_some() {
+                bail!("[invalid-input] --sensor requires --focal-length");
+            }
+            let (scene, _) = node::scene_for(&framed, Some(&model))?;
+            let camera = framed["camera"].as_object_mut().unwrap();
+            camera.insert("eye".into(), json!(scene.camera.eye));
+            camera.insert("target".into(), json!(scene.camera.target));
+            camera.insert("up".into(), json!(scene.camera.up));
+            camera.insert("near".into(), json!(scene.camera.near));
+            camera.insert("far".into(), json!(scene.camera.far));
+            let stored_camera = framed.remove("camera").unwrap();
+            let stored_physical = framed.remove("physical_camera");
+            let target = scene3d_node(&mut raw, &id)?;
+            target.insert("camera".into(), stored_camera);
+            match stored_physical {
+                Some(value) => {
+                    target.insert("physical_camera".into(), value);
+                }
+                None => {
+                    target.remove("physical_camera");
+                }
+            }
+            (
+                "scene3d-frame",
+                json!({"id": id, "eye": scene.camera.eye, "target": scene.camera.target}),
+            )
         }
         Scene3dAction::Light { id, action } => {
             require_v10(&raw)?;
@@ -789,6 +911,84 @@ pub fn run(
                 }
             }
             ("scene3d-light", json!({"id": id}))
+        }
+        Scene3dAction::Material { id, action } => {
+            require_v10(&raw)?;
+            if let MaterialAction::Set { material, .. } | MaterialAction::Clear { material } =
+                &action
+            {
+                let scene = scene3d_node(&mut raw, &id)?.clone();
+                let digest = scene["model"].as_str().unwrap_or_default();
+                let model = node::load_model(&raw, &doc_dir, digest)?;
+                ensure!(
+                    *material < model.materials.len(),
+                    "[missing-resource] material {material} does not exist; inspect the scene for valid IDs"
+                );
+            }
+            let n = scene3d_node(&mut raw, &id)?;
+            match action {
+                MaterialAction::Reset => {
+                    n.remove("material_overrides");
+                }
+                MaterialAction::Clear { material } => {
+                    let overrides = n
+                        .get_mut("material_overrides")
+                        .and_then(Value::as_object_mut)
+                        .context(
+                            "[missing-resource] this scene has no material overrides to clear",
+                        )?;
+                    ensure!(
+                        overrides.remove(&material.to_string()).is_some(),
+                        "[missing-resource] material {material} has no override to clear"
+                    );
+                    if overrides.is_empty() {
+                        n.remove("material_overrides");
+                    }
+                }
+                MaterialAction::Set {
+                    material,
+                    base_color,
+                    metallic,
+                    roughness,
+                    emissive,
+                    double_sided,
+                } => {
+                    ensure!(
+                        base_color.is_some()
+                            || metallic.is_some()
+                            || roughness.is_some()
+                            || emissive.is_some()
+                            || double_sided.is_some(),
+                        "[invalid-input] material set needs at least one property"
+                    );
+                    let overrides = n
+                        .entry("material_overrides")
+                        .or_insert_with(|| json!({}))
+                        .as_object_mut()
+                        .context("[invalid-input] material_overrides must be an object")?;
+                    let entry = overrides
+                        .entry(material.to_string())
+                        .or_insert_with(|| json!({}))
+                        .as_object_mut()
+                        .context("[invalid-input] material override must be an object")?;
+                    if let Some(v) = base_color {
+                        entry.insert("base_color".into(), json!(v));
+                    }
+                    if let Some(v) = metallic {
+                        entry.insert("metallic".into(), json!(v));
+                    }
+                    if let Some(v) = roughness {
+                        entry.insert("roughness".into(), json!(v));
+                    }
+                    if let Some(v) = emissive {
+                        entry.insert("emissive".into(), json!(v));
+                    }
+                    if let Some(v) = double_sided {
+                        entry.insert("double_sided".into(), json!(v));
+                    }
+                }
+            }
+            ("scene3d-material", json!({"id": id}))
         }
         Scene3dAction::Environment {
             id,

@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod gltf;
+pub mod gpu;
 pub mod math;
 pub mod model;
 pub mod node;

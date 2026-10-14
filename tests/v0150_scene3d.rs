@@ -149,6 +149,324 @@ fn dry_run_and_bad_input_leave_the_file_untouched() {
 }
 
 #[test]
+fn material_overrides_are_atomic_and_inspection_is_paginated() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("painted.obj");
+    let mtl = dir.join("painted.mtl");
+    std::fs::write(&mtl, "newmtl clay\nKd 0.8 0.2 0.1\nNs 20\n").unwrap();
+    std::fs::write(
+        &model,
+        "mtllib painted.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl clay\nf 1 3 2\n",
+    )
+    .unwrap();
+    let d = doc.to_str().unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+        "--external"
+    ])
+    .status
+    .success());
+
+    let inspected = pentool(&[
+        "scene3d", d, "inspect", "m", "--offset", "1", "--limit", "1",
+    ]);
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    let report: Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(report["matches"], 3);
+    assert_eq!(report["returned"], 1);
+    assert_eq!(report["offset"], 1);
+    assert_eq!(report["limit"], 1);
+    assert_eq!(report["has_more"], true);
+    assert_eq!(report["records"][0]["id"], "material-0");
+
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "material",
+        "m",
+        "set",
+        "0",
+        "--base-color",
+        "#2080ffff",
+        "--metallic",
+        "0.25",
+        "--roughness",
+        "0.4",
+        "--double-sided",
+        "true"
+    ])
+    .status
+    .success());
+    let stored = read(&doc);
+    assert_eq!(
+        stored["pages"][0]["layers"][0]["nodes"][0]["material_overrides"]["0"]["roughness"],
+        0.4
+    );
+
+    let before = std::fs::read(&doc).unwrap();
+    let bad = pentool(&[
+        "scene3d",
+        d,
+        "material",
+        "m",
+        "set",
+        "9",
+        "--roughness",
+        "0.5",
+    ]);
+    assert!(!bad.status.success());
+    assert_eq!(before, std::fs::read(&doc).unwrap());
+
+    assert!(pentool(&["scene3d", d, "material", "m", "clear", "0"])
+        .status
+        .success());
+    assert!(read(&doc)["pages"][0]["layers"][0]["nodes"][0]
+        .get("material_overrides")
+        .is_none());
+}
+
+#[test]
+fn frame_to_fit_stores_a_deterministic_physical_camera() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    let d = doc.to_str().unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l"
+    ])
+    .status
+    .success());
+    let out = pentool(&[
+        "scene3d",
+        d,
+        "frame",
+        "m",
+        "--azimuth",
+        "40",
+        "--elevation",
+        "25",
+        "--focal-length",
+        "50",
+        "--sensor",
+        "36x24",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let first = read(&doc);
+    let node = &first["pages"][0]["layers"][0]["nodes"][0];
+    assert_eq!(node["physical_camera"]["focal_length_mm"], 50.0);
+    assert_eq!(node["camera"]["projection"], "perspective");
+    assert_eq!(node["camera"]["eye"].as_array().unwrap().len(), 3);
+    assert_eq!(node["camera"]["target"].as_array().unwrap().len(), 3);
+
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "frame",
+        "m",
+        "--azimuth",
+        "40",
+        "--elevation",
+        "25",
+        "--focal-length",
+        "50",
+        "--sensor",
+        "36x24"
+    ])
+    .status
+    .success());
+    assert_eq!(first, read(&doc), "framing must be deterministic");
+
+    let before = std::fs::read(&doc).unwrap();
+    let bad = pentool(&["scene3d", d, "frame", "m", "--sensor", "36x24"]);
+    assert!(!bad.status.success());
+    assert_eq!(before, std::fs::read(&doc).unwrap());
+}
+
+#[test]
+fn accelerated_request_falls_back_explicitly_in_the_default_build() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    let d = doc.to_str().unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l"
+    ])
+    .status
+    .success());
+    let reference = dir.join("reference.png");
+    let accelerated = dir.join("accelerated.png");
+    assert!(pentool(&["export", d, reference.to_str().unwrap()])
+        .status
+        .success());
+    let out = pentool(&[
+        "export",
+        d,
+        accelerated.to_str().unwrap(),
+        "--renderer",
+        "accelerated",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let diagnostic = String::from_utf8_lossy(&out.stderr);
+    assert!(diagnostic.contains("\"renderer_requested\":\"accelerated\""));
+    assert!(diagnostic.contains("\"renderer_used\":\"reference\""));
+    assert!(diagnostic.contains("without the `gpu` Cargo feature"));
+    assert_eq!(
+        std::fs::read(reference).unwrap(),
+        std::fs::read(accelerated).unwrap()
+    );
+}
+
+#[test]
+fn packages_audit_embedded_models_and_reject_external_sources() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    let d = doc.to_str().unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "hero",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l"
+    ])
+    .status
+    .success());
+
+    let package_dir = dir.join("kit");
+    assert!(pentool(&[
+        "package",
+        "init",
+        package_dir.to_str().unwrap(),
+        "--name",
+        "model-kit"
+    ])
+    .status
+    .success());
+    let mut asset = read(&doc);
+    asset["asset"] = json!({
+        "schema": 1, "id": "model-card", "name": "Model card",
+        "asset_version": "0.1.0", "kind": "component"
+    });
+    let asset_path = package_dir.join("assets/model.pen");
+    std::fs::write(&asset_path, serde_json::to_vec_pretty(&asset).unwrap()).unwrap();
+    let output = dir.join("model.penpkg");
+    let packed = pentool(&[
+        "package",
+        "pack",
+        package_dir.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(
+        packed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&packed.stderr)
+    );
+    let verified = pentool(&["package", "verify", output.to_str().unwrap()]);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let report: Value = serde_json::from_slice(&verified.stdout).unwrap();
+    let models = &report["package"]["assets"]["model-card"]["models"];
+    assert_eq!(models.as_array().unwrap().len(), 1);
+    assert_eq!(models[0]["format"], "obj");
+    assert_eq!(models[0]["byte_length"], TETRA.len());
+    assert_eq!(models[0]["consumers"], json!(["hero"]));
+
+    let digest = asset["models"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
+    asset["models"][&digest]["storage"] = json!({"kind":"external", "path":"tet.obj"});
+    std::fs::write(&asset_path, serde_json::to_vec_pretty(&asset).unwrap()).unwrap();
+    let refused = pentool(&[
+        "package",
+        "pack",
+        package_dir.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("must be embedded"));
+}
+
+#[test]
+fn camera_edits_round_trip_through_shared_undo_and_redo() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    let d = doc.to_str().unwrap();
+    assert!(pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "m",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l"
+    ])
+    .status
+    .success());
+    let before = read(&doc);
+    assert!(pentool(&["scene3d", d, "frame", "m", "--azimuth", "65"])
+        .status
+        .success());
+    let framed = read(&doc);
+    assert_ne!(before, framed);
+    assert!(pentool(&["undo", d]).status.success());
+    assert_eq!(before, read(&doc));
+    assert!(pentool(&["redo", d]).status.success());
+    assert_eq!(framed, read(&doc));
+}
+
+#[test]
 fn downgrade_is_refused_while_3d_is_used_and_allowed_when_empty() {
     let dir = scratch();
     let doc = base(&dir);

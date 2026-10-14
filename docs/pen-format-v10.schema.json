@@ -122,6 +122,14 @@
         "pixel_ratio": {"type": "number", "minimum": 0.1, "maximum": 8},
         "shadows": {"type": "boolean"},
         "shadow_map_size": {"type": "integer", "minimum": 64, "maximum": 2048},
+        "material_overrides": {
+          "type": "object", "maxProperties": 1024,
+          "patternProperties": {"^[0-9]+$": {"type": "object", "additionalProperties": false, "properties": {
+            "base_color": {"$ref": "#/$defs/color"}, "metallic": {"type": "number", "minimum": 0, "maximum": 1},
+            "roughness": {"type": "number", "minimum": 0, "maximum": 1}, "emissive": {"$ref": "#/$defs/color"},
+            "double_sided": {"type": "boolean"}
+          }}}, "additionalProperties": false
+        },
         "opacity": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },

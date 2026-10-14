@@ -10,6 +10,7 @@ use super::{gltf, math, obj};
 use anyhow::{bail, ensure, Context, Result};
 use base64::Engine as _;
 use serde_json::{json, Map, Value};
+use std::cell::Cell;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -17,6 +18,41 @@ pub const VERSION: u64 = 10;
 /// Longest rendered edge in pixels.
 pub const MAX_RENDER_EDGE: f64 = 4096.0;
 const FORMATS: [&str; 3] = ["glb", "gltf", "obj"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererPreference {
+    Reference,
+    Accelerated,
+}
+
+thread_local! {
+    static RENDERER: Cell<RendererPreference> = const { Cell::new(RendererPreference::Reference) };
+    static RENDERER_REPORTED: Cell<bool> = const { Cell::new(false) };
+}
+
+pub struct RendererGuard {
+    preference: RendererPreference,
+    reported: bool,
+}
+
+impl Drop for RendererGuard {
+    fn drop(&mut self) {
+        RENDERER.set(self.preference);
+        RENDERER_REPORTED.set(self.reported);
+    }
+}
+
+/// Select the scene3d renderer for the current export operation. The guard
+/// restores the previous selection so servers and concurrent exports cannot
+/// leak a request into later work.
+pub fn select_renderer(preference: RendererPreference) -> RendererGuard {
+    let previous = RENDERER.replace(preference);
+    let reported = RENDERER_REPORTED.replace(false);
+    RendererGuard {
+        preference: previous,
+        reported,
+    }
+}
 
 pub fn is_v10(raw: &Value) -> bool {
     raw.get("version")
@@ -190,6 +226,99 @@ pub fn validate_node(node: &Map<String, Value>, raw: &Value) -> Result<()> {
         ctx()
     );
     scene_for(node, None).with_context(ctx)?;
+    validate_material_overrides(node).with_context(ctx)?;
+    Ok(())
+}
+
+fn validate_material_overrides(node: &Map<String, Value>) -> Result<()> {
+    let Some(overrides) = node.get("material_overrides") else {
+        return Ok(());
+    };
+    let overrides = overrides
+        .as_object()
+        .context("[invalid-input] material_overrides must be an object")?;
+    ensure!(
+        overrides.len() <= LIMITS.max_materials,
+        "[limit-exceeded] too many material overrides"
+    );
+    for (id, value) in overrides {
+        id.parse::<usize>().with_context(|| {
+            format!("[invalid-input] material override key `{id}` must be an index")
+        })?;
+        let o = value
+            .as_object()
+            .context("[invalid-input] material override must be an object")?;
+        for key in o.keys() {
+            ensure!(
+                matches!(
+                    key.as_str(),
+                    "base_color" | "metallic" | "roughness" | "emissive" | "double_sided"
+                ),
+                "[invalid-input] unknown material override field `{key}`"
+            );
+        }
+        if let Some(v) = o.get("base_color") {
+            parse_color(
+                v.as_str()
+                    .context("[invalid-input] base_color must be a color string")?,
+            )?;
+        }
+        if let Some(v) = o.get("emissive") {
+            parse_color(
+                v.as_str()
+                    .context("[invalid-input] emissive must be a color string")?,
+            )?;
+        }
+        for key in ["metallic", "roughness"] {
+            if let Some(v) = o.get(key) {
+                let v = v
+                    .as_f64()
+                    .with_context(|| format!("[invalid-input] {key} must be a number"))?;
+                ensure!(
+                    v.is_finite() && (0.0..=1.0).contains(&v),
+                    "[invalid-input] {key} must be within 0..=1"
+                );
+            }
+        }
+        if let Some(v) = o.get("double_sided") {
+            ensure!(
+                v.is_boolean(),
+                "[invalid-input] double_sided must be boolean"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn apply_material_overrides(model: &mut Model, node: &Map<String, Value>) -> Result<()> {
+    let Some(overrides) = node.get("material_overrides").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    for (id, value) in overrides {
+        let index: usize = id.parse()?;
+        let material = model.materials.get_mut(index)
+            .with_context(|| format!("[missing-resource] material {index} does not exist; inspect the scene for valid IDs"))?;
+        let o = value
+            .as_object()
+            .context("[invalid-input] material override must be an object")?;
+        if let Some(v) = o.get("base_color").and_then(Value::as_str) {
+            let c = parse_color(v)?;
+            material.base_color = [c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32];
+        }
+        if let Some(v) = o.get("emissive").and_then(Value::as_str) {
+            let c = parse_color(v)?;
+            material.emissive = [c[0] as f32, c[1] as f32, c[2] as f32];
+        }
+        if let Some(v) = o.get("metallic").and_then(Value::as_f64) {
+            material.metallic = v as f32;
+        }
+        if let Some(v) = o.get("roughness").and_then(Value::as_f64) {
+            material.roughness = v as f32;
+        }
+        if let Some(v) = o.get("double_sided").and_then(Value::as_bool) {
+            material.double_sided = v;
+        }
+    }
     Ok(())
 }
 
@@ -721,6 +850,19 @@ pub fn load_model(raw: &Value, document_dir: &Path, digest: &str) -> Result<Arc<
 
 /// Render a node to PNG bytes (straight alpha sRGB).
 pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -> Result<Vec<u8>> {
+    if RENDERER.get() == RendererPreference::Accelerated && !RENDERER_REPORTED.replace(true) {
+        let status = super::gpu::availability();
+        eprintln!(
+            "{}",
+            json!({
+                "renderer_requested": "accelerated",
+                "renderer_used": "reference",
+                "fallback": status.reason,
+                "adapter": status.adapter,
+                "backend": status.backend,
+            })
+        );
+    }
     let digest = node
         .get("model")
         .and_then(Value::as_str)
@@ -742,6 +884,7 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
             "supersample",
             "shadows",
             "shadow_map_size",
+            "material_overrides",
         ] {
             if let Some(v) = node.get(k) {
                 spec.insert(k.into(), v.clone());
@@ -755,7 +898,9 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
             return Ok(png.as_ref().clone());
         }
     }
-    let model = load_model(raw, document_dir, digest)?;
+    let loaded = load_model(raw, document_dir, digest)?;
+    let mut model = loaded.as_ref().clone();
+    apply_material_overrides(&mut model, node)?;
     let (scene, options) = scene_for(node, Some(&model))?;
     let lens = lens_for(node, &scene)?;
     let image = render::render_with_lens(&model, &scene, &options, lens.as_ref())?;
@@ -771,8 +916,33 @@ pub fn render_png(raw: &Value, document_dir: &Path, node: &Map<String, Value>) -
 }
 
 /// Compact description for `scene3d inspect`.
-pub fn inspect(model: &Model) -> Value {
+pub fn inspect(model: &Model, offset: usize, limit: usize) -> Value {
     let bounds = model.bounds();
+    let mut records = Vec::new();
+    records.extend(model.primitives.iter().enumerate().map(|(index, p)| json!({
+        "id": format!("primitive-{index}"), "kind": "primitive", "index": index,
+        "name": p.name, "triangles": p.triangle_count(), "uv_sets": p.uvs.len(), "material": p.material
+    })));
+    records.extend(model.materials.iter().enumerate().map(|(index, m)| {
+        json!({
+            "id": format!("material-{index}"), "kind": "material", "index": index, "name": m.name,
+            "base_color": m.base_color, "metallic": m.metallic, "roughness": m.roughness,
+            "emissive": m.emissive, "double_sided": m.double_sided
+        })
+    }));
+    records.extend(model.instances.iter().map(|i| {
+        json!({
+            "id": i.id, "kind": "instance", "primitive": i.primitive,
+            "triangles": model.primitives[i.primitive].triangle_count()
+        })
+    }));
+    let matches = records.len();
+    let page = records
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect::<Vec<_>>();
+    let returned = page.len();
     json!({
         "format": model.report.format,
         "vertices": model.report.vertices,
@@ -780,13 +950,8 @@ pub fn inspect(model: &Model) -> Value {
         "primitives": model.primitives.len(),
         "materials": model.materials.len(),
         "textures": model.textures.len(),
-        "instances": model.instances.iter().map(|i| json!({
-            "id": i.id,
-            "primitive": i.primitive,
-            "triangles": model.primitives[i.primitive].triangle_count(),
-            "uv_sets": model.primitives[i.primitive].uvs.len(),
-            "material": model.primitives[i.primitive].material,
-        })).collect::<Vec<_>>(),
+        "records": page, "matches": matches, "returned": returned,
+        "offset": offset, "limit": limit, "has_more": offset.saturating_add(returned) < matches,
         "bounds": bounds.map(|(min, max)| json!({"min": min, "max": max})),
         "unsupported": model.report.unsupported,
     })
