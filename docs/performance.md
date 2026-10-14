@@ -255,3 +255,32 @@ beneath the real text; it was 43 s before page rasters stopped round-tripping
 through PNG. Skipping rasterization of pages with no non-text content is the
 next candidate. Reproduce with a generated document of this shape; the numbers
 are one-machine measurements, not a guarantee.
+
+## Static 3D reference-renderer benchmark (v0.15)
+
+The release qualification probe isolates bounded triangle traversal and raster
+work by drawing one full-frame triangle 100,000 times with shared vertices. It
+uses the normative CPU renderer at 256x256, one sample per pixel, one light and
+no shadow map. An optional square texture exercises sampling and the decoded
+texture budget. The command reports every sample, its minimum/median/maximum,
+the output digest and peak resident memory:
+
+```sh
+pentool benchmark --scene3d --triangles 100000 --repetitions 3 --max-ms 30000
+pentool benchmark --scene3d --triangles 100000 --texture-edge 4096 --repetitions 3 --max-ms 30000
+```
+
+The 30-second ceiling is the initial release budget for one untextured sample;
+CI runs one sample against it on every release target. It is intentionally above
+the developer baseline so shared hosted runners do not turn ordinary variance
+into failures. Triangle count is limited by the importer budget, texture memory
+uses the same decoded-byte limit, and repetitions are limited to 20.
+
+The initial untextured baseline was measured on 2026-10-14 with an optimized
+x86_64-pc-windows-msvc build on Windows 11 Pro 10.0.26200, an Intel Core
+i9-11900H (8 cores/16 threads), rustc 1.99.0 and LLVM 23.1.1. Three samples were
+10.108, 10.421 and 10.475 seconds (10.421-second median), peak resident memory
+was 33,103,872 bytes, and every run produced pixel digest
+`sha256:afe972e005866dbef2d148ba2e34ba9a52fece4e8c477d22ea3297a67732635b`.
+The default release binary was 42,787,328 bytes. These are local observations;
+the CI matrix remains the cross-platform performance authority.

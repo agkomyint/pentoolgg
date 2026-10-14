@@ -9,6 +9,156 @@ use serde_json::{json, Value};
 use std::{fs, hint::black_box, time::Instant};
 
 #[derive(Debug, Clone, Copy)]
+pub struct Scene3dBenchmark {
+    pub triangles: usize,
+    pub texture_edge: u32,
+    pub repetitions: usize,
+}
+
+/// Deterministic CPU budget probe for the v0.15 reference rasterizer. The
+/// geometry deliberately reuses three vertices so the measurement isolates
+/// triangle traversal/raster work rather than importer or allocation noise.
+pub fn run_scene3d(c: Scene3dBenchmark) -> Result<Value> {
+    use crate::scene3d::{
+        math,
+        model::{Instance, Material, Model, Primitive, TexRef, Texture, LIMITS},
+        render::{self, Options, Scene},
+    };
+    if c.triangles == 0 || c.triangles > LIMITS.max_triangles {
+        bail!(
+            "scene3d benchmark triangles must be 1..={}",
+            LIMITS.max_triangles
+        );
+    }
+    if c.texture_edge > 8192
+        || u64::from(c.texture_edge) * u64::from(c.texture_edge) * 4
+            > LIMITS.max_texture_bytes as u64
+    {
+        bail!("scene3d benchmark texture exceeds the decoded texture budget");
+    }
+    if c.repetitions == 0 || c.repetitions > 20 {
+        bail!("scene3d benchmark repetitions must be 1..=20");
+    }
+    let mut material = Material::default();
+    let textures = if c.texture_edge == 0 {
+        vec![]
+    } else {
+        material.base_color_texture = Some(TexRef {
+            texture: 0,
+            uv_set: 0,
+        });
+        let mut rgba = vec![192; c.texture_edge as usize * c.texture_edge as usize * 4];
+        for alpha in rgba.iter_mut().skip(3).step_by(4) {
+            *alpha = 255;
+        }
+        vec![Texture {
+            name: "budget".into(),
+            width: c.texture_edge,
+            height: c.texture_edge,
+            rgba,
+        }]
+    };
+    let mut indices = Vec::with_capacity(c.triangles * 3);
+    for _ in 0..c.triangles {
+        indices.extend_from_slice(&[0, 1, 2]);
+    }
+    let model = Model {
+        primitives: vec![Primitive {
+            name: "triangle-budget".into(),
+            positions: vec![[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            uvs: vec![vec![[0.0, 1.0], [1.0, 1.0], [0.5, 0.0]]],
+            indices,
+            material: Some(0),
+        }],
+        materials: vec![material],
+        textures,
+        instances: vec![Instance {
+            id: "budget".into(),
+            primitive: 0,
+            transform: math::IDENTITY,
+        }],
+        ..Default::default()
+    }
+    .finish()?;
+    let mut scene = Scene {
+        camera: render::frame_camera(&model, 0.0, 0.0, 40.0),
+        lights: render::default_lights(),
+        environment: Default::default(),
+        background: [0.0, 0.0, 0.0, 0.0],
+        exposure_ev: 0.0,
+        shadow_size: 0,
+    };
+    scene.lights.truncate(1);
+    let options = Options {
+        width: 256,
+        height: 256,
+        supersample: 1,
+    };
+    let mut timings = Vec::with_capacity(c.repetitions);
+    let mut digest = String::new();
+    for _ in 0..c.repetitions {
+        let started = Instant::now();
+        let image = black_box(render::render(&model, &scene, &options)?);
+        timings.push(started.elapsed().as_micros() as u64);
+        digest = crate::resource::sha256(&image.rgba);
+    }
+    let mut sorted = timings.clone();
+    sorted.sort_unstable();
+    Ok(json!({
+        "schema_version": 1,
+        "benchmark": "scene3d-reference",
+        "fixture": {"triangles": c.triangles, "texture_edge": c.texture_edge},
+        "render": {"width": 256, "height": 256, "supersample": 1, "renderer": "reference", "digest": digest},
+        "runs": {"repetitions": c.repetitions},
+        "timings_us": {"samples": timings, "min": sorted[0], "median": sorted[sorted.len() / 2], "max": sorted[sorted.len() - 1]},
+        "peak_resident_bytes": peak_resident_bytes(),
+    }))
+}
+
+#[cfg(test)]
+mod scene3d_tests {
+    use super::*;
+
+    #[test]
+    fn scene3d_benchmark_is_repeatable_and_reports_its_budget() {
+        let report = run_scene3d(Scene3dBenchmark {
+            triangles: 10,
+            texture_edge: 4,
+            repetitions: 2,
+        })
+        .unwrap();
+        assert_eq!(report["benchmark"], "scene3d-reference");
+        assert_eq!(report["fixture"]["triangles"], 10);
+        assert_eq!(report["fixture"]["texture_edge"], 4);
+        assert_eq!(report["timings_us"]["samples"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            report["render"]["digest"],
+            "sha256:0b868991e96b565ced1cbae9acd7f9bd6f79b8d9f165f7e67cdb07c97137459e"
+        );
+    }
+
+    #[test]
+    fn scene3d_benchmark_rejects_unbounded_work() {
+        let error = run_scene3d(Scene3dBenchmark {
+            triangles: crate::scene3d::model::LIMITS.max_triangles + 1,
+            texture_edge: 0,
+            repetitions: 1,
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("triangles must be"));
+
+        let error = run_scene3d(Scene3dBenchmark {
+            triangles: 1,
+            texture_edge: 8193,
+            repetitions: 1,
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("texture exceeds"));
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct RenderBenchmark {
     pub layers: usize,
     pub objects: usize,

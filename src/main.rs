@@ -2067,6 +2067,15 @@ enum Command {
         /// synthetic Bayer shoot.
         #[arg(long, conflicts_with_all = ["images", "composite"])]
         photo: bool,
+        /// Benchmark the deterministic static-3D CPU renderer.
+        #[arg(long, conflicts_with_all = ["images", "composite", "photo"])]
+        scene3d: bool,
+        /// Rendered triangle count for --scene3d (1-1,000,000).
+        #[arg(long, default_value_t = 100_000)]
+        triangles: usize,
+        /// Optional square RGBA texture edge for --scene3d; zero disables it.
+        #[arg(long, default_value_t = 0)]
+        texture_edge: u32,
         /// Photos in the synthetic shoot for --photo (1-500).
         #[arg(long, default_value_t = 24)]
         photos: usize,
@@ -6683,11 +6692,28 @@ async fn run() -> Result<()> {
             source_size,
             operations,
             photo: photo_benchmark,
+            scene3d: scene3d_benchmark,
+            triangles,
+            texture_edge,
             photos,
             megapixels,
             json: _,
         } => {
-            let value = if photo_benchmark {
+            if !scene3d_benchmark && (triangles != 100_000 || texture_edge != 0) {
+                anyhow::bail!("--triangles and --texture-edge require --scene3d")
+            }
+            let value = if scene3d_benchmark {
+                if render_benchmark || paths_only || scale != 1.0 || warmups != 1 {
+                    anyhow::bail!(
+                        "scene3d benchmark sets its own render workload; omit --render, --paths-only, --scale and --warmups"
+                    )
+                }
+                benchmark::run_scene3d(benchmark::Scene3dBenchmark {
+                    triangles,
+                    texture_edge,
+                    repetitions,
+                })?
+            } else if photo_benchmark {
                 if scale != 1.0 || warmups != 1 {
                     anyhow::bail!("photo benchmark sets its own sizes; omit --scale and --warmups")
                 }
@@ -6758,6 +6784,17 @@ async fn run() -> Result<()> {
                     if worst as f64 / 1000.0 > max_ms as f64 {
                         anyhow::bail!(
                             "composite benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
+                            worst as f64 / 1000.0
+                        )
+                    }
+                }
+            }
+            if scene3d_benchmark {
+                if let Some(max_ms) = max_ms {
+                    let worst = value["timings_us"]["max"].as_u64().unwrap_or(0);
+                    if worst as u128 > max_ms * 1000 {
+                        anyhow::bail!(
+                            "scene3d benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
                             worst as f64 / 1000.0
                         )
                     }
