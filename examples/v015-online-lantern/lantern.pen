@@ -1,0 +1,133 @@
+{
+  "color_management": {
+    "aliases": {},
+    "engine": 1,
+    "legacy_rgb": "srgb",
+    "profiles": {},
+    "working_space": "srgb:linear"
+  },
+  "components": [],
+  "compositing": {
+    "color_space": "srgb8",
+    "engine": 1
+  },
+  "fonts": [],
+  "format": "pentool",
+  "image_assets": {},
+  "layout": {
+    "engine": 1,
+    "spreads": [
+      {
+        "facing": false,
+        "id": "s1",
+        "pages": [
+          "page-1"
+        ]
+      }
+    ]
+  },
+  "models": {
+    "sha256:a79458c4b02d695187a952f23a63b8bf278e7bc3d316a3c2a314f2d6974181f1": {
+      "bytes": 9564264,
+      "format": "glb",
+      "name": "Lantern.glb",
+      "storage": {
+        "kind": "external",
+        "path": "Lantern.glb"
+      }
+    }
+  },
+  "name": "Pentool 0.15 — CC0 PBR Lantern",
+  "pages": [
+    {
+      "canvas": {
+        "background": "#ffffff",
+        "height": 900,
+        "width": 1200
+      },
+      "id": "page-1",
+      "layers": [
+        {
+          "id": "layer-1",
+          "locked": false,
+          "name": "Layer 1",
+          "nodes": [
+            {
+              "background": "#02040aff",
+              "camera": {
+                "azimuth": 32.0,
+                "elevation": 7.0
+              },
+              "environment": {
+                "ground": "#070503ff",
+                "intensity": 0.45,
+                "sky": "#101936ff"
+              },
+              "exposure_ev": -0.35,
+              "height": 900.0,
+              "id": "lantern",
+              "kind": "scene3d",
+              "lights": [
+                {
+                  "color": "#8fc8ffff",
+                  "direction": [
+                    -0.45,
+                    -0.7,
+                    -0.55
+                  ],
+                  "intensity": 3.8,
+                  "kind": "directional"
+                },
+                {
+                  "color": "#ffb45eff",
+                  "direction": [
+                    -0.25,
+                    -0.15,
+                    -1.0
+                  ],
+                  "inner_deg": 18.0,
+                  "intensity": 11.0,
+                  "kind": "spot",
+                  "outer_deg": 42.0,
+                  "position": [
+                    8.0,
+                    18.0,
+                    7.0
+                  ]
+                },
+                {
+                  "color": "#ffd18aff",
+                  "intensity": 18.0,
+                  "kind": "point",
+                  "position": [
+                    8.0,
+                    21.0,
+                    0.0
+                  ]
+                }
+              ],
+              "model": "sha256:a79458c4b02d695187a952f23a63b8bf278e7bc3d316a3c2a314f2d6974181f1",
+              "physical_camera": {
+                "focal_length_mm": 62.0,
+                "sensor_mm": [
+                  36.0,
+                  24.0
+                ]
+              },
+              "shadow_map_size": 512,
+              "shadows": true,
+              "supersample": 1,
+              "width": 1200.0,
+              "x": 0.0,
+              "y": 0.0
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Page 1"
+    }
+  ],
+  "styles": {},
+  "version": 10
+}

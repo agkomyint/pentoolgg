@@ -1,0 +1,21 @@
+newmtl crystal
+Ka 0.02 0.08 0.10
+Kd 0.16 0.78 0.92
+Ks 1.00 1.00 1.00
+Ns 900
+d 0.38
+illum 4
+
+newmtl pedestal
+Ka 0.02 0.02 0.03
+Kd 0.06 0.08 0.12
+Ks 0.85 0.92 1.00
+Ns 700
+illum 2
+
+newmtl accent
+Ka 0.04 0.00 0.08
+Kd 0.52 0.08 0.90
+Ks 1.00 0.50 1.00
+Ns 500
+illum 2

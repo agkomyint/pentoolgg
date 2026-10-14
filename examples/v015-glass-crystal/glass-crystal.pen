@@ -1,0 +1,168 @@
+{
+  "color_management": {
+    "aliases": {},
+    "engine": 1,
+    "legacy_rgb": "srgb",
+    "profiles": {},
+    "working_space": "srgb:linear"
+  },
+  "components": [],
+  "compositing": {
+    "color_space": "srgb8",
+    "engine": 1
+  },
+  "fonts": [],
+  "format": "pentool",
+  "image_assets": {},
+  "layout": {
+    "engine": 1,
+    "spreads": [
+      {
+        "facing": false,
+        "id": "s1",
+        "pages": [
+          "page-1"
+        ]
+      }
+    ]
+  },
+  "models": {
+    "sha256:5fe449456846c77c8a3a195a78305d0ca68f1fe56d2b46611bf22bc50452f438": {
+      "bytes": 1795,
+      "format": "obj",
+      "name": "glass-crystal.obj",
+      "storage": {
+        "kind": "external",
+        "path": "glass-crystal.obj",
+        "resources": {
+          "glass-crystal.mtl": {
+            "byte_length": 261,
+            "digest": "sha256:49be9750a9d384334275974693f559175fcdde9f393079ce88c031a5ee89bbf6"
+          }
+        }
+      }
+    }
+  },
+  "name": "Pentool 0.15 Glass Crystal",
+  "pages": [
+    {
+      "canvas": {
+        "background": "#ffffff",
+        "height": 900,
+        "width": 1200
+      },
+      "id": "page-1",
+      "layers": [
+        {
+          "id": "layer-1",
+          "locked": false,
+          "name": "Layer 1",
+          "nodes": [
+            {
+              "background": "#03040cff",
+              "camera": {
+                "azimuth": 35.0,
+                "elevation": 12.0
+              },
+              "environment": {
+                "ground": "#02040cff",
+                "intensity": 0.75,
+                "sky": "#111638ff"
+              },
+              "exposure_ev": 0.35,
+              "height": 900.0,
+              "id": "crystal",
+              "kind": "scene3d",
+              "lights": [
+                {
+                  "color": "#6feaff",
+                  "direction": [
+                    0.45,
+                    -0.55,
+                    -0.7
+                  ],
+                  "inner_deg": 16.0,
+                  "intensity": 9.0,
+                  "kind": "spot",
+                  "outer_deg": 34.0,
+                  "position": [
+                    -3.0,
+                    4.0,
+                    4.0
+                  ]
+                },
+                {
+                  "color": "#c366ffff",
+                  "direction": [
+                    -0.8,
+                    -0.1,
+                    -0.4
+                  ],
+                  "inner_deg": 18.0,
+                  "intensity": 7.0,
+                  "kind": "spot",
+                  "outer_deg": 38.0,
+                  "position": [
+                    4.0,
+                    1.0,
+                    2.0
+                  ]
+                },
+                {
+                  "color": "#ffffffff",
+                  "direction": [
+                    0.3,
+                    -1.0,
+                    -0.2
+                  ],
+                  "intensity": 2.5,
+                  "kind": "directional"
+                }
+              ],
+              "material_overrides": {
+                "0": {
+                  "base_color": "#35dff260",
+                  "double_sided": true,
+                  "metallic": 0.05,
+                  "roughness": 0.06
+                },
+                "1": {
+                  "base_color": "#101827ff",
+                  "metallic": 0.88,
+                  "roughness": 0.18
+                },
+                "2": {
+                  "base_color": "#9b32ffff",
+                  "double_sided": true,
+                  "emissive": "#2a073fff",
+                  "metallic": 0.35,
+                  "roughness": 0.12
+                }
+              },
+              "model": "sha256:5fe449456846c77c8a3a195a78305d0ca68f1fe56d2b46611bf22bc50452f438",
+              "physical_camera": {
+                "aperture_f": 5.6,
+                "focal_length_mm": 58.0,
+                "samples": 16,
+                "sensor_mm": [
+                  36.0,
+                  24.0
+                ]
+              },
+              "shadow_map_size": 512,
+              "shadows": true,
+              "supersample": 3,
+              "width": 1200.0,
+              "x": 0.0,
+              "y": 0.0
+            }
+          ],
+          "visible": true
+        }
+      ],
+      "name": "Page 1"
+    }
+  ],
+  "styles": {},
+  "version": 10
+}
