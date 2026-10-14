@@ -143,24 +143,33 @@ export function Canvas() {
   );
 
   // Rust render, debounced so a drag-heavy session does not queue renders.
+  // Committed edits publish a bounded proxy first, then replace it with the
+  // full preview. This keeps camera and material controls responsive without
+  // changing the native reference renderer used for either pass.
   useEffect(() => {
     const shown = preview ?? doc;
     if (!shown || view.kind !== "document") return;
     const mine = ++token.current;
     const timer = window.setTimeout(() => {
       setLoading(true);
+      const publish = (blob: Blob) => {
+        if (mine !== token.current) return false;
+        setUrl((old) => {
+          if (old) URL.revokeObjectURL(old);
+          return URL.createObjectURL(blob);
+        });
+        if (!drag.current) clearSprite();
+        return true;
+      };
       api
-        .renderPng(shown, pageId, preview ? 1024 : 2048)
-        .then((blob) => {
-          if (mine !== token.current) return;
-          setUrl((old) => {
-            if (old) URL.revokeObjectURL(old);
-            return URL.createObjectURL(blob);
-          });
-          if (!drag.current) clearSprite();
+        .renderPng(shown, pageId, preview ? 1024 : 768)
+        .then(async (blob) => {
+          if (!publish(blob) || preview) return;
+          publish(await api.renderPng(shown, pageId, 2048));
         })
         .catch((error: unknown) => {
-          if (mine === token.current) notify(error instanceof Error ? error.message : "Preview failed.", true);
+          if (mine !== token.current) return;
+          notify(error instanceof Error ? error.message : "Preview failed.", true);
         })
         .finally(() => {
           if (mine === token.current) setLoading(false);
