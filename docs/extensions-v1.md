@@ -178,7 +178,9 @@ run writes the served file.
 The HTTP endpoints are covered by an integration test. The Ctrl/Cmd+K palette
 was driven in headless Edge on Windows against a served document (open palette,
 run "Add a badge", nodes `stamp-bg` and `stamp-label` appear in the file). The
-Extensions workspace tab and other browsers have not been exercised by hand.
+Extensions workspace tab was also driven there (open the tab, Preview reports
+"preview only, nothing written"); the only failed request was `/favicon.ico`.
+Other browsers and hands-on use have not been exercised.
 The `revision` sent by Studio is the document revision from
 `GET /api/document`; a stale or missing one is rejected before anything runs.
 
