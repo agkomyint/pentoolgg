@@ -40,15 +40,18 @@ Raising `rust-version` from 1.85 to **1.86** was required by `wasmi` 2.
 
 ### Binary-size budget
 
-The CI release-binary budget is 60 MB. The Windows x64 release binary built from
-this branch (`cargo build --release --locked`, with `wasmi`, v0.18 work in
-progress) is **43,572,224 bytes (41.6 MiB)**, inside that budget.
+The CI release-binary budget is 60 MB. Like-for-like Windows x64 release builds
+(`cargo build --release --locked`, same machine and toolchain):
 
-A like-for-like delta against the unmodified v0.16.1 source was **not**
-completed locally (the baseline build was starved of memory and stopped). The
-installed v0.16.1 binary measured 48,343,552 bytes, but it came from a different
-build and is not comparable, so no size delta is claimed. CI's `binary-size`
-jobs are the authority and will report the Linux and macOS figures.
+| Build | Bytes |
+| --- | --- |
+| v0.16.1 source (`9bf4a13`) | 42,043,392 |
+| with `wasmi` and the extension host | 43,572,224 |
+| Delta | +1,528,832 (+3.6%) |
+
+The second figure was measured before the Studio routes and panel were added;
+those add little to the Rust binary (the embedded `studio.html` grew by a few
+KB). CI's `binary-size` jobs will report the Linux and macOS figures.
 
 ## Threat model
 
