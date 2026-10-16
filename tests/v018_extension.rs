@@ -613,3 +613,72 @@ fn identical_runs_produce_identical_documents() {
     }
     assert_eq!(outputs[0], outputs[1]);
 }
+
+fn example_package(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/extensions")
+        .join(name)
+        .join("package")
+}
+
+#[test]
+fn shipped_examples_pack_install_and_run() {
+    let ws = Workspace::new("examples");
+    let doc = new_doc(&ws);
+    for name in ["inventory", "stamp"] {
+        let out = ws.path(&format!("{name}.penext"));
+        quiet(
+            &ws,
+            &[
+                "extension",
+                "pack",
+                example_package(name).to_str().unwrap(),
+                out.to_str().unwrap(),
+            ],
+        );
+        let verified = ok(&ws, &["extension", "verify", out.to_str().unwrap()]);
+        assert_eq!(verified["name"], name);
+        install(&ws, &out);
+    }
+
+    let inv = ok(
+        &ws,
+        &["extension", "run", "inventory", doc.to_str().unwrap()],
+    );
+    assert_eq!(inv["changed"], false);
+
+    let args = json!({"text": "NEW", "x": 20, "y": 20}).to_string();
+    let before = fs::read(&doc).unwrap();
+    let dry = ok(
+        &ws,
+        &[
+            "extension",
+            "run",
+            "stamp",
+            doc.to_str().unwrap(),
+            "--args",
+            &args,
+            "--dry-run",
+        ],
+    );
+    assert_eq!(dry["dry_run"], true);
+    assert_eq!(fs::read(&doc).unwrap(), before);
+
+    let run = ok(
+        &ws,
+        &[
+            "extension",
+            "run",
+            "stamp",
+            doc.to_str().unwrap(),
+            "--args",
+            &args,
+        ],
+    );
+    assert_eq!(run["changed"], true);
+    assert!(ok(&ws, &["search", doc.to_str().unwrap(), "NEW"])
+        .to_string()
+        .contains("NEW"));
+    quiet(&ws, &["undo", doc.to_str().unwrap()]);
+    assert_eq!(fs::read(&doc).unwrap(), before);
+}

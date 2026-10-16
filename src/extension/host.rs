@@ -130,6 +130,7 @@ impl HostState {
                     "version": self.working.get("version"),
                     "revision": self.revision,
                     "pages": scene::page_list(&self.working),
+                    "layers": layer_list(&self.working, self.page.as_deref()),
                     "edited": self.edited,
                 }))
             }
@@ -156,6 +157,20 @@ impl HostState {
                     clamp_limit(params),
                 )
                 .map_err(fail)
+            }
+            "document.get" => {
+                self.require("document.read")?;
+                let id = params
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| error_value("invalid-operation", "document.get needs params.id"))?;
+                let wanted_page = params
+                    .get("page")
+                    .and_then(Value::as_str)
+                    .or(self.page.as_deref());
+                find_node(&self.working, wanted_page, id).ok_or_else(|| {
+                    error_value("not-found", format!("no object `{id}` on the selected page(s)"))
+                })
             }
             "document.plan" | "document.apply" => {
                 self.require("document.edit")?;
@@ -264,6 +279,75 @@ fn locks_respected(before: &Value, after: &Value) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Full scene node by id, with where it lives. Ids are unique per page, so
+/// without a page the first match in page order wins.
+/// Layer ids of the selected page(s), so an extension can name a target layer
+/// even when the page has no objects yet.
+fn layer_list(doc: &Value, page: Option<&str>) -> Vec<Value> {
+    let mut out = Vec::new();
+    for p in doc
+        .get("pages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let page_id = p.get("id").and_then(Value::as_str).unwrap_or("");
+        if page.is_some_and(|wanted| wanted != page_id) {
+            continue;
+        }
+        for layer in p
+            .get("layers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            out.push(json!({
+                "page": page_id,
+                "id": layer.get("id"),
+                "locked": layer.get("locked").and_then(Value::as_bool).unwrap_or(false),
+                "visible": layer.get("visible").and_then(Value::as_bool).unwrap_or(true),
+            }));
+        }
+    }
+    out
+}
+
+fn find_node(doc: &Value, page: Option<&str>, id: &str) -> Option<Value> {
+    fn search<'a>(nodes: &'a [Value], id: &str) -> Option<&'a Value> {
+        for node in nodes {
+            if node.get("id").and_then(Value::as_str) == Some(id) {
+                return Some(node);
+            }
+            if let Some(found) = node
+                .get("children")
+                .and_then(Value::as_array)
+                .and_then(|c| search(c, id))
+            {
+                return Some(found);
+            }
+        }
+        None
+    }
+    for p in doc.get("pages")?.as_array()? {
+        let page_id = p.get("id").and_then(Value::as_str).unwrap_or("");
+        if page.is_some_and(|wanted| wanted != page_id) {
+            continue;
+        }
+        for layer in p.get("layers")?.as_array()? {
+            let nodes = layer.get("nodes").and_then(Value::as_array)?;
+            if let Some(node) = search(nodes, id) {
+                return Some(json!({
+                    "page": page_id,
+                    "layer": layer.get("id"),
+                    "locked": layer.get("locked"),
+                    "node": node,
+                }));
+            }
+        }
+    }
+    None
 }
 
 fn host_call(
@@ -573,6 +657,13 @@ mod tests {
         );
         assert_eq!(s.logs.len(), 0);
         assert!(!s.edited);
+        let found = s.dispatch(&json!({"method": "document.get", "params": {"id": "card-bg"}}));
+        assert_eq!(found["result"]["node"]["id"], "card-bg", "{found}");
+        assert_eq!(found["result"]["layer"], "content");
+        assert_eq!(
+            code(&s.dispatch(&json!({"method": "document.get", "params": {"id": "nope"}}))),
+            "not-found"
+        );
     }
 
     #[test]
