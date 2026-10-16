@@ -682,3 +682,89 @@ fn shipped_examples_pack_install_and_run() {
     quiet(&ws, &["undo", doc.to_str().unwrap()]);
     assert_eq!(fs::read(&doc).unwrap(), before);
 }
+
+struct Server(std::process::Child);
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[test]
+fn studio_server_lists_and_runs_extensions_with_a_revision_guard() {
+    let ws = Workspace::new("serve");
+    let doc = new_doc(&ws);
+    let package = ws.path("stamp.penext");
+    quiet(
+        &ws,
+        &[
+            "extension",
+            "pack",
+            example_package("stamp").to_str().unwrap(),
+            package.to_str().unwrap(),
+        ],
+    );
+    install(&ws, &package);
+
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let _server = Server(
+        Command::new(env!("CARGO_BIN_EXE_pentool"))
+            .args(["serve", doc.to_str().unwrap(), "--port", &port.to_string()])
+            .current_dir(&ws.0)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::blocking::Client::new();
+    assert!(
+        (0..100).any(|_| {
+            let up = client.get(format!("{base}/api/health")).send().is_ok();
+            if !up {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            up
+        }),
+        "server did not start"
+    );
+
+    let listed: Value = client
+        .get(format!("{base}/api/extensions"))
+        .send()
+        .unwrap()
+        .text()
+        .map(|t| serde_json::from_str(&t).unwrap())
+        .unwrap();
+    assert!(listed.to_string().contains("stamp"), "{listed}");
+
+    let run = |body: Value| {
+        let response = client
+            .post(format!("{base}/api/extensions/run"))
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .send()
+            .unwrap();
+        let status = response.status().as_u16();
+        (status, serde_json::from_str::<Value>(&response.text().unwrap()).unwrap())
+    };
+    let before = fs::read(&doc).unwrap();
+    let (status, stale) = run(json!({"name":"stamp","revision":"0000"}));
+    assert_eq!(status, 400, "{stale}");
+    assert_eq!(fs::read(&doc).unwrap(), before);
+
+    let (status, dry) = run(json!({"name":"stamp","dry_run":true}));
+    assert_eq!(status, 200, "{dry}");
+    assert_eq!(fs::read(&doc).unwrap(), before);
+
+    let (status, done) = run(json!({"name":"stamp","args":{"text":"WEB"}}));
+    assert_eq!(status, 200, "{done}");
+    assert_eq!(done["changed"], true);
+    assert_ne!(fs::read(&doc).unwrap(), before);
+    assert_eq!(run(json!({"name":"missing"})).0, 400);
+}
