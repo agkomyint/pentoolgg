@@ -498,6 +498,7 @@ pub enum CacheAction {
 }
 
 /// Inspect or clear the disposable cache of a running local Pentool server.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_cache_command(server: &str, action: CacheAction) -> Result<()> {
     let url = reqwest::Url::parse(server).context("[invalid-input] server URL is invalid")?;
     ensure!(
