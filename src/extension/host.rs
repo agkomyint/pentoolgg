@@ -160,16 +160,18 @@ impl HostState {
             }
             "document.get" => {
                 self.require("document.read")?;
-                let id = params
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| error_value("invalid-operation", "document.get needs params.id"))?;
+                let id = params.get("id").and_then(Value::as_str).ok_or_else(|| {
+                    error_value("invalid-operation", "document.get needs params.id")
+                })?;
                 let wanted_page = params
                     .get("page")
                     .and_then(Value::as_str)
                     .or(self.page.as_deref());
                 find_node(&self.working, wanted_page, id).ok_or_else(|| {
-                    error_value("not-found", format!("no object `{id}` on the selected page(s)"))
+                    error_value(
+                        "not-found",
+                        format!("no object `{id}` on the selected page(s)"),
+                    )
                 })
             }
             "document.plan" | "document.apply" => {

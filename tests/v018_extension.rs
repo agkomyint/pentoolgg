@@ -751,7 +751,10 @@ fn studio_server_lists_and_runs_extensions_with_a_revision_guard() {
             .send()
             .unwrap();
         let status = response.status().as_u16();
-        (status, serde_json::from_str::<Value>(&response.text().unwrap()).unwrap())
+        (
+            status,
+            serde_json::from_str::<Value>(&response.text().unwrap()).unwrap(),
+        )
     };
     let before = fs::read(&doc).unwrap();
     let (status, stale) = run(json!({"name":"stamp","revision":"0000"}));
