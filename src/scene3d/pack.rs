@@ -271,6 +271,14 @@ pub fn tuck_carton_dieline(
     let total = 2.0 * (length + width);
     let dust = length / 2.0;
     let tuck = (width / 3.0).min(35.0);
+    // Dust flaps fold slightly past square so their free edge sits more than one
+    // board thickness below the closing lid instead of sharing its plane. The
+    // lid keeps its square fold, so the board-compensated opening is unchanged.
+    // The tilted flap must also stay inside the inner faces of the front and
+    // back walls, so it is narrower than the wall by a board thickness per side.
+    let dust_inset = (1.5 * board).min(width.min(length) / 4.0);
+    let dust_drop = (2.0 * board).max(dust * 0.0175);
+    let dust_fold_angle = 90.0 + (dust_drop / dust).min(0.5).asin().to_degrees();
     let body_y = width + dust + tuck;
     let body_end = body_y + height;
     let straight = template == "straight-tuck";
@@ -320,9 +328,8 @@ pub fn tuck_carton_dieline(
     );
 
     for index in [1usize, 3] {
-        let direction = if index == 1 { "valley" } else { "mountain" };
-        let x0 = x[index];
-        let panel_width = widths[index];
+        let x0 = x[index] + dust_inset;
+        let panel_width = widths[index] - 2.0 * dust_inset;
         for (edge, y0, id) in [
             ("top", body_y - dust, format!("{}-dust-top", ids[index])),
             ("bottom", body_end, format!("{}-dust-bottom", ids[index])),
@@ -333,8 +340,8 @@ pub fn tuck_carton_dieline(
             add_crease(
                 &format!("{id}-fold"),
                 [[x0, hinge_y], [x0 + panel_width, hinge_y]],
-                90.0,
-                direction,
+                dust_fold_angle,
+                "valley",
             );
         }
     }
@@ -3090,13 +3097,30 @@ fn folded_hinge_checks(dieline: &Value, model: &Model) -> Result<Vec<Value>> {
     let distance = |a: [f32; 3], b: [f32; 3]| {
         ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
     };
+    let crease_lines = dieline["creases"]
+        .as_array()
+        .map(|creases| {
+            creases
+                .iter()
+                .filter_map(|crease| {
+                    let line = crease["line_mm"].as_array()?;
+                    Some([
+                        pair(&line[0], "crease start").ok()?,
+                        pair(&line[1], "crease end").ok()?,
+                    ])
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut checks = Vec::new();
     for first in 0..rects.len() {
         for second in first + 1..rects.len() {
-            let Some(edge) = panel_adjacent(rects[first], rects[second]) else {
+            let Some(edge) = panel_hinged(rects[first], rects[second], &crease_lines) else {
                 continue;
             };
-            let vertex_index = |index: usize, target: [f64; 2]| {
+            // A hinge may cover only part of a larger panel's edge (inset dust
+            // flaps), so a non-corner endpoint is interpolated along its edge.
+            let hinge_point = |index: usize, target: [f64; 2]| -> Result<[f32; 3]> {
                 let points = if let Some(path) = panel_cut_contour(dieline, &panels[index]) {
                     flatten_panel_contour(
                         path["d"].as_str().unwrap_or_default(),
@@ -3111,24 +3135,36 @@ fn folded_hinge_checks(dieline: &Value, model: &Model) -> Result<Vec<Value>> {
                         [x, y + height],
                     ]
                 };
-                points
-                    .iter()
-                    .position(|point| {
-                        (point[0] - target[0]).abs() <= 1e-8 && (point[1] - target[1]).abs() <= 1e-8
-                    })
-                    .context("[invalid-input] shared panel edge endpoint is not a panel corner")
+                let positions = &model.primitives[index].positions;
+                if let Some(vertex) = points.iter().position(|point| {
+                    (point[0] - target[0]).abs() <= 1e-8 && (point[1] - target[1]).abs() <= 1e-8
+                }) {
+                    return Ok(positions[vertex]);
+                }
+                for start in 0..points.len() {
+                    let end = (start + 1) % points.len();
+                    if !point_on_segment(target, [points[start], points[end]]) {
+                        continue;
+                    }
+                    let span = (points[end][0] - points[start][0])
+                        .hypot(points[end][1] - points[start][1]);
+                    let along = (target[0] - points[start][0]).hypot(target[1] - points[start][1]);
+                    let t = (along / span) as f32;
+                    let (p, q) = (positions[start], positions[end]);
+                    return Ok([
+                        p[0] + (q[0] - p[0]) * t,
+                        p[1] + (q[1] - p[1]) * t,
+                        p[2] + (q[2] - p[2]) * t,
+                    ]);
+                }
+                bail!("[invalid-input] shared panel edge endpoint is not on the panel boundary")
             };
-            let first_indices = [vertex_index(first, edge[0])?, vertex_index(first, edge[1])?];
-            let second_indices = [
-                vertex_index(second, edge[0])?,
-                vertex_index(second, edge[1])?,
-            ];
-            let a = &model.primitives[first].positions;
-            let b = &model.primitives[second].positions;
-            let direct = distance(a[first_indices[0]], b[second_indices[0]])
-                .max(distance(a[first_indices[1]], b[second_indices[1]]));
-            let reverse = distance(a[first_indices[0]], b[second_indices[1]])
-                .max(distance(a[first_indices[1]], b[second_indices[0]]));
+            let first_points = [hinge_point(first, edge[0])?, hinge_point(first, edge[1])?];
+            let second_points = [hinge_point(second, edge[0])?, hinge_point(second, edge[1])?];
+            let direct = distance(first_points[0], second_points[0])
+                .max(distance(first_points[1], second_points[1]));
+            let reverse = distance(first_points[0], second_points[1])
+                .max(distance(first_points[1], second_points[0]));
             let gap = f64::from(direct.min(reverse));
             checks.push(serde_json::json!({
                 "kind":"hinge", "panels":[panels[first]["id"],panels[second]["id"]],
@@ -5645,6 +5681,40 @@ fn panel_adjacent(a: [f64; 4], b: [f64; 4]) -> Option<[[f64; 2]; 2]> {
     }
 }
 
+/// Like [`panel_adjacent`], but also accepts a hinge that covers only part of
+/// the longer panel's edge (an inset flap), and only when a stored crease runs
+/// exactly along that shorter shared segment. Partial contact without a matching
+/// crease stays non-adjacent, as before.
+fn panel_hinged(a: [f64; 4], b: [f64; 4], crease_lines: &[[[f64; 2]; 2]]) -> Option<[[f64; 2]; 2]> {
+    const EPS: f64 = 1e-6;
+    if let Some(edge) = panel_adjacent(a, b) {
+        return Some(edge);
+    }
+    let nested = |a0: f64, a1: f64, b0: f64, b1: f64| {
+        let (lo, hi) = (a0.max(b0), a1.min(b1));
+        let matches_a = (lo - a0).abs() <= EPS && (hi - a1).abs() <= EPS;
+        let matches_b = (lo - b0).abs() <= EPS && (hi - b1).abs() <= EPS;
+        (hi - lo > EPS && (matches_a || matches_b)).then_some((lo, hi))
+    };
+    let (ar, ab) = (a[0] + a[2], a[1] + a[3]);
+    let (br, bb) = (b[0] + b[2], b[1] + b[3]);
+    let edge = if (ar - b[0]).abs() <= EPS {
+        nested(a[1], ab, b[1], bb).map(|(lo, hi)| [[ar, lo], [ar, hi]])
+    } else if (br - a[0]).abs() <= EPS {
+        nested(a[1], ab, b[1], bb).map(|(lo, hi)| [[a[0], lo], [a[0], hi]])
+    } else if (ab - b[1]).abs() <= EPS {
+        nested(a[0], ar, b[0], br).map(|(lo, hi)| [[lo, ab], [hi, ab]])
+    } else if (bb - a[1]).abs() <= EPS {
+        nested(a[0], ar, b[0], br).map(|(lo, hi)| [[lo, a[1]], [hi, a[1]]])
+    } else {
+        None
+    }?;
+    crease_lines
+        .iter()
+        .any(|line| same_edge(*line, edge))
+        .then_some(edge)
+}
+
 fn same_edge(a: [[f64; 2]; 2], b: [[f64; 2]; 2]) -> bool {
     const EPS: f64 = 1e-6;
     ((a[0][0] - b[0][0]).abs() <= EPS
@@ -6269,11 +6339,15 @@ pub fn generate(dieline: &Value) -> Result<Model> {
             direction,
         ));
     }
+    let crease_lines = creases
+        .iter()
+        .map(|(_, line, _, _)| *line)
+        .collect::<Vec<_>>();
     let mut adjacency = vec![Vec::new(); panels.len()];
     let mut crease_used = vec![false; creases.len()];
     for a in 0..panels.len() {
         for b in a + 1..panels.len() {
-            let Some(edge) = panel_adjacent(panels[a].rect, panels[b].rect) else {
+            let Some(edge) = panel_hinged(panels[a].rect, panels[b].rect, &crease_lines) else {
                 continue;
             };
             let mut matching_creases = creases
@@ -7038,11 +7112,7 @@ mod tests {
                 tuck_carton_dieline(template, 120.0, 70.0, 180.0, 0.5, 3.0, 15.0).unwrap();
             let model = generate(&dieline).unwrap();
             let report = folded_collision_report(&dieline, &model).unwrap();
-            let expected_collisions = if template == "straight-tuck" { 2 } else { 0 };
-            assert_eq!(
-                report["collision_count"], expected_collisions,
-                "{template}: {report}"
-            );
+            assert_eq!(report["collision_count"], 0, "{template}: {report}");
             for collision in report["collisions"].as_array().unwrap() {
                 let panels = collision["panels"].as_array().unwrap();
                 assert!(panels
@@ -7539,8 +7609,8 @@ mod tests {
             .iter()
             .any(|element| matches!(element, kurbo::PathEl::ClosePath)));
         let model = generate(&dieline).unwrap();
-        assert_eq!(model.primitives.len(), 38);
-        assert_eq!(model.report.triangles, 132);
+        assert_eq!(model.primitives.len(), 40);
+        assert_eq!(model.report.triangles, 140);
         let body_panels: Vec<_> = model
             .primitives
             .iter()
@@ -7684,22 +7754,30 @@ mod tests {
             "bottom lid does not fold into a horizontal cap: {:?}",
             bottom.positions
         );
-        for id in ["right-dust-top", "left-dust-top"] {
+        // Dust flaps fold slightly past square so they layer under the lid
+        // instead of sharing its plane: the hinge stays on the closure plane
+        // and the free edge sits more than one board thickness below it.
+        for (id, closure_y, inward) in [
+            ("right-dust-top", top_y, -1.0_f32),
+            ("left-dust-top", top_y, -1.0),
+            ("right-dust-bottom", bottom_y, 1.0),
+            ("left-dust-bottom", bottom_y, 1.0),
+        ] {
             let dust = model.primitives.iter().find(|p| p.name == id).unwrap();
+            let drops: Vec<f32> = dust
+                .positions
+                .iter()
+                .map(|p| (p[1] - closure_y) * inward)
+                .collect();
             assert!(
-                dust.positions.iter().all(|p| (p[1] - top_y).abs() < 1e-3),
-                "{id} does not lie in the top closure plane: {:?}",
+                drops.iter().all(|d| *d > -1e-3),
+                "{id} rises above its closure plane: {:?}",
                 dust.positions
             );
-        }
-        for id in ["right-dust-bottom", "left-dust-bottom"] {
-            let dust = model.primitives.iter().find(|p| p.name == id).unwrap();
+            let deepest = drops.iter().cloned().fold(0.0_f32, f32::max);
             assert!(
-                dust.positions
-                    .iter()
-                    .all(|p| (p[1] - bottom_y).abs() < 1e-3),
-                "{id} does not lie in the bottom closure plane: {:?}",
-                dust.positions
+                deepest > 1.0 && deepest < 3.0,
+                "{id} free edge is not layered below the lid: {deepest}"
             );
         }
         for id in ["top-tuck", "bottom-tuck"] {
@@ -7917,9 +7995,11 @@ mod tests {
                 source["template"].as_str(),
                 Some("straight-tuck" | "reverse-tuck")
             ) {
-                assert!(
-                    move_count > close_count,
-                    "{} cut path must retain open through-cut slits between non-hinged flaps",
+                // Inset dust flaps leave open notches instead of slits, so the
+                // whole net is one closed contour.
+                assert_eq!(
+                    move_count, close_count,
+                    "{} cut outline",
                     source["template"]
                 );
             }

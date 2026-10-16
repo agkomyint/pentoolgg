@@ -2372,3 +2372,121 @@ fn stand_up_pouch_cli_is_transactional_renderable_and_listed() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn every_builtin_template_preflights_without_panel_intersections_at_each_fold() {
+    use pentool::scene3d::pack;
+    let fixture = include_bytes!("../docs/fixtures/v11-product-packaging.pen");
+    for template in ["straight-tuck", "reverse-tuck", "sleeve", "mailer", "pouch"] {
+        let mut document: Value = serde_json::from_slice(fixture).unwrap();
+        let (id, node) = ("built-in", "built-in-preview");
+        let placement = [600.0, 100.0, 400.0, 600.0];
+        let (layer, page) = ("mockups", Some("products"));
+        match template {
+            "sleeve" => pack::add_sleeve(
+                &mut document,
+                id,
+                node,
+                layer,
+                page,
+                120.0,
+                70.0,
+                180.0,
+                0.5,
+                3.0,
+                placement,
+            ),
+            "pouch" => pack::add_pouch(
+                &mut document,
+                id,
+                node,
+                layer,
+                page,
+                120.0,
+                35.0,
+                180.0,
+                3.0,
+                placement,
+            ),
+            "mailer" => pack::add_tuck_carton(
+                &mut document,
+                id,
+                node,
+                layer,
+                page,
+                template,
+                180.0,
+                120.0,
+                35.0,
+                0.6,
+                3.0,
+                18.0,
+                placement,
+            ),
+            _ => pack::add_tuck_carton(
+                &mut document,
+                id,
+                node,
+                layer,
+                page,
+                template,
+                120.0,
+                70.0,
+                180.0,
+                0.5,
+                3.0,
+                15.0,
+                placement,
+            ),
+        }
+        .unwrap();
+        for fold in [0.0, 0.5, 1.0] {
+            document["dielines"][id]["fold_state"] = serde_json::json!(fold);
+            let report =
+                pack::preflight(&document, std::path::Path::new("built-in.pen"), id, 300.0)
+                    .unwrap();
+            let collisions = &report["fold_collision_report"];
+            // Documented, precisely pinned exceptions (everything else must be
+            // clear):
+            // - straight-tuck mid-fold: with one shared fold amount the side
+            //   dust flaps and the lids sweep through each other in transit.
+            //   Real assembly folds flaps before lids; the closed state is
+            //   layered and clear.
+            // - mailer once folded: the lid overlaps the side glue joint; the
+            //   mailer net is outside the dust-flap fix and remains open.
+            let known: Option<fn(&[&str]) -> bool> = match (template, fold > 0.0) {
+                ("straight-tuck", _) if fold == 0.5 => Some(|panels| {
+                    panels.iter().any(|id| id.contains("dust"))
+                        && panels.iter().any(|id| id.ends_with("-lid"))
+                }),
+                ("mailer", true) => {
+                    Some(|panels| panels.contains(&"lid") && panels.contains(&"glue-joint"))
+                }
+                _ => None,
+            };
+            if let Some(known) = known {
+                for collision in collisions["collisions"].as_array().unwrap() {
+                    let panels: Vec<&str> = collision["panels"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|panel| panel.as_str().unwrap())
+                        .collect();
+                    assert!(
+                        known(&panels),
+                        "{template} at fold {fold}: unexpected pair in {collisions}"
+                    );
+                }
+                continue;
+            }
+            assert_eq!(
+                collisions["collision_count"], 0,
+                "{template} at fold {fold}: {collisions}"
+            );
+            assert_eq!(
+                collisions["status"], "checked-clear",
+                "{template} at fold {fold}"
+            );
+        }
+    }
+}

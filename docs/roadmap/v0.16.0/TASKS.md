@@ -795,20 +795,21 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   and treats an exact one-board-thickness separation as contact rather than
   positive-volume overlap, while retaining same-facing overlap and non-coplanar
   crossing detection.
-  Regressions verify reverse-tuck is clear under this screen and straight-tuck
-  reports its two unresolved dust-flap/lid overlaps instead of the corrected
-  tongue and glue-joint contacts. Straight-tuck remains `needs-review`; this is
-  not a physical-board simulation or manufacturing conformance result. A test
-  of the tempting opposite lid-fold direction removed the overlap warning but
-  also made the main lid miss the board-compensated carton opening; that change
-  was rejected. A valid fix needs thickness-aware flap layering, not merely a
-  warning-free fold orientation. A global pivot-side switch keyed only to
-  mountain/valley direction was also rejected: it breaks shared-surface hinge
-  continuity and changes generated board geometry. The remaining fix must
-  represent the flap stack without breaking the structural hinge. A fresh
-  transactional CLI smoke on both generated templates reproduced the expected
-  result: straight-tuck has the two named dust-flap/lid overlaps, reverse-tuck
-  is clear under this bounded screen, and both remain explicitly uncertified.
+  The straight-tuck dust-flap/lid overlaps are resolved by thickness-aware
+  flap layering. Dust flaps are inset by 1.5 board thicknesses per side (so a
+  tilted flap stays inside the inner wall faces), hinge along a partial wall
+  edge that needs a matching crease (partial contact without one is still not a
+  hinge), fold slightly past square so the free edge sits below the lid, and
+  both left and right flaps now fold toward the interior (the left flaps
+  previously pointed outward). The lid fold and board-compensated opening are
+  unchanged, and shared-surface hinge continuity regressions pass; the hinge
+  check interpolates partial-edge endpoints. A regression preflights
+  straight-tuck, reverse-tuck, sleeve, mailer, and pouch at fold 0, 0.5, and 1:
+  all are clear except two pinned, documented cases. Straight-tuck at fold 0.5
+  shows only dust-flap/lid pairs because one shared fold amount drives every
+  crease (flaps do not fold before lids in transit). The mailer lid overlaps its
+  side glue joint once folded; the mailer net is outside this fix. This is not
+  a physical-board simulation or manufacturing conformance result.
   Folded-state collision accuracy and geometric conformance remain open.
 
 - [ ] **9a. Unify packaging UVs and print mapping.** Every flat panel's artwork
@@ -1024,8 +1025,7 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   vector-plate exporters instead of reporting a false missing-crease warning.
   A regression verifies all 12 folds survive layout resolution and appear on
   the separate Crease vector plate. This resolves only the preflight mismatch;
-  the straight-tuck dust-flap/lid overlaps and broader geometry acceptance
-  remain open.
+  broader geometry acceptance remains open.
 
 - [ ] **11. Build the Studio mockup and packaging workflow.** Add a Mockups
   workspace that:

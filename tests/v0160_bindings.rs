@@ -2626,16 +2626,14 @@ fn generated_tuck_carton_links_panel_art_and_renders_flat_and_folded() {
         .unwrap();
     assert_eq!(front_inside["within_safe_zone"], true);
     assert_eq!(inside_preflight["panel_connected_components"], 1);
-    assert_eq!(inside_preflight["design_geometry_status"], "needs-review");
+    assert_eq!(inside_preflight["design_geometry_status"], "checks-passed");
     assert_eq!(
         inside_preflight["fold_collision_report"]["status"],
-        "potential-overlaps"
+        "checked-clear"
     );
-    assert!(
-        inside_preflight["fold_collision_report"]["collision_count"]
-            .as_u64()
-            .unwrap()
-            > 0
+    assert_eq!(
+        inside_preflight["fold_collision_report"]["collision_count"],
+        0
     );
     assert!(inside_preflight["production_path_checks"]
         .as_array()

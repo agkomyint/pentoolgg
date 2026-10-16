@@ -365,8 +365,13 @@ onto a common plane and flagged when their interiors overlap and the full face's
 plane-distance range is strictly less than one board thickness; exact one-
 thickness separation is face contact, not positive-volume overlap, and
 coincident opposing faces remain contact here too. Generated tuck tongues now
-fold toward the carton interior. The straight-tuck template still reports two
-dust-flap/lid overlaps that need a thickness-aware stacking model; reverse-tuck
-is clear under this bounded screen. This limited screen does not model angled
+fold toward the carton interior. Both tuck cartons now layer their dust flaps
+under the lids: each flap is narrower than its wall by 1.5 board thicknesses per
+side, hinged along a partial wall edge with a matching crease, and folds slightly
+past square (about 1 degree, or enough for twice the board thickness) so its free
+edge sits below the closing lid. Both cartons are clear at flat and fully folded
+states under this bounded screen. At intermediate fold amounts the straight-tuck
+dust flaps and lids still sweep through each other in transit because one shared
+fold amount drives every crease. This limited screen does not model angled
 clearance, crease compression, full solid-board geometry, or structural
 fitness, and a clear result is not manufacturing certification.
