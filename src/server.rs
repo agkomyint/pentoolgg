@@ -3280,6 +3280,13 @@ async fn extensions_run(
         let _guard = gate
             .lock()
             .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        // Studio revisions are value hashes (GET /api/document); the transaction
+        // guard uses the file's byte hash. Check the former, then pin the latter
+        // under the same lock so nothing can change in between.
+        let bytes = std::fs::read(&file)?;
+        let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+        require_revision(body.revision.as_deref(), &raw)?;
+        let pinned = crate::transaction::revision(&bytes);
         crate::extension::store::run(
             &root,
             &body.name,
@@ -3290,7 +3297,7 @@ async fn extensions_run(
                 event: None,
                 page: body.page,
                 dry_run: body.dry_run,
-                if_revision: body.revision,
+                if_revision: Some(pinned),
             },
         )
     };

@@ -175,8 +175,12 @@ with the document revision). Installing and approving capabilities remain CLI
 actions. Running is disabled while there are unsaved local edits, because the
 run writes the served file.
 
-The panel has been type-checked and built, and the HTTP endpoints are covered
-by an integration test, but it has **not** been exercised in a live browser.
+The HTTP endpoints are covered by an integration test. The Ctrl/Cmd+K palette
+was driven in headless Edge on Windows against a served document (open palette,
+run "Add a badge", nodes `stamp-bg` and `stamp-label` appear in the file). The
+Extensions workspace tab and other browsers have not been exercised by hand.
+The `revision` sent by Studio is the document revision from
+`GET /api/document`; a stale or missing one is rejected before anything runs.
 
 ## Known limits
 

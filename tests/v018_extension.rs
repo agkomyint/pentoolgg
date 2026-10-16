@@ -756,20 +756,32 @@ fn studio_server_lists_and_runs_extensions_with_a_revision_guard() {
             serde_json::from_str::<Value>(&response.text().unwrap()).unwrap(),
         )
     };
+    let current: Value = serde_json::from_str(
+        &client
+            .get(format!("{base}/api/document"))
+            .send()
+            .unwrap()
+            .text()
+            .unwrap(),
+    )
+    .unwrap();
+    let rev = current["revision"].as_str().unwrap().to_string();
     let before = fs::read(&doc).unwrap();
+    let (status, unguarded) = run(json!({"name":"stamp"}));
+    assert_eq!(status, 400, "{unguarded}");
     let (status, stale) = run(json!({"name":"stamp","revision":"0000"}));
     assert_eq!(status, 400, "{stale}");
     assert_eq!(fs::read(&doc).unwrap(), before);
 
-    let (status, dry) = run(json!({"name":"stamp","dry_run":true}));
+    let (status, dry) = run(json!({"name":"stamp","dry_run":true,"revision":rev}));
     assert_eq!(status, 200, "{dry}");
     assert_eq!(fs::read(&doc).unwrap(), before);
 
-    let (status, done) = run(json!({"name":"stamp","args":{"text":"WEB"}}));
+    let (status, done) = run(json!({"name":"stamp","args":{"text":"WEB"},"revision":rev}));
     assert_eq!(status, 200, "{done}");
     assert_eq!(done["changed"], true);
     assert_ne!(fs::read(&doc).unwrap(), before);
-    assert_eq!(run(json!({"name":"missing"})).0, 400);
+    assert_eq!(run(json!({"name":"missing","revision":rev})).0, 400);
 }
 
 #[test]
