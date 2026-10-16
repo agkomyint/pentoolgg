@@ -175,7 +175,9 @@ excluded. The editor also supports 3D face selection/art placement and UV island
 packing. Broader carton structures, profile-conforming bottle labels, and
 manufacturing conformance remain in development; see the [v0.16
 roadmap](docs/roadmap/v0.16.0/TASKS.md) and
-[v11 3D contract](docs/scene3d-v2.md) for current limits.
+[v11 3D contract](docs/scene3d-v2.md) (schema:
+[`docs/pen-format-v11.schema.json`](docs/pen-format-v11.schema.json); upgrade with
+`pentool migrate FILE --target 11`) for current limits.
 
 ## ICC profile tools (v0.12 in development)
 

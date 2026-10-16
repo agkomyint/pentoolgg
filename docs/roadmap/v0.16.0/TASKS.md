@@ -356,8 +356,7 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   selecting an island highlights its exact face triangles in a transient,
   uncached 3D render, and a page-context toggle returns to the editable canvas.
   A server regression verifies the highlight changes pixels without mutating the
-  document.
-   `island pack` command now shelf-packs each UV set into the unit square with
+  document. The `island pack` command now shelf-packs each UV set into the unit square with
   normalized padding, preserving island orientation and mirror state; tests
   cover dry-run safety, bounds, padding, and non-overlap. `uv ... show` now
   reports area-weighted texel density per UV set and editable island for a
@@ -366,8 +365,7 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   than bounding boxes, with a one-million triangle-pair budget and an explicit
   truncation field. A regression verifies separated polygons with overlapping
   AABBs are not falsely reported. Studio distinguishes true overlaps from a
-  bounded/incomplete analysis.
-  optional `--minimum-density` marks low-density islands without assuming OBJ
+  bounded/incomplete analysis. An optional `--minimum-density` marks low-density islands without assuming OBJ
   units are millimeters. Studio now passes the selected resolution/threshold
   through the UV preview endpoint and displays per-set and selected-island
   warnings. UV reports now detect shared geometric edges with mismatched UVs;
@@ -436,20 +434,22 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   Reports identify created/changed node IDs, bindings, source digests, slots,
   cache hits/misses, renderer, dimensions, effective ppi, warnings, and output
   paths without embedding pixels. Freeze exact spelling and argument grammar in
-  this task before implementation. Candidate command shape:
+  this task before implementation. Shipped command spellings (frozen):
 
   ```sh
   pentool mockup list --json
-  pentool mockup apply DOC --preset perfume-bottle --id bottle-front --layer mockups --page products --x 120 --y 80 --width 640 --height 720 --dry-run --json
-  pentool scene3d DOC texture bind bottle-front --slot label --source page:front
-  pentool scene3d DOC texture bind bottle-front --slot cap --source node:cap-art
-  pentool scene3d DOC form create perfume-bottle --id bottle --height-mm 180 --body-diameter-mm 52
-  pentool scene3d DOC uv bottle project --kind cylinder --region label --set uv1
-  pentool scene3d DOC graphic add bottle --source page:front --region label --mode decal
-  pentool scene3d DOC uv bottle layout --region label --out label-uv.svg
-  pentool scene3d DOC inspect bottle-front --json
-  pentool render DOC --page front --node bottle-front --scale 2 --json
+  pentool mockup apply DOC --preset perfume-bottle --id bottle-front --layer mockups --page products --width 640 --height 720 --dry-run --json
+  pentool scene3d DOC form add bottle-front --form bottle --preset perfume-bottle --layer mockups --page products --width 640 --height 720
+  pentool scene3d DOC form set bottle --parameters '{"height_mm":190,...}'
+  pentool scene3d DOC uv bottle project --primitive 0 --projection cylindrical --axis y
+  pentool scene3d DOC graphic bottle add label-art --source page:front --slot label --mode decal
+  pentool scene3d DOC uv bottle layout --primitive 0 --out label-uv.svg
+  pentool scene3d DOC render-report bottle-front
   ```
+
+  Panel artwork binds through `scene3d DOC pack bind`. Earlier drafts of this
+  block used `texture bind`, `form create`, `uv project --kind/--region/--set`
+  and `graphic add --region`; those spellings were never shipped.
 
   The final CLI contract is JSON by default; `--json` remains an accepted global
   compatibility flag. `mockup list` needs no document and reports offline
@@ -860,6 +860,7 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   use the same expanded page origin and dimensions. Cut-edge masks, fold-edge
   exclusions, and edge pixels have deterministic regression coverage. This
   is a design aid, not certified trapping or manufacturing output. Bleed on
+  contour-associated panels is described next.
   An optional `panel_id` on a cut path now explicitly associates one closed
   contour with an existing panel; validation rejects non-cut associations,
   duplicate per-panel associations, open paths, and contour bounds outside the
@@ -896,17 +897,20 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   certification without validated geometry and an explicit conformance test.
 
   ```sh
-  pentool pack templates --json
-  pentool pack create DOC --template straight-tuck --id carton --layer packaging --length-mm 120 --width-mm 80 --height-mm 220 --board-mm 0.5 --dry-run --json
-  pentool pack bind DOC carton --panel front --source page:front
-  pentool scene3d DOC pack crease carton front-body-fold --angle-deg 90 --dry-run --json
-  pentool pack preview DOC carton --fold 0.75 --out preview.png
-  pentool pack preflight DOC carton --min-ppi 300 --json
-  pentool pack export DOC carton --out dist/carton --pdfx --json
+  pentool scene3d DOC pack carton --dieline carton --node carton-preview --layer mockups --template straight-tuck --length-mm 120 --width-mm 80 --height-mm 220 --board-mm 0.5 --dry-run
+  pentool scene3d DOC pack bind carton --panel front --source page:front
+  pentool scene3d DOC pack crease carton front-body-fold --angle-deg 90 --dry-run
+  pentool scene3d DOC pack preview carton --fold 0.75 --out preview.png
+  pentool scene3d DOC pack preflight carton --min-ppi 300
+  pentool scene3d DOC pack export carton --out carton-flat.svg --min-ppi 300
+  pentool pack DOC export-bundle carton --out dist/carton --min-ppi 300
+  pentool pack verify-bundle dist/carton
   ```
 
-  Final flags and command nesting are frozen before implementation; examples
-  above are a concrete direction for review, not an existing CLI promise.
+  The shipped grammar is `pack [DOC] <action>` and
+  `scene3d DOC pack <action>`; there is no `pack create` verb (generation is
+  `pack sleeve|carton|pouch|tube|bottle-label`). Output names are deterministic
+  for bundles; other exports take an explicit `--out`.
 
   Implemented command subset: `scene3d DOC pack templates`, `inspect`,
   `preflight`, flat SVG `export`, and static PNG `preview --fold 0..1`.
@@ -998,9 +1002,9 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   finishing; it states that the PDF is not a cutter file and that conceptual
   templates are not manufacturing-certified. This is a design handoff, not an
   invented cut/assembly recipe: structural and
-  manufacturing certification remain out of scope until validated. Editable
-  dieline import, production validation, and certified manufacturing output
-  remain open. `pack preflight` parses stored production paths, reports bounds
+  manufacturing certification remain out of scope until validated. Production
+  validation and certified manufacturing output are explicitly deferred; constrained
+  labeled-SVG dieline import is implemented. `pack preflight` parses stored production paths, reports bounds
   and element diagnostics against the panel envelope plus bleed, and checks
   edge-connected panel components for built-in rectangular nets. It also counts
   closed subpaths per production path and warns when a cut-role path has no

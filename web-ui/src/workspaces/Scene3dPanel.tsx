@@ -790,7 +790,7 @@ export function Scene3dPanel() {
       <h3 className={heading}>Product forms</h3>
       <label className="block space-y-1 text-xs text-muted-foreground" htmlFor="scene3d-product-form-preset">Start with a product</label>
       <select id="scene3d-product-form-preset" className="h-10 w-full rounded border bg-input px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring" value={formPreset} disabled={formBusy} onChange={(event) => setFormPreset(event.target.value)}>
-        <option value="perfume-bottle">Perfume bottle</option><option value="cosmetic-jar">Cosmetic jar</option><option value="cosmetic-tube">Cosmetic tube</option><option value="shipping-carton">Shipping carton mockup</option><option value="product-card">Product card</option><option value="device-frame">Simple device frame</option><option value="stand-up-pouch">Stand-up pouch</option><option value="custom">Custom dimensions…</option>
+        <option value="perfume-bottle">Perfume bottle</option><option value="cosmetic-jar">Cosmetic jar</option><option value="cosmetic-tube">Cosmetic tube</option><option value="cylinder-container">Cylinder container</option><option value="shipping-carton">Shipping carton mockup</option><option value="product-card">Product card</option><option value="device-frame">Simple device frame</option><option value="stand-up-pouch">Stand-up pouch</option><option value="custom">Custom dimensions…</option>
       </select>
       {formPreset === "custom" && <>
         <label className="block space-y-1 text-xs text-muted-foreground" htmlFor="scene3d-product-form-kind">Custom form type</label>

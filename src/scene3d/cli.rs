@@ -184,7 +184,7 @@ pub enum FormAction {
         /// Stable product form catalog ID.
         #[arg(long)]
         form: String,
-        /// Use a bundled starter: perfume-bottle, cosmetic-jar, cosmetic-tube, shipping-carton, product-card, device-frame, stand-up-pouch.
+        /// Use a bundled starter: perfume-bottle, cosmetic-jar, cosmetic-tube, cylinder-container, shipping-carton, product-card, device-frame, stand-up-pouch.
         #[arg(long, conflicts_with_all = ["kind", "parameters"])]
         preset: Option<String>,
         /// `box`, `cylinder`, `tube` or `lathe-bottle` (optional bottle `cap_mm`).
