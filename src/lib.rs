@@ -14,6 +14,8 @@ pub mod diff;
 pub mod document;
 pub mod editing;
 pub mod effects;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod extension;
 pub mod fill;
 pub mod fonts;
 pub mod geometry;

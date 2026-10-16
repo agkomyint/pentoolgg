@@ -56,3 +56,6 @@ mod v0160_packaging;
 
 #[path = "../v0160_uv.rs"]
 mod v0160_uv;
+
+#[path = "../v018_extension.rs"]
+mod v018_extension;
