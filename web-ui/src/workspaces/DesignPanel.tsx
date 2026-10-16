@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, FilePlus2, FolderOpen, Image as ImageIcon, Plus, Trash2, Type as TypeIcon } from "lucide-react";
+import { Copy, FilePlus2, FolderOpen, GripVertical, Image as ImageIcon, Plus, Trash2, Type as TypeIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
+import { ARTWORK_SOURCE_DRAG_TYPE } from "@/lib/artworkDrag";
 import {
   addImage,
   addPage,
@@ -14,7 +15,7 @@ import {
   renamePage,
   resizeCanvas,
 } from "@/lib/actions";
-import { pageOf } from "@/lib/model";
+import { findNode, pageOf } from "@/lib/model";
 import { cn } from "@/lib/utils";
 
 const input = "mt-0.5 h-7 w-full rounded border bg-card px-1.5 text-xs";
@@ -38,6 +39,19 @@ function Pages() {
       <ul className="space-y-0.5">
         {doc?.pages.map((p) => (
           <li key={p.id} className={cn("flex items-center gap-1 rounded px-1.5 py-1 hover:bg-accent", p.id === pageId && "bg-accent font-medium")}>
+            <button
+              type="button"
+              draggable
+              aria-label={`Drag page ${p.name ?? p.id} as artwork`}
+              title="Drag onto a mockup artwork slot"
+              className="grid size-12 shrink-0 cursor-grab place-items-center rounded text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
+              onClick={(event) => { event.stopPropagation(); setPage(p.id); }}
+              onDragStart={(event) => {
+                event.stopPropagation();
+                event.dataTransfer.effectAllowed = "copy";
+                event.dataTransfer.setData(ARTWORK_SOURCE_DRAG_TYPE, JSON.stringify({ kind: "page", page: p.id }));
+              }}
+            ><GripVertical size={14} aria-hidden="true" /></button>
             <button className="min-w-0 flex-1 truncate text-left" onClick={() => setPage(p.id)}>
               {p.name ?? p.id}
             </button>
@@ -94,6 +108,94 @@ function CanvasSettings() {
       </div>
     </section>
   );
+}
+
+function DielineProductionRole() {
+  const studio = useStudio();
+  const page = pageOf(studio.doc, studio.pageId);
+  const dielineId = page?.dieline_layout?.dieline;
+  const selected = studio.doc && findNode(page, studio.selectedId)?.node;
+  const path = selected?.kind === "path" ? selected : null;
+  const doc = studio.doc;
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [creaseId, setCreaseId] = useState("");
+  const [creaseAngle, setCreaseAngle] = useState(90);
+  const [creaseDirection, setCreaseDirection] = useState<"mountain" | "valley">("valley");
+  const currentRole = path?.dieline_path_role;
+  const currentCrease = path?.dieline_crease_id;
+  if (!doc || !dielineId || !path) return null;
+
+  const setRole = async (role: "cut" | "crease" | "perforation" | "bleed" | "safe-zone" | "glue-flap") => {
+    if (busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.scene3dPathRole({ document: doc, dieline: dielineId, node: path.id, role });
+      studio.replaceDoc(result.document, "Assign packaging production role");
+      setMessage({ text: `${role} operation added to the ${result.result.spot} plate.` });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "The production role could not be assigned.", error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createCrease = async () => {
+    if (busy || !creaseId.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.scene3dPathCrease({ document: doc, dieline: dielineId, node: path.id, crease: creaseId.trim(), angle_deg: creaseAngle, direction: creaseDirection });
+      studio.replaceDoc(result.document, "Create packaging fold edge");
+      setMessage({ text: `Validated shared panel edge added as ${creaseDirection} fold ${result.result.crease}.` });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "The path could not be used as a structural fold edge.", error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <section className="space-y-1.5">
+    <h3 className={heading}>Packaging path</h3>
+    <p className="text-[11px] text-muted-foreground">Assign this editable path to a print/finishing operation. Cut lines are through-cuts; crease marks are scores. To drive the fold preview, create a separate structural hinge on a validated shared panel edge.</p>
+    {typeof currentRole === "string" && <p className="text-xs">Current operation: <span className="font-medium">{currentRole}</span></p>}
+    {typeof currentCrease === "string" && <p className="text-xs">Structural fold edge: <span className="font-medium">{currentCrease}</span></p>}
+    {!currentCrease && <label className="block text-xs">Production role
+      <select className={`${input} min-h-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`} value="" disabled={busy} aria-busy={busy} onChange={(event) => {
+        if (event.target.value) void setRole(event.target.value as "cut" | "crease" | "perforation" | "bleed" | "safe-zone" | "glue-flap");
+      }}>
+        <option value="">Choose operation…</option>
+        <option value="cut">Cut · through-cut</option>
+        <option value="crease">Crease · score line</option>
+        <option value="perforation">Perforation · tear line</option>
+        <option value="bleed">Bleed guide</option>
+        <option value="safe-zone">Safe zone · not cut</option>
+        <option value="glue-flap">Glue flap guide</option>
+      </select>
+    </label>}
+    {!currentRole && !currentCrease && <fieldset className="space-y-1.5 rounded border p-2">
+      <legend className="px-1 text-[11px] font-medium">Create structural fold edge</legend>
+      <p className="text-[11px] text-muted-foreground">The path must exactly match the shared edge of two panels. Freeform score marks stay non-structural.</p>
+      <label className="block text-xs">Stable fold ID
+        <input className={`${input} min-h-10`} value={creaseId} maxLength={128} placeholder="e.g. front-left-fold" disabled={busy} onChange={(event) => setCreaseId(event.target.value)} />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-xs">Target angle · degrees
+          <input className={`${input} min-h-10`} type="number" min={-180} max={180} step={1} value={creaseAngle} disabled={busy} onChange={(event) => setCreaseAngle(Number(event.target.value))} />
+        </label>
+        <label className="text-xs">Fold direction
+          <select className={`${input} min-h-10`} value={creaseDirection} disabled={busy} onChange={(event) => setCreaseDirection(event.target.value as "mountain" | "valley")}>
+            <option value="valley">Valley</option><option value="mountain">Mountain</option>
+          </select>
+        </label>
+      </div>
+      <Button type="button" variant="outline" className="min-h-10 w-full" disabled={busy || !creaseId.trim() || !Number.isFinite(creaseAngle)} aria-busy={busy} onClick={() => void createCrease()}>
+        {busy ? "Validating fold edge…" : "Create fold edge"}
+      </Button>
+    </fieldset>}
+    {message && <p role={message.error ? "alert" : "status"} className={`break-words text-[11px] ${message.error ? "text-destructive" : "text-muted-foreground"}`}>{message.text}</p>}
+  </section>;
 }
 
 function Defaults() {
@@ -240,6 +342,7 @@ export function DesignPanel() {
     <div className="space-y-5">
       <Pages />
       <CanvasSettings />
+      <DielineProductionRole />
       <Defaults />
       <Insert />
       <Assets />

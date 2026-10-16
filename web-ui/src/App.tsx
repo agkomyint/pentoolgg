@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, FilePlus2, FolderOpen, Moon, Redo2, RefreshCw, Save, Sun, Undo2 } from "lucide-react";
 import { LATEST_FORMAT, collectIds, useStudio } from "@/store";
 import { workspaces } from "@/lib/workspaces";
@@ -21,6 +21,8 @@ import { RasterPanel } from "@/workspaces/RasterPanel";
 import { RasterStage } from "@/workspaces/RasterStage";
 import { ImageAdjust } from "@/workspaces/ImageAdjust";
 import { Scene3dPanel } from "@/workspaces/Scene3dPanel";
+import { UvWorkspaceStage } from "@/workspaces/UvWorkspaceStage";
+import { PackagingWorkspaceStage } from "@/workspaces/PackagingWorkspaceStage";
 import { useLayout } from "@/workspaces/layout/layoutStore";
 import { nextId, pageParent } from "@/workspaces/layout/layoutModel";
 import { findNode, pageOf } from "@/lib/model";
@@ -97,7 +99,7 @@ function WorkspaceBody() {
 }
 
 /** Right dock: stacked, collapsible panels (Properties, Layers, module). */
-function Dock() {
+function Dock({ mobileOpen }: { mobileOpen: boolean }) {
   const { workspaceId, selectedId, doc, pageId } = useStudio();
   const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0]!;
   const picked = selectedId ? findNode(pageOf(doc, pageId), selectedId)?.node : null;
@@ -111,7 +113,10 @@ function Dock() {
     </Section>
   );
   return (
-    <aside aria-label="Panels" className="flex w-72 shrink-0 flex-col overflow-y-auto border-l bg-card">
+    <aside id="mobile-panels" aria-label="Panels" className={cn(
+      "w-full shrink-0 flex-col overflow-y-auto border-t bg-card lg:flex lg:w-72 lg:border-l lg:border-t-0",
+      mobileOpen ? "flex max-h-[45vh]" : "hidden",
+    )}>
       {moduleFirst && module}
       <Section id="dock-properties" title="Properties">
         <div className="-mx-2 -my-1.5">
@@ -137,6 +142,7 @@ export default function App() {
   const s = useStudio();
   const render = useRenderStats();
   const openInput = useRef<HTMLInputElement>(null);
+  const [mobilePanelsOpen, setMobilePanelsOpen] = useState(false);
   useEffect(() => {
     void s.load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,7 +200,9 @@ export default function App() {
   const confirmDiscard = () => !s.dirty || window.confirm("Discard unsaved changes?");
   const pages = s.doc?.pages ?? [];
   const pageIndex = pages.findIndex((p) => p.id === s.pageId);
-  const stage = s.workspaceId === "photo" ? "photo" : s.workspaceId === "paint" ? "paint" : "canvas";
+  const stage = s.workspaceId === "photo" ? "photo" : s.workspaceId === "paint" ? "paint" : s.workspaceId === "3d" ? "3d" : "canvas";
+  const selectedNode = s.doc ? findNode(pageOf(s.doc, s.pageId), s.selectedId)?.node ?? null : null;
+  const hasSelectedDieline = stage === "3d" && selectedNode?.kind === "scene3d" && typeof selectedNode.dieline === "string";
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col bg-background text-foreground">
@@ -244,14 +252,16 @@ export default function App() {
             </Button>
           </Tip>
 
-          <nav aria-label="Modules" className="mx-auto flex items-center gap-0.5">
+          <nav aria-label="Modules" className="mx-auto flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-x-auto">
             {workspaces.map((w) => (
               <Tip key={w.id} label={`${w.label} — ${w.status === "planned" ? `coming soon (${w.since})` : w.status}`}>
                 <button
+                  aria-label={w.label}
                   aria-current={s.workspaceId === w.id ? "page" : undefined}
+                  title={w.label}
                   onClick={() => s.setWorkspace(w.id)}
                   className={cn(
-                    "flex h-7 items-center gap-1.5 rounded px-2 text-[12px] text-muted-foreground hover:text-foreground",
+                    "flex h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded px-2 text-[12px] text-muted-foreground hover:text-foreground lg:h-7 lg:w-auto",
                     s.workspaceId === w.id && "bg-accent text-foreground",
                     w.status === "planned" && "opacity-50",
                   )}
@@ -287,7 +297,7 @@ export default function App() {
         <div className="flex h-8 shrink-0 items-center gap-2 border-b bg-card/60 px-3 text-[12px]">
           <span className="max-w-56 truncate font-medium">{String(s.doc?.name ?? "Untitled")}</span>
           {s.dirty && <span className="text-warning">unsaved</span>}
-          {s.doc && !s.shared && <span className="text-muted-foreground">standalone</span>}
+          {s.doc && !s.shared && <span className="hidden text-muted-foreground sm:inline">standalone</span>}
           <span className="mx-1 h-4 w-px bg-border" />
           <select
             aria-label="Page"
@@ -301,18 +311,32 @@ export default function App() {
               </option>
             ))}
           </select>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 lg:hidden"
+            aria-expanded={mobilePanelsOpen}
+            aria-controls="mobile-panels"
+            onClick={() => setMobilePanelsOpen((open) => !open)}
+          >
+            {mobilePanelsOpen ? "Hide panels" : "Panels"}
+          </Button>
           {s.doc && (
             <Tip
               label={
                 s.doc.version < LATEST_FORMAT
-                  ? `Document format v${s.doc.version}. Upgrade to v${LATEST_FORMAT} for images, compositing, photo, print and layout.`
+                  ? `Document format v${s.doc.version}. Upgrade to v${LATEST_FORMAT} for current 3D packaging, layout and production features.`
                   : `Document format v${s.doc.version} (latest)`
               }
             >
               <Button
                 variant="outline"
                 size="sm"
-                className="h-6 px-2 text-[11px]"
+                className="h-6 shrink-0 px-2 text-[11px]"
+                aria-label={s.doc.version >= LATEST_FORMAT
+                  ? `Document format v${s.doc.version} (latest)`
+                  : `Upgrade document from format v${s.doc.version} to v${LATEST_FORMAT}`}
                 disabled={s.doc.version >= LATEST_FORMAT || s.busy}
                 onClick={() => {
                   if (
@@ -323,7 +347,9 @@ export default function App() {
                     void s.upgradeDoc();
                 }}
               >
-                {s.doc.version >= LATEST_FORMAT ? `Format v${s.doc.version}` : `Format v${s.doc.version} · Upgrade`}
+                {s.doc.version >= LATEST_FORMAT
+                  ? <><span className="sm:hidden">v{s.doc.version}</span><span className="hidden sm:inline">Format v{s.doc.version}</span></>
+                  : <><span className="sm:hidden">v{s.doc.version} ↑</span><span className="hidden sm:inline">Format v{s.doc.version} · Upgrade</span></>}
               </Button>
             </Tip>
           )}
@@ -334,8 +360,10 @@ export default function App() {
           )}
         </div>
 
-        <div className="flex min-h-0 flex-1">
-          {stage === "photo" ? (
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          {stage === "3d" ? (
+            hasSelectedDieline ? <PackagingWorkspaceStage /> : <UvWorkspaceStage />
+          ) : stage === "photo" ? (
             <PhotoStage />
           ) : stage === "paint" ? (
             <RasterStage />
@@ -347,7 +375,7 @@ export default function App() {
               </main>
             </>
           )}
-          <Dock />
+          <Dock mobileOpen={mobilePanelsOpen} />
         </div>
 
         {/* Status bar. */}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, postJson, type Doc, type SceneNode } from "@/lib/api";
-import { pageOf } from "@/lib/model";
+import { apply, findNode, invert, pageOf } from "@/lib/model";
 import { useStudio } from "@/store";
 import { usePaint } from "./rasterStore";
 
@@ -106,7 +106,11 @@ export function RasterStage() {
     const img = image.current;
     const canvas = doc ? pageOf(doc as Doc, pageId)?.canvas : undefined;
     if (!layer || !canvas || !img?.naturalWidth) return null;
-    return { node: layer, sx: img.naturalWidth / canvas.width, sy: img.naturalHeight / canvas.height, lx: layer.x ?? 0, ly: layer.y ?? 0 };
+    const found = findNode(pageOf(doc as Doc, pageId), layer.id);
+    const world = found?.world;
+    const inverse = world && invert(world);
+    if (!world || !inverse) return null;
+    return { node: layer, sx: img.naturalWidth / canvas.width, sy: img.naturalHeight / canvas.height, lx: layer.x ?? 0, ly: layer.y ?? 0, world, inverse };
   }, [doc, pageId, layer]);
 
   const draw = useCallback(() => {
@@ -270,7 +274,8 @@ export function RasterStage() {
     const uy = (-dx * Math.sin(a) + dy * Math.cos(a)) / zoom;
     const px = (ux * el.width) / el.offsetWidth + el.width / 2;
     const py = (uy * el.height) / el.offsetHeight + el.height / 2;
-    return { x: px / g.sx - g.lx, y: py / g.sy - g.ly, px, py };
+    const [parentX, parentY] = apply(g.inverse, px / g.sx, py / g.sy);
+    return { x: parentX - g.lx, y: parentY - g.ly, px, py };
   };
   const snap = (p: Pt): Pt => {
     const g = geometry();
@@ -285,7 +290,8 @@ export function RasterStage() {
       if (guide.axis === "x" && Math.abs(p.x - guide.at) <= SNAP) x = guide.at;
       if (guide.axis === "y" && Math.abs(p.y - guide.at) <= SNAP) y = guide.at;
     }
-    return { x, y, px: (x + g.lx) * g.sx, py: (y + g.ly) * g.sy };
+    const [pageX, pageY] = apply(g.world, x + g.lx, y + g.ly);
+    return { x, y, px: pageX * g.sx, py: pageY * g.sy };
   };
 
   const brush = () => {

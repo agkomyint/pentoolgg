@@ -54,6 +54,8 @@ fn development_schema_references_resolve_to_tracked_definitions() {
     }
     for file in [
         "docs/pen-format-v6.schema.json",
+        "docs/pen-format-v11.schema.json",
+        "docs/scene3d-batch-queue.schema.json",
         "docs/penpreset.schema.json",
     ] {
         let path = Path::new(file);

@@ -8,6 +8,7 @@ export type Page = {
   layers?: Layer[];
   canvas?: { width: number; height: number };
   production?: unknown;
+  dieline_layout?: { dieline: string; coordinates: "mm" };
 };
 export type Layer = {
   id: string;
@@ -60,11 +61,59 @@ export type PreflightReport = {
   warnings: number;
   issues: PreflightIssue[];
   production: unknown;
+  scene3d_ppi?: {
+    node: string;
+    width_px: number;
+    height_px: number;
+    placed_width: number;
+    placed_height: number;
+    effective_ppi: { x: number; y: number; units_per_inch: number };
+  }[];
+  scene3d_ppi_omitted?: number;
 };
 export type PlateListing = {
   width: number;
   height: number;
   plates: { plate: string; spot: boolean; average_coverage_percent: number; max_percent: number }[];
+};
+
+export type Scene3dUvIsland = {
+  id: string;
+  uv_set: number;
+  triangle_count: number;
+  uv_bounds: { min: [number, number]; max: [number, number] };
+  mirrored: boolean;
+  texture_resolution_px: [number, number];
+  texel_density_px_per_model_unit: number | null;
+  below_minimum_texel_density: boolean | null;
+};
+export type Scene3dUvTexelDensity = {
+  uv_set: number;
+  texture_resolution_px: [number, number];
+  texel_density_px_per_model_unit: number | null;
+  below_minimum_texel_density: boolean | null;
+  model_area_unit: "model_unit";
+};
+export type Scene3dUvDiscontinuityReport = {
+  uv_set: number;
+  count: number;
+  analyzed_triangles: number;
+  analysis_truncated: boolean;
+  details_truncated: boolean;
+  render_segments_truncated: boolean;
+  edges: { triangles: number[]; occurrence_count: number; segments_truncated: boolean; uv_segments: [[[number, number], [number, number]]][] }[];
+};
+export type Scene3dUvPrimitive = {
+  primitive: number;
+  name?: string;
+  triangles: number;
+  vertices: number;
+  uv_sets: number;
+  texel_density: Scene3dUvTexelDensity[];
+  uv_discontinuities: Scene3dUvDiscontinuityReport[];
+  islands?: Scene3dUvIsland[];
+  island_overlap_candidates?: [string, string][];
+  island_overlap_analysis_truncated?: boolean;
 };
 
 export const api = {
@@ -109,8 +158,68 @@ export const api = {
     getJson<{ document: Record<string, unknown>; asset: { name: string } }>(`/api/asset?spec=${encodeURIComponent(spec)}`),
   scene3dStatus: () =>
     getJson<{ active: "reference" | "accelerated"; accelerated_available: boolean; adapter?: string; backend?: string; fallback_reason?: string }>("/api/scene3d/status"),
+  scene3dRenderReport: (body: { document: Doc; page: string; node: string }) =>
+    postJson<{ node: string; page: string; document_revision: string; local: true; render: { format: "pentool-scene3d-render-report-v1"; output: { format: "png"; width_px: number; height_px: number; bytes: number }; effective_ppi: { x: number; y: number; units_per_inch: number } | null; renderer_requested: "reference" | "accelerated"; renderer_used: "reference" | "accelerated"; cache_hit: boolean } }>("/api/scene3d/render-report", body),
   scene3dImport: (body: { document: Doc; data: string; format: "glb" | "gltf" | "obj"; id: string; layer: string; page?: string; x: number; y: number; width: number; height: number }) =>
     postJson<{ document: Doc; result: { id: string; model: string; report: unknown } }>("/api/scene3d/import", body),
+  scene3dForm: (body: { document: Doc; action: "add" | "set"; form_id: string; preset?: string; kind?: string; parameters?: Record<string, unknown>; material_slots?: string[]; node_id?: string; layer?: string; page?: string; placement?: [number, number, number, number] }) =>
+    postJson<{ document: Doc; result: { node?: string; form: string; vertices: number; triangles: number } }>("/api/scene3d/form", body),
+  scene3dFold: (body: { document: Doc; dieline: string; fold_state: number }) =>
+    postJson<{ document: Doc; result: { dieline: string; fold_state: number } }>("/api/scene3d/fold", body),
+  scene3dCreaseAngle: (body: { document: Doc; dieline: string; crease: string; angle_deg: number }) =>
+    postJson<{ document: Doc; result: { dieline: string; crease: string; previous_angle_deg: number; angle_deg: number } }>("/api/scene3d/crease-angle", body),
+  scene3dCreaseDirection: (body: { document: Doc; dieline: string; crease: string; direction: "mountain" | "valley" }) =>
+    postJson<{ document: Doc; result: { dieline: string; crease: string; previous_direction: string; direction: "mountain" | "valley" } }>("/api/scene3d/crease-direction", body),
+  scene3dPackSettings: (body: { document: Doc; dieline: string; board_mm?: number; bleed_mm?: number; seam_angle_deg?: number; wrap_direction?: "clockwise" | "counterclockwise" }) =>
+    postJson<{ document: Doc; result: { dieline: string; previous_board_mm: number; board_mm: number; previous_bleed_mm: number; bleed_mm: number; previous_seam_angle_deg: number | null; seam_angle_deg: number | null; previous_wrap_direction: string | null; wrap_direction: string | null } }>("/api/scene3d/pack/settings", body),
+  scene3dPackPreflight: (body: { document: Doc; dieline: string; min_ppi?: number }) =>
+    postJson<{ result: { id: string; template?: string; preflight_status: "mockup-ready" | "needs-review"; manufacturing_certified: false; panel_count: number; panel_art_bound: number; panels_without_artwork: string[]; fold_hinge_checks: { kind: "hinge" | "wrap-seam"; panels: string[]; gap_mm: number; tolerance_mm: number; joined: boolean }[]; fold_collision_report: { status: "checked-clear" | "potential-overlaps"; fold_state: number; pairs_tested: number; collision_count: number; collisions: { panels: string[]; kind: "zero-thickness-intersection" }[]; collisions_omitted: number; physical_thickness_tested: false } | null; rasterized_panels: string[]; rasterized_ppi: { panel: string; effective_ppi: number }[]; bleed_synthesized: { panel: string; bleed_mm: number; raster_ppi: number; pixel_width: number; pixel_height: number; cut_edges: string[]; method: string }[]; safe_zone_checks: { panel: string; inset_mm: number | null; within_safe_zone: boolean }[]; wrap_seam_checks: { panel: string; seam_angle_deg: number; direction: string; overlap_mm: number; touches_start_edge: boolean; touches_end_edge: boolean; touches_seam: boolean; method: string }[]; pdfx_output_role: { configured: boolean; space: string | null; profile: string | null; message: string | null }; minimum_ppi: number; warnings: string[]; production_blockers: string[] } }>("/api/scene3d/pack/preflight", body),
+  scene3dPackFlatPreview: (body: { document: Doc; dieline: string; min_ppi?: number }) =>
+    postJson<{ svg: string; report: { dieline: string; artwork_panels: string[]; rasterized_panels: string[]; rasterized_ppi: { panel: string; effective_ppi: number }[]; bleed_synthesized: { panel: string; bleed_mm: number; raster_ppi: number; pixel_width: number; pixel_height: number; cut_edges: string[]; method: string }[]; minimum_ppi: number; warnings: string[]; manufacturing_certified: false } }>("/api/scene3d/pack/flat-preview", body),
+  scene3dPackFacePreview: (body: { document: Doc; page: string; node: string; panel: string }) =>
+    postJson<{ node: string; page: string; panel: string; png_base64: string; max_edge_px: number }>("/api/scene3d/pack/face-preview", body),
+  async scene3dPackExportBundle(body: { document: Doc; dieline: string; min_ppi?: number; ppi?: number; fold?: number }) {
+    const response = await check(await fetch("/api/scene3d/pack/export-bundle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "pentool-packaging-bundle.zip";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+  scene3dSleeve: (body: { document: Doc; dieline_id: string; node_id: string; layer: string; page?: string; length_mm: number; width_mm: number; height_mm: number; board_mm: number; bleed_mm: number; placement: [number, number, number, number] }) =>
+    postJson<{ document: Doc; result: { node: string; dieline: string; panels: number; fold_state: number } }>("/api/scene3d/sleeve", body),
+  scene3dCarton: (body: { document: Doc; dieline_id: string; node_id: string; layer: string; page?: string; template: "straight-tuck" | "reverse-tuck" | "mailer"; length_mm: number; width_mm: number; height_mm: number; board_mm: number; bleed_mm: number; glue_flap_mm: number; placement: [number, number, number, number] }) =>
+    postJson<{ document: Doc; result: { node: string; dieline: string; template: string; panels: number; fold_state: number } }>("/api/scene3d/carton", body),
+  scene3dTubeLabel: (body: { document: Doc; dieline_id: string; node_id: string; layer: string; page?: string; radius_mm: number; height_mm: number; bleed_mm: number; overlap_mm?: number; placement: [number, number, number, number] }) =>
+    postJson<{ document: Doc; result: { node: string; dieline: string; template: string; panels: number; fold_state: number } }>("/api/scene3d/tube-label", body),
+  scene3dPouch: (body: { document: Doc; dieline_id: string; node_id: string; layer: string; page?: string; front_width_mm: number; gusset_mm: number; height_mm: number; bleed_mm: number; placement: [number, number, number, number] }) =>
+    postJson<{ document: Doc; result: { node: string; dieline: string; template: string; panels: number; fold_state: number } }>("/api/scene3d/pouch", body),
+  scene3dBottleLabel: (body: { document: Doc; dieline_id: string; node_id: string; layer: string; page?: string; radius_mm: number; height_mm: number; bleed_mm: number; overlap_mm?: number; placement: [number, number, number, number] }) =>
+    postJson<{ document: Doc; result: { node: string; dieline: string; template: string; panels: number; fold_state: number } }>("/api/scene3d/bottle-label", body),
+  scene3dPanelArt: (body: { document: Doc; dieline: string; panel: string; source?: { kind: "page" | "node"; page: string; node?: string } }) =>
+    postJson<{ document: Doc; result: { dieline: string; panel: string; artwork: unknown } }>("/api/scene3d/panel-art", body),
+  scene3dPanelArtTransform: (body: { document: Doc; dieline: string; panel: string; scale: [number, number]; offset: [number, number]; rotate: number }) =>
+    postJson<{ document: Doc; result: { dieline: string; panel: string; artwork_transform: { scale: [number, number]; offset: [number, number]; rotate: number } } }>("/api/scene3d/panel-art-transform", body),
+  scene3dPanelSafeZone: (body: { document: Doc; dieline: string; panel: string; inset_mm: number }) =>
+    postJson<{ document: Doc; result: { dieline: string; panel: string; safe_zone_mm: number } }>("/api/scene3d/panel-safe-zone", body),
+  scene3dPathRole: (body: { document: Doc; dieline: string; node: string; role: "cut" | "crease" | "perforation" | "bleed" | "safe-zone" | "glue-flap" }) =>
+    postJson<{ document: Doc; result: { dieline: string; path: string; node: string; role: string; spot: string } }>("/api/scene3d/path-role", body),
+  scene3dPathCrease: (body: { document: Doc; dieline: string; node: string; crease: string; angle_deg: number; direction: "mountain" | "valley" }) =>
+    postJson<{ document: Doc; result: { dieline: string; crease: string; node: string; line_mm: [[number, number], [number, number]]; angle_deg: number; direction: "mountain" | "valley" } }>("/api/scene3d/path-crease", body),
+  scene3dUvPreview: (document: Doc, node: string, primitive: number, size = 1024, textureResolution = 2048, minimumDensity?: number) =>
+    postJson<{ node: string; model: string; primitive: number; material_slot: string | null; svg: string; png_base64: string; report: { primitives: Scene3dUvPrimitive[] } }>("/api/scene3d/uv/preview", { document, node, primitive, size, texture_resolution: textureResolution, minimum_density: minimumDensity }),
+  scene3dUvModelPreview: (body: { document: Doc; page: string; node: string; primitive: number; island?: string }) =>
+    postJson<{ node: string; page: string; primitive: number; island: string | null; png_base64: string; max_edge_px: number }>("/api/scene3d/uv/model-preview", body),
+  scene3dUvFacePick: (body: { document: Doc; page: string; node: string; primitive?: number; x: number; y: number }) =>
+    postJson<{ node: string; page: string; primitive: number | null; panel: string | null; triangle: number | null; island: string | null; material_slot: string | null; uv: [number, number] | null }>("/api/scene3d/uv/face-pick", body),
+  scene3dUvPack: (body: { document: Doc; page: string; node: string; primitive: number; padding: number }) =>
+    postJson<{ document: Doc; result: { node: string; page: string; primitive: number; padding: number; islands: number } }>("/api/scene3d/uv/pack", body),
 };
 
 export type LayoutIssue = {

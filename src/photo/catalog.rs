@@ -933,6 +933,7 @@ fn with_catalog(raw: &Value) -> Result<(Value, bool)> {
                 | crate::color::VERSION
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
+                | crate::scene3d::node::BINDINGS_VERSION
         )
     );
     let mut document = if current {

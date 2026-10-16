@@ -1,0 +1,47 @@
+{
+  "format": "pentool-fixture-cases-v1",
+  "base": "v11-product-packaging.pen",
+  "cases": [
+    {
+      "id": "missing-page-source",
+      "expected_error": "missing-resource",
+      "replace": [{ "path": "/pages/1/layers/0/nodes/0/surface_graphics/0/source/page", "value": "not-a-page" }]
+    },
+    {
+      "id": "uv-triangle-owned-by-two-islands",
+      "expected_error": "invalid-input",
+      "replace": [{ "path": "/models/sha256:5f32296497f0c937569f9eac6a5ca28cf3e8123206d765f81c5bf3076ca0ee73/uv", "value": { "0": { "projection": "planar", "islands": [
+        { "id": "island-a", "uv_set": 0, "triangles": [0], "transform": { "scale": [1, 1], "offset": [0, 0], "rotate": 0 } },
+        { "id": "island-b", "uv_set": 0, "triangles": [0], "transform": { "scale": [1, 1], "offset": [0.5, 0], "rotate": 0 } }
+      ] } } }]
+    },
+    {
+      "id": "non-monotonic-bottle-profile",
+      "expected_error": "invalid-input",
+      "replace": [{ "path": "/product_forms/perfume-bottle/parameters/profile_mm", "value": [[24, 0], [26, 80], [24, 40], [8, 180]] }]
+    },
+    {
+      "id": "cut-contour-missing-panel",
+      "expected_error": "missing panel",
+      "replace": [{ "path": "/dielines/shirt-carton/paths/0", "value": { "id": "front-trim", "role": "cut", "panel_id": "missing", "d": "M 22 22 H 362 V 282 H 22 Z", "spot": "CutContour" } }]
+    },
+    {
+      "id": "board-thickness-over-limit",
+      "expected_error": "100",
+      "replace": [{ "path": "/dielines/shirt-carton/dimensions_mm/board", "value": 100.1 }]
+    },
+    {
+      "id": "open-associated-cut-contour",
+      "expected_error": "closed contour",
+      "replace": [{ "path": "/dielines/shirt-carton/paths/0", "value": { "id": "front-trim", "role": "cut", "panel_id": "front", "d": "M 22 22 H 362 V 282", "spot": "CutContour" } }]
+    },
+    {
+      "id": "surface-binding-cycle",
+      "expected_error": "dependency-cycle",
+      "replace": [
+        { "path": "/pages/1/layers/0/nodes/0/surface_graphics", "value": [{ "id": "to-carton", "source": { "kind": "node", "page": "products", "node": "carton-preview" }, "slot": "label-band", "mode": "decal", "projection": "uv" }] },
+        { "path": "/pages/1/layers/0/nodes/1", "value": { "kind": "scene3d", "id": "carton-preview", "x": 600, "y": 100, "width": 500, "height": 600, "dieline": "shirt-carton", "surface_graphics": [{ "id": "to-bottle", "source": { "kind": "node", "page": "products", "node": "perfume-preview" }, "slot": "front", "mode": "decal", "projection": "uv" }] } }
+      ]
+    }
+  ]
+}

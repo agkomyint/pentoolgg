@@ -6,12 +6,16 @@
 //! used, in a fixed order, so output is identical on every platform.
 
 use super::math::{self, Mat4, Vec3};
-use super::model::{AlphaMode, Instance, Material, Model, Texture};
-use anyhow::{bail, ensure, Result};
+use super::model::{
+    AlphaMode, GraphicBlend, Instance, Material, Model, Texture, TextureProjection, WrapMode,
+};
+use anyhow::{bail, ensure, Context, Result};
 
 pub const MAX_DIMENSION: u32 = 8192;
 pub const MAX_SUPERSAMPLE: u32 = 4;
 pub const MAX_LIGHTS: usize = 16;
+/// Peak bytes reserved for the CPU framebuffer and resolved image per render.
+pub const MAX_RENDER_BUFFER_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Projection {
@@ -184,23 +188,46 @@ struct Shared<'a> {
     exposure: f64,
     /// One entry per light, `None` when shadows are off.
     shadows: Vec<Option<super::shadow::ShadowSet>>,
+    bounds: (Vec3, Vec3),
 }
 
-fn sample(tex: &Texture, uv: [f64; 2], decode: &[f64; 256], srgb: bool) -> [f64; 4] {
+fn sample(
+    tex: &Texture,
+    uv: [f64; 2],
+    decode: &[f64; 256],
+    srgb: bool,
+    mode: &WrapMode,
+) -> [f64; 4] {
     let w = tex.width as usize;
     let h = tex.height as usize;
-    // Repeat wrap, bilinear, texel centers at half-integers.
-    let fx = uv[0] - floor(uv[0]);
-    let fy = uv[1] - floor(uv[1]);
+    // Normalize the address mode first, then use bilinear filtering with
+    // texel centers at half-integers.
+    let address = |v: f64| match mode {
+        WrapMode::Repeat => v.rem_euclid(1.0),
+        WrapMode::Clamp => v.clamp(0.0, 1.0),
+        WrapMode::Mirror => {
+            let p = v.rem_euclid(2.0);
+            if p <= 1.0 {
+                p
+            } else {
+                2.0 - p
+            }
+        }
+    };
+    let fx = address(uv[0]);
+    let fy = address(uv[1]);
     let x = fx * w as f64 - 0.5;
     let y = fy * h as f64 - 0.5;
     let x0 = floor(x);
     let y0 = floor(y);
     let tx = x - x0;
     let ty = y - y0;
-    let wrap = |v: f64, n: usize| (((v as i64) % n as i64 + n as i64) % n as i64) as usize;
+    let index = |v: f64, n: usize| match mode {
+        WrapMode::Repeat => (((v as i64) % n as i64 + n as i64) % n as i64) as usize,
+        WrapMode::Clamp | WrapMode::Mirror => (v as i64).clamp(0, n as i64 - 1) as usize,
+    };
     let fetch = |xi: f64, yi: f64| {
-        let i = (wrap(yi, h) * w + wrap(xi, w)) * 4;
+        let i = (index(yi, h) * w + index(xi, w)) * 4;
         let p = &tex.rgba[i..i + 4];
         let c = |k: usize| {
             if srgb && k < 3 {
@@ -224,12 +251,70 @@ fn sample(tex: &Texture, uv: [f64; 2], decode: &[f64; 256], srgb: bool) -> [f64;
     out
 }
 
+fn sample_triplanar(
+    tex: &Texture,
+    position: Vec3,
+    normal: Vec3,
+    bounds: (Vec3, Vec3),
+    decode: &[f64; 256],
+    srgb: bool,
+    wrap: &WrapMode,
+) -> [f64; 4] {
+    let (min, max) = bounds;
+    let extent = |axis: usize| (max[axis] - min[axis]).max(1e-9);
+    let uv = [
+        [
+            (position[2] - min[2]) / extent(2),
+            (position[1] - min[1]) / extent(1),
+        ],
+        [
+            (position[0] - min[0]) / extent(0),
+            (position[2] - min[2]) / extent(2),
+        ],
+        [
+            (position[0] - min[0]) / extent(0),
+            (position[1] - min[1]) / extent(1),
+        ],
+    ];
+    // Fourth-power weights keep the projection stable on broad faces while
+    // blending smoothly through edges and rounded corners.
+    let mut weights = [
+        normal[0].abs().powi(4),
+        normal[1].abs().powi(4),
+        normal[2].abs().powi(4),
+    ];
+    let total = (weights[0] + weights[1] + weights[2]).max(1e-12);
+    for weight in &mut weights {
+        *weight /= total;
+    }
+    let mut out = [0.0; 4];
+    for axis in 0..3 {
+        let value = sample(tex, uv[axis], decode, srgb, wrap);
+        for channel in 0..4 {
+            out[channel] += value[channel] * weights[axis];
+        }
+    }
+    out
+}
+
 fn floor(x: f64) -> f64 {
     let t = x as i64 as f64;
     if t > x {
         t - 1.0
     } else {
         t
+    }
+}
+
+fn blend_channel(mode: GraphicBlend, source: f64, destination: f64) -> f64 {
+    let (source, destination) = (math::clamp01(source), math::clamp01(destination));
+    match mode {
+        GraphicBlend::Multiply => source * destination,
+        GraphicBlend::Screen => source + destination - source * destination,
+        GraphicBlend::Overlay if destination <= 0.5 => 2.0 * source * destination,
+        GraphicBlend::Overlay => 1.0 - 2.0 * (1.0 - source) * (1.0 - destination),
+        GraphicBlend::Darken => source.min(destination),
+        GraphicBlend::Lighten => source.max(destination),
     }
 }
 
@@ -244,12 +329,21 @@ fn shade(
     let uv_of = |set: usize| vertex.uv[set.min(1)];
     let tex = |r: &Option<super::model::TexRef>, srgb: bool| {
         r.as_ref().map(|r| {
-            sample(
-                &model.textures[r.texture],
-                uv_of(r.uv_set),
-                &shared.decode,
-                srgb,
-            )
+            let texture = &model.textures[r.texture];
+            match r.projection {
+                TextureProjection::Uv => {
+                    sample(texture, uv_of(r.uv_set), &shared.decode, srgb, &r.wrap)
+                }
+                TextureProjection::Triplanar => sample_triplanar(
+                    texture,
+                    vertex.world,
+                    math::normalize(vertex.normal),
+                    shared.bounds,
+                    &shared.decode,
+                    srgb,
+                    &r.wrap,
+                ),
+            }
         })
     };
     let mut base = [
@@ -319,6 +413,9 @@ fn shade(
         base[2] * (1.0 - metallic),
     ];
     let mut out = [0.0f64; 3];
+    let shadow_catcher = material.name == "ground-shadow-catcher";
+    let mut catcher_shadow = 0.0;
+    let mut catcher_weight = 0.0;
 
     for (light_index, light) in shared.scene.lights.iter().enumerate() {
         let (l, radiance) = match light {
@@ -368,13 +465,26 @@ fn shade(
         if n_dot_l <= 0.0 {
             continue;
         }
+        let visibility = shared
+            .shadows
+            .get(light_index)
+            .and_then(Option::as_ref)
+            .map_or(1.0, |set| set.visibility(vertex.world, n));
+        if shadow_catcher {
+            let weight = (radiance[0] + radiance[1] + radiance[2]) * n_dot_l;
+            catcher_shadow += (1.0 - visibility) * weight;
+            catcher_weight += weight;
+        }
         let radiance = match shared.shadows.get(light_index).and_then(Option::as_ref) {
-            Some(set) => {
-                let vis = set.visibility(vertex.world, n);
-                if vis <= 0.0 {
+            Some(_) => {
+                if visibility <= 0.0 {
                     continue;
                 }
-                [radiance[0] * vis, radiance[1] * vis, radiance[2] * vis]
+                [
+                    radiance[0] * visibility,
+                    radiance[1] * visibility,
+                    radiance[2] * visibility,
+                ]
             }
             None => radiance,
         };
@@ -391,6 +501,15 @@ fn shade(
             let diff = (1.0 - f) * diffuse_color[c] / math::PI;
             out[c] += (diff + spec) * radiance[c] * n_dot_l;
         }
+    }
+
+    if shadow_catcher {
+        let opacity = if catcher_weight > 0.0 {
+            (catcher_shadow / catcher_weight).clamp(0.0, 1.0) * base[3]
+        } else {
+            0.0
+        };
+        return [base[0], base[1], base[2], opacity];
     }
 
     // Gradient environment: diffuse from the normal, specular from reflection.
@@ -563,12 +682,27 @@ fn raster(
                 let a = math::clamp01(color[3]);
                 let dst = buf.color[idx];
                 let keep = 1.0 - a;
-                buf.color[idx] = [
-                    color[0] * a + dst[0] * keep,
-                    color[1] * a + dst[1] * keep,
-                    color[2] * a + dst[2] * keep,
-                    a + dst[3] * keep,
-                ];
+                let dst_a = math::clamp01(dst[3]);
+                let blend_mode = match material.alpha_mode {
+                    AlphaMode::GraphicBlend(mode) => Some(mode),
+                    _ => None,
+                };
+                let mut output = [0.0; 4];
+                for channel in 0..3 {
+                    let dst_straight = if dst_a > 1e-12 {
+                        dst[channel] / dst_a
+                    } else {
+                        0.0
+                    };
+                    let blended = blend_mode.map_or(color[channel], |mode| {
+                        blend_channel(mode, color[channel], dst_straight)
+                    });
+                    output[channel] = dst[channel] * keep
+                        + color[channel] * a * (1.0 - dst_a)
+                        + blended * a * dst_a;
+                }
+                output[3] = a + dst_a * keep;
+                buf.color[idx] = output;
             } else {
                 buf.depth[idx] = z;
                 buf.color[idx] = [color[0], color[1], color[2], 1.0];
@@ -619,13 +753,24 @@ fn check(scene: &Scene, options: &Options) -> Result<()> {
     if options.supersample == 0 || options.supersample > MAX_SUPERSAMPLE {
         bail!("[limit-exceeded] supersample must be 1..={MAX_SUPERSAMPLE}");
     }
-    let pixels = options.width as u64
-        * options.height as u64
-        * options.supersample as u64
-        * options.supersample as u64;
+    let output_pixels = u64::from(options.width) * u64::from(options.height);
+    let pixels = output_pixels * u64::from(options.supersample) * u64::from(options.supersample);
     if pixels > 64 * 1024 * 1024 {
         bail!("[limit-exceeded] render needs {pixels} samples; the limit is 67108864");
     }
+    let framebuffer_bytes = pixels
+        .checked_mul((std::mem::size_of::<f64>() + std::mem::size_of::<[f64; 4]>()) as u64)
+        .context("[limit-exceeded] render framebuffer byte count overflow")?;
+    let output_bytes = output_pixels
+        .checked_mul(4)
+        .context("[limit-exceeded] render output byte count overflow")?;
+    let reserved_bytes = framebuffer_bytes
+        .checked_add(output_bytes)
+        .context("[limit-exceeded] render allocation byte count overflow")?;
+    ensure!(
+        reserved_bytes <= MAX_RENDER_BUFFER_BYTES,
+        "[limit-exceeded] render buffers need {reserved_bytes} bytes; the limit is {MAX_RENDER_BUFFER_BYTES}; lower output size or supersample"
+    );
     if scene.lights.len() > MAX_LIGHTS {
         bail!("[limit-exceeded] at most {MAX_LIGHTS} lights are supported");
     }
@@ -664,6 +809,7 @@ pub fn render_with_lens(
     let Some(lens) = lens.filter(|l| l.samples > 1 && l.aperture_radius > 0.0) else {
         return render(model, scene, options);
     };
+    check(scene, options)?;
     ensure!(
         lens.samples <= MAX_LENS_SAMPLES,
         "[limit-exceeded] depth of field supports at most {MAX_LENS_SAMPLES} lens samples"
@@ -675,6 +821,25 @@ pub fn render_with_lens(
     ensure!(
         work <= MAX_LENS_WORK,
         "[limit-exceeded] depth of field would take {work} samples; the limit is {MAX_LENS_WORK}; lower samples, supersample or size"
+    );
+    let output_pixels = u64::from(options.width) * u64::from(options.height);
+    let accumulator_bytes = output_pixels
+        .checked_mul(std::mem::size_of::<[f64; 4]>() as u64)
+        .context("[limit-exceeded] depth-of-field accumulator byte count overflow")?;
+    let render_bytes = output_pixels
+        .checked_mul(u64::from(options.supersample).pow(2))
+        .and_then(|samples| {
+            samples
+                .checked_mul((std::mem::size_of::<f64>() + std::mem::size_of::<[f64; 4]>()) as u64)
+        })
+        .and_then(|bytes| bytes.checked_add(output_pixels * 4))
+        .context("[limit-exceeded] depth-of-field render byte count overflow")?;
+    let peak_bytes = accumulator_bytes
+        .checked_add(render_bytes)
+        .context("[limit-exceeded] depth-of-field allocation byte count overflow")?;
+    ensure!(
+        peak_bytes <= MAX_RENDER_BUFFER_BYTES,
+        "[limit-exceeded] depth of field needs up to {peak_bytes} render-buffer bytes; the limit is {MAX_RENDER_BUFFER_BYTES}; lower samples or output size"
     );
     let cam = &scene.camera;
     let forward = math::normalize(math::sub(cam.target, cam.eye));
@@ -758,6 +923,7 @@ pub fn render(model: &Model, scene: &Scene, options: &Options) -> Result<Image> 
         eye: scene.camera.eye,
         exposure: math::pow(2.0, scene.exposure_ev),
         shadows,
+        bounds: model.bounds().unwrap_or(([0.0; 3], [1.0; 3])),
     };
     let vp = view_projection(&scene.camera, options.width as f64 / options.height as f64);
     let default_material = Material::default();
@@ -778,7 +944,10 @@ pub fn render(model: &Model, scene: &Scene, options: &Options) -> Result<Image> 
                 .material
                 .and_then(|m| model.materials.get(m))
                 .unwrap_or(&default_material);
-            let is_blend = material.alpha_mode == AlphaMode::Blend;
+            let is_blend = matches!(
+                material.alpha_mode,
+                AlphaMode::Blend | AlphaMode::GraphicBlend(_)
+            );
             if !pass_blend && is_blend {
                 // Depth of the instance origin decides the blend order.
                 let o = math::transform_point(&inst.transform, [0.0; 3]);
@@ -909,7 +1078,42 @@ pub fn default_lights() -> Vec<Light> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene3d::model::{Instance, Material, Model, Primitive};
+    use crate::scene3d::model::{
+        Instance, Material, Model, Primitive, TexRef, Texture, TextureProjection, WrapMode,
+    };
+
+    #[test]
+    fn texture_address_modes_repeat_clamp_and_mirror_out_of_range_uvs() {
+        let texture = Texture {
+            name: "wrap-test".into(),
+            width: 2,
+            height: 1,
+            rgba: vec![255, 0, 0, 255, 0, 0, 255, 255],
+        };
+        let decode = [0.0; 256];
+        let uv = [1.1, 0.5];
+        let repeat = sample(&texture, uv, &decode, false, &WrapMode::Repeat);
+        let clamp = sample(&texture, uv, &decode, false, &WrapMode::Clamp);
+        let mirror = sample(&texture, uv, &decode, false, &WrapMode::Mirror);
+        assert!(repeat[0] > 0.65 && repeat[0] < 0.75);
+        assert_eq!(clamp, [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(mirror, [0.0, 0.0, 1.0, 1.0]);
+        let mirrored_negative = sample(&texture, [-0.1, 0.5], &decode, false, &WrapMode::Mirror);
+        assert_eq!(mirrored_negative, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn graphic_blend_modes_use_deterministic_linear_channel_formulas() {
+        for (mode, expected) in [
+            (GraphicBlend::Multiply, 0.2),
+            (GraphicBlend::Screen, 0.85),
+            (GraphicBlend::Overlay, 0.7),
+            (GraphicBlend::Darken, 0.25),
+            (GraphicBlend::Lighten, 0.8),
+        ] {
+            assert!((blend_channel(mode, 0.25, 0.8) - expected).abs() < 1e-12);
+        }
+    }
 
     fn quad_model(z: f32, color: [f32; 4], blend: bool) -> Model {
         let mut m = Model::default();
@@ -972,6 +1176,55 @@ mod tests {
     }
 
     #[test]
+    fn textured_alpha_overlay_in_front_of_an_opaque_face_changes_pixels() {
+        let mut model = quad_model(0.0, [0.35, 0.35, 0.35, 1.0], false);
+        model.textures.push(Texture {
+            name: "solid-red-overlay".into(),
+            width: 1,
+            height: 1,
+            rgba: vec![255, 0, 0, 255],
+        });
+        model.materials.push(Material {
+            name: "red-overlay".into(),
+            base_color: [1.0; 4],
+            base_color_texture: Some(TexRef {
+                texture: 0,
+                uv_set: 0,
+                wrap: WrapMode::Clamp,
+                projection: TextureProjection::Uv,
+            }),
+            alpha_mode: AlphaMode::Blend,
+            ..Material::default()
+        });
+        let mut overlay = model.primitives[0].clone();
+        overlay.name = "red-overlay".into();
+        overlay
+            .positions
+            .iter_mut()
+            .for_each(|position| position[2] = 0.01);
+        overlay.uvs = vec![vec![[0.5, 0.5]; overlay.positions.len()]];
+        overlay.material = Some(1);
+        let primitive = model.primitives.len();
+        model.primitives.push(overlay);
+        model.instances.push(Instance {
+            id: "red-overlay".into(),
+            primitive,
+            transform: math::IDENTITY,
+        });
+        let opts = Options {
+            width: 32,
+            height: 32,
+            supersample: 1,
+        };
+        let image = render(&model, &scene(&model), &opts).unwrap();
+        let center = &image.rgba[(16 * 32 + 16) * 4..(16 * 32 + 16) * 4 + 4];
+        assert!(
+            center[0] > center[1].saturating_add(80),
+            "overlay pixel: {center:?}"
+        );
+    }
+
+    #[test]
     fn rendering_is_deterministic_and_antialiasing_adds_partial_alpha() {
         let model = quad_model(0.0, [0.2, 0.6, 1.0, 1.0], false);
         let opts = Options {
@@ -1026,6 +1279,37 @@ mod tests {
             };
             assert!(render(&model, &s, &o).is_err(), "{w}x{h}@{ss}");
         }
+        let large_supersampled = Options {
+            width: 2048,
+            height: 2048,
+            supersample: 2,
+        };
+        let error = render(&model, &s, &large_supersampled)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("render buffers need"),
+            "byte budget must reject before allocating the framebuffer: {error}"
+        );
+        let large_lens = Options {
+            width: 2048,
+            height: 2048,
+            supersample: 1,
+        };
+        let lens = Lens {
+            aperture_radius: 0.1,
+            focus_distance: 4.0,
+            samples: 2,
+        };
+        let error = render_with_lens(&model, &s, &large_lens, Some(&lens))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("depth of field needs up to"),
+            "combined lens and framebuffer bytes must be rejected before allocation: {error}"
+        );
     }
 
     #[test]

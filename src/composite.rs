@@ -302,6 +302,7 @@ pub fn is_document(raw: &Value) -> bool {
                 | crate::color::VERSION
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
+                | crate::scene3d::node::BINDINGS_VERSION
         )
     )
 }
@@ -1760,8 +1761,10 @@ impl Renderer<'_> {
                     )?)
                 }
             } else {
-                let raster_source =
-                    matches!(node["kind"].as_str(), Some("image" | "raster" | "photo"));
+                let raster_source = matches!(
+                    node["kind"].as_str(),
+                    Some("image" | "raster" | "photo" | "scene3d")
+                );
                 let vector_source = matches!(
                     node["kind"].as_str(),
                     Some("path" | "rect" | "ellipse" | "line" | "text")
@@ -1776,7 +1779,10 @@ impl Renderer<'_> {
                     let work = self.plain_node_pixels(node);
                     self.reserve_surface(work)?;
                     let mut content = node.clone();
-                    if matches!(content["kind"].as_str(), Some("image" | "raster" | "photo")) {
+                    if matches!(
+                        content["kind"].as_str(),
+                        Some("image" | "raster" | "photo" | "scene3d")
+                    ) {
                         content["opacity"] = json!(1.0);
                         content["blend_mode"] = json!("normal");
                     }

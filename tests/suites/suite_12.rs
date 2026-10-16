@@ -41,3 +41,18 @@ mod v0140_layout_api;
 
 #[path = "../v0150_scene3d.rs"]
 mod v0150_scene3d;
+
+#[path = "../v0160_bindings.rs"]
+mod v0160_bindings;
+
+#[path = "../v0160_migration.rs"]
+mod v0160_migration;
+
+#[path = "../v0160_mockup.rs"]
+mod v0160_mockup;
+
+#[path = "../v0160_packaging.rs"]
+mod v0160_packaging;
+
+#[path = "../v0160_uv.rs"]
+mod v0160_uv;

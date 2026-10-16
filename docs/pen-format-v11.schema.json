@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/pen-v11.json",
+  "title": "Pentool document v11 (product forms and packaging)",
+  "description": "v11 extends v10 scene3d with parametric forms, editable UV islands, source-linked surface graphics, and packaging dielines. Rust validation is authoritative for cross-reference and geometry checks.",
+  "type": "object",
+  "required": ["format", "version", "name", "pages", "color_management", "compositing", "image_assets", "product_forms", "dielines"],
+  "properties": {
+    "format": { "const": "pentool" },
+    "version": { "const": 11 },
+    "name": { "type": "string" },
+    "color_management": { "type": "object" },
+    "compositing": { "type": "object", "required": ["engine", "color_space"], "properties": { "engine": { "const": 1 }, "color_space": { "type": "string" } } },
+    "image_assets": { "type": "object" },
+    "styles": { "type": "object" },
+    "components": { "type": "array" },
+    "fonts": { "type": "array" },
+    "pages": { "type": "array", "minItems": 1, "maxItems": 5000, "items": { "$ref": "#/$defs/page" } },
+    "models": { "type": "object", "maxProperties": 256, "propertyNames": { "pattern": "^sha256:[0-9a-f]{64}$" }, "additionalProperties": { "$ref": "#/$defs/model" } },
+    "product_forms": { "type": "object", "maxProperties": 256, "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }, "additionalProperties": { "$ref": "#/$defs/productForm" } },
+    "dielines": { "type": "object", "maxProperties": 256, "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }, "additionalProperties": { "$ref": "#/$defs/dieline" } }
+  },
+  "$defs": {
+    "pair": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }], "items": false },
+    "quad": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }, { "type": "number" }, { "type": "number" }], "items": false },
+    "vec3": { "type": "array", "prefixItems": [{ "type": "number" }, { "type": "number" }, { "type": "number" }], "items": false },
+    "color": { "type": "string", "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$" },
+    "storage": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "data"], "properties": { "kind": { "const": "embedded" }, "data": { "type": "string", "contentEncoding": "base64" }, "resources": { "type": "object", "maxProperties": 1024, "additionalProperties": { "type": "object", "required": ["digest", "byte_length", "data"], "properties": { "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "byte_length": { "type": "integer", "minimum": 0 }, "data": { "type": "string", "contentEncoding": "base64" } } } } } },
+        { "type": "object", "required": ["kind", "path"], "properties": { "kind": { "const": "external" }, "path": { "type": "string", "minLength": 1 }, "resources": { "type": "object", "maxProperties": 1024, "additionalProperties": { "type": "object", "required": ["digest", "byte_length"], "properties": { "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "byte_length": { "type": "integer", "minimum": 0 } } } } }
+        }
+      ]
+    },
+    "uvTransform": { "type": "object", "required": ["scale", "offset", "rotate"], "properties": { "scale": { "$ref": "#/$defs/pair" }, "offset": { "$ref": "#/$defs/pair" }, "rotate": { "type": "number", "minimum": -360, "maximum": 360 } }, "additionalProperties": false },
+    "uvIsland": { "type": "object", "required": ["id", "uv_set", "triangles", "transform"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 128 }, "uv_set": { "type": "integer", "minimum": 0, "maximum": 3 }, "triangles": { "type": "array", "minItems": 1, "maxItems": 1000000, "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } }, "transform": { "$ref": "#/$defs/uvTransform" } }, "additionalProperties": false },
+    "uvOverlay": { "type": "object", "properties": { "projection": { "enum": ["planar", "box", "cylindrical", "spherical"] }, "axis": { "enum": ["x", "y", "z"] }, "scale": { "$ref": "#/$defs/pair" }, "offset": { "$ref": "#/$defs/pair" }, "rotate": { "type": "number" }, "islands": { "type": "array", "minItems": 1, "maxItems": 4096, "items": { "$ref": "#/$defs/uvIsland" } } }, "anyOf": [{ "required": ["projection"] }, { "required": ["islands"] }], "additionalProperties": false },
+    "model": { "type": "object", "required": ["format", "storage"], "properties": { "format": { "enum": ["glb", "gltf", "obj"] }, "name": { "type": "string" }, "bytes": { "type": "integer", "minimum": 0 }, "storage": { "$ref": "#/$defs/storage" }, "uv": { "type": "object", "maxProperties": 4096, "patternProperties": { "^(\\*|[0-9]+)$": { "$ref": "#/$defs/uvOverlay" } }, "additionalProperties": false } }, "additionalProperties": true },
+    "productForm": {
+      "type": "object",
+      "required": ["kind", "generator", "parameters"],
+      "properties": {
+        "kind": { "enum": ["box", "pouch", "cylinder", "tube", "lathe-bottle"] },
+        "generator": { "const": 1 },
+        "parameters": { "type": "object", "properties": {
+          "length_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+          "width_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+          "gusset_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+          "height_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+          "outer_diameter_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+          "inner_diameter_mm": { "type": "number", "minimum": 0, "maximum": 100000 },
+          "bevel_mm": { "type": "number", "minimum": 0, "maximum": 50000 },
+          "radial_segments": { "type": "integer", "minimum": 8, "maximum": 256 },
+          "capped": { "type": "boolean" },
+          "profile_mm": { "type": "array", "minItems": 3, "maxItems": 256, "items": { "$ref": "#/$defs/pair" } },
+          "profile_tangents": { "type": "array", "minItems": 3, "maxItems": 256, "description": "Optional radius-mm per height-mm tangent slope for each corresponding profile_mm control point; omitted slopes use the deterministic automatic curve.", "items": { "type": "number", "minimum": -20, "maximum": 20 } },
+          "cap_mm": { "type": "object", "required": ["radius_mm", "height_mm"], "properties": { "radius_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 }, "height_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 }, "offset_mm": { "type": "number", "minimum": -100000, "maximum": 100000, "default": 0 } }, "additionalProperties": false }
+        }, "additionalProperties": false },
+        "material_slots": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 128 }, "uniqueItems": true }
+        ,"uv": { "type": "object", "maxProperties": 4096, "patternProperties": { "^(\\*|[0-9]+)$": { "$ref": "#/$defs/uvOverlay" } }, "additionalProperties": false }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "box" } } }, "then": { "properties": { "parameters": { "required": ["length_mm", "width_mm", "height_mm"] } } } },
+        { "if": { "properties": { "kind": { "const": "pouch" } } }, "then": { "properties": { "parameters": { "required": ["width_mm", "height_mm", "gusset_mm"] } } } },
+        { "if": { "properties": { "kind": { "enum": ["cylinder", "tube"] } } }, "then": { "properties": { "parameters": { "required": ["height_mm", "outer_diameter_mm", "radial_segments"] } } } },
+        { "if": { "properties": { "kind": { "const": "lathe-bottle" } } }, "then": { "properties": { "parameters": { "required": ["height_mm", "radial_segments", "profile_mm"] } } } }
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "page"], "properties": { "kind": { "const": "page" }, "page": { "type": "string", "minLength": 1 } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "page", "node"], "properties": { "kind": { "const": "node" }, "page": { "type": "string", "minLength": 1 }, "node": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
+      ]
+    },
+    "surfaceGraphic": { "type": "object", "required": ["id", "source", "slot", "mode", "projection"], "properties": {
+      "id": { "type": "string", "minLength": 1, "maxLength": 128 }, "source": { "$ref": "#/$defs/source" }, "slot": { "type": "string", "minLength": 1, "maxLength": 128 }, "island": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "mode": { "enum": ["decal", "fill"] }, "projection": { "enum": ["uv", "planar", "box", "cylindrical", "spherical", "triplanar"] }, "axis": { "enum": ["x", "y", "z"] }, "fit": { "enum": ["contain", "cover", "stretch"] }, "wrap": { "enum": ["clamp", "repeat", "mirror"] },
+      "offset": { "$ref": "#/$defs/pair" }, "scale": { "$ref": "#/$defs/pair" }, "rotate": { "type": "number", "minimum": -360, "maximum": 360 }, "crop": { "$ref": "#/$defs/quad" }, "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "blend": { "enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten"] },
+      "material": { "type": "object", "properties": { "metallic": { "type": "number", "minimum": 0, "maximum": 1 }, "roughness": { "type": "number", "minimum": 0, "maximum": 1 }, "opacity": { "type": "number", "minimum": 0, "maximum": 1 } }, "additionalProperties": false }
+    }, "additionalProperties": false },
+    "scene3d": { "type": "object", "required": ["kind", "id", "x", "y", "width", "height"], "properties": {
+      "kind": { "const": "scene3d" }, "id": { "type": "string", "minLength": 1 }, "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number", "exclusiveMinimum": 0 }, "height": { "type": "number", "exclusiveMinimum": 0 },
+      "model": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }, "product_form": { "type": "string", "minLength": 1 }, "surface_graphics": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/surfaceGraphic" } }, "dieline": { "type": "string", "minLength": 1 },
+      "camera": { "type": "object" }, "physical_camera": { "type": "object" }, "lights": { "type": "array", "maxItems": 16, "items": { "type": "object" } }, "environment": { "type": "object" }, "background": { "type": "string" }, "exposure_ev": { "type": "number" }, "supersample": { "type": "integer", "minimum": 1, "maximum": 4 }, "pixel_ratio": { "type": "number", "minimum": 0.1, "maximum": 8 }, "shadows": { "type": "boolean" }, "shadow_map_size": { "type": "integer", "minimum": 64, "maximum": 2048 }, "ground_plane": { "type": "object", "required": ["enabled"], "properties": { "enabled": { "type": "boolean" }, "color": { "type": "string" }, "size_multiplier": { "type": "number", "minimum": 1, "maximum": 4 }, "offset": { "type": "number", "minimum": 0, "maximum": 0.25 }, "mode": { "enum": ["opaque", "shadow-catcher"] }, "opacity": { "type": "number", "minimum": 0, "maximum": 1 } }, "additionalProperties": false }, "material_overrides": { "type": "object" }, "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+    }, "oneOf": [{ "required": ["model"], "not": { "anyOf": [{"required":["product_form"]},{"required":["dieline"]}] } }, { "required": ["product_form"], "not": { "anyOf": [{"required":["model"]},{"required":["dieline"]}] } }, { "required": ["dieline"], "not": { "anyOf": [{"required":["model"]},{"required":["product_form"]}] } }] },
+    "node": { "type": "object", "required": ["kind", "id"], "allOf": [{ "if": { "properties": { "kind": { "const": "scene3d" } }, "required": ["kind"] }, "then": { "$ref": "#/$defs/scene3d" } }] },
+    "page": {
+      "type": "object",
+      "required": ["id", "canvas", "layers"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "canvas": { "type": "object", "required": ["width", "height"] },
+        "dieline_layout": { "$ref": "#/$defs/dielineLayout" },
+        "layers": { "type": "array", "items": { "type": "object", "required": ["id", "nodes"], "properties": { "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } } } } }
+      }
+    },
+    "dielineLayout": { "type": "object", "required": ["dieline", "coordinates"], "properties": { "dieline": { "type": "string", "minLength": 1 }, "coordinates": { "const": "mm" } }, "additionalProperties": false },
+    "point": { "$ref": "#/$defs/pair" },
+    "panel": { "type": "object", "required": ["id", "rect_mm", "face_slot", "uv_rect"], "properties": { "id": { "type": "string", "minLength": 1 }, "rect_mm": { "$ref": "#/$defs/quad" }, "face_slot": { "type": "string", "minLength": 1 }, "uv_rect": { "$ref": "#/$defs/quad" }, "artwork": { "$ref": "#/$defs/source" }, "artwork_transform": { "type": "object", "required": ["scale", "offset", "rotate"], "properties": { "scale": { "$ref": "#/$defs/pair" }, "offset": { "$ref": "#/$defs/pair" }, "rotate": { "type": "number", "minimum": -360, "maximum": 360 } }, "additionalProperties": false }, "safe_zone_mm": { "type": "number", "minimum": 0, "maximum": 500000 } }, "additionalProperties": false },
+    "crease": { "type": "object", "required": ["id", "line_mm", "angle_deg", "direction"], "properties": { "id": { "type": "string", "minLength": 1 }, "line_mm": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/point" }, { "$ref": "#/$defs/point" }], "items": false }, "angle_deg": { "type": "number", "minimum": -180, "maximum": 180 }, "direction": { "enum": ["mountain", "valley"] } }, "additionalProperties": false },
+    "productionPath": { "type": "object", "required": ["id", "role", "d"], "properties": { "id": { "type": "string", "minLength": 1 }, "role": { "enum": ["cut", "crease", "perforation", "bleed", "safe-zone", "glue-flap"] }, "d": { "type": "string", "minLength": 1, "maxLength": 1000000 }, "spot": { "type": "string" }, "panel_id": { "type": "string", "minLength": 1, "description": "Optional stable panel ID for a closed cut contour that defines that panel's artwork trim shape." } }, "additionalProperties": false },
+    "dieline": { "type": "object", "required": ["template", "units", "dimensions_mm", "panels", "creases", "paths"], "properties": {
+      "template": { "enum": ["straight-tuck", "reverse-tuck", "sleeve", "mailer", "cylinder", "tube", "pouch", "bottle-label", "svg-import"] }, "units": { "const": "mm" }, "layout_page": { "type": "string", "minLength": 1 }, "dimensions_mm": { "type": "object", "required": ["length", "width", "height", "board", "bleed"], "properties": { "length": { "type": "number", "exclusiveMinimum": 0 }, "width": { "type": "number", "exclusiveMinimum": 0 }, "height": { "type": "number", "exclusiveMinimum": 0 }, "board": { "type": "number", "minimum": 0, "maximum": 100 }, "bleed": { "type": "number", "minimum": 0 }, "glue_flap": { "type": "number", "minimum": 0 } }, "additionalProperties": false },
+      "panels": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/panel" } }, "creases": { "type": "array", "maxItems": 512, "items": { "$ref": "#/$defs/crease" } }, "paths": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/productionPath" } }, "wrap": { "type": "object", "required": ["radius_mm", "direction", "seam_angle_deg"], "properties": { "radius_mm": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 }, "direction": { "enum": ["clockwise", "counterclockwise"] }, "seam_angle_deg": { "type": "number", "minimum": -360, "maximum": 360 }, "overlap_mm": { "type": "number", "minimum": 0, "maximum": 100000 } }, "additionalProperties": false }, "scene3d_node": { "type": "string", "minLength": 1 }, "fold_state": { "type": "number", "minimum": 0, "maximum": 1 }
+    }, "additionalProperties": false }
+  }
+}

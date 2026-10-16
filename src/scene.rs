@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
-pub const LATEST_VERSION: u64 = crate::color::VERSION;
+pub const LATEST_VERSION: u64 = crate::scene3d::node::BINDINGS_VERSION;
 pub const MAX_DEPTH: usize = 64;
 
 pub fn is_scene_document(raw: &Value) -> bool {
@@ -19,6 +19,7 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::color::VERSION)
             | Some(crate::spreads::VERSION)
             | Some(crate::scene3d::node::VERSION)
+            | Some(crate::scene3d::node::BINDINGS_VERSION)
     )
 }
 
@@ -2804,6 +2805,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 | crate::color::VERSION
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
+                | crate::scene3d::node::BINDINGS_VERSION
         )
     {
         bail!("not a supported Pentool scene document")

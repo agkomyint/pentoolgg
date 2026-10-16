@@ -133,6 +133,19 @@ jobs:
         run: |
           mkdir -p layout-smoke
           python3 scripts/layout-smoke.py target/${{ matrix.target }}/release/${{ matrix.binary }} layout-smoke || python scripts/layout-smoke.py target/${{ matrix.target }}/release/${{ matrix.binary }} layout-smoke
+      - name: Smoke test v11 mockup bindings and packaging export
+        shell: bash
+        run: |
+          cp docs/fixtures/v11-product-packaging.pen packaging-smoke.pen
+          "$BIN" scene3d packaging-smoke.pen dependencies --json
+          "$BIN" scene3d packaging-smoke.pen render-report perfume-preview --json
+          "$BIN" pack packaging-smoke.pen preflight shirt-carton --json
+          "$BIN" pack packaging-smoke.pen preview shirt-carton --fold 0.5 --out packaging-preview.png --json
+          "$BIN" pack packaging-smoke.pen export shirt-carton --out packaging-flat.svg --json
+          "$BIN" color profile import packaging-smoke.pen docs/fixtures/print-CGATS21_CRPC7.icc --name press-coated --redistribution allowed --json
+          "$BIN" color role assign packaging-smoke.pen output --to '{"space":"icc-cmyk","profile":"press-coated"}' --intent relative-colorimetric --json
+          "$BIN" pack packaging-smoke.pen export-bundle shirt-carton --out packaging-bundle --min-ppi 36 --ppi 36 --fold 0.5 --json
+          "$BIN" pack verify-bundle packaging-bundle
       - name: Smoke test outlined typography
         shell: bash
         run: $BIN export examples/text-demo.pen text-smoke.svg --outline-text
@@ -173,6 +186,6 @@ jobs:
         run: cd artifacts && sha256sum *.zip *.tar.gz > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          draft: false
+          draft: true
           generate_release_notes: true
           files: artifacts/*

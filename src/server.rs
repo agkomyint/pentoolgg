@@ -74,7 +74,56 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/migrate", post(migrate_document))
         .route("/api/image/add", post(image_add))
         .route("/api/scene3d/import", post(scene3d_import))
+        .route("/api/scene3d/render-report", post(scene3d_render_report))
+        .route("/api/scene3d/form", post(scene3d_form))
+        .route("/api/scene3d/fold", post(scene3d_fold))
+        .route("/api/scene3d/pack/settings", post(scene3d_pack_settings))
+        .route("/api/scene3d/crease-angle", post(scene3d_crease_angle))
+        .route(
+            "/api/scene3d/crease-direction",
+            post(scene3d_crease_direction),
+        )
+        .route("/api/scene3d/pack/preflight", post(scene3d_pack_preflight))
+        .route(
+            "/api/scene3d/pack/flat-preview",
+            post(scene3d_pack_flat_preview),
+        )
+        .route(
+            "/api/scene3d/pack/export-bundle",
+            post(scene3d_pack_export_bundle),
+        )
+        .route(
+            "/api/scene3d/pack/face-preview",
+            post(scene3d_pack_face_preview),
+        )
+        .route("/api/scene3d/sleeve", post(scene3d_sleeve))
+        .route("/api/scene3d/carton", post(scene3d_carton))
+        .route("/api/scene3d/tube-label", post(scene3d_tube_label))
+        .route("/api/scene3d/pouch", post(scene3d_pouch))
+        .route("/api/scene3d/bottle-label", post(scene3d_bottle_label))
+        .route("/api/scene3d/panel-art", post(scene3d_panel_art))
+        .route(
+            "/api/scene3d/panel-art-transform",
+            post(scene3d_panel_art_transform),
+        )
+        .route(
+            "/api/scene3d/panel-safe-zone",
+            post(scene3d_panel_safe_zone),
+        )
+        .route("/api/scene3d/path-role", post(scene3d_path_role))
+        .route("/api/scene3d/path-crease", post(scene3d_path_crease))
+        .route("/api/scene3d/uv/preview", post(scene3d_uv_preview))
+        .route(
+            "/api/scene3d/uv/model-preview",
+            post(scene3d_uv_model_preview),
+        )
+        .route("/api/scene3d/uv/face-pick", post(scene3d_uv_face_pick))
+        .route("/api/scene3d/uv/pack", post(scene3d_uv_pack))
         .route("/api/scene3d/status", get(scene3d_status))
+        .route(
+            "/api/scene3d/cache",
+            get(scene3d_cache_status).delete(scene3d_cache_clear),
+        )
         .route("/api/color/preflight", get(color_preflight))
         .route("/api/layout", post(layout_command))
         .route("/api/layout/preflight", get(layout_preflight))
@@ -879,6 +928,1130 @@ struct Scene3dImportRequest {
     height: f64,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dFormRequest {
+    document: serde_json::Value,
+    action: String,
+    form_id: String,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    parameters: Option<serde_json::Value>,
+    #[serde(default)]
+    material_slots: Option<Vec<String>>,
+    #[serde(default)]
+    node_id: Option<String>,
+    #[serde(default)]
+    layer: Option<String>,
+    #[serde(default)]
+    page: Option<String>,
+    #[serde(default)]
+    placement: Option<[f64; 4]>,
+}
+
+fn plan_scene3d_form(request: &Scene3dFormRequest) -> Result<serde_json::Value> {
+    use serde_json::json;
+
+    anyhow::ensure!(
+        request
+            .document
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(11),
+        "[unsupported-version] product forms need document format v11; upgrade the document first"
+    );
+    let mut candidate = request.document.clone();
+    let form = match request.action.as_str() {
+        "add" => {
+            anyhow::ensure!(
+                !request.form_id.trim().is_empty(),
+                "[invalid-input] product form ID cannot be empty"
+            );
+            anyhow::ensure!(
+                candidate
+                    .get("product_forms")
+                    .and_then(|forms| forms.get(&request.form_id))
+                    .is_none(),
+                "[invalid-input] product form `{}` already exists",
+                request.form_id
+            );
+            let mut form = if let Some(preset) = &request.preset {
+                anyhow::ensure!(
+                    request.kind.is_none() && request.parameters.is_none(),
+                    "[invalid-input] a product-form preset cannot be combined with custom kind or parameters"
+                );
+                crate::scene3d::form::starter_preset(preset)?
+            } else {
+                let kind = request
+                    .kind
+                    .as_deref()
+                    .context("[invalid-input] new product form kind or preset is required")?;
+                let parameters = request
+                    .parameters
+                    .as_ref()
+                    .context("[invalid-input] new product form parameters are required")?;
+                anyhow::ensure!(
+                    parameters.is_object(),
+                    "[invalid-input] product form parameters must be an object"
+                );
+                json!({"kind":kind,"generator":1,"parameters":parameters})
+            };
+            if let Some(slots) = &request.material_slots {
+                form["material_slots"] = json!(slots);
+            }
+            form
+        }
+        "set" => {
+            anyhow::ensure!(
+                request.preset.is_none() && request.kind.is_none(),
+                "[invalid-input] product-form presets and kinds apply only when adding a form"
+            );
+            let current = candidate
+                .get("product_forms")
+                .and_then(|forms| forms.get(&request.form_id))
+                .with_context(|| {
+                    format!(
+                        "[missing-resource] product form `{}` does not exist",
+                        request.form_id
+                    )
+                })?;
+            let mut form = current.clone();
+            let parameters = request
+                .parameters
+                .as_ref()
+                .context("[invalid-input] updated product form parameters are required")?;
+            anyhow::ensure!(
+                parameters.is_object(),
+                "[invalid-input] product form parameters must be an object"
+            );
+            form["parameters"] = parameters.clone();
+            if let Some(slots) = &request.material_slots {
+                form["material_slots"] = json!(slots);
+            }
+            form
+        }
+        other => anyhow::bail!("[invalid-input] product form action `{other}` must be add or set"),
+    };
+    let model = crate::scene3d::form::generate(&form)
+        .with_context(|| format!("product form `{}`", request.form_id))?;
+    candidate["product_forms"][&request.form_id] = form;
+    let result = if request.action == "add" {
+        let node_id = request
+            .node_id
+            .as_deref()
+            .context("[invalid-input] new product form node ID is required")?;
+        let layer_id = request
+            .layer
+            .as_deref()
+            .context("[invalid-input] product form target layer is required")?;
+        let page_id = request
+            .page
+            .clone()
+            .or_else(|| {
+                candidate["pages"]
+                    .as_array()
+                    .and_then(|pages| pages.first())
+                    .and_then(|page| page["id"].as_str())
+                    .map(str::to_owned)
+            })
+            .context("[invalid-input] product form target page is required")?;
+        let placement = request.placement.unwrap_or([80.0, 80.0, 480.0, 480.0]);
+        anyhow::ensure!(
+            placement
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0),
+            "[invalid-input] product form placement values must be finite and nonnegative"
+        );
+        anyhow::ensure!(
+            placement[2] > 0.0 && placement[3] > 0.0,
+            "[invalid-input] product form node width and height must be positive"
+        );
+        let page = candidate["pages"]
+            .as_array_mut()
+            .context("[invalid-input] document pages are missing")?
+            .iter_mut()
+            .find(|page| page["id"].as_str() == Some(page_id.as_str()))
+            .with_context(|| format!("[missing-resource] page `{page_id}` does not exist"))?;
+        let layer = page["layers"]
+            .as_array_mut()
+            .context("[invalid-input] target page has no layers")?
+            .iter_mut()
+            .find(|layer| layer["id"].as_str() == Some(layer_id))
+            .with_context(|| {
+                format!("[missing-resource] layer `{layer_id}` does not exist on page `{page_id}`")
+            })?;
+        anyhow::ensure!(
+            layer["locked"].as_bool() != Some(true),
+            "[locked] target layer `{layer_id}` is locked"
+        );
+        layer["nodes"].as_array_mut().context("[invalid-input] target layer has no node array")?
+            .push(json!({"kind":"scene3d","id":node_id,"x":placement[0],"y":placement[1],"width":placement[2],"height":placement[3],"product_form":request.form_id}));
+        json!({"node":node_id,"form":request.form_id,"vertices":model.report.vertices,"triangles":model.report.triangles})
+    } else {
+        json!({"form":request.form_id,"vertices":model.report.vertices,"triangles":model.report.triangles})
+    };
+    crate::transaction::validate_value(&candidate)?;
+    Ok(json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_form(Json(request): Json<Scene3dFormRequest>) -> Response {
+    match plan_scene3d_form(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dFoldRequest {
+    document: serde_json::Value,
+    dieline: String,
+    fold_state: f64,
+}
+
+fn plan_scene3d_fold(request: &Scene3dFoldRequest) -> Result<serde_json::Value> {
+    use serde_json::json;
+    anyhow::ensure!(
+        request.document.get("version").and_then(serde_json::Value::as_u64) == Some(11),
+        "[unsupported-version] package folding needs document format v11; upgrade the document first"
+    );
+    anyhow::ensure!(
+        request.fold_state.is_finite() && (0.0..=1.0).contains(&request.fold_state),
+        "[invalid-input] fold state must be within 0..=1"
+    );
+    let mut candidate = request.document.clone();
+    let dieline = candidate
+        .get_mut("dielines")
+        .and_then(|dielines| dielines.get_mut(&request.dieline))
+        .with_context(|| {
+            format!(
+                "[missing-resource] dieline `{}` does not exist",
+                request.dieline
+            )
+        })?;
+    dieline["fold_state"] = json!(request.fold_state);
+    crate::transaction::validate_value(&candidate)?;
+    Ok(
+        json!({"document":candidate,"result":{"dieline":request.dieline,"fold_state":request.fold_state},"local":true}),
+    )
+}
+
+async fn scene3d_fold(Json(request): Json<Scene3dFoldRequest>) -> Response {
+    match plan_scene3d_fold(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dRenderReportRequest {
+    document: serde_json::Value,
+    page: String,
+    node: String,
+}
+
+fn find_scene3d_node<'a>(
+    nodes: &'a [serde_json::Value],
+    id: &str,
+) -> Option<&'a serde_json::Value> {
+    for node in nodes {
+        if node.get("id").and_then(serde_json::Value::as_str) == Some(id) {
+            return Some(node);
+        }
+        if let Some(found) = node
+            .get("children")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|children| find_scene3d_node(children, id))
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn plan_scene3d_render_report(
+    request: &Scene3dRenderReportRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    crate::transaction::validate_value(&request.document)?;
+    let page = request
+        .document
+        .get("pages")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|pages| {
+            pages.iter().find(|page| {
+                page.get("id").and_then(serde_json::Value::as_str) == Some(&request.page)
+            })
+        })
+        .with_context(|| format!("[missing-resource] page `{}` does not exist", request.page))?;
+    let node = page
+        .get("layers")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|layer| layer.get("nodes").and_then(serde_json::Value::as_array))
+        .find_map(|nodes| find_scene3d_node(nodes, &request.node))
+        .with_context(|| {
+            format!(
+                "[missing-resource] node `{}` does not exist on page `{}`",
+                request.node, request.page
+            )
+        })?;
+    anyhow::ensure!(
+        node.get("kind").and_then(serde_json::Value::as_str) == Some("scene3d"),
+        "[invalid-input] node `{}` is not a scene3d node",
+        request.node
+    );
+    let node = node
+        .as_object()
+        .context("[invalid-input] scene3d node must be an object")?;
+    let (_, report) = crate::scene3d::node::render_png_report_in_page(
+        &request.document,
+        project_root,
+        Some(&request.page),
+        node,
+    )?;
+    let revision = crate::transaction::revision(&serde_json::to_vec(&request.document)?);
+    Ok(serde_json::json!({
+        "node": request.node,
+        "page": request.page,
+        "document_revision": revision,
+        "render": report,
+        "local": true
+    }))
+}
+
+async fn scene3d_render_report(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dRenderReportRequest>,
+) -> Response {
+    match plan_scene3d_render_report(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dCreaseAngleRequest {
+    document: serde_json::Value,
+    dieline: String,
+    crease: String,
+    angle_deg: f64,
+}
+
+fn plan_scene3d_crease_angle(request: &Scene3dCreaseAngleRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::set_crease_angle(
+        &mut candidate,
+        &request.dieline,
+        &request.crease,
+        request.angle_deg,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_crease_angle(Json(request): Json<Scene3dCreaseAngleRequest>) -> Response {
+    match plan_scene3d_crease_angle(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dCreaseDirectionRequest {
+    document: serde_json::Value,
+    dieline: String,
+    crease: String,
+    direction: String,
+}
+
+fn plan_scene3d_crease_direction(
+    request: &Scene3dCreaseDirectionRequest,
+) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::set_crease_direction(
+        &mut candidate,
+        &request.dieline,
+        &request.crease,
+        &request.direction,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_crease_direction(Json(request): Json<Scene3dCreaseDirectionRequest>) -> Response {
+    match plan_scene3d_crease_direction(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPackSettingsRequest {
+    document: serde_json::Value,
+    dieline: String,
+    #[serde(default)]
+    board_mm: Option<f64>,
+    #[serde(default)]
+    bleed_mm: Option<f64>,
+    #[serde(default)]
+    seam_angle_deg: Option<f64>,
+    #[serde(default)]
+    wrap_direction: Option<String>,
+}
+
+fn plan_scene3d_pack_settings(request: &Scene3dPackSettingsRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::set_print_settings(
+        &mut candidate,
+        &request.dieline,
+        request.board_mm,
+        request.bleed_mm,
+        request.seam_angle_deg,
+        request.wrap_direction.as_deref(),
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_pack_settings(Json(request): Json<Scene3dPackSettingsRequest>) -> Response {
+    match plan_scene3d_pack_settings(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPackPreflightRequest {
+    document: serde_json::Value,
+    dieline: String,
+    #[serde(default = "scene3d_default_min_ppi")]
+    min_ppi: f64,
+}
+
+fn scene3d_default_min_ppi() -> f64 {
+    300.0
+}
+
+fn plan_scene3d_pack_preflight(
+    request: &Scene3dPackPreflightRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    let report = crate::scene3d::pack::preflight(
+        &request.document,
+        project_root,
+        &request.dieline,
+        request.min_ppi,
+    )?;
+    Ok(serde_json::json!({"result": report, "local": true}))
+}
+
+async fn scene3d_pack_preflight(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dPackPreflightRequest>,
+) -> Response {
+    match plan_scene3d_pack_preflight(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPackFlatPreviewRequest {
+    document: serde_json::Value,
+    dieline: String,
+    #[serde(default = "scene3d_default_min_ppi")]
+    min_ppi: f64,
+}
+
+fn plan_scene3d_pack_flat_preview(
+    request: &Scene3dPackFlatPreviewRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    const MAX_BROWSER_PREVIEW_BYTES: usize = 16 * 1024 * 1024;
+    let preview = crate::scene3d::pack::flat_dieline_svg_with_artwork(
+        &request.document,
+        project_root,
+        &request.dieline,
+        request.min_ppi,
+    )?;
+    anyhow::ensure!(
+        preview.svg.len() <= MAX_BROWSER_PREVIEW_BYTES,
+        "[limit-exceeded] flat dieline browser preview exceeds 16 MiB; export the SVG with the CLI instead"
+    );
+    Ok(serde_json::json!({
+        "svg": preview.svg,
+        "report": {
+            "dieline": request.dieline,
+            "artwork_panels": preview.artwork_panels,
+            "rasterized_panels": preview.rasterized_panels,
+            "rasterized_ppi": preview.rasterized_ppi,
+            "bleed_synthesized": preview.bleed_synthesized,
+            "minimum_ppi": request.min_ppi,
+            "warnings": preview.warnings,
+            "manufacturing_certified": false
+        }
+    }))
+}
+
+async fn scene3d_pack_flat_preview(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dPackFlatPreviewRequest>,
+) -> Response {
+    match plan_scene3d_pack_flat_preview(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPackExportBundleRequest {
+    document: serde_json::Value,
+    dieline: String,
+    #[serde(default = "scene3d_default_min_ppi")]
+    min_ppi: f64,
+    #[serde(default = "scene3d_default_min_ppi")]
+    ppi: f64,
+    #[serde(default = "scene3d_default_bundle_fold")]
+    fold: f64,
+}
+
+fn scene3d_default_bundle_fold() -> f64 {
+    1.0
+}
+
+fn zip_pack_directory(
+    root: &std::path::Path,
+    directory: &std::path::Path,
+    writer: &mut zip::ZipWriter<std::io::Cursor<Vec<u8>>>,
+    total_bytes: &mut usize,
+) -> Result<()> {
+    let mut entries = std::fs::read_dir(directory)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort();
+    for path in entries {
+        let metadata = std::fs::symlink_metadata(&path)?;
+        anyhow::ensure!(
+            !metadata.file_type().is_symlink(),
+            "[invalid-input] packaging export encountered a symlink"
+        );
+        if metadata.is_dir() {
+            zip_pack_directory(root, &path, writer, total_bytes)?;
+            continue;
+        }
+        anyhow::ensure!(
+            metadata.is_file(),
+            "[invalid-input] packaging export encountered a non-file artifact"
+        );
+        *total_bytes = total_bytes
+            .checked_add(metadata.len() as usize)
+            .context("packaging ZIP size overflow")?;
+        anyhow::ensure!(
+            *total_bytes <= 512 * 1024 * 1024,
+            "[limit-exceeded] packaging print bundle exceeds the 512 MiB download limit"
+        );
+        let relative = path.strip_prefix(root)?;
+        let name = relative.to_string_lossy().replace('\\', "/");
+        writer.start_file(
+            name,
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        )?;
+        use std::io::Write as _;
+        writer.write_all(&crate::resource::read_bounded(&path, 512 * 1024 * 1024)?)?;
+    }
+    Ok(())
+}
+
+async fn scene3d_pack_export_bundle(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dPackExportBundleRequest>,
+) -> Response {
+    let result = (|| -> Result<Response> {
+        crate::scene::validate(&request.document)?;
+        let revision = crate::transaction::revision(&serde_json::to_vec(&request.document)?);
+        let source = state
+            .file
+            .clone()
+            .unwrap_or_else(|| state.project_root.join("untitled.pen"));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let temp_root = std::env::temp_dir().join(format!(
+            "pentool-pack-download-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&temp_root)?;
+        let bundle_dir = temp_root.join("bundle");
+        if let Err(error) = crate::scene3d::cli::write_pack_bundle(
+            &request.document,
+            &source,
+            crate::scene3d::cli::PackBundleOptions {
+                dieline_id: &request.dieline,
+                out: &bundle_dir,
+                min_ppi: request.min_ppi,
+                ppi: request.ppi,
+                bits: 8,
+                fold: request.fold,
+                source_revision: &revision,
+                dry_run: false,
+            },
+        ) {
+            let _ = std::fs::remove_dir_all(&temp_root);
+            return Err(error);
+        }
+        let mut uncompressed_bytes = 0usize;
+        let zipped = (|| -> Result<std::io::Cursor<Vec<u8>>> {
+            let verification = crate::scene3d::cli::verify_pack_bundle(&bundle_dir)?;
+            anyhow::ensure!(
+                verification["status"] == "verified",
+                "[integrity-error] generated packaging bundle did not pass verification"
+            );
+            let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            zip_pack_directory(
+                &bundle_dir,
+                &bundle_dir,
+                &mut archive,
+                &mut uncompressed_bytes,
+            )?;
+            Ok(archive.finish()?)
+        })();
+        let _ = std::fs::remove_dir_all(&temp_root);
+        let bytes = zipped?.into_inner();
+        anyhow::ensure!(
+            bytes.len() <= 512 * 1024 * 1024,
+            "[limit-exceeded] compressed packaging bundle exceeds the 512 MiB download limit"
+        );
+        let mut response = bytes.into_response();
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/zip"),
+        );
+        response.headers_mut().insert(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment; filename=\"pentool-packaging-bundle.zip\""),
+        );
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        Ok(response)
+    })();
+    result.unwrap_or_else(problem)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPackFacePreviewRequest {
+    document: serde_json::Value,
+    page: String,
+    node: String,
+    panel: String,
+}
+
+fn plan_scene3d_pack_face_preview(
+    request: &Scene3dPackFacePreviewRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    use base64::Engine as _;
+    const MAX_FACE_PREVIEW_EDGE: f64 = 768.0;
+    crate::scene::validate(&request.document)?;
+    let page = request.document["pages"]
+        .as_array()
+        .context("[invalid-input] document pages are missing")?
+        .iter()
+        .find(|page| page["id"].as_str() == Some(request.page.as_str()))
+        .with_context(|| format!("[missing-resource] page `{}` does not exist", request.page))?;
+    let source_node = find_scene3d_value(page, &request.node).with_context(|| {
+        format!(
+            "[missing-resource] scene3d node `{}` does not exist on page `{}`",
+            request.node, request.page
+        )
+    })?;
+    let dieline_id = source_node["dieline"].as_str().context(
+        "[unsupported-capability] selected-face preview requires a dieline-backed scene3d node",
+    )?;
+    let dieline = request.document["dielines"]
+        .get(dieline_id)
+        .with_context(|| format!("[missing-resource] dieline `{dieline_id}` does not exist"))?;
+    let panels = dieline["panels"]
+        .as_array()
+        .context("[invalid-input] dieline panels are missing")?;
+    anyhow::ensure!(
+        panels
+            .iter()
+            .any(|panel| panel["id"].as_str() == Some(request.panel.as_str())),
+        "[missing-resource] panel `{}` does not exist in dieline `{dieline_id}`",
+        request.panel
+    );
+    let model = crate::scene3d::pack::generate(dieline)?;
+    let selections = model
+        .primitives
+        .iter()
+        .enumerate()
+        .filter_map(|(index, primitive)| {
+            let name = primitive.name.as_str();
+            (name == request.panel || name.starts_with(&format!("{}-overlap-", request.panel)))
+                .then(|| (index, (0..primitive.triangle_count()).collect::<Vec<_>>()))
+        })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        !selections.is_empty(),
+        "[missing-resource] panel `{}` has no folded faces to highlight",
+        request.panel
+    );
+    let mut preview_node = source_node
+        .as_object()
+        .context("[invalid-input] scene3d node must be an object")?
+        .clone();
+    let width = preview_node["width"]
+        .as_f64()
+        .context("[invalid-input] scene3d node width is missing")?;
+    let height = preview_node["height"]
+        .as_f64()
+        .context("[invalid-input] scene3d node height is missing")?;
+    anyhow::ensure!(
+        width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0,
+        "[invalid-input] scene3d node dimensions must be finite and positive"
+    );
+    let scale = MAX_FACE_PREVIEW_EDGE / width.max(height);
+    preview_node.insert("width".into(), serde_json::json!(width * scale));
+    preview_node.insert("height".into(), serde_json::json!(height * scale));
+    preview_node.insert("pixel_ratio".into(), serde_json::json!(1.0));
+    preview_node.insert("supersample".into(), serde_json::json!(1));
+    let png = crate::scene3d::node::render_png_with_primitive_selections_in_page(
+        &request.document,
+        project_root,
+        Some(&request.page),
+        &preview_node,
+        selections,
+    )?;
+    anyhow::ensure!(
+        png.len() <= 16 * 1024 * 1024,
+        "[limit-exceeded] selected-face preview exceeds 16 MiB"
+    );
+    Ok(serde_json::json!({
+        "node":request.node,"page":request.page,"panel":request.panel,
+        "png_base64":base64::engine::general_purpose::STANDARD.encode(png),
+        "max_edge_px":MAX_FACE_PREVIEW_EDGE as u32
+    }))
+}
+async fn scene3d_pack_face_preview(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dPackFacePreviewRequest>,
+) -> Response {
+    match plan_scene3d_pack_face_preview(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dSleeveRequest {
+    document: serde_json::Value,
+    dieline_id: String,
+    node_id: String,
+    layer: String,
+    #[serde(default)]
+    page: Option<String>,
+    length_mm: f64,
+    width_mm: f64,
+    height_mm: f64,
+    #[serde(default)]
+    board_mm: f64,
+    #[serde(default)]
+    bleed_mm: f64,
+    placement: [f64; 4],
+}
+
+fn plan_scene3d_sleeve(request: &Scene3dSleeveRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::add_sleeve(
+        &mut candidate,
+        &request.dieline_id,
+        &request.node_id,
+        &request.layer,
+        request.page.as_deref(),
+        request.length_mm,
+        request.width_mm,
+        request.height_mm,
+        request.board_mm,
+        request.bleed_mm,
+        request.placement,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_sleeve(Json(request): Json<Scene3dSleeveRequest>) -> Response {
+    match plan_scene3d_sleeve(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dCartonRequest {
+    document: serde_json::Value,
+    dieline_id: String,
+    node_id: String,
+    layer: String,
+    #[serde(default)]
+    page: Option<String>,
+    template: String,
+    length_mm: f64,
+    width_mm: f64,
+    height_mm: f64,
+    #[serde(default = "scene3d_default_board")]
+    board_mm: f64,
+    #[serde(default = "scene3d_default_bleed")]
+    bleed_mm: f64,
+    #[serde(default = "scene3d_default_glue_flap")]
+    glue_flap_mm: f64,
+    placement: [f64; 4],
+}
+
+fn plan_scene3d_carton(request: &Scene3dCartonRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::add_tuck_carton(
+        &mut candidate,
+        &request.dieline_id,
+        &request.node_id,
+        &request.layer,
+        request.page.as_deref(),
+        &request.template,
+        request.length_mm,
+        request.width_mm,
+        request.height_mm,
+        request.board_mm,
+        request.bleed_mm,
+        request.glue_flap_mm,
+        request.placement,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_carton(Json(request): Json<Scene3dCartonRequest>) -> Response {
+    match plan_scene3d_carton(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dTubeLabelRequest {
+    document: serde_json::Value,
+    dieline_id: String,
+    node_id: String,
+    layer: String,
+    #[serde(default)]
+    page: Option<String>,
+    radius_mm: f64,
+    height_mm: f64,
+    #[serde(default = "scene3d_default_bleed")]
+    bleed_mm: f64,
+    #[serde(default)]
+    overlap_mm: f64,
+    placement: [f64; 4],
+}
+
+fn plan_scene3d_tube_label(request: &Scene3dTubeLabelRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::add_tube_label_with_overlap(
+        &mut candidate,
+        &request.dieline_id,
+        &request.node_id,
+        &request.layer,
+        request.page.as_deref(),
+        request.radius_mm,
+        request.height_mm,
+        request.bleed_mm,
+        request.overlap_mm,
+        request.placement,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_tube_label(Json(request): Json<Scene3dTubeLabelRequest>) -> Response {
+    match plan_scene3d_tube_label(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPouchRequest {
+    document: serde_json::Value,
+    dieline_id: String,
+    node_id: String,
+    layer: String,
+    #[serde(default)]
+    page: Option<String>,
+    front_width_mm: f64,
+    gusset_mm: f64,
+    height_mm: f64,
+    #[serde(default = "scene3d_default_bleed")]
+    bleed_mm: f64,
+    placement: [f64; 4],
+}
+
+fn plan_scene3d_pouch(request: &Scene3dPouchRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::add_pouch(
+        &mut candidate,
+        &request.dieline_id,
+        &request.node_id,
+        &request.layer,
+        request.page.as_deref(),
+        request.front_width_mm,
+        request.gusset_mm,
+        request.height_mm,
+        request.bleed_mm,
+        request.placement,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_pouch(Json(request): Json<Scene3dPouchRequest>) -> Response {
+    match plan_scene3d_pouch(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dBottleLabelRequest {
+    document: serde_json::Value,
+    dieline_id: String,
+    node_id: String,
+    layer: String,
+    #[serde(default)]
+    page: Option<String>,
+    radius_mm: f64,
+    height_mm: f64,
+    #[serde(default = "scene3d_default_bleed")]
+    bleed_mm: f64,
+    #[serde(default)]
+    overlap_mm: f64,
+    placement: [f64; 4],
+}
+
+fn plan_scene3d_bottle_label(request: &Scene3dBottleLabelRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::pack::add_bottle_label(
+        &mut candidate,
+        &request.dieline_id,
+        &request.node_id,
+        &request.layer,
+        request.page.as_deref(),
+        request.radius_mm,
+        request.height_mm,
+        request.bleed_mm,
+        request.overlap_mm,
+        request.placement,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_bottle_label(Json(request): Json<Scene3dBottleLabelRequest>) -> Response {
+    match plan_scene3d_bottle_label(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+fn scene3d_default_board() -> f64 {
+    0.5
+}
+
+fn scene3d_default_bleed() -> f64 {
+    3.0
+}
+
+fn scene3d_default_glue_flap() -> f64 {
+    15.0
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPanelArtRequest {
+    document: serde_json::Value,
+    dieline: String,
+    panel: String,
+    #[serde(default)]
+    source: Option<serde_json::Value>,
+}
+
+fn plan_scene3d_panel_art(request: &Scene3dPanelArtRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::bindings::set_panel_artwork(
+        &mut candidate,
+        &request.dieline,
+        &request.panel,
+        request.source.as_ref(),
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_panel_art(Json(request): Json<Scene3dPanelArtRequest>) -> Response {
+    match plan_scene3d_panel_art(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPanelArtTransformRequest {
+    document: serde_json::Value,
+    dieline: String,
+    panel: String,
+    scale: [f64; 2],
+    offset: [f64; 2],
+    rotate: f64,
+}
+
+fn plan_scene3d_panel_art_transform(
+    request: &Scene3dPanelArtTransformRequest,
+) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::bindings::set_panel_artwork_transform(
+        &mut candidate,
+        &request.dieline,
+        &request.panel,
+        request.scale,
+        request.offset,
+        request.rotate,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_panel_art_transform(
+    Json(request): Json<Scene3dPanelArtTransformRequest>,
+) -> Response {
+    match plan_scene3d_panel_art_transform(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPanelSafeZoneRequest {
+    document: serde_json::Value,
+    dieline: String,
+    panel: String,
+    inset_mm: f64,
+}
+
+fn plan_scene3d_panel_safe_zone(
+    request: &Scene3dPanelSafeZoneRequest,
+) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::bindings::set_panel_safe_zone(
+        &mut candidate,
+        &request.dieline,
+        &request.panel,
+        request.inset_mm,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_panel_safe_zone(Json(request): Json<Scene3dPanelSafeZoneRequest>) -> Response {
+    match plan_scene3d_panel_safe_zone(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPathRoleRequest {
+    document: serde_json::Value,
+    dieline: String,
+    node: String,
+    role: String,
+}
+
+fn plan_scene3d_path_role(request: &Scene3dPathRoleRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::bindings::set_layout_path_role(
+        &mut candidate,
+        &request.dieline,
+        &request.node,
+        &request.role,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    let resolved = crate::scene3d::pack::dieline_from_document(&candidate, &request.dieline)?;
+    crate::scene3d::pack::flat_dieline_svg(&resolved)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_path_role(Json(request): Json<Scene3dPathRoleRequest>) -> Response {
+    match plan_scene3d_path_role(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Scene3dPathCreaseRequest {
+    document: serde_json::Value,
+    dieline: String,
+    node: String,
+    crease: String,
+    angle_deg: f64,
+    direction: String,
+}
+
+fn plan_scene3d_path_crease(request: &Scene3dPathCreaseRequest) -> Result<serde_json::Value> {
+    let mut candidate = request.document.clone();
+    let result = crate::scene3d::bindings::set_layout_path_crease(
+        &mut candidate,
+        &request.dieline,
+        &request.node,
+        &request.crease,
+        request.angle_deg,
+        &request.direction,
+    )?;
+    crate::transaction::validate_value(&candidate)?;
+    let resolved = crate::scene3d::pack::dieline_from_document(&candidate, &request.dieline)?;
+    crate::scene3d::pack::flat_dieline_svg(&resolved)?;
+    crate::scene3d::pack::generate(&resolved)?;
+    Ok(serde_json::json!({"document":candidate,"result":result,"local":true}))
+}
+
+async fn scene3d_path_crease(Json(request): Json<Scene3dPathCreaseRequest>) -> Response {
+    match plan_scene3d_path_crease(&request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 fn scene3d_default_extent() -> f64 {
     400.0
 }
@@ -959,8 +2132,627 @@ async fn scene3d_status() -> Response {
         "adapter": status.adapter,
         "backend": status.backend,
         "fallback_reason": status.reason,
+        "render_cache": crate::scene3d::node::png_cache_status(),
     }))
     .into_response()
+}
+
+async fn scene3d_cache_status() -> Response {
+    Json(crate::scene3d::node::png_cache_status()).into_response()
+}
+
+async fn scene3d_cache_clear() -> Response {
+    Json(crate::scene3d::node::clear_png_cache()).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct Scene3dUvPreviewRequest {
+    document: serde_json::Value,
+    node: String,
+    primitive: usize,
+    #[serde(default = "scene3d_uv_default_size")]
+    size: u32,
+    #[serde(default = "scene3d_uv_default_texture_resolution")]
+    texture_resolution: u32,
+    minimum_density: Option<f64>,
+}
+
+#[derive(serde::Deserialize)]
+struct Scene3dUvModelPreviewRequest {
+    document: serde_json::Value,
+    page: String,
+    node: String,
+    primitive: usize,
+    island: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct Scene3dUvFacePickRequest {
+    document: serde_json::Value,
+    page: String,
+    node: String,
+    #[serde(default)]
+    primitive: Option<usize>,
+    /// Normalized coordinates in the rendered preview, each in [0, 1].
+    x: f64,
+    y: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct Scene3dUvPackRequest {
+    document: serde_json::Value,
+    page: String,
+    node: String,
+    primitive: usize,
+    #[serde(default = "scene3d_uv_default_padding")]
+    padding: f64,
+}
+
+fn scene3d_uv_default_padding() -> f64 {
+    0.01
+}
+
+fn scene3d_uv_default_size() -> u32 {
+    1024
+}
+
+fn scene3d_uv_default_texture_resolution() -> u32 {
+    2048
+}
+
+fn find_scene3d_value<'a>(value: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+    if value.get("kind").and_then(serde_json::Value::as_str) == Some("scene3d")
+        && value.get("id").and_then(serde_json::Value::as_str) == Some(id)
+    {
+        return Some(value);
+    }
+    match value {
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(|value| find_scene3d_value(value, id)),
+        serde_json::Value::Object(values) => values
+            .values()
+            .find_map(|value| find_scene3d_value(value, id)),
+        _ => None,
+    }
+}
+
+fn plan_scene3d_uv_preview(
+    request: &Scene3dUvPreviewRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    use base64::Engine as _;
+    crate::scene::validate(&request.document)?;
+    let node = find_scene3d_value(&request.document, &request.node).with_context(|| {
+        format!(
+            "[missing-resource] scene3d node `{}` does not exist",
+            request.node
+        )
+    })?;
+    let (model, overlays, source) = if let Some(digest) =
+        node.get("model").and_then(serde_json::Value::as_str)
+    {
+        (
+            crate::scene3d::node::load_model(&request.document, project_root, digest)?,
+            request.document["models"][digest]
+                .get("uv")
+                .unwrap_or(&serde_json::Value::Null),
+            serde_json::json!({"kind":"model","id":digest}),
+        )
+    } else if let Some(form_id) = node.get("product_form").and_then(serde_json::Value::as_str) {
+        (
+            crate::scene3d::node::load_form(&request.document, form_id)?,
+            request.document["product_forms"][form_id]
+                .get("uv")
+                .unwrap_or(&serde_json::Value::Null),
+            serde_json::json!({"kind":"product_form","id":form_id}),
+        )
+    } else {
+        anyhow::bail!("[unsupported-capability] UV workspace supports imported models and parametric product forms")
+    };
+    let primitive = model.primitives.get(request.primitive).with_context(|| {
+        format!(
+            "[missing-resource] primitive {} does not exist (model has {})",
+            request.primitive,
+            model.primitives.len()
+        )
+    })?;
+    let material_slot = primitive
+        .material
+        .and_then(|index| model.materials.get(index))
+        .map(|material| material.name.as_str());
+    let uv = crate::scene3d::uv::show_with_overlays_at_resolution(
+        &model,
+        overlays,
+        request.texture_resolution,
+        request.minimum_density,
+    )?;
+    let svg = crate::scene3d::uv::layout_svg(primitive, request.size)?;
+    let png = crate::scene3d::uv::layout_png(primitive, request.size)?;
+    Ok(serde_json::json!({
+        "node": request.node,
+        "source": source,
+        "primitive": request.primitive,
+        "material_slot": material_slot,
+        "svg": svg,
+        "png_base64": base64::engine::general_purpose::STANDARD.encode(png),
+        "report": uv,
+    }))
+}
+
+async fn scene3d_uv_preview(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dUvPreviewRequest>,
+) -> Response {
+    match plan_scene3d_uv_preview(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+fn plan_scene3d_uv_model_preview(
+    request: &Scene3dUvModelPreviewRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    use base64::Engine as _;
+    anyhow::ensure!(
+        request
+            .document
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(11),
+        "[unsupported-version] UV model preview requires document format v11"
+    );
+    crate::scene::validate(&request.document)?;
+    let page = request.document["pages"]
+        .as_array()
+        .context("[invalid-input] document pages are missing")?
+        .iter()
+        .find(|page| page["id"].as_str() == Some(request.page.as_str()))
+        .with_context(|| format!("[missing-resource] page `{}` does not exist", request.page))?;
+    let source_node = find_scene3d_value(page, &request.node).with_context(|| {
+        format!(
+            "[missing-resource] scene3d node `{}` does not exist on page `{}`",
+            request.node, request.page
+        )
+    })?;
+    let (model, source_record) = if let Some(digest) =
+        source_node.get("model").and_then(serde_json::Value::as_str)
+    {
+        (
+            crate::scene3d::node::load_model(&request.document, project_root, digest)?,
+            request.document["models"].get(digest).with_context(|| {
+                format!("[missing-resource] model record `{digest}` does not exist")
+            })?,
+        )
+    } else if let Some(form_id) = source_node
+        .get("product_form")
+        .and_then(serde_json::Value::as_str)
+    {
+        (
+            crate::scene3d::node::load_form(&request.document, form_id)?,
+            request.document["product_forms"]
+                .get(form_id)
+                .with_context(|| {
+                    format!("[missing-resource] product form `{form_id}` does not exist")
+                })?,
+        )
+    } else {
+        anyhow::bail!("[unsupported-capability] UV model preview supports imported models and parametric product forms")
+    };
+    let primitive = model.primitives.get(request.primitive).with_context(|| {
+        format!(
+            "[missing-resource] primitive {} does not exist (model has {})",
+            request.primitive,
+            model.primitives.len()
+        )
+    })?;
+    let triangles = if let Some(island_id) = request.island.as_deref() {
+        let key = request.primitive.to_string();
+        let empty_uv = serde_json::Value::Null;
+        let uv_overlays = source_record.get("uv").unwrap_or(&empty_uv);
+        let overlay = uv_overlays
+            .get(&key)
+            .or_else(|| uv_overlays.get("*"))
+            .with_context(|| {
+                format!(
+                    "[missing-resource] primitive {} has no UV overlay for island `{island_id}`",
+                    request.primitive
+                )
+            })?;
+        let island = overlay["islands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|island| island["id"].as_str() == Some(island_id))
+            .with_context(|| {
+                format!(
+                    "[missing-resource] UV island `{island_id}` does not exist on primitive {}",
+                    request.primitive
+                )
+            })?;
+        Some(
+            island["triangles"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|triangle| {
+                    triangle.as_u64().map(|triangle| triangle as usize).context(
+                        "[invalid-input] UV island triangle indices must be non-negative integers",
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?,
+        )
+    } else {
+        None
+    };
+    if let Some(triangles) = &triangles {
+        anyhow::ensure!(
+            !triangles.is_empty(),
+            "[missing-resource] selected UV island has no triangles"
+        );
+        anyhow::ensure!(
+            triangles
+                .iter()
+                .all(|triangle| *triangle < primitive.triangle_count()),
+            "[invalid-input] selected UV island references a missing primitive triangle"
+        );
+    }
+    let mut preview_node = source_node
+        .as_object()
+        .context("[invalid-input] scene3d node must be an object")?
+        .clone();
+    let width = preview_node["width"]
+        .as_f64()
+        .context("[invalid-input] scene3d node width is missing")?;
+    let height = preview_node["height"]
+        .as_f64()
+        .context("[invalid-input] scene3d node height is missing")?;
+    let scale = 512.0 / width.max(height);
+    preview_node.insert("width".into(), serde_json::json!(width * scale));
+    preview_node.insert("height".into(), serde_json::json!(height * scale));
+    preview_node.insert("pixel_ratio".into(), serde_json::json!(1.0));
+    preview_node.insert("supersample".into(), serde_json::json!(1));
+    let png = match triangles {
+        Some(triangles) => crate::scene3d::node::render_png_with_island_selection_in_page(
+            &request.document,
+            project_root,
+            Some(&request.page),
+            &preview_node,
+            request.primitive,
+            triangles,
+        )?,
+        None => crate::scene3d::node::render_png_in_page(
+            &request.document,
+            project_root,
+            Some(&request.page),
+            &preview_node,
+        )?,
+    };
+    Ok(serde_json::json!({
+        "node": request.node,
+        "page": request.page,
+        "primitive": request.primitive,
+        "island": request.island,
+        "png_base64": base64::engine::general_purpose::STANDARD.encode(png),
+        "max_edge_px": 512,
+    }))
+}
+
+fn plan_scene3d_uv_face_pick(
+    request: &Scene3dUvFacePickRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    anyhow::ensure!(
+        request.x.is_finite()
+            && request.y.is_finite()
+            && (0.0..=1.0).contains(&request.x)
+            && (0.0..=1.0).contains(&request.y),
+        "[invalid-argument] face-pick coordinates must be normalized to [0, 1]"
+    );
+    crate::scene::validate(&request.document)?;
+    let page = request.document["pages"]
+        .as_array()
+        .context("[invalid-input] document pages are missing")?
+        .iter()
+        .find(|page| page["id"].as_str() == Some(request.page.as_str()))
+        .with_context(|| format!("[missing-resource] page `{}` does not exist", request.page))?;
+    let node = find_scene3d_value(page, &request.node).with_context(|| {
+        format!(
+            "[missing-resource] scene3d node `{}` does not exist on page `{}`",
+            request.node, request.page
+        )
+    })?;
+    let digest = node.get("model").and_then(serde_json::Value::as_str);
+    let model = if let Some(digest) = digest {
+        let loaded = crate::scene3d::node::load_model(&request.document, project_root, digest)?;
+        let mut model = loaded.as_ref().clone();
+        crate::scene3d::uv::apply(
+            &mut model,
+            request.document["models"][digest]
+                .get("uv")
+                .unwrap_or(&serde_json::Value::Null),
+        )?;
+        model
+    } else if let Some(form_id) = node.get("product_form").and_then(serde_json::Value::as_str) {
+        crate::scene3d::node::load_form(&request.document, form_id)?
+            .as_ref()
+            .clone()
+    } else if let Some(dieline_id) = node.get("dieline").and_then(serde_json::Value::as_str) {
+        let dieline = request.document["dielines"]
+            .get(dieline_id)
+            .with_context(|| format!("[missing-resource] dieline `{dieline_id}` is missing"))?;
+        crate::scene3d::pack::generate(dieline)?
+    } else {
+        anyhow::bail!("[unsupported-capability] face picking supports imported models, product forms, and packaging dielines")
+    };
+    if let Some(primitive) = request.primitive {
+        model
+            .primitives
+            .get(primitive)
+            .with_context(|| format!("[missing-resource] primitive {primitive} does not exist"))?;
+    }
+    let node_map = node
+        .as_object()
+        .context("[invalid-input] scene3d node must be an object")?;
+    let (scene, _) = crate::scene3d::node::scene_for(node_map, Some(&model))?;
+    let aspect = node["width"]
+        .as_f64()
+        .context("[invalid-input] scene3d node width is missing")?
+        / node["height"]
+            .as_f64()
+            .context("[invalid-input] scene3d node height is missing")?;
+    let camera = &scene.camera;
+    let forward =
+        crate::scene3d::math::normalize(crate::scene3d::math::sub(camera.target, camera.eye));
+    let right = crate::scene3d::math::normalize(crate::scene3d::math::cross(forward, camera.up));
+    let up = crate::scene3d::math::cross(right, forward);
+    let nx = request.x * 2.0 - 1.0;
+    let ny = 1.0 - request.y * 2.0;
+    let (origin, direction) = match camera.projection {
+        crate::scene3d::render::Projection::Perspective { fov_y_deg } => {
+            let t = crate::scene3d::math::tan(fov_y_deg * crate::scene3d::math::PI / 360.0);
+            (
+                camera.eye,
+                crate::scene3d::math::normalize(crate::scene3d::math::add(
+                    forward,
+                    crate::scene3d::math::add(
+                        crate::scene3d::math::scale(right, nx * t * aspect),
+                        crate::scene3d::math::scale(up, ny * t),
+                    ),
+                )),
+            )
+        }
+        crate::scene3d::render::Projection::Orthographic { height } => (
+            crate::scene3d::math::add(
+                camera.eye,
+                crate::scene3d::math::add(
+                    crate::scene3d::math::scale(right, nx * height * aspect * 0.5),
+                    crate::scene3d::math::scale(up, ny * height * 0.5),
+                ),
+            ),
+            forward,
+        ),
+    };
+    type FaceHit = (f64, usize, usize, Option<String>, Option<[f64; 2]>);
+    let mut nearest: Option<FaceHit> = None;
+    for instance in &model.instances {
+        let primitive = &model.primitives[instance.primitive];
+        for (triangle, indices) in primitive.indices.chunks_exact(3).enumerate() {
+            let vertices = [indices[0], indices[1], indices[2]].map(|index| {
+                crate::scene3d::math::transform_point(&instance.transform, {
+                    let p = primitive.positions[index as usize];
+                    [p[0] as f64, p[1] as f64, p[2] as f64]
+                })
+            });
+            let edge1 = crate::scene3d::math::sub(vertices[1], vertices[0]);
+            let edge2 = crate::scene3d::math::sub(vertices[2], vertices[0]);
+            let p = crate::scene3d::math::cross(direction, edge2);
+            let det = crate::scene3d::math::dot(edge1, p);
+            if det.abs() < 1e-12 {
+                continue;
+            }
+            let material = primitive
+                .material
+                .and_then(|index| model.materials.get(index));
+            if det < 0.0 && !material.is_some_and(|material| material.double_sided) {
+                continue;
+            }
+            let inv = 1.0 / det;
+            let tvec = crate::scene3d::math::sub(origin, vertices[0]);
+            let u = crate::scene3d::math::dot(tvec, p) * inv;
+            if !(0.0..=1.0).contains(&u) {
+                continue;
+            }
+            let q = crate::scene3d::math::cross(tvec, edge1);
+            let v = crate::scene3d::math::dot(direction, q) * inv;
+            if v < 0.0 || u + v > 1.0 {
+                continue;
+            }
+            let distance = crate::scene3d::math::dot(edge2, q) * inv;
+            if distance > 0.0
+                && nearest
+                    .as_ref()
+                    .is_none_or(|(best, _, _, _, _)| distance < *best)
+            {
+                let w = 1.0 - u - v;
+                let uv = primitive.uvs.first().map(|set| {
+                    let uv0 = set[indices[0] as usize];
+                    let uv1 = set[indices[1] as usize];
+                    let uv2 = set[indices[2] as usize];
+                    [
+                        f64::from(uv0[0]) * w + f64::from(uv1[0]) * u + f64::from(uv2[0]) * v,
+                        f64::from(uv0[1]) * w + f64::from(uv1[1]) * u + f64::from(uv2[1]) * v,
+                    ]
+                });
+                let slot = material.map(|material| material.name.clone());
+                nearest = Some((distance, instance.primitive, triangle, slot, uv));
+            }
+        }
+    }
+    // A face on another primitive in front of the selected one must occlude it.
+    let hit = nearest.filter(|(_, primitive, _, _, _)| {
+        request
+            .primitive
+            .is_none_or(|expected| *primitive == expected)
+    });
+    let picked_primitive = hit.as_ref().map(|(_, primitive, _, _, _)| *primitive);
+    let triangle = hit.as_ref().map(|(_, _, triangle, _, _)| *triangle);
+    let material_slot = hit.as_ref().and_then(|(_, _, _, slot, _)| slot.clone());
+    let uv = hit.as_ref().and_then(|(_, _, _, _, uv)| *uv);
+    let island = digest.and_then(|digest| {
+        let triangle = triangle?;
+        let primitive = picked_primitive?;
+        request.document["models"][digest]["uv"]
+            .as_object()?
+            .iter()
+            .filter(|(key, _)| key.as_str() == "*" || key.parse::<usize>().ok() == Some(primitive))
+            .flat_map(|(_, overlay)| overlay["islands"].as_array().into_iter().flatten())
+            .find(|island| {
+                island["triangles"].as_array().is_some_and(|triangles| {
+                    triangles
+                        .iter()
+                        .any(|value| value.as_u64() == Some(triangle as u64))
+                })
+            })
+            .and_then(|island| island["id"].as_str())
+            .map(str::to_owned)
+    });
+    let panel = node
+        .get("dieline")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| request.document["dielines"].get(id))
+        .and_then(|dieline| dieline["panels"].as_array())
+        .and_then(|panels| {
+            picked_primitive.and_then(|primitive| {
+                let name = model.primitives[primitive].name.as_str();
+                panels.iter().find_map(|panel| {
+                    let id = panel["id"].as_str()?;
+                    (name == id || name.starts_with(&format!("{id}-overlap-")))
+                        .then(|| id.to_owned())
+                })
+            })
+        });
+    Ok(serde_json::json!({
+        "node": request.node,
+        "page": request.page,
+        "primitive": picked_primitive,
+        "panel": panel,
+        "triangle": triangle,
+        "island": island,
+        "material_slot": material_slot,
+        "uv": uv
+    }))
+}
+
+async fn scene3d_uv_face_pick(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dUvFacePickRequest>,
+) -> Response {
+    match plan_scene3d_uv_face_pick(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+async fn scene3d_uv_model_preview(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dUvModelPreviewRequest>,
+) -> Response {
+    match plan_scene3d_uv_model_preview(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+fn plan_scene3d_uv_pack(
+    request: &Scene3dUvPackRequest,
+    project_root: &std::path::Path,
+) -> Result<serde_json::Value> {
+    anyhow::ensure!(
+        request
+            .document
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(11),
+        "[unsupported-version] editable UV island packing needs document format v11"
+    );
+    crate::scene::validate(&request.document)?;
+    let page = request.document["pages"]
+        .as_array()
+        .context("[invalid-input] document pages are missing")?
+        .iter()
+        .find(|page| page["id"].as_str() == Some(request.page.as_str()))
+        .with_context(|| format!("[missing-resource] page `{}` does not exist", request.page))?;
+    let node = find_scene3d_value(page, &request.node).with_context(|| {
+        format!(
+            "[missing-resource] scene3d node `{}` does not exist on page `{}`",
+            request.node, request.page
+        )
+    })?;
+    let (model, source_kind, source_id) = if let Some(digest) =
+        node.get("model").and_then(serde_json::Value::as_str)
+    {
+        (
+            crate::scene3d::node::load_model(&request.document, project_root, digest)?,
+            "models",
+            digest.to_owned(),
+        )
+    } else if let Some(form_id) = node.get("product_form").and_then(serde_json::Value::as_str) {
+        (
+            crate::scene3d::node::load_form(&request.document, form_id)?,
+            "product_forms",
+            form_id.to_owned(),
+        )
+    } else {
+        anyhow::bail!("[unsupported-capability] UV packing supports imported models and parametric product forms")
+    };
+    let primitive = model.primitives.get(request.primitive).with_context(|| {
+        format!(
+            "[missing-resource] primitive {} does not exist (model has {})",
+            request.primitive,
+            model.primitives.len()
+        )
+    })?;
+    let key = request.primitive.to_string();
+    let overlays = &request.document[source_kind][&source_id]["uv"];
+    let current_overlay = overlays
+        .get(&key)
+        .or_else(|| overlays.get("*"))
+        .cloned()
+        .context("[missing-resource] primitive has no editable UV islands to pack")?;
+    let packed_overlay =
+        crate::scene3d::uv::pack_islands(primitive, &current_overlay, request.padding)?;
+    let mut candidate = request.document.clone();
+    candidate[source_kind][&source_id]["uv"][&key] = packed_overlay;
+    crate::scene::validate(&candidate)?;
+    let packed_model = if source_kind == "models" {
+        crate::scene3d::node::load_model(&candidate, project_root, &source_id)?
+    } else {
+        crate::scene3d::node::load_form(&candidate, &source_id)?
+    };
+    let report = crate::scene3d::uv::show_with_overlays_at_resolution(
+        &packed_model,
+        &candidate[source_kind][&source_id]["uv"],
+        2048,
+        None,
+    )?;
+    Ok(serde_json::json!({
+        "document":candidate,
+        "result":{"node":request.node,"page":request.page,"primitive":request.primitive,
+            "padding":request.padding,"islands":candidate[source_kind][&source_id]["uv"][&key]["islands"].as_array().map_or(0, Vec::len),
+            "report":report["primitives"][request.primitive]},
+    }))
+}
+
+async fn scene3d_uv_pack(
+    State(state): State<Shared>,
+    Json(request): Json<Scene3dUvPackRequest>,
+) -> Response {
+    match plan_scene3d_uv_pack(&request, &state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -1587,8 +3379,8 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             .get("version")
             .and_then(serde_json::Value::as_u64)
             .context("[invalid-input] the document has no version")?;
-        if !(4..=10).contains(&body.target) {
-            bail!("[invalid-input] migration target must be between 4 and 10");
+        if !(4..=11).contains(&body.target) {
+            bail!("[invalid-input] migration target must be between 4 and 11");
         }
         if body.target <= from {
             bail!(
@@ -1596,7 +3388,8 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             );
         }
         let migrated = match body.target {
-            10 => crate::scene3d::node::migrate(body.document)?,
+            11 => crate::scene3d::node::migrate_to_v11(body.document)?,
+            10 => crate::scene3d::node::migrate(crate::scene3d::node::to_v10(body.document)?)?,
             9 => crate::spreads::migrate(body.document)?,
             8 => crate::color::catalog::migrate(body.document)?,
             7 => crate::photo::catalog::migrate(body.document)?,
@@ -2260,6 +4053,147 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn packaging_bundle_api_returns_the_complete_print_zip() {
+        use std::io::Read as _;
+        let mut document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "pentool-pack-api-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.pen");
+        crate::color::catalog::import(
+            &mut document,
+            &source,
+            include_bytes!("../docs/fixtures/print-CGATS21_CRPC7.icc"),
+            "press",
+            "allowed",
+            None,
+            None,
+        )
+        .unwrap();
+        document["color_management"]["roles"] = serde_json::json!({"output":{
+            "destination":{"space":"icc-cmyk","profile":"press"},
+            "intent":"relative-colorimetric"
+        }});
+        std::fs::write(&source, serde_json::to_vec(&document).unwrap()).unwrap();
+        let state = super::Shared {
+            file: Some(source.clone()),
+            project_root: root.clone(),
+            gate: std::sync::Arc::new(std::sync::Mutex::new(())),
+            previews: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            no_cache: false,
+        };
+        let response = super::scene3d_pack_export_bundle(
+            axum::extract::State(state),
+            axum::Json(super::Scene3dPackExportBundleRequest {
+                document: document.clone(),
+                dieline: "shirt-carton".into(),
+                min_ppi: 36.0,
+                ppi: 36.0,
+                fold: 1.0,
+            }),
+        )
+        .await;
+        let status = response.status();
+        let content_type = response.headers()[axum::http::header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let bytes = axum::body::to_bytes(response.into_body(), 512 * 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        assert_eq!(content_type, "application/zip");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "PRINT-GUIDE.txt"));
+        assert!(names
+            .iter()
+            .any(|name| name.starts_with("vector-spot-plates/") && name.ends_with(".svg")));
+        let mut guide = archive.by_name("PRINT-GUIDE.txt").unwrap();
+        let mut guide_text = String::new();
+        guide.read_to_string(&mut guide_text).unwrap();
+        assert!(guide_text.contains("CutContour = through-cut paths"));
+        assert!(guide_text.contains("Check folded-preview.png first"));
+        assert_eq!(
+            std::fs::read(&source).unwrap(),
+            serde_json::to_vec(&document).unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn packaging_bundle_zip_contains_relative_paths_and_bytes() {
+        use std::io::Read as _;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "pentool-pack-zip-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(root.join("plates")).unwrap();
+        std::fs::write(root.join("manifest.json"), b"manifest").unwrap();
+        std::fs::write(root.join("plates/CutContour.svg"), b"cut path").unwrap();
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let mut total = 0;
+        super::zip_pack_directory(&root, &root, &mut writer, &mut total).unwrap();
+        assert_eq!(total, b"manifest".len() + b"cut path".len());
+        let bytes = writer.finish().unwrap().into_inner();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["manifest.json", "plates/CutContour.svg"]);
+        let mut cut = archive.by_name("plates/CutContour.svg").unwrap();
+        let mut content = String::new();
+        cut.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "cut path");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scene3d_server_render_report_uses_the_shared_renderer() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let request = super::Scene3dRenderReportRequest {
+            document: document.clone(),
+            page: "products".into(),
+            node: "perfume-preview".into(),
+        };
+        let report = super::plan_scene3d_render_report(&request, &std::env::temp_dir()).unwrap();
+        assert_eq!(report["node"], "perfume-preview");
+        assert_eq!(report["page"], "products");
+        assert_eq!(
+            report["render"]["format"],
+            "pentool-scene3d-render-report-v1"
+        );
+        assert!(report["render"]["output"]["width_px"].as_u64().unwrap() > 0);
+        assert!(report["render"]["output"]["height_px"].as_u64().unwrap() > 0);
+        assert!(report["render"]["effective_ppi"]["x"].as_f64().unwrap() > 0.0);
+        assert_eq!(report["render"]["effective_ppi"]["units_per_inch"], 72.0);
+        assert_eq!(request.document, document);
+    }
+
     #[test]
     fn browser_scene3d_import_is_bounded_validated_and_atomic() {
         use base64::Engine as _;
@@ -2309,6 +4243,1323 @@ mod tests {
             super::plan_scene3d_import(&mut unchanged, &malformed, &std::env::temp_dir()).is_err()
         );
         assert_eq!(unchanged, raw);
+    }
+
+    #[test]
+    fn browser_uv_preview_uses_the_loaded_model_and_validates_primitive_bounds() {
+        use base64::Engine as _;
+        let raw = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let layer = raw["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        let mut document = raw;
+        let import = super::Scene3dImportRequest {
+            document: document.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(obj),
+            format: "obj".into(),
+            id: "uv-model".into(),
+            layer,
+            page: None,
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        super::plan_scene3d_import(&mut document, &import, &std::env::temp_dir()).unwrap();
+        let request = super::Scene3dUvPreviewRequest {
+            document: document.clone(),
+            node: "uv-model".into(),
+            primitive: 0,
+            size: 128,
+            texture_resolution: 4096,
+            minimum_density: Some(5000.0),
+        };
+        let preview = super::plan_scene3d_uv_preview(&request, &std::env::temp_dir()).unwrap();
+        assert_eq!(preview["material_slot"], serde_json::Value::Null);
+        assert!(preview["svg"].as_str().unwrap().contains("<path"));
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(preview["png_base64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(preview["report"]["primitives"][0]["uv_sets"], 1);
+        assert_eq!(
+            preview["report"]["primitives"][0]["texel_density"][0]["texture_resolution_px"],
+            serde_json::json!([4096, 4096])
+        );
+        assert_eq!(
+            preview["report"]["primitives"][0]["texel_density"][0]["below_minimum_texel_density"],
+            true
+        );
+
+        let invalid = super::Scene3dUvPreviewRequest {
+            primitive: 9,
+            ..request
+        };
+        let error = super::plan_scene3d_uv_preview(&invalid, &std::env::temp_dir()).unwrap_err();
+        assert!(error.to_string().contains("primitive 9"));
+    }
+
+    #[test]
+    fn browser_uv_face_pick_selects_the_hit_island_without_mutating_document() {
+        use base64::Engine as _;
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let mut document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        let import = super::Scene3dImportRequest {
+            document: document.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(obj),
+            format: "obj".into(),
+            id: "uv-face-pick-model".into(),
+            layer,
+            page: Some(page.clone()),
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        super::plan_scene3d_import(&mut document, &import, &std::env::temp_dir()).unwrap();
+        let digest = document["pages"][0]["layers"][0]["nodes"][0]["model"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        document["models"][&digest]["uv"]["0"] = serde_json::json!({
+            "islands":[{"id":"label","uv_set":0,"triangles":[0],"transform":{"scale":[1,1],"offset":[0,0],"rotate":0.0}}]
+        });
+        let before = document.clone();
+        let request = |x, y| super::Scene3dUvFacePickRequest {
+            document: document.clone(),
+            page: page.clone(),
+            node: "uv-face-pick-model".into(),
+            primitive: Some(0),
+            x,
+            y,
+        };
+        let hit =
+            super::plan_scene3d_uv_face_pick(&request(0.5, 0.5), &std::env::temp_dir()).unwrap();
+        assert_eq!(hit["triangle"], 0);
+        assert_eq!(hit["island"], "label");
+        assert_eq!(hit["uv"].as_array().unwrap().len(), 2);
+        assert_eq!(document, before);
+        assert!(
+            super::plan_scene3d_uv_face_pick(&request(f64::NAN, 0.5), &std::env::temp_dir())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn browser_uv_model_preview_highlights_selected_island_without_mutating_document() {
+        use base64::Engine as _;
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let mut document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        let import = super::Scene3dImportRequest {
+            document: document.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(obj),
+            format: "obj".into(),
+            id: "uv-highlight-model".into(),
+            layer,
+            page: Some(page.clone()),
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        super::plan_scene3d_import(&mut document, &import, &std::env::temp_dir()).unwrap();
+        let digest = document["pages"][0]["layers"][0]["nodes"][0]["model"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        document["models"][&digest]["uv"]["0"] = serde_json::json!({
+            "islands":[{"id":"label","uv_set":0,"triangles":[0],"transform":{"scale":[1,1],"offset":[0,0],"rotate":0.0}}]
+        });
+        let before = document.clone();
+        let request = super::Scene3dUvModelPreviewRequest {
+            document: document.clone(),
+            page: page.clone(),
+            node: "uv-highlight-model".into(),
+            primitive: 0,
+            island: None,
+        };
+        let plain = super::plan_scene3d_uv_model_preview(&request, &std::env::temp_dir()).unwrap();
+        let highlighted = super::plan_scene3d_uv_model_preview(
+            &super::Scene3dUvModelPreviewRequest {
+                island: Some("label".into()),
+                ..request
+            },
+            &std::env::temp_dir(),
+        )
+        .unwrap();
+        let plain_png = base64::engine::general_purpose::STANDARD
+            .decode(plain["png_base64"].as_str().unwrap())
+            .unwrap();
+        let highlighted_png = base64::engine::general_purpose::STANDARD
+            .decode(highlighted["png_base64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(
+            u32::from_be_bytes(plain_png[16..20].try_into().unwrap()),
+            512
+        );
+        assert_eq!(
+            u32::from_be_bytes(plain_png[20..24].try_into().unwrap()),
+            512
+        );
+        assert_ne!(plain_png, highlighted_png);
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn browser_uv_model_preview_renders_and_highlights_product_forms() {
+        use base64::Engine as _;
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let mut document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        document["product_forms"]["perfume-bottle"] =
+            crate::scene3d::form::starter_preset("perfume-bottle").unwrap();
+        document["pages"][0]["layers"][0]["nodes"] = serde_json::json!([{
+            "kind":"scene3d", "id":"uv-product-form", "x":0, "y":0,
+            "width":160, "height":200, "product_form":"perfume-bottle"
+        }]);
+        document["product_forms"]["perfume-bottle"]["uv"]["0"] = serde_json::json!({
+            "islands":[{"id":"bottle-body-island","uv_set":0,"triangles":[0],
+                "transform":{"scale":[0.8,0.8],"offset":[0.1,0.1],"rotate":0.0}}]
+        });
+        crate::scene::validate(&document).unwrap();
+        let before = document.clone();
+        let request = super::Scene3dUvModelPreviewRequest {
+            document: document.clone(),
+            page,
+            node: "uv-product-form".into(),
+            primitive: 0,
+            island: None,
+        };
+        let plain = super::plan_scene3d_uv_model_preview(&request, &std::env::temp_dir()).unwrap();
+        assert_eq!(plain["primitive"], 0);
+        assert_eq!(plain["island"], serde_json::Value::Null);
+        let highlighted = super::plan_scene3d_uv_model_preview(
+            &super::Scene3dUvModelPreviewRequest {
+                island: Some("bottle-body-island".into()),
+                ..request
+            },
+            &std::env::temp_dir(),
+        )
+        .unwrap();
+        let plain_png = base64::engine::general_purpose::STANDARD
+            .decode(plain["png_base64"].as_str().unwrap())
+            .unwrap();
+        let highlighted_png = base64::engine::general_purpose::STANDARD
+            .decode(highlighted["png_base64"].as_str().unwrap())
+            .unwrap();
+        assert_ne!(plain_png, highlighted_png);
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn browser_uv_pack_returns_a_valid_undoable_document_without_mutating_input() {
+        use base64::Engine as _;
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let mut document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        let import = super::Scene3dImportRequest {
+            document: document.clone(),
+            data: base64::engine::general_purpose::STANDARD.encode(obj),
+            format: "obj".into(),
+            id: "pack-model".into(),
+            layer,
+            page: Some(page.clone()),
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        super::plan_scene3d_import(&mut document, &import, &std::env::temp_dir()).unwrap();
+        let digest = document["pages"][0]["layers"][0]["nodes"][0]["model"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        document["models"][&digest]["uv"]["0"] = serde_json::json!({
+            "islands":[{"id":"face","uv_set":0,"triangles":[0],"transform":{"scale":[0.4,0.4],"offset":[0.1,0.1],"rotate":0.0}}]
+        });
+        let before = document.clone();
+        let request = super::Scene3dUvPackRequest {
+            document: document.clone(),
+            page,
+            node: "pack-model".into(),
+            primitive: 0,
+            padding: 0.02,
+        };
+        let packed = super::plan_scene3d_uv_pack(&request, &std::env::temp_dir()).unwrap();
+        assert_eq!(document, before);
+        assert_eq!(packed["result"]["islands"], 1);
+        let bounds = &packed["result"]["report"]["islands"][0]["uv_bounds"];
+        assert!(bounds["min"][0].as_f64().unwrap() >= 0.02 - 1e-6);
+        assert!(bounds["min"][1].as_f64().unwrap() >= 0.02 - 1e-6);
+        assert!(bounds["max"][0].as_f64().unwrap() <= 0.98 + 1e-6);
+        assert!(bounds["max"][1].as_f64().unwrap() <= 0.98 + 1e-6);
+        crate::scene::validate(&packed["document"]).unwrap();
+
+        let invalid = super::Scene3dUvPackRequest {
+            primitive: 9,
+            ..request
+        };
+        let error = super::plan_scene3d_uv_pack(&invalid, &std::env::temp_dir()).unwrap_err();
+        assert!(error.to_string().contains("primitive 9"));
+        assert_eq!(document, before);
+    }
+
+    #[test]
+    fn browser_product_form_add_and_edit_validate_before_returning_document() {
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let request = super::Scene3dFormRequest {
+            document: document.clone(),
+            action: "add".into(),
+            form_id: "perfume-form".into(),
+            preset: None,
+            kind: Some("lathe-bottle".into()),
+            parameters: Some(
+                serde_json::json!({"height_mm":100,"radial_segments":32,"profile_mm":[[18,0],[20,20],[18,70],[8,82],[8,100]]}),
+            ),
+            material_slots: Some(vec!["body".into(), "label".into()]),
+            node_id: Some("perfume-node".into()),
+            layer: Some(layer),
+            page: Some(page),
+            placement: Some([10.0, 10.0, 120.0, 180.0]),
+        };
+        let added = super::plan_scene3d_form(&request).unwrap();
+        assert_eq!(
+            added["document"]["product_forms"]["perfume-form"]["kind"],
+            "lathe-bottle"
+        );
+        assert_eq!(added["result"]["triangles"], 1024);
+        let mut form_uv_document = added["document"].clone();
+        form_uv_document["product_forms"]["perfume-form"]["uv"] = serde_json::json!({
+            "0": {
+                "projection": "planar",
+                "islands": [{
+                    "id": "profile-front",
+                    "uv_set": 0,
+                    "triangles": [0],
+                    "transform": {"scale": [1, 1], "offset": [0, 0], "rotate": 0}
+                }]
+            }
+        });
+        let uv_preview = super::plan_scene3d_uv_preview(
+            &super::Scene3dUvPreviewRequest {
+                document: form_uv_document,
+                node: "perfume-node".into(),
+                primitive: 0,
+                size: 256,
+                texture_resolution: 512,
+                minimum_density: None,
+            },
+            &std::env::temp_dir(),
+        )
+        .unwrap();
+        assert_eq!(uv_preview["source"]["kind"], "product_form");
+        assert_eq!(uv_preview["source"]["id"], "perfume-form");
+        assert_eq!(uv_preview["report"]["primitives"][0]["primitive"], 0);
+        assert_eq!(
+            uv_preview["report"]["primitives"][0]["islands"][0]["id"],
+            "profile-front"
+        );
+        let picked = super::plan_scene3d_uv_face_pick(
+            &super::Scene3dUvFacePickRequest {
+                document: added["document"].clone(),
+                page: request.page.clone().unwrap(),
+                node: "perfume-node".into(),
+                primitive: Some(0),
+                x: 0.5,
+                y: 0.5,
+            },
+            &std::env::temp_dir(),
+        )
+        .unwrap();
+        assert!(picked["triangle"].is_u64(), "{picked}");
+        assert_eq!(picked["material_slot"], "body");
+        assert_eq!(picked["uv"].as_array().unwrap().len(), 2);
+
+        let starter = super::Scene3dFormRequest {
+            document: document.clone(),
+            action: "add".into(),
+            form_id: "starter-jar-form".into(),
+            preset: Some("cosmetic-jar".into()),
+            kind: None,
+            parameters: None,
+            material_slots: None,
+            node_id: Some("starter-jar-node".into()),
+            layer: request.layer.clone(),
+            page: request.page.clone(),
+            placement: Some([20.0, 20.0, 120.0, 180.0]),
+        };
+        let started = super::plan_scene3d_form(&starter).unwrap();
+        assert_eq!(
+            started["document"]["product_forms"]["starter-jar-form"]["kind"],
+            "lathe-bottle"
+        );
+        assert_eq!(
+            started["document"]["product_forms"]["starter-jar-form"]["material_slots"][2],
+            "cap"
+        );
+
+        let edit = super::Scene3dFormRequest {
+            document: added["document"].clone(),
+            action: "set".into(),
+            form_id: "perfume-form".into(),
+            preset: None,
+            kind: None,
+            parameters: Some(
+                serde_json::json!({"height_mm":120,"radial_segments":32,"profile_mm":[[18,0],[20,20],[18,70],[8,82],[8,120]],"profile_tangents":[0.0,0.2,0.0,-0.2,0.0],"cap_mm":{"radius_mm":9,"height_mm":18}}),
+            ),
+            material_slots: Some(vec!["body".into(), "label".into(), "cap".into()]),
+            node_id: None,
+            layer: None,
+            page: None,
+            placement: None,
+        };
+        let updated = super::plan_scene3d_form(&edit).unwrap();
+        assert_eq!(
+            updated["document"]["product_forms"]["perfume-form"]["parameters"]["height_mm"],
+            120
+        );
+        assert_eq!(
+            updated["document"]["product_forms"]["perfume-form"]["material_slots"][2],
+            "cap"
+        );
+        assert_eq!(
+            updated["document"]["product_forms"]["perfume-form"]["parameters"]["profile_tangents"]
+                [1],
+            0.2
+        );
+
+        let invalid = super::Scene3dFormRequest {
+            parameters: Some(serde_json::json!({"height_mm":-1})),
+            ..edit
+        };
+        assert!(super::plan_scene3d_form(&invalid).is_err());
+        assert_eq!(
+            invalid.document["product_forms"]["perfume-form"]["parameters"]["height_mm"],
+            100
+        );
+    }
+
+    #[test]
+    fn browser_package_fold_validates_candidate_and_returns_undoable_document() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let request = super::Scene3dFoldRequest {
+            document: document.clone(),
+            dieline: "shirt-carton".into(),
+            fold_state: 0.4,
+        };
+        let folded = super::plan_scene3d_fold(&request).unwrap();
+        assert_eq!(
+            folded["document"]["dielines"]["shirt-carton"]["fold_state"],
+            0.4
+        );
+        assert_eq!(folded["document"]["pages"], document["pages"]);
+
+        let invalid = super::Scene3dFoldRequest {
+            fold_state: 1.01,
+            ..request
+        };
+        assert!(super::plan_scene3d_fold(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+    }
+
+    #[test]
+    fn browser_crease_angle_edit_updates_one_target_without_mutating_input() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dCreaseAngleRequest {
+            document,
+            dieline: "shirt-carton".into(),
+            crease: "front-right-fold".into(),
+            angle_deg: 45.0,
+        };
+        let planned = super::plan_scene3d_crease_angle(&request).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["creases"][1]["angle_deg"],
+            45.0
+        );
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["fold_state"],
+            1.0
+        );
+        assert_eq!(planned["result"]["previous_angle_deg"], 90.0);
+        assert_eq!(request.document, before);
+
+        let invalid = super::Scene3dCreaseAngleRequest {
+            angle_deg: 181.0,
+            ..request
+        };
+        assert!(super::plan_scene3d_crease_angle(&invalid).is_err());
+        assert_eq!(invalid.document, before);
+    }
+
+    #[test]
+    fn browser_crease_direction_edit_is_validated_and_failure_atomic() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dCreaseDirectionRequest {
+            document,
+            dieline: "shirt-carton".into(),
+            crease: "front-right-fold".into(),
+            direction: "valley".into(),
+        };
+        let planned = super::plan_scene3d_crease_direction(&request).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["creases"][1]["direction"],
+            "valley"
+        );
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["creases"][1]["angle_deg"],
+            90.0
+        );
+        assert_eq!(planned["result"]["previous_direction"], "mountain");
+        assert_eq!(request.document, before);
+
+        let invalid = super::Scene3dCreaseDirectionRequest {
+            direction: "sideways".into(),
+            ..request
+        };
+        assert!(super::plan_scene3d_crease_direction(&invalid).is_err());
+        assert_eq!(invalid.document, before);
+    }
+
+    #[test]
+    fn browser_pack_print_settings_preserve_layout_and_reject_out_of_range_values() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dPackSettingsRequest {
+            document,
+            dieline: "shirt-carton".into(),
+            board_mm: Some(1.2),
+            bleed_mm: Some(5.0),
+            seam_angle_deg: None,
+            wrap_direction: None,
+        };
+        let planned = super::plan_scene3d_pack_settings(&request).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["dimensions_mm"]["board"],
+            1.2
+        );
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["dimensions_mm"]["bleed"],
+            5.0
+        );
+        assert_eq!(planned["document"]["pages"], before["pages"]);
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["panels"],
+            before["dielines"]["shirt-carton"]["panels"]
+        );
+        assert_eq!(request.document, before);
+
+        let invalid = super::Scene3dPackSettingsRequest {
+            board_mm: None,
+            bleed_mm: Some(100.1),
+            ..request
+        };
+        assert!(super::plan_scene3d_pack_settings(&invalid).is_err());
+        assert_eq!(invalid.document, before);
+    }
+
+    #[test]
+    fn browser_pack_wrap_settings_share_the_validated_cylindrical_mapping() {
+        let mut document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        crate::scene3d::pack::add_tube_label_with_overlap(
+            &mut document,
+            "tube-label",
+            "tube-label-preview",
+            "mockups",
+            Some("products"),
+            28.0,
+            96.0,
+            3.0,
+            2.0,
+            [25.0, 30.0, 260.0, 500.0],
+        )
+        .unwrap();
+        let request = super::Scene3dPackSettingsRequest {
+            document: document.clone(),
+            dieline: "tube-label".into(),
+            board_mm: None,
+            bleed_mm: None,
+            seam_angle_deg: Some(42.0),
+            wrap_direction: Some("counterclockwise".into()),
+        };
+        let planned = super::plan_scene3d_pack_settings(&request).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["tube-label"]["wrap"]["seam_angle_deg"],
+            42.0
+        );
+        assert_eq!(
+            planned["document"]["dielines"]["tube-label"]["wrap"]["direction"],
+            "counterclockwise"
+        );
+        assert_eq!(request.document, document);
+
+        let invalid = super::Scene3dPackSettingsRequest {
+            seam_angle_deg: Some(361.0),
+            ..request
+        };
+        assert!(super::plan_scene3d_pack_settings(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+    }
+
+    #[test]
+    fn browser_package_preflight_is_read_only_and_reports_limits() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dPackPreflightRequest {
+            document,
+            dieline: "shirt-carton".into(),
+            min_ppi: 300.0,
+        };
+        let planned = super::plan_scene3d_pack_preflight(&request, &std::env::temp_dir()).unwrap();
+        assert_eq!(planned["result"]["preflight_status"], "needs-review");
+        assert_eq!(planned["result"]["manufacturing_certified"], false);
+        assert_eq!(planned["result"]["minimum_ppi"], 300.0);
+        assert_eq!(planned["result"]["pdfx_output_role"]["configured"], false);
+        assert!(planned["result"]["pdfx_output_role"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("output color role is not configured"));
+        assert_eq!(request.document, before);
+        assert!(planned.get("document").is_none());
+    }
+
+    #[test]
+    fn browser_face_pick_resolves_folded_package_panel_from_cpu_camera_ray() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dUvFacePickRequest {
+            document,
+            page: "products".into(),
+            node: "carton-preview".into(),
+            primitive: None,
+            x: 0.5,
+            y: 0.5,
+        };
+        let picked = super::plan_scene3d_uv_face_pick(&request, &std::env::temp_dir()).unwrap();
+        assert!(picked["primitive"].is_number(), "{picked}");
+        assert!(picked["panel"].is_string(), "{picked}");
+        assert!(request.document["dielines"]["shirt-carton"]["panels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|panel| panel["id"] == picked["panel"]));
+        assert_eq!(request.document, before);
+    }
+
+    #[test]
+    fn browser_package_face_preview_highlights_selected_panel_without_mutation() {
+        use base64::Engine as _;
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dPackFacePreviewRequest {
+            document,
+            page: "products".into(),
+            node: "carton-preview".into(),
+            panel: "front".into(),
+        };
+        let preview =
+            super::plan_scene3d_pack_face_preview(&request, &std::env::temp_dir()).unwrap();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(preview["png_base64"].as_str().unwrap())
+            .unwrap();
+        let page = request.document["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|page| page["id"] == request.page)
+            .unwrap();
+        let source_node = super::find_scene3d_value(page, &request.node).unwrap();
+        let mut baseline_node = source_node.as_object().unwrap().clone();
+        let width = baseline_node["width"].as_f64().unwrap();
+        let height = baseline_node["height"].as_f64().unwrap();
+        let scale = 768.0 / width.max(height);
+        baseline_node.insert("width".into(), serde_json::json!(width * scale));
+        baseline_node.insert("height".into(), serde_json::json!(height * scale));
+        baseline_node.insert("pixel_ratio".into(), serde_json::json!(1.0));
+        baseline_node.insert("supersample".into(), serde_json::json!(1));
+        let baseline = crate::scene3d::node::render_png_in_page(
+            &request.document,
+            &std::env::temp_dir(),
+            Some(&request.page),
+            &baseline_node,
+        )
+        .unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_ne!(png, baseline, "selected panel should change preview pixels");
+        assert_eq!(preview["panel"], "front");
+        assert_eq!(preview["max_edge_px"], 768);
+        assert_eq!(request.document, before);
+    }
+
+    #[test]
+    fn browser_flat_pack_preview_uses_shared_export_and_does_not_return_a_document() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let before = document.clone();
+        let request = super::Scene3dPackFlatPreviewRequest {
+            document,
+            dieline: "shirt-carton".into(),
+            min_ppi: 300.0,
+        };
+        let planned =
+            super::plan_scene3d_pack_flat_preview(&request, &std::env::temp_dir()).unwrap();
+        assert!(planned["svg"]
+            .as_str()
+            .unwrap()
+            .contains("data-artwork-panel=\"front\""));
+        assert_eq!(planned["report"]["artwork_panels"][0], "front");
+        assert_eq!(planned["report"]["manufacturing_certified"], false);
+        assert_eq!(request.document, before);
+        assert!(planned.get("document").is_none());
+
+        let missing = super::Scene3dPackFlatPreviewRequest {
+            dieline: "missing".into(),
+            ..request
+        };
+        assert!(super::plan_scene3d_pack_flat_preview(&missing, &std::env::temp_dir()).is_err());
+    }
+
+    #[test]
+    fn browser_sleeve_creation_builds_a_valid_linked_four_panel_preview() {
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let request = super::Scene3dSleeveRequest {
+            document: document.clone(),
+            dieline_id: "sleeve-1".into(),
+            node_id: "sleeve-preview".into(),
+            layer,
+            page: Some(page),
+            length_mm: 120.0,
+            width_mm: 70.0,
+            height_mm: 180.0,
+            board_mm: 0.5,
+            bleed_mm: 3.0,
+            placement: [10.0, 10.0, 200.0, 240.0],
+        };
+        let planned = super::plan_scene3d_sleeve(&request).unwrap();
+        let dieline = &planned["document"]["dielines"]["sleeve-1"];
+        assert_eq!(dieline["template"], "sleeve");
+        assert_eq!(dieline["panels"].as_array().unwrap().len(), 4);
+        assert_eq!(dieline["creases"].as_array().unwrap().len(), 3);
+        assert_eq!(dieline["scene3d_node"], "sleeve-preview");
+        assert_eq!(
+            planned["document"]["pages"][0]["layers"][0]["nodes"][0]["dieline"],
+            "sleeve-1"
+        );
+        crate::transaction::validate_value(&planned["document"]).unwrap();
+
+        let invalid = super::Scene3dSleeveRequest {
+            length_mm: 0.0,
+            ..request
+        };
+        assert!(super::plan_scene3d_sleeve(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+    }
+
+    #[test]
+    fn browser_carton_creation_generates_valid_tuck_and_mailer_nets() {
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for template in ["straight-tuck", "reverse-tuck", "mailer"] {
+            let request = super::Scene3dCartonRequest {
+                document: document.clone(),
+                dieline_id: format!("{template}-die"),
+                node_id: format!("{template}-preview"),
+                layer: layer.clone(),
+                page: Some(page.clone()),
+                template: template.into(),
+                length_mm: 120.0,
+                width_mm: 70.0,
+                height_mm: 180.0,
+                board_mm: 0.5,
+                bleed_mm: 3.0,
+                glue_flap_mm: 15.0,
+                placement: [10.0, 10.0, 200.0, 240.0],
+            };
+            let planned = super::plan_scene3d_carton(&request).unwrap();
+            let dieline = &planned["document"]["dielines"][request.dieline_id.as_str()];
+            assert_eq!(dieline["template"], template);
+            let (panels, creases) = if template == "mailer" {
+                (7, 6)
+            } else {
+                (13, 12)
+            };
+            assert_eq!(dieline["panels"].as_array().unwrap().len(), panels);
+            assert_eq!(dieline["creases"].as_array().unwrap().len(), creases);
+            assert_eq!(dieline["scene3d_node"], request.node_id);
+            crate::transaction::validate_value(&planned["document"]).unwrap();
+        }
+    }
+
+    #[test]
+    fn packaging_path_role_planner_exports_drawn_cut_and_score_marks_without_folding_them() {
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let created = super::plan_scene3d_carton(&super::Scene3dCartonRequest {
+            document,
+            dieline_id: "role-test-die".into(),
+            node_id: "role-test-preview".into(),
+            layer,
+            page: Some(page),
+            template: "straight-tuck".into(),
+            length_mm: 120.0,
+            width_mm: 70.0,
+            height_mm: 180.0,
+            board_mm: 0.5,
+            bleed_mm: 3.0,
+            glue_flap_mm: 15.0,
+            placement: [10.0, 10.0, 200.0, 240.0],
+        })
+        .unwrap();
+        let mut source = created["document"].clone();
+        let layout_page = source["dielines"]["role-test-die"]["layout_page"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let page = source["pages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|page| page["id"] == layout_page)
+            .unwrap();
+        page["layers"][1]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "kind":"path","id":"user-cut-line","name":"New cut line",
+                "d":"M 10 10 L 20 10 L 20 20 L 10 20 Z",
+                "style":{"fill":{"fallback":"none"},"stroke":{"fallback":"#111111"}}
+            }));
+
+        let request = super::Scene3dPathRoleRequest {
+            document: source.clone(),
+            dieline: "role-test-die".into(),
+            node: "user-cut-line".into(),
+            role: "cut".into(),
+        };
+        let planned = super::plan_scene3d_path_role(&request).unwrap();
+        assert_eq!(planned["result"]["spot"], "CutContour");
+        let resolved =
+            crate::scene3d::pack::dieline_from_document(&planned["document"], "role-test-die")
+                .unwrap();
+        assert!(resolved["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| { path["id"] == planned["result"]["path"] && path["role"] == "cut" }));
+        let root = std::env::temp_dir().join(format!(
+            "pentool-path-role-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let plates_dir = root.join("vector-plates");
+        let plates = crate::scene3d::pack::write_dieline_vector_spot_plates(
+            &planned["document"],
+            "role-test-die",
+            &plates_dir,
+        )
+        .unwrap();
+        let cut_plate = plates["plates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|plate| plate["ink"] == "CutContour")
+            .unwrap();
+        let cut_svg =
+            std::fs::read_to_string(plates_dir.join(cut_plate["path"].as_str().unwrap())).unwrap();
+        assert!(cut_svg.contains("data-id=\"layout-"));
+        assert!(cut_svg.contains("data-role=\"cut\""));
+
+        let scored_document = planned["document"].clone();
+        let layout_page = scored_document["dielines"]["role-test-die"]["layout_page"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut scored_source = scored_document;
+        let score_page = scored_source["pages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|page| page["id"] == layout_page)
+            .unwrap();
+        score_page["layers"][1]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "kind":"path","id":"user-score-line","name":"Curved score",
+                "d":"M 10 30 Q 20 20 30 30",
+                "style":{"fill":{"fallback":"none"},"stroke":{"fallback":"#111111"}}
+            }));
+        let score_request = super::Scene3dPathRoleRequest {
+            document: scored_source,
+            dieline: "role-test-die".into(),
+            node: "user-score-line".into(),
+            role: "crease".into(),
+        };
+        let scored = super::plan_scene3d_path_role(&score_request).unwrap();
+        assert_eq!(scored["result"]["spot"], "Crease");
+        let scored_dieline =
+            crate::scene3d::pack::dieline_from_document(&scored["document"], "role-test-die")
+                .unwrap();
+        assert_eq!(scored_dieline["creases"].as_array().unwrap().len(), 12);
+        assert!(scored_dieline["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| { path["id"] == scored["result"]["path"] && path["role"] == "crease" }));
+        let score_plates_dir = root.join("score-plates");
+        let score_plates = crate::scene3d::pack::write_dieline_vector_spot_plates(
+            &scored["document"],
+            "role-test-die",
+            &score_plates_dir,
+        )
+        .unwrap();
+        let crease_plate = score_plates["plates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|plate| plate["ink"] == "Crease")
+            .unwrap();
+        let crease_svg =
+            std::fs::read_to_string(score_plates_dir.join(crease_plate["path"].as_str().unwrap()))
+                .unwrap();
+        assert!(crease_svg.contains("data-id=\"layout-"));
+        assert!(crease_svg.contains("data-role=\"crease\""));
+
+        std::fs::remove_dir_all(&root).unwrap();
+
+        let invalid = super::Scene3dPathRoleRequest {
+            role: "hinge".into(),
+            ..request
+        };
+        assert!(super::plan_scene3d_path_role(&invalid)
+            .unwrap_err()
+            .to_string()
+            .contains("new packaging paths support"));
+        assert_eq!(invalid.document, source);
+    }
+
+    #[test]
+    fn packaging_path_crease_planner_promotes_only_exact_shared_panel_edges() {
+        let v10 = crate::scene3d::node::migrate(crate::scene::new_document(320, 240)).unwrap();
+        let document = crate::scene3d::node::migrate_to_v11(v10).unwrap();
+        let page = document["pages"][0]["id"].as_str().unwrap().to_owned();
+        let layer = document["pages"][0]["layers"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let created = super::plan_scene3d_carton(&super::Scene3dCartonRequest {
+            document,
+            dieline_id: "crease-test-die".into(),
+            node_id: "crease-test-preview".into(),
+            layer,
+            page: Some(page),
+            template: "straight-tuck".into(),
+            length_mm: 120.0,
+            width_mm: 70.0,
+            height_mm: 180.0,
+            board_mm: 0.5,
+            bleed_mm: 3.0,
+            glue_flap_mm: 15.0,
+            placement: [10.0, 10.0, 200.0, 240.0],
+        })
+        .unwrap();
+        let mut source = created["document"].clone();
+        let dieline = &source["dielines"]["crease-test-die"];
+        let old = dieline["creases"][0].clone();
+        let layout_id = dieline["layout_page"].as_str().unwrap().to_owned();
+        let old_node_id = format!("{layout_id}-crease-{}", old["id"].as_str().unwrap());
+        let line = &old["line_mm"];
+        let bleed = 3.0;
+        let d = format!(
+            "M {} {} L {} {}",
+            line[0][0].as_f64().unwrap() + bleed,
+            line[0][1].as_f64().unwrap() + bleed,
+            line[1][0].as_f64().unwrap() + bleed,
+            line[1][1].as_f64().unwrap() + bleed
+        );
+        source["dielines"]["crease-test-die"]["creases"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        source["dielines"]["crease-test-die"]["paths"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|path| path["role"] != "crease");
+        let layout = source["pages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|page| page["id"] == layout_id)
+            .unwrap();
+        let nodes = layout["layers"][1]["nodes"].as_array_mut().unwrap();
+        nodes.retain(|node| node["id"] != old_node_id && node["dieline_path_role"] != "crease");
+        nodes.push(serde_json::json!({
+            "kind":"path","id":"authored-fold","name":"Authored fold",
+            "d":d,"style":{"fill":{"fallback":"none"},"stroke":{"fallback":"#111"}}
+        }));
+        let request = super::Scene3dPathCreaseRequest {
+            document: source.clone(),
+            dieline: "crease-test-die".into(),
+            node: "authored-fold".into(),
+            crease: "authored-hinge".into(),
+            angle_deg: 90.0,
+            direction: "valley".into(),
+        };
+        let planned = super::plan_scene3d_path_crease(&request).unwrap();
+        assert_eq!(planned["result"]["crease"], "authored-hinge");
+        assert_eq!(
+            planned["document"]["pages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|p| p["layers"].as_array().unwrap())
+                .flat_map(|l| l["nodes"].as_array().unwrap())
+                .find(|n| n["id"] == "authored-fold")
+                .unwrap()["dieline_crease_id"],
+            "authored-hinge"
+        );
+        let resolved =
+            crate::scene3d::pack::dieline_from_document(&planned["document"], "crease-test-die")
+                .unwrap();
+        assert!(resolved["creases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == "authored-hinge"));
+        let flat_svg = crate::scene3d::pack::flat_dieline_svg(&resolved).unwrap();
+        assert!(flat_svg.contains("data-role=\"crease\""));
+        assert!(flat_svg.contains("data-direction=\"valley\""));
+        assert!(flat_svg.contains("data-angle-deg=\"90\""));
+        let spot_dir = std::env::temp_dir().join(format!(
+            "pentool-path-crease-plates-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let plates = crate::scene3d::pack::write_dieline_vector_spot_plates(
+            &planned["document"],
+            "crease-test-die",
+            &spot_dir,
+        )
+        .unwrap();
+        let crease_plate = plates["plates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|plate| plate["ink"] == "Crease")
+            .unwrap();
+        let crease_svg =
+            std::fs::read_to_string(spot_dir.join(crease_plate["path"].as_str().unwrap())).unwrap();
+        assert!(crease_svg.contains("data-id=\"structural-crease-authored-hinge\""));
+        std::fs::remove_dir_all(spot_dir).unwrap();
+
+        let mut raster_doc: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        raster_doc["dielines"]["shirt-carton"]["paths"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|path| path["role"] != "crease");
+        let (separations, _) = crate::scene3d::pack::dieline_spot_separations(
+            &raster_doc,
+            std::path::Path::new("packaging.pen"),
+            "shirt-carton",
+            36.0,
+        )
+        .unwrap();
+        let crease_separation = separations
+            .plates
+            .iter()
+            .find(|plate| plate.spot && plate.id == "Crease")
+            .unwrap();
+        assert!(crease_separation.samples.iter().any(|sample| *sample > 0.0));
+        crate::scene3d::pack::generate(&resolved).unwrap();
+
+        let mut invalid = source;
+        let layout = invalid["pages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|page| page["id"] == layout_id)
+            .unwrap();
+        layout["layers"][1]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|n| n["id"] == "authored-fold")
+            .unwrap()["d"] = "M 5 5 L 15 5".into();
+        let failed = super::Scene3dPathCreaseRequest {
+            document: invalid.clone(),
+            ..request
+        };
+        assert!(super::plan_scene3d_path_crease(&failed)
+            .unwrap_err()
+            .to_string()
+            .contains("not exactly a shared edge"));
+        assert_eq!(failed.document, invalid);
+    }
+
+    #[test]
+    fn tube_label_planner_uses_the_measured_circumference_and_preserves_input() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let request = super::Scene3dTubeLabelRequest {
+            document: document.clone(),
+            dieline_id: "tube-label".into(),
+            node_id: "tube-preview".into(),
+            layer: "mockups".into(),
+            page: Some("products".into()),
+            radius_mm: 32.0,
+            height_mm: 95.0,
+            bleed_mm: 3.0,
+            overlap_mm: 4.0,
+            placement: [10.0, 10.0, 200.0, 240.0],
+        };
+        let planned = super::plan_scene3d_tube_label(&request).unwrap();
+        let dieline = &planned["document"]["dielines"]["tube-label"];
+        assert_eq!(dieline["template"], "tube");
+        assert_eq!(dieline["wrap"]["radius_mm"], 32.0);
+        assert_eq!(dieline["panels"][0]["face_slot"], "label");
+        let flat_width = dieline["panels"][0]["rect_mm"][2].as_f64().unwrap();
+        assert!((flat_width - (std::f64::consts::TAU * 32.0 + 4.0)).abs() < 1e-4);
+        assert_eq!(dieline["wrap"]["overlap_mm"], 4.0);
+        crate::transaction::validate_value(&planned["document"]).unwrap();
+
+        let invalid = super::Scene3dTubeLabelRequest {
+            radius_mm: 0.0,
+            ..request
+        };
+        assert!(super::plan_scene3d_tube_label(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+    }
+
+    #[test]
+    fn browser_pouch_and_bottle_label_creation_use_validated_planners() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let pouch = super::Scene3dPouchRequest {
+            document: document.clone(),
+            dieline_id: "pouch-1".into(),
+            node_id: "pouch-preview".into(),
+            layer: "mockups".into(),
+            page: Some("products".into()),
+            front_width_mm: 120.0,
+            gusset_mm: 35.0,
+            height_mm: 180.0,
+            bleed_mm: 3.0,
+            placement: [10.0, 10.0, 200.0, 240.0],
+        };
+        let planned = super::plan_scene3d_pouch(&pouch).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["pouch-1"]["template"],
+            "pouch"
+        );
+        assert_eq!(
+            planned["document"]["dielines"]["pouch-1"]["panels"]
+                .as_array()
+                .unwrap()
+                .len(),
+            5
+        );
+        crate::transaction::validate_value(&planned["document"]).unwrap();
+        let invalid = super::Scene3dPouchRequest {
+            gusset_mm: 0.0,
+            ..pouch
+        };
+        assert!(super::plan_scene3d_pouch(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+
+        let bottle_label = super::Scene3dBottleLabelRequest {
+            document: document.clone(),
+            dieline_id: "bottle-label-1".into(),
+            node_id: "bottle-label-preview".into(),
+            layer: "mockups".into(),
+            page: Some("products".into()),
+            radius_mm: 30.0,
+            height_mm: 90.0,
+            bleed_mm: 3.0,
+            overlap_mm: 2.0,
+            placement: [10.0, 10.0, 200.0, 240.0],
+        };
+        let planned = super::plan_scene3d_bottle_label(&bottle_label).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["bottle-label-1"]["template"],
+            "bottle-label"
+        );
+        assert_eq!(
+            planned["document"]["dielines"]["bottle-label-1"]["panels"][0]["id"],
+            "bottle-label"
+        );
+        crate::transaction::validate_value(&planned["document"]).unwrap();
+        let invalid = super::Scene3dBottleLabelRequest {
+            overlap_mm: 1000.0,
+            ..bottle_label
+        };
+        assert!(super::plan_scene3d_bottle_label(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+    }
+
+    #[test]
+    fn panel_art_binding_is_validated_and_clears_without_mutating_the_source() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let request = super::Scene3dPanelArtRequest {
+            document: document.clone(),
+            dieline: "shirt-carton".into(),
+            panel: "back".into(),
+            source: Some(serde_json::json!({"kind":"page","page":"artwork"})),
+        };
+        let planned = super::plan_scene3d_panel_art(&request).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["panels"][1]["artwork"]["page"],
+            "artwork"
+        );
+
+        let invalid = super::Scene3dPanelArtRequest {
+            source: Some(serde_json::json!({"kind":"page","page":"missing-page"})),
+            ..request
+        };
+        assert!(super::plan_scene3d_panel_art(&invalid).is_err());
+        assert_eq!(invalid.document, document);
+
+        let mut cleared_doc = planned["document"].clone();
+        let cleared = crate::scene3d::bindings::set_panel_artwork(
+            &mut cleared_doc,
+            "shirt-carton",
+            "back",
+            None,
+        )
+        .unwrap();
+        assert_eq!(cleared["artwork"], serde_json::Value::Null);
+        assert!(cleared_doc["dielines"]["shirt-carton"]["panels"][1]
+            .get("artwork")
+            .is_none());
+    }
+
+    #[test]
+    fn panel_safe_area_planner_is_validated_and_failure_atomic() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))
+                .unwrap();
+        let request = super::Scene3dPanelSafeZoneRequest {
+            document: document.clone(),
+            dieline: "shirt-carton".into(),
+            panel: "front".into(),
+            inset_mm: 12.0,
+        };
+        let planned = super::plan_scene3d_panel_safe_zone(&request).unwrap();
+        assert_eq!(
+            planned["document"]["dielines"]["shirt-carton"]["panels"][0]["safe_zone_mm"],
+            12.0
+        );
+        assert_eq!(planned["result"]["safe_zone_mm"], 12.0);
+        assert!(request.document["dielines"]["shirt-carton"]["panels"][0]
+            .get("safe_zone_mm")
+            .is_none());
+
+        let invalid = super::Scene3dPanelSafeZoneRequest {
+            inset_mm: 131.0,
+            ..request
+        };
+        assert!(super::plan_scene3d_panel_safe_zone(&invalid).is_err());
+        assert!(invalid.document["dielines"]["shirt-carton"]["panels"][0]
+            .get("safe_zone_mm")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn scene3d_cache_endpoint_reports_and_clears_process_local_entries() {
+        let _cache_guard = crate::scene3d::node::PNG_CACHE_TEST_LOCK.lock().await;
+        let status = super::scene3d_cache_status().await;
+        let body = axum::body::to_bytes(status.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status["max_bytes"], 64 * 1024 * 1024);
+        assert_eq!(status["scope"], "process");
+        assert!(status["bytes"].as_u64().unwrap() <= status["max_bytes"].as_u64().unwrap());
+        assert!(status["hits"].as_u64().is_some());
+        assert!(status["misses"].as_u64().is_some());
+        assert!(status["evictions"].as_u64().is_some());
+
+        let cleared = super::scene3d_cache_clear().await;
+        let body = axum::body::to_bytes(cleared.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let cleared: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(cleared["cleared_entries"].as_u64().is_some());
+        assert!(cleared["cleared_bytes"].as_u64().is_some());
+        assert!(cleared["cleared_hits"].as_u64().is_some());
+        assert!(cleared["cleared_misses"].as_u64().is_some());
+        assert!(cleared["cleared_evictions"].as_u64().is_some());
     }
 
     #[test]

@@ -23,6 +23,8 @@ import {
   findNode,
   hitTest,
   isScene,
+  multiply,
+  nodeMatrix,
   pageBounds,
   pageOf,
   penPathData,
@@ -75,7 +77,7 @@ function resizedBox(box: Rect, h: Handle, p: Point, keepAspect: boolean): Rect {
 }
 
 /** Interactive page: Rust-rendered preview under an SVG layer for selection and drawing. */
-export function Canvas() {
+export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
   const s = useStudio();
   const { doc, preview, pageId, view, zoom, setZoom, notify, tool, selectedId, layerId } = s;
   const [url, setUrl] = useState<string | null>(null);
@@ -96,13 +98,41 @@ export function Canvas() {
   const [rest, setRest] = useState<Point | null>(null);
   const spriteToken = useRef(0);
   const spaceDown = useRef(false);
+  const facePickPending = useRef(false);
+  const facePreviewToken = useRef(0);
+  const [faceHighlight, setFaceHighlight] = useState<{ node: string; panel: string; png: string } | null>(null);
 
   const page = pageOf(doc, pageId);
+  const flatDielineId = page?.dieline_layout?.dieline;
+  const flatDieline = flatDielineId && doc ? (doc.dielines as Record<string, { scene3d_node?: string; panels?: { id: string }[] }> | undefined)?.[flatDielineId] : undefined;
+  const packageNodeId = flatDieline?.scene3d_node;
+  const packageLocation = packageNodeId && doc?.pages
+    ? doc.pages.map((candidate) => ({ page: candidate, found: findNode(candidate, packageNodeId) })).find((item) => item.found?.node.kind === "scene3d" && item.found.node.dieline === flatDielineId)
+    : undefined;
   const canvas = page?.canvas ?? { width: 1200, height: 800 };
   const fit = Math.min((box.w - 64) / canvas.width, (box.h - 64) / canvas.height, 4);
   const scale = Math.max(0.02, fit * zoom);
   const found = useMemo(() => findNode(page, selectedId), [page, selectedId]);
   const selectedBox = useMemo(() => (found ? pageBounds(found) : null), [found]);
+  const selectedPackagePanel = s.selectedPackagePanel;
+  const selectedDielineNode = s.workspaceId === "3d" && found?.node.kind === "scene3d" && typeof found.node.dieline === "string" ? found.node : null;
+
+  useEffect(() => {
+    const token = ++facePreviewToken.current;
+    if (!doc || !page || !selectedDielineNode || !selectedPackagePanel) {
+      setFaceHighlight(null);
+      return;
+    }
+    setFaceHighlight(null);
+    void api.scene3dPackFacePreview({ document: doc, page: page.id, node: selectedDielineNode.id, panel: selectedPackagePanel })
+      .then((result) => {
+        if (token === facePreviewToken.current) setFaceHighlight({ node: result.node, panel: result.panel, png: result.png_base64 });
+      })
+      .catch((cause: unknown) => {
+        if (token === facePreviewToken.current) useStudio.getState().notify(cause instanceof Error ? cause.message : "The selected package face could not be highlighted.", true);
+      });
+    return () => { if (token === facePreviewToken.current) facePreviewToken.current += 1; };
+  }, [doc, page, selectedDielineNode, selectedPackagePanel]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -220,6 +250,34 @@ export function Canvas() {
       void useLayout.getState().placeLoaded(p);
       return;
     }
+    if (tool === "select" && useStudio.getState().workspaceId === "3d" && doc && page && found?.node.kind === "scene3d" && typeof found.node.dieline === "string" && selectedBox && p.x >= selectedBox.x && p.x <= selectedBox.x + selectedBox.width && p.y >= selectedBox.y && p.y <= selectedBox.y + selectedBox.height) {
+      const [a, b, c, d, e0, f0] = found.world;
+      const determinant = a * d - b * c;
+      const localX = (d * (p.x - e0) - c * (p.y - f0)) / determinant;
+      const localY = (-b * (p.x - e0) + a * (p.y - f0)) / determinant;
+      const width = Number(found.node.width);
+      const height = Number(found.node.height);
+      const pickX = (localX - Number(found.node.x ?? 0)) / width;
+      const pickY = (localY - Number(found.node.y ?? 0)) / height;
+      if (!facePickPending.current && Math.abs(determinant) > 1e-12 && width > 0 && height > 0 && pickX >= 0 && pickX <= 1 && pickY >= 0 && pickY <= 1) {
+        facePickPending.current = true;
+        e.preventDefault();
+        void api.scene3dUvFacePick({
+          document: doc,
+          page: page.id,
+          node: found.node.id,
+          x: pickX,
+          y: pickY,
+        }).then((result) => {
+          if (result.panel) useStudio.getState().setSelectedPackagePanel(result.panel);
+        }).catch((cause: unknown) => {
+          useStudio.getState().notify(cause instanceof Error ? cause.message : "Package face could not be picked.", true);
+        }).finally(() => {
+          facePickPending.current = false;
+        });
+        return;
+      }
+    }
     const target = e.target as SVGElement;
     svg.current!.setPointerCapture(e.pointerId);
     if (tool === "select") {
@@ -231,6 +289,10 @@ export function Canvas() {
       }
       const hit = hitTest(page, p.x, p.y);
       s.select(hit ? hit.node.id : null);
+      const hitPanelId = hit?.node.dieline_panel_id ?? hit?.node.dieline_panel_label;
+      if (typeof hitPanelId === "string") {
+        useStudio.getState().setSelectedPackagePanel(hitPanelId);
+      }
       if (hit) {
         drag.current = { mode: "move", start: p, id: hit.node.id };
         clearSprite();
@@ -527,6 +589,13 @@ export function Canvas() {
                 }}
               >
                 <LayoutOverlay px={px} />
+                {faceHighlight && selectedDielineNode && found?.node.id === faceHighlight.node && selectedPackagePanel === faceHighlight.panel && (() => {
+                  const transform = multiply(found.world, nodeMatrix(found.node));
+                  return <g transform={`matrix(${transform.join(" ")})`} pointerEvents="none" aria-hidden="true">
+                    {/* The parent transform already includes the node's page position. */}
+                    <image href={`data:image/png;base64,${faceHighlight.png}`} x={0} y={0} width={Number(found.node.width)} height={Number(found.node.height)} preserveAspectRatio="none" />
+                  </g>;
+                })()}
                 {liveBox && tool === "select" && (
                   <g>
                     <rect {...liveBox} fill="none" stroke="#2563eb" strokeWidth={px * 1.5} pointerEvents="none" />
@@ -589,6 +658,42 @@ export function Canvas() {
           <Maximize2 size={14} />
         </Button>
       </div>
+      {flatDielineId && flatDieline && packageLocation && selectedPackagePanel && flatDieline.panels?.some((panel) => panel.id === selectedPackagePanel) && (
+        <div className="absolute bottom-3 right-3 flex items-center gap-2 rounded-md border bg-card p-1.5 shadow" role="group" aria-label="Selected package panel">
+          <span className="px-1 text-xs text-muted-foreground">Panel <span className="font-medium text-foreground">{selectedPackagePanel}</span></span>
+          <Button type="button" variant="outline" className="min-h-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => {
+            const state = useStudio.getState();
+            state.setPage(packageLocation.page.id);
+            state.select(packageLocation.found!.node.id);
+            state.setWorkspace("3d");
+          }}>View folded mockup</Button>
+        </div>
+      )}
+      {dragToUv && found && found.node.kind !== "scene3d" && page && (
+        <button
+          type="button"
+          draggable={!found.layer.locked}
+          disabled={found.layer.locked}
+          className="absolute right-3 top-3 min-h-10 rounded-md border bg-card px-3 text-xs font-medium text-foreground shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
+          aria-label={found.layer.locked
+            ? `Unlock the layer containing ${found.node.name || found.node.id} to drag it to the UV canvas`
+            : `Drag selected artwork ${found.node.name || found.node.id} to the UV canvas`}
+          title={found.layer.locked
+            ? "Unlock this layer before linking its artwork to a 3D surface"
+            : "Drag this selected page object onto the UV canvas to link it as a decal"}
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "copy";
+            event.dataTransfer.setData("application/x-pentool-uv-source", JSON.stringify({
+              kind: "node",
+              page: page.id,
+              node: found.node.id,
+            }));
+            event.dataTransfer.setData("text/plain", found.node.name || found.node.id);
+          }}
+        >
+          {found.layer.locked ? "Unlock artwork to drag" : "Drag selected art to UV"}
+        </button>
+      )}
       {view.kind === "image" && (
         <div className="absolute left-3 top-3 rounded-md border bg-card px-2 py-1 text-xs">{view.label}</div>
       )}

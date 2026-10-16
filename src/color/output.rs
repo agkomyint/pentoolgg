@@ -11,7 +11,7 @@ use super::{
     value::{Destination, Evaluator, ProfileSet},
 };
 use crate::composite::WorkingRender;
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -233,6 +233,87 @@ pub fn deliver(
         samples,
         report,
     })
+}
+
+/// Deliver a straight-alpha sRGB8 raster directly to a device profile without
+/// first expanding the entire image into a float compositing surface. This is
+/// used by export paths whose source is already a single, fully composited
+/// raster (notably large flattened packaging proofs). The per-pixel color math
+/// and quantization are identical to `deliver`.
+pub(crate) fn deliver_srgb8(
+    raw: &Value,
+    document: &Path,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    destination: &Destination,
+    intent: Intent,
+) -> Result<(Vec<u8>, Report)> {
+    ensure!(
+        destination.space() == "icc-cmyk",
+        "[unsupported-capability] direct raster delivery requires an ICC CMYK destination"
+    );
+    let pixels = u64::from(width)
+        .checked_mul(u64::from(height))
+        .context("[limit-exceeded] output pixel count overflow")?;
+    let source_bytes = pixels
+        .checked_mul(4)
+        .context("[limit-exceeded] output raster byte count overflow")?;
+    ensure!(
+        source_bytes == rgba.len() as u64,
+        "[invalid-input] sRGB raster byte count does not match its dimensions"
+    );
+    ensure!(
+        source_bytes * 2 <= crate::blend::LinearSurface::MAX_BYTES as u64,
+        "[limit-exceeded] direct output conversion exceeds its bounded raster budget"
+    );
+    let role = roles::effective(raw, Role::Working)?;
+    ensure!(
+        role.destination.is_linear_rgb(),
+        "[unsupported-capability] output transform requires a named linear RGB working space"
+    );
+    let set = ProfileSet::load(raw, document, destination.profile())?;
+    let mut engine = Evaluator::new(&set, intent)?;
+    let mut report = Report {
+        pixels,
+        clipped_pixels: 0,
+        quantized_samples: pixels * 4,
+        max_quantization_error: 0.0,
+        profile: destination.profile().map(str::to_owned),
+    };
+    let mut bytes = Vec::with_capacity(rgba.len());
+    let mut last: Option<([f64; 3], [f64; 4], bool)> = None;
+    for (index, pixel) in rgba.chunks_exact(4).enumerate() {
+        if index % (width as usize).max(1) == 0 {
+            crate::composite::check_cancelled()?;
+        }
+        let encoded = [
+            f64::from(pixel[0]) / 255.0,
+            f64::from(pixel[1]) / 255.0,
+            f64::from(pixel[2]) / 255.0,
+            f64::from(pixel[3]) / 255.0,
+        ];
+        let working = engine.srgb_working_rgba(encoded, &role.destination)?;
+        let rgb = [
+            working[0] * working[3] + (1.0 - working[3]),
+            working[1] * working[3] + (1.0 - working[3]),
+            working[2] * working[3] + (1.0 - working[3]),
+        ];
+        let (device, clipped) = match last {
+            Some((input, device, clipped)) if input == rgb => (device, clipped),
+            _ => {
+                let (device, clipped) =
+                    engine.working_to_destination(rgb, &role.destination, destination)?;
+                last = Some((rgb, device, clipped));
+                (device, clipped)
+            }
+        };
+        report.clipped_pixels += u64::from(clipped);
+        for value in &device[..4] {
+            bytes.push(quantize(*value, Depth::Eight, &mut report.max_quantization_error) as u8);
+        }
+    }
+    Ok((bytes, report))
 }
 
 /// Render a page on float surfaces and deliver it in one explicit step.

@@ -20,6 +20,9 @@ type State = {
   pageId: string | undefined;
   layerId: string | undefined;
   selectedId: string | null;
+  /** Stable panel ID shared by the packaging stage and its inspector. */
+  selectedPackagePanel: string | null;
+  setSelectedPackagePanel: (id: string | null) => void;
   tool: Tool;
   look: Appearance;
   workspaceId: string;
@@ -65,8 +68,8 @@ function initialDark(): boolean {
 }
 
 const HISTORY_LIMIT = 100;
-/** Newest `.pen` format the server can migrate to (`pentool migrate --target 10`). */
-export const LATEST_FORMAT = 10;
+/** Newest `.pen` format the server can migrate to (`pentool migrate --target 11`). */
+export const LATEST_FORMAT = 11;
 
 function blankDoc(): Doc {
   return {
@@ -89,6 +92,7 @@ function blankDoc(): Doc {
 
 export const useStudio = create<State>((set, get) => {
   const firstLayer = (doc: Doc, pageId: string | undefined) => pageOf(doc, pageId)?.layers?.[0]?.id;
+  let pendingLoad: Promise<void> | null = null;
   const adopt = (doc: Doc, extra: Partial<State> = {}) => {
     const page = pageOf(doc, get().pageId);
     const layer = page?.layers?.find((l) => l.id === get().layerId)?.id ?? page?.layers?.[0]?.id;
@@ -106,6 +110,8 @@ export const useStudio = create<State>((set, get) => {
     pageId: undefined,
     layerId: undefined,
     selectedId: null,
+    selectedPackagePanel: null,
+    setSelectedPackagePanel: (selectedPackagePanel) => set({ selectedPackagePanel }),
     tool: "select",
     look: { fill: "#6d28d9", stroke: "#111827", strokeWidth: 3 },
     workspaceId: "design",
@@ -116,28 +122,35 @@ export const useStudio = create<State>((set, get) => {
     message: null,
     past: [],
     future: [],
-    async load() {
+    load() {
+      // React Strict Mode intentionally replays mount effects in development.
+      // Coalesce overlapping requests so a slower duplicate cannot adopt the
+      // document again after the user has already started interacting.
+      if (pendingLoad) return pendingLoad;
       set({ busy: true });
-      try {
-        const health = await api.health();
-        let shared = true;
-        let document: Doc;
-        let revision: string | null = null;
+      pendingLoad = (async () => {
         try {
-          const loaded = await api.document();
-          document = loaded.document;
-          revision = loaded.revision;
-        } catch {
-          shared = false;
-          document = get().doc ?? blankDoc();
+          const health = await api.health();
+          let shared = true;
+          let document: Doc;
+          let revision: string | null = null;
+          try {
+            const loaded = await api.document();
+            document = loaded.document;
+            revision = loaded.revision;
+          } catch {
+            shared = false;
+            document = get().doc ?? blankDoc();
+          }
+          set({ past: [], future: [], dirty: false, selectedId: null });
+          adopt(document, { base: clone(document), revision, shared, version: health.version, message: null, view: { kind: "document" } });
+        } catch (error) {
+          get().notify(error instanceof Error ? error.message : "Could not load the document.", true);
+        } finally {
+          set({ busy: false });
         }
-        set({ past: [], future: [], dirty: false, selectedId: null });
-        adopt(document, { base: clone(document), revision, shared, version: health.version, message: null, view: { kind: "document" } });
-      } catch (error) {
-        get().notify(error instanceof Error ? error.message : "Could not load the document.", true);
-      } finally {
-        set({ busy: false });
-      }
+      })().finally(() => { pendingLoad = null; });
+      return pendingLoad;
     },
     edit(label, mutate) {
       const { doc, pageId, past } = get();

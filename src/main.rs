@@ -2049,7 +2049,7 @@ enum Command {
         #[arg(long)]
         images: Option<usize>,
         /// Benchmark compositing stacks, shared masks, clipping and blur.
-        #[arg(long, conflicts_with = "images")]
+        #[arg(long, conflicts_with_all = ["images", "photo", "scene3d", "scene3d_cache"])]
         composite: bool,
         #[arg(long, default_value_t = 16)]
         clipped: usize,
@@ -2065,11 +2065,14 @@ enum Command {
         operations: usize,
         /// Benchmark photography: ingest, cull, develop, preview and export a
         /// synthetic Bayer shoot.
-        #[arg(long, conflicts_with_all = ["images", "composite"])]
+        #[arg(long, conflicts_with_all = ["images", "composite", "scene3d", "scene3d_cache"])]
         photo: bool,
         /// Benchmark the deterministic static-3D CPU renderer.
-        #[arg(long, conflicts_with_all = ["images", "composite", "photo"])]
+        #[arg(long, conflicts_with_all = ["images", "composite", "photo", "scene3d_cache"])]
         scene3d: bool,
+        /// Benchmark full-node cold and warm render time through the PNG cache.
+        #[arg(long, conflicts_with_all = ["images", "composite", "photo", "scene3d"])]
+        scene3d_cache: bool,
         /// Rendered triangle count for --scene3d (1-1,000,000).
         #[arg(long, default_value_t = 100_000)]
         triangles: usize,
@@ -2106,7 +2109,7 @@ enum Command {
         #[command(subcommand)]
         action: pentool::layout_cli::SpreadAction,
     },
-    /// Version 10 static 3D: import models, camera, lights, inspect.
+    /// Static 3D and v11 product forms: import models, generate forms, camera, lights, inspect.
     Scene3d {
         input: PathBuf,
         #[arg(long)]
@@ -2115,6 +2118,35 @@ enum Command {
         if_revision: Option<String>,
         #[command(subcommand)]
         action: pentool::scene3d::cli::Scene3dAction,
+    },
+    /// Inspect or clear render cache in a running loopback Pentool server.
+    Scene3dCache {
+        #[arg(long, default_value = "http://127.0.0.1:4711")]
+        server: String,
+        #[command(subcommand)]
+        action: pentool::scene3d::cli::CacheAction,
+    },
+    /// List procedural product starters or add one as an editable mockup.
+    Mockup {
+        /// Validate and report without writing the document (apply only).
+        #[arg(long, global = true)]
+        dry_run: bool,
+        /// Reject apply if the document revision no longer matches this value.
+        #[arg(long, global = true)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: MockupAction,
+    },
+    /// Create, inspect, preview, preflight, and export packaging dielines.
+    Pack {
+        /// Document file; omitted only for the static `templates` listing.
+        input: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::scene3d::cli::PackAction,
     },
     /// Version 9 parent pages: create, items, assignment, resolution.
     Parent {
@@ -2507,7 +2539,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate between compatible v3 through v10 document formats.
+    /// Explicitly migrate between compatible v3 through v11 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -2742,6 +2774,41 @@ enum Command {
         /// 3D renderer: deterministic `reference` or optional `accelerated`.
         #[arg(long, default_value = "reference")]
         renderer: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum MockupAction {
+    /// List offline procedural mockup starters as JSON.
+    List,
+    /// Add a preset as a new editable product form and scene3d node.
+    Apply {
+        /// Target v11 `.pen` document.
+        input: PathBuf,
+        /// Offline starter ID from `mockup list`.
+        #[arg(long)]
+        preset: String,
+        /// Stable ID for the new scene3d node; its form ID is `<id>-form`.
+        #[arg(long)]
+        id: String,
+        /// Existing target layer ID.
+        #[arg(long)]
+        layer: String,
+        /// Target page ID (defaults to the first page).
+        #[arg(long)]
+        page: Option<String>,
+        /// Horizontal placement in document units.
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        x: f64,
+        /// Vertical placement in document units.
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        y: f64,
+        /// Placed width in document units.
+        #[arg(long, default_value_t = 400.0)]
+        width: f64,
+        /// Placed height in document units.
+        #[arg(long, default_value_t = 400.0)]
+        height: f64,
     },
 }
 
@@ -6693,14 +6760,31 @@ async fn run() -> Result<()> {
             operations,
             photo: photo_benchmark,
             scene3d: scene3d_benchmark,
+            scene3d_cache: scene3d_cache_benchmark,
             triangles,
             texture_edge,
             photos,
             megapixels,
             json: _,
         } => {
-            if !scene3d_benchmark && (triangles != 100_000 || texture_edge != 0) {
+            if !scene3d_benchmark
+                && !scene3d_cache_benchmark
+                && (triangles != 100_000 || texture_edge != 0)
+            {
                 anyhow::bail!("--triangles and --texture-edge require --scene3d")
+            }
+            let modes = [
+                images.is_some(),
+                composite_benchmark,
+                photo_benchmark,
+                scene3d_benchmark,
+                scene3d_cache_benchmark,
+            ]
+            .into_iter()
+            .filter(|active| *active)
+            .count();
+            if modes > 1 {
+                anyhow::bail!("choose only one benchmark mode")
             }
             let value = if scene3d_benchmark {
                 if render_benchmark || paths_only || scale != 1.0 || warmups != 1 {
@@ -6713,6 +6797,17 @@ async fn run() -> Result<()> {
                     texture_edge,
                     repetitions,
                 })?
+            } else if scene3d_cache_benchmark {
+                if render_benchmark
+                    || paths_only
+                    || scale != 1.0
+                    || warmups != 1
+                    || triangles != 100_000
+                    || texture_edge != 0
+                {
+                    anyhow::bail!("scene3d cache benchmark sets its own render workload; omit render, paths, scale, warmups, triangle and texture options")
+                }
+                benchmark::run_scene3d_cache(repetitions)?
             } else if photo_benchmark {
                 if scale != 1.0 || warmups != 1 {
                     anyhow::bail!("photo benchmark sets its own sizes; omit --scale and --warmups")
@@ -6795,6 +6890,23 @@ async fn run() -> Result<()> {
                     if worst as u128 > max_ms * 1000 {
                         anyhow::bail!(
                             "scene3d benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
+                            worst as f64 / 1000.0
+                        )
+                    }
+                }
+            }
+            if scene3d_cache_benchmark {
+                if let Some(max_ms) = max_ms {
+                    let worst = value["samples"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|sample| sample["cold_us"].as_u64())
+                        .max()
+                        .unwrap_or(0);
+                    if worst as u128 > max_ms * 1000 {
+                        anyhow::bail!(
+                            "scene3d cache benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
                             worst as f64 / 1000.0
                         )
                     }
@@ -6998,6 +7110,55 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::scene3d::cli::run(&input, dry_run, if_revision.as_deref(), action),
+        Command::Scene3dCache { server, action } => {
+            pentool::scene3d::cli::run_cache_command(&server, action)
+        }
+        Command::Mockup {
+            dry_run,
+            if_revision,
+            action,
+        } => match action {
+            MockupAction::List => {
+                anyhow::ensure!(
+                    !dry_run && if_revision.is_none(),
+                    "--dry-run and --if-revision apply only to `mockup apply`"
+                );
+                pentool::scene3d::cli::run_mockup_list()
+            }
+            MockupAction::Apply {
+                input,
+                preset,
+                id,
+                layer,
+                page,
+                x,
+                y,
+                width,
+                height,
+            } => pentool::scene3d::cli::run_mockup_apply(
+                &input,
+                dry_run,
+                if_revision.as_deref(),
+                &preset,
+                &id,
+                &layer,
+                pentool::scene3d::cli::MockupPlacement {
+                    page,
+                    rect: [x, y, width, height],
+                },
+            ),
+        },
+        Command::Pack {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::scene3d::cli::run_pack(
+            input.as_deref(),
+            dry_run,
+            if_revision.as_deref(),
+            action,
+        ),
         Command::LayoutStyle {
             input,
             dry_run,
@@ -8371,8 +8532,8 @@ async fn run() -> Result<()> {
             if selected_page.is_some() {
                 bail!("[invalid-input] format migration affects the entire document; --page is not applicable");
             }
-            if !matches!(target, 3..=10) {
-                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, 8, 9, or 10")
+            if !matches!(target, 3..=11) {
+                anyhow::bail!("migration target must be 3 through 11")
             }
             let before = if u64::from(target) >= pentool::color::VERSION {
                 pentool::resource::read_bounded(
@@ -8386,7 +8547,8 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
-                10 => pentool::scene3d::node::migrate(raw)?,
+                11 => pentool::scene3d::node::migrate_to_v11(raw)?,
+                10 => pentool::scene3d::node::migrate(pentool::scene3d::node::to_v10(raw)?)?,
                 9 => pentool::spreads::migrate(raw)?,
                 8 => pentool::color::catalog::migrate(raw)?,
                 7 => pentool::photo::catalog::migrate(raw)?,
