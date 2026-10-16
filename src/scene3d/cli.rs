@@ -3753,7 +3753,16 @@ pub fn run(
         Scene3dAction::Uv { id, action } => {
             require_v10(&raw)?;
             let node = scene3d_node(&mut raw, &id)?;
-            let digest = node["model"].as_str().unwrap_or_default().to_string();
+            let digest = node
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if digest.is_empty() && node.contains_key("dieline") {
+                bail!(
+                    "[unsupported-capability] node `{id}` is a dieline preview with no UV model; inspect its panel UV rectangles with `pack inspect` and export the flat layout with `pack export`"
+                );
+            }
             match action {
                 UvAction::Show {
                     resolution,

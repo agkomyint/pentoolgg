@@ -3979,3 +3979,80 @@ fn graphic_cli_add_set_list_remove_is_transactional() {
             .any(|item| item["id"] == "pattern-fill")
     );
 }
+
+#[test]
+fn unknown_material_slot_is_a_stable_diagnostic_and_leaves_the_document_unchanged() {
+    use std::process::Command;
+    // Document validation names the slot, the consumer and the corrective action.
+    let mut document = fixture();
+    document["pages"][1]["layers"][0]["nodes"][0]["surface_graphics"][0]["slot"] =
+        Value::String("no-such-slot".into());
+    let error = pentool::scene::validate(&document).unwrap_err().to_string();
+    assert!(error.contains("[missing-resource]"), "{error}");
+    assert!(error.contains("material slot `no-such-slot`"), "{error}");
+
+    // The CLI mutation path refuses the same slot and does not touch the file.
+    let dir = std::env::temp_dir().join(format!("pentool-v0160-slot-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("slot.pen");
+    std::fs::write(&input, serde_json::to_vec_pretty(&fixture()).unwrap()).unwrap();
+    let before = std::fs::read(&input).unwrap();
+    for dry in [true, false] {
+        let mut args = vec!["scene3d", input.to_str().unwrap()];
+        if dry {
+            args.push("--dry-run");
+        }
+        args.extend([
+            "graphic",
+            "perfume-preview",
+            "add",
+            "bad-slot",
+            "--source",
+            "page:artwork",
+            "--slot",
+            "no-such-slot",
+        ]);
+        let out = Command::new(env!("CARGO_BIN_EXE_pentool"))
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "unknown slot must be refused");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("[missing-resource]") && stderr.contains("no-such-slot"),
+            "{stderr}"
+        );
+        assert_eq!(std::fs::read(&input).unwrap(), before);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn uv_layout_on_a_dieline_preview_is_refused_not_a_panic() {
+    use std::process::Command;
+    let dir = std::env::temp_dir().join(format!("pentool-v0160-dieline-uv-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("dieline.pen");
+    std::fs::write(&input, serde_json::to_vec_pretty(&fixture()).unwrap()).unwrap();
+    let before = std::fs::read(&input).unwrap();
+    let svg = dir.join("uv.svg");
+    let out = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args([
+            "scene3d",
+            input.to_str().unwrap(),
+            "uv",
+            "carton-preview",
+            "layout",
+            "--out",
+            svg.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.contains("[unsupported-capability]"), "{stderr}");
+    assert!(!svg.exists());
+    assert_eq!(std::fs::read(&input).unwrap(), before);
+    std::fs::remove_dir_all(dir).unwrap();
+}
