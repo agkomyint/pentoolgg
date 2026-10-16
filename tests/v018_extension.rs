@@ -771,3 +771,24 @@ fn studio_server_lists_and_runs_extensions_with_a_revision_guard() {
     assert_ne!(fs::read(&doc).unwrap(), before);
     assert_eq!(run(json!({"name":"missing"})).0, 400);
 }
+
+#[test]
+fn batch_put_operations_respect_locked_layers() {
+    let ws = Workspace::new("batchlock");
+    let doc = new_doc(&ws);
+    let path = doc.to_str().unwrap();
+    quiet(&ws, &["layer", path, "set", "layer-1", "--locked", "true"]);
+    let before = fs::read(&doc).unwrap();
+    let ops = [
+        add_box_op("locked-box"),
+        json!({"type":"put-text","id":"locked-text","layer":"layer-1","content":"x","x":1,"y":1}),
+        json!({"type":"put-path","id":"locked-path","layer":"layer-1","d":"M 0 0 L 5 5","stroke":"#000"}),
+    ];
+    for (i, op) in ops.iter().enumerate() {
+        let file = ws.path(&format!("ops{i}.json"));
+        fs::write(&file, json!([op]).to_string()).unwrap();
+        let error = fails(&ws, &["batch", path, file.to_str().unwrap()]);
+        assert!(error.contains("locked"), "{error}");
+        assert_eq!(fs::read(&doc).unwrap(), before);
+    }
+}

@@ -180,6 +180,6 @@ by an integration test, but it has **not** been exercised in a live browser.
 - Batch operations only: an extension cannot do anything `scene::apply_batch_at`
   does not support.
 - No marketplace, network-capable extensions, or native plugins (deferred).
-- Edits to a locked layer or node are rejected by the extension host. Note that
-  plain `pentool batch put-shape` currently does **not** check layer locks; that
-  is a separate, pre-existing CLI bug.
+- Edits to a locked layer or node are rejected by the extension host. v0.18.0
+  also fixed plain `pentool batch`, whose `put-shape`, `put-text` and
+  `put-path` previously ignored layer locks.
