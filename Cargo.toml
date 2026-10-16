@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.15.0"
+version = "0.16.0"
 edition = "2021"
 # Integration tests are grouped into 12 suites under tests/suites/ so a full
 # run links 12 test binaries instead of one per file (123). Add new test
