@@ -658,6 +658,13 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   now pins rejection of transforms on child SVG panel elements, which otherwise
   could be silently interpreted at untransformed coordinates.
 
+  **Release status (v0.16.0 candidate): remaining.** Delivered: all seven
+  built-in templates, validated generation, labeled-SVG import, and flat/folded
+  preview as visual draft/reference mockups. Not delivered: the bottle-label
+  wrap does not conform to tapered profiles, and Mailer lid/glue-joint
+  overlap when folded is documented under task 9. Non-developable shapes are
+  deferred (see Explicitly deferred) and no dedicated refusal test exists.
+
 - [ ] **8a. Make dielines usable as design surfaces.** Provide a 2D dieline
   editing view where panels have stable IDs and can receive linked page/node
   artwork. Support ordinary vector/text editing plus panel assignment, panel
@@ -742,6 +749,12 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   and profile-conforming bottle-label wrapping remain open; both pouch and
   bottle-label outputs are visual mockups.
 
+  **Release status (v0.16.0 candidate): remaining.** Delivered: dielines are editable through a linked
+  ordinary layout page, with stable panel IDs, linked panel artwork, crease
+  angle/direction editing, and SVG import. Not delivered: freeform manufacturing
+  crease editing, direct artwork editing on the dieline page (artwork stays in
+  the linked source page), tube end closures, and production pouch construction.
+
 - [ ] **9. Keep flat dieline and folded view in sync.** Derive folded faces and
   UV rectangles from the single panel map in the data model, using the same
   `scene3d uv` overlay record as ordinary models. Implement a deterministic
@@ -812,7 +825,15 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   a physical-board simulation or manufacturing conformance result.
   Folded-state collision accuracy and geometric conformance remain open.
 
-- [ ] **9a. Unify packaging UVs and print mapping.** Every flat panel's artwork
+  **Release status (v0.16.0 candidate): remaining.** Delivered: single stored
+  panel map shared by folded mesh, flat export, and linked artwork; panel and
+  face selection in both directions; deterministic collision preflight at fold
+  0, 0.5 and 1 for all rectangular built-ins. Not met: the documented, pinned
+  overlaps (straight-tuck dust flaps vs lids at fold 0.5, and the mailer lid vs
+  its glue joint when folded), so the "no unintended overlaps" acceptance target
+  is not satisfied; tube and bottle-label are not in the overlap sweeps.
+
+- [x] **9a. Unify packaging UVs and print mapping.** Every flat panel's artwork
   has one canonical mapping to its 3D face and UV rectangle. A cylindrical
   bottle/tube label uses a documented seam and wrap direction; the flat label
   width corresponds to the measured surface circumference at the specified
@@ -876,7 +897,17 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   bounded triangle pairs rather than assuming four-corner faces. Complete
   dieline/UV export parity and structural manufacturing validation remain open.
 
-- [ ] **10. Add packaging CLI and print export.** Provide template listing,
+  **Release status (v0.16.0 candidate): delivered as draft/reference-only.**
+  Panel UV rectangles are one stored map read by the folded mesh, the flat SVG
+  and the cylindrical wrap (tests: `non_full_panel_uv_rect_keeps_folded_linked_
+  artwork_aligned_to_its_flat_panel`, cylindrical wrap settings update). The
+  flat dieline SVG does not emit UV rectangles, and `scene3d uv ... layout`
+  applies to model and form nodes only; on a dieline preview it now fails with
+  `[unsupported-capability]` instead of panicking. Seam-crossing detection is a
+  conservative bounds check; contours with multiple subpaths or holes are
+  rejected. Structural/manufacturing validation is deferred.
+
+- [x] **10. Add packaging CLI and print export.** Provide template listing,
   dieline create/import, panel binding, fold preview, inspect/preflight, and
   export. Flat exports preserve full bleed and place cut, crease, perforation,
   and safe-zone graphics on documented spot-color/separation roles. Export a
@@ -1030,6 +1061,14 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   A regression verifies all 12 folds survive layout resolution and appear on
   the separate Crease vector plate. This resolves only the preflight mismatch;
   broader geometry acceptance remains open.
+
+  **Release status (v0.16.0 candidate): delivered as draft/reference-only.**
+  Shipped grammar: `scene3d DOC pack <sleeve|carton|pouch|tube|bottle-label|
+  templates|inspect|bind|crease|settings|preview|preflight|export|separate|
+  vector-separate>`, `pack DOC export-bundle`, and `pack verify-bundle`, with
+  dry-run, `--if-revision` and failure atomicity. Certified manufacturing
+  output and DXF/Artios/Esko interchange are deferred. Bundle outputs carry
+  `manufacturing_certified:false`.
 
 - [ ] **11. Build the Studio mockup and packaging workflow.** Add a Mockups
   workspace that:
@@ -1224,6 +1263,10 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   clipping defect only; broader mobile editor and full Studio acceptance remain
   open.
 
+  **Release status (v0.16.0 candidate): remaining.** Studio panels exist but
+  the workflow has had only the manual Chromium passes recorded above and no
+  automated browser test or complete desktop+mobile acceptance run.
+
 - [x] **12. Add bounded batch rendering.** Render many source pages/documents
   through one mockup and many mockups from one source with stable, collision-
   checked names. Bound queue length, total pixels, document count, and work;
@@ -1323,6 +1366,10 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   test command. Hosted cross-platform CI and browser-level Studio acceptance
   remain outstanding.
 
+  **Release status (v0.16.0 candidate): remaining.** Hosted Linux, Windows and
+  macOS CI on the exact release commit; no pinned cross-platform render digest
+  test exists yet (acceptance target 6 relies on that CI evidence).
+
 - [ ] **14. Document and release evidence.** Publish the binding, preset,
   dieline, print, CLI, cache, license, and Studio contracts. Synchronize schema,
   help, README examples, fixtures, and user-facing examples. Record which
@@ -1360,6 +1407,9 @@ and [UV projection overview](https://helpx.adobe.com/dimension/desktop/features/
   those capabilities from still-open structural and manufacturing validation.
   Tag-triggered releases are staged as drafts for artifact/release-note review;
   hosted three-platform CI and a real tagged artifact run remain required.
+
+  **Release status (v0.16.0 candidate): remaining.** Hosted three-platform CI
+  and a tagged draft-release artifact run are required before this can close.
 
 ## Acceptance targets
 
