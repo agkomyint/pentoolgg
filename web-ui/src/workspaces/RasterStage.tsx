@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, postJson, type Doc, type SceneNode } from "@/lib/api";
-import { apply, findNode, invert, pageOf } from "@/lib/model";
+import { apply, findNode, invert, nodeWorldTransform, pageOf } from "@/lib/model";
 import { useStudio } from "@/store";
 import { usePaint } from "./rasterStore";
 
@@ -29,20 +29,35 @@ const SNAP = 6;
 const CURSOR_TOOLS = ["brush", "eraser", "clone", "heal", "quickmask"];
 
 /** Soft-edged dabs along a path: what you see while painting matches the committed look. */
-function dabs(ctx: CanvasRenderingContext2D, pts: { px: number; py: number }[], diameter: number, color: string, hardness: number, flow: number, erase: boolean) {
+function dabs(ctx: CanvasRenderingContext2D, pts: { px: number; py: number }[], diameter: number, kind: string, color: string, hardness: number, flow: number, erase: boolean) {
   const r = Math.max(0.5, diameter / 2);
-  const step = Math.max(1, r * 0.25);
+  const pixel = kind === "pixel";
+  const step = pixel ? 1 : Math.max(1, diameter * 0.1);
   const rgb = erase ? "255,255,255" : color.startsWith("#") && color.length >= 7 ? [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)).join(",") : "0,0,0";
-  const a = Math.min(1, Math.max(0.05, flow)) * (erase ? 0.9 : 1);
+  const a = Math.min(1, Math.max(0, flow));
   const h = Math.min(0.98, Math.max(0, hardness));
   const stamp = (x: number, y: number) => {
-    const g = ctx.createRadialGradient(x, y, r * h, x, y, r);
-    g.addColorStop(0, `rgba(${rgb},${a})`);
-    g.addColorStop(1, `rgba(${rgb},0)`);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 7);
-    ctx.fill();
+    if (pixel) {
+      const size = Math.max(1, Math.round(diameter));
+      ctx.fillStyle = `rgba(${rgb},${a})`;
+      ctx.fillRect(Math.floor(x) - Math.floor(size / 2), Math.floor(y) - Math.floor(size / 2), size, size);
+    } else if (kind === "hard-round") {
+      ctx.fillStyle = `rgba(${rgb},${a})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 7);
+      ctx.fill();
+    } else {
+      const g = ctx.createRadialGradient(x, y, r * h, x, y, r);
+      g.addColorStop(0, `rgba(${rgb},${a})`);
+      g.addColorStop(0.25, `rgba(${rgb},${a * 0.84375})`);
+      g.addColorStop(0.5, `rgba(${rgb},${a * 0.5})`);
+      g.addColorStop(0.75, `rgba(${rgb},${a * 0.15625})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 7);
+      ctx.fill();
+    }
   };
   let carry = 0;
   stamp(pts[0]!.px, pts[0]!.py);
@@ -53,6 +68,36 @@ function dabs(ctx: CanvasRenderingContext2D, pts: { px: number; py: number }[], 
     for (let d = step - carry; d <= len; d += step) stamp(a0.px + ((b0.px - a0.px) * d) / (len || 1), a0.py + ((b0.py - a0.py) * d) / (len || 1));
     carry = (carry + len) % step;
   }
+}
+
+function transformedDabs(
+  ctx: CanvasRenderingContext2D,
+  pts: Pt[],
+  diameter: number,
+  kind: string,
+  color: string,
+  hardness: number,
+  flow: number,
+  erase: boolean,
+  g: { sx: number; sy: number; inverse: [number, number, number, number, number, number]; world: [number, number, number, number, number, number] },
+) {
+  const [a, b, c, d, e, f] = g.world;
+  ctx.save();
+  ctx.setTransform(g.sx * a, g.sy * b, g.sx * c, g.sy * d, g.sx * e, g.sy * f);
+  dabs(
+    ctx,
+    pts.map((p) => {
+      const [x, y] = apply(g.inverse, p.px / g.sx, p.py / g.sy);
+      return { px: x, py: y };
+    }),
+    diameter,
+    kind,
+    color,
+    hardness,
+    flow,
+    erase,
+  );
+  ctx.restore();
 }
 
 export function RasterStage() {
@@ -78,7 +123,7 @@ export function RasterStage() {
     selection: { x: number; y: number; width: number; height: number } | null;
     source: { x: number; y: number } | null;
     /** Strokes already released but not yet confirmed by the engine; drawn so the mark never disappears. */
-    pending: { preview: Pt[]; size: number; color: string; erase: boolean; hardness: number; flow: number; done: boolean; gen: number }[];
+    pending: { preview: Pt[]; size: number; kind: string; color: string; erase: boolean; hardness: number; flow: number; done: boolean; gen: number }[];
   }>({ pointer: null, stroke: null, lasso: [], selection: null, source: null, pending: [] });
   /** Commits run strictly in order; input is never blocked while one is in flight. */
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -107,7 +152,9 @@ export function RasterStage() {
     const canvas = doc ? pageOf(doc as Doc, pageId)?.canvas : undefined;
     if (!layer || !canvas || !img?.naturalWidth) return null;
     const found = findNode(pageOf(doc as Doc, pageId), layer.id);
-    const world = found?.world;
+    // A raster node's own transform affects both where its pixels appear and
+    // which local pixel receives a pointer sample.
+    const world = found && nodeWorldTransform(found);
     const inverse = world && invert(world);
     if (!world || !inverse) return null;
     return { node: layer, sx: img.naturalWidth / canvas.width, sy: img.naturalHeight / canvas.height, lx: layer.x ?? 0, ly: layer.y ?? 0, world, inverse };
@@ -197,10 +244,10 @@ export function RasterStage() {
       l.lasso.forEach((q, i) => (i ? ctx.lineTo(q.px, q.py) : ctx.moveTo(q.px, q.py)));
       ctx.stroke();
     }
-    for (const q of l.pending) if (q.preview.length) dabs(ctx, q.preview, q.size * g.sx, q.color, q.hardness, q.flow, q.erase);
+    for (const q of l.pending) if (q.preview.length) transformedDabs(ctx, q.preview, q.size, q.kind, q.color, q.hardness, q.flow, q.erase, g);
     const s = l.stroke;
     if (s && "samples" in s) {
-      if (s.preview.length) dabs(ctx, s.preview, p.size * g.sx, p.color, p.hardness, p.flow, p.tool === "eraser");
+      if (s.preview.length) transformedDabs(ctx, s.preview, p.size, p.kind, p.color, p.hardness, p.flow, p.tool === "eraser", g);
       // Stabilizer feedback: the engine smooths with this lag, so show where the dab will land.
       ctx.strokeStyle = "#30d158";
       ctx.lineWidth = 1;
@@ -210,16 +257,22 @@ export function RasterStage() {
       ctx.stroke();
     }
     if (l.pointer && !l.stroke && CURSOR_TOOLS.includes(p.tool)) {
-      const r = Math.max(1, (p.size * g.sx) / 2);
+      const [a, b, c, d, e, f] = g.world;
+      ctx.save();
+      ctx.setTransform(g.sx * a, g.sy * b, g.sx * c, g.sy * d, g.sx * e, g.sy * f);
+      const x = l.pointer.x + g.lx;
+      const y = l.pointer.y + g.ly;
+      const r = Math.max(0.5, p.size / 2);
       ctx.lineWidth = 1;
       ctx.strokeStyle = "#fff";
       ctx.beginPath();
-      ctx.arc(l.pointer.px, l.pointer.py, r + 1, 0, 7);
+      ctx.arc(x, y, r + 1, 0, 7);
       ctx.stroke();
       ctx.strokeStyle = "#000";
       ctx.beginPath();
-      ctx.arc(l.pointer.px, l.pointer.py, r, 0, 7);
+      ctx.arc(x, y, r, 0, 7);
       ctx.stroke();
+      ctx.restore();
     }
   }, [geometry]);
 
@@ -300,7 +353,7 @@ export function RasterStage() {
   };
 
   // Pixels change only through the shared Rust engine.
-  const call = (action: string, args: Record<string, unknown>, ghost?: { preview: Pt[]; size: number; color: string; erase: boolean; hardness: number; flow: number }) => {
+  const call = (action: string, args: Record<string, unknown>, ghost?: { preview: Pt[]; size: number; kind: string; color: string; erase: boolean; hardness: number; flow: number }) => {
     const entry = ghost ? { ...ghost, done: false, gen: Infinity } : null;
     if (entry) live.current.pending.push(entry);
     inflight.current += 1;
@@ -386,12 +439,15 @@ export function RasterStage() {
     const common = { brush: brush(), color: st.color, seed: 0 };
     if ("samples" in s) {
       const action = ({ brush: "stroke", eraser: "stroke", clone: "clone", heal: "heal", quickmask: "quickmask" } as Record<string, string>)[st.tool];
-      if (action)
+      if (action) {
+        const preview = s.preview.slice();
+        if (st.stabilizer > 0 && s.samples.length > 1) preview.push(s.last);
         void call(
           action,
           { ...common, samples: s.samples, blend: st.tool === "eraser" ? "erase" : "normal", erase: st.tool === "quickmask" && st.mode === "subtract" },
-          { preview: s.preview, size: st.size, color: st.color, erase: st.tool === "eraser", hardness: st.hardness, flow: st.flow },
+          { preview, size: st.size, kind: st.kind, color: st.color, erase: st.tool === "eraser", hardness: st.hardness, flow: st.flow },
         );
+      }
     } else if ("lasso" in s && l.lasso.length >= 3) {
       void call("select-lasso", { points: l.lasso.map((q) => [q.x, q.y]), mode: st.mode });
     } else if ("marquee" in s && l.selection && l.selection.width > 0 && l.selection.height > 0) {

@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }},wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
@@ -66,6 +66,8 @@ jobs:
             echo "reused the CI binary"
           else
             echo "CI binary unavailable; building"
+            cargo build -p pentool-wasm --release --locked --target wasm32-unknown-unknown
+            cp target/wasm32-unknown-unknown/release/pentool_wasm.wasm web/pentool_core.wasm
             cargo build --release --locked --target ${{ matrix.target }}
           fi
       - name: Smoke test CLI rendering

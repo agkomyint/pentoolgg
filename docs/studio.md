@@ -10,9 +10,11 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
 - `cargo build` never needs Node or Bun. `bun run build` produces one
   self-contained `web/studio.html`, which is committed and embedded in the
   binary (`include_str!`). Rebuild and commit it whenever `web-ui/src` changes.
-- The server stays the source of truth. Studio renders previews through
-  `/api/render/png`, runs checks through `/api/color/*`, and never reimplements
-  document logic in the browser.
+- The server stays the source of truth. Studio uses the embedded WebAssembly
+  renderer for supported v6-v9 previews, including raster tiles, and falls back
+  to `/api/render/png` when local rendering is unavailable. Raster edits still
+  commit through `/api/raster`; the browser only draws the in-progress stroke.
+  Release builds embed the renderer built for `wasm32-unknown-unknown`.
 - Workspaces map to the roadmap (`web-ui/src/lib/workspaces.ts`): Design,
   Images (0.7), Composite (0.8), Photo (0.11), Print (0.12), Paint (0.13),
   Layout (0.14), 3D (0.15). A workspace whose format or CLI is

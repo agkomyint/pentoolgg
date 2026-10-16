@@ -67,6 +67,11 @@ export function nodeMatrix(node: SceneNode): Matrix {
   return Array.isArray(t) && t.length === 6 ? (t.map(Number) as Matrix) : IDENTITY;
 }
 
+/** Parent-to-page transform composed with the node's own transform. */
+export function nodeWorldTransform(found: Pick<Found, "node" | "world">): Matrix {
+  return multiply(found.world, nodeMatrix(found.node));
+}
+
 export function invert(m: Matrix): Matrix | null {
   const det = m[0] * m[3] - m[1] * m[2];
   if (!det || !Number.isFinite(det)) return null;

@@ -31,6 +31,7 @@ pub(crate) fn check_cancelled() -> Result<()> {
     }
     Ok(())
 }
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn with_cancel<T>(
     flag: Arc<AtomicBool>,
     operation: impl FnOnce() -> Result<T>,
