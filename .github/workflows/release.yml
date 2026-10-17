@@ -199,6 +199,6 @@ jobs:
         run: cd artifacts && sha256sum *.zip *.tar.gz > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          draft: false
+          draft: true
           generate_release_notes: true
           files: artifacts/*
