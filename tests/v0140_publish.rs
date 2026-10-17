@@ -127,3 +127,45 @@ fn pdf_has_real_text_links_and_outline_and_epub_has_navigation() {
     .unwrap();
     assert!(story.contains("<h1 id=\"p0\"") && story.contains("href=\"https://example.com\""));
 }
+
+#[test]
+fn fixed_layout_epub_report_carries_fixed_limits() {
+    let dir = scratch();
+    let doc = document(400.0);
+    let path = write(dir.as_path(), "doc.pen", &doc);
+    let epub = dir.as_path().join("fixed.epub");
+    let report = pentool::publish::export_epub(
+        &[(&doc, path.as_path())],
+        &epub,
+        &pentool::publish::EpubOptions {
+            fixed: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(report["layout"], "fixed");
+    let limits: Vec<&str> = report["limits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap())
+        .collect();
+    assert!(
+        limits.iter().all(|l| !l.contains("reflowable")),
+        "fixed report must not carry reflowable limits: {limits:?}"
+    );
+    assert!(
+        limits.iter().any(|l| l.contains("fixed output")),
+        "limits must describe the fixed layout: {limits:?}"
+    );
+    // Fixed pages are rasterized artwork plus positioned text; links are gone.
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&epub).unwrap()).unwrap();
+    assert!(archive.by_name("OEBPS/images/d0-p0.png").is_ok());
+    let mut page = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("OEBPS/page-0-0.xhtml").unwrap(),
+        &mut page,
+    )
+    .unwrap();
+    assert!(!page.contains("<a "), "fixed pages drop link runs: {page}");
+}
