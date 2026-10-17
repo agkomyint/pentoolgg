@@ -1,0 +1,10 @@
+{
+  "name": "inventory",
+  "version": "1.0.0",
+  "api": 1,
+  "description": "Count objects on the page by kind (read-only).",
+  "capabilities": ["document.read"],
+  "entry": "main.wasm",
+  "limits": {"cpu_ms": 2000, "memory_mb": 16},
+  "commands": [{"id": "count", "title": "Count objects by kind"}]
+}

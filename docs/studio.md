@@ -77,6 +77,16 @@ and instance links are retained with materialized fallback artwork. Unique
 text nodes; other property types and live override propagation remain
 unsupported. Studio does not expose component override editing.
 
+### Extensions (0.18)
+
+The Extensions workspace and the Ctrl/Cmd+K palette list the project's installed
+sandboxed extensions with their approved capabilities and limits, then preview
+(dry run) or run a command against the served document through
+`GET /api/extensions` and `POST /api/extensions/run` (guarded by the document
+revision, one undoable step). Installing and approving capabilities stay CLI
+actions (`pentool extension add --approve`). Running is disabled while local
+edits are unsaved. Not yet exercised in a live browser. See `docs/extensions-v1.md`.
+
 ### Paint plan authoring (0.13)
 
 The Paint workspace's "Plan passes" section authors an ordered paint plan: path or

@@ -47,3 +47,12 @@ documents and propose edits through the same planner every command uses.
 
 - A public marketplace, network-capable extensions, and native (non-sandboxed)
   plugins.
+
+## Status
+
+All seven items are implemented on branch `feat/v0.18.0-extensions` (see
+`docs/extensions-v1.md`) with passing local tests on Windows (full suite,
+Clippy and rustfmt clean). Checkboxes stay open until the three-OS CI run
+provides cross-platform evidence. Studio (item 6) has not been exercised in a
+live browser, and a like-for-like binary-size delta against v0.16.1 is still
+to be read from CI's `binary-size` jobs.

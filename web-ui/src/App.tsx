@@ -14,6 +14,7 @@ import { DesignPanel } from "@/workspaces/DesignPanel";
 import { CompositePanel, ImagePanel, SceneConsole } from "@/workspaces/OperationsPanel";
 import { PrintPanel } from "@/workspaces/PrintPanel";
 import { LayoutPanel } from "@/workspaces/LayoutPanel";
+import { ExtensionsPanel, ExtensionPalette } from "@/workspaces/ExtensionsPanel";
 import { Planned } from "@/workspaces/Planned";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
 import { PhotoStage } from "@/workspaces/PhotoStage";
@@ -89,6 +90,8 @@ function WorkspaceBody() {
           <Scene3dPanel />
         </div>
       );
+    case "extensions":
+      return <ExtensionsPanel />;
     default:
       return (
         <div className="p-2">
@@ -206,6 +209,7 @@ export default function App() {
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col bg-background text-foreground">
+        <ExtensionPalette />
         {/* Application bar: file actions, module switcher, history. */}
         <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-card px-2">
           <strong className="mr-1 text-[13px] tracking-tight">Pentool</strong>

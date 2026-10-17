@@ -1615,6 +1615,7 @@ pub fn apply_batch_at(
                         "line" => ShapeKind::Line,
                         other => bail!("unsupported shape: {other}"),
                     };
+                    ensure_layer_unlocked(page_mut(&mut candidate, page)?, &layer)?;
                     let n = |key| operation.get(key).and_then(Value::as_f64);
                     let previous = if is_replace(operation)? {
                         take_for_replace(page_mut(&mut candidate, page)?, &id)?
@@ -1667,6 +1668,7 @@ pub fn apply_batch_at(
                     let id = resolve("id")?;
                     let layer = resolve("layer")?;
                     let page_value = page_mut(&mut candidate, page)?;
+                    ensure_layer_unlocked(page_value, &layer)?;
                     let previous = if is_replace(operation)? {
                         take_for_replace(page_value, &id)?
                     } else {

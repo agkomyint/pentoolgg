@@ -67,6 +67,24 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Extensions (v0.18)
+
+Sandboxed WebAssembly extensions read a document and propose edits through the
+same planner and transaction as `pentool batch` (dry run, revision guard, locks,
+rollback, one undo step). They get no filesystem, network, clock or randomness,
+and run under fixed CPU and memory limits. Capabilities are declared in the
+manifest and shown before install. See [docs/extensions-v1.md](docs/extensions-v1.md).
+
+```sh
+pentool extension pack examples/extensions/stamp/package stamp.penext
+pentool extension verify stamp.penext
+pentool extension add stamp.penext                 # shows capabilities, installs nothing
+pentool extension add stamp.penext --approve
+pentool extension run stamp logo.pen --args '{"text":"SALE"}' --dry-run
+pentool extension list
+pentool extension remove stamp
+```
+
 ## 3D mockups and UVs (v0.16 in development)
 
 Pentool imports GLB, glTF, and OBJ models into ordinary `.pen` scene nodes.

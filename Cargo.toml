@@ -6,7 +6,7 @@ edition = "2021"
 # Milestone-specific integration suites are declared explicitly below so CI
 # executes their dedicated format and release coverage.
 autotests = false
-rust-version = "1.85"
+rust-version = "1.86"
 description = "A single-binary, agent-friendly vector pen tool"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/agkomyint/pentoolgg"
@@ -60,6 +60,7 @@ url = "=2.4.1"
 encoding_rs = "=0.8.35"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+wasmi = { version = "2", default-features = false, features = ["std", "validate", "stable", "deterministic", "portable-dispatch"] }
 
 # Local dev/test: line-only debuginfo (level 1 instead of full level 2) to
 # cut compile, link and disk cost. Backtraces keep file/line information.
@@ -137,3 +138,6 @@ path = "tests/v017_interchange.rs"
 [[test]]
 name = "v017_psd_export"
 path = "tests/v017_psd_export.rs"
+
+[dev-dependencies]
+wat = "1.258.3"

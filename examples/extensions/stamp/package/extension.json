@@ -1,0 +1,10 @@
+{
+  "name": "stamp",
+  "version": "1.0.0",
+  "api": 1,
+  "description": "Add a labelled badge to the page.",
+  "capabilities": ["document.read", "document.edit"],
+  "entry": "main.wasm",
+  "limits": {"cpu_ms": 2000, "memory_mb": 16},
+  "commands": [{"id": "stamp", "title": "Add a badge"}]
+}

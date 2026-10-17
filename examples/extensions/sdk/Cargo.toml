@@ -1,0 +1,10 @@
+[package]
+name = "pentool-ext-sdk"
+version = "1.0.0"
+edition = "2021"
+description = "Tiny guest-side helper for Pentool extension api 1"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+serde_json = "1"

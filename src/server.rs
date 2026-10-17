@@ -153,6 +153,8 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/render/svg", post(render_svg))
         .route("/api/document", get(get_document).put(put_document))
         .route("/api/scene", post(scene_command))
+        .route("/api/extensions", get(extensions_list))
+        .route("/api/extensions/run", post(extensions_run))
         .route("/api/history", get(history_list))
         .route("/api/undo", post(history_undo))
         .route("/api/redo", post(history_redo))
@@ -3302,6 +3304,70 @@ async fn composite_dependencies(State(state): State<Shared>) -> Response {
         Err(error) => problem(error),
     }
 }
+/// Installed extensions of the served project, with the capabilities each was approved for.
+async fn extensions_list(State(state): State<Shared>) -> Response {
+    match crate::extension::store::list(&state.project_root) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExtensionRunRequest {
+    name: String,
+    command: Option<String>,
+    args: Option<serde_json::Value>,
+    page: Option<String>,
+    revision: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Runs an installed extension against the shared document. The run goes through
+/// the same host and transaction as `pentool extension run`; installing and
+/// approving capabilities stays a CLI action.
+async fn extensions_run(
+    State(state): State<Shared>,
+    Json(body): Json<ExtensionRunRequest>,
+) -> Response {
+    let Some(file) = state.file.clone() else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let root = state.project_root.clone();
+    let gate = state.gate.clone();
+    let work = move || -> Result<serde_json::Value> {
+        let _guard = gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        // Studio revisions are value hashes (GET /api/document); the transaction
+        // guard uses the file's byte hash. Check the former, then pin the latter
+        // under the same lock so nothing can change in between.
+        let bytes = std::fs::read(&file)?;
+        let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+        require_revision(body.revision.as_deref(), &raw)?;
+        let pinned = crate::transaction::revision(&bytes);
+        crate::extension::store::run(
+            &root,
+            &body.name,
+            &file,
+            crate::extension::store::RunOptions {
+                command: body.command,
+                args: body.args,
+                event: None,
+                page: body.page,
+                dry_run: body.dry_run,
+                if_revision: Some(pinned),
+            },
+        )
+    };
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(error)) => problem(error),
+        Err(error) => problem(anyhow::anyhow!("extension task failed: {error}")),
+    }
+}
+
 async fn scene_command(State(state): State<Shared>, Json(body): Json<SceneRequest>) -> Response {
     if let Some(mut raw) = body.document {
         let result = crate::scene::apply_batch_at(

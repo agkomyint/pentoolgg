@@ -16,6 +16,8 @@ pub mod editing;
 pub mod effects;
 mod fig_binary;
 pub mod figma_import;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod extension;
 pub mod fill;
 pub mod fonts;
 pub mod geometry;

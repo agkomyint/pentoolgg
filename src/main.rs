@@ -1,7 +1,7 @@
 use pentool::{
-    agent, ai, asset, benchmark, composite, diff, document, editing, fonts, geometry, history,
-    image, import, instance, json, layout, library, package, page, pdf, raster, render, replace,
-    scene, server, style, text, transaction,
+    agent, ai, asset, benchmark, composite, diff, document, editing, extension, fonts, geometry,
+    history, image, import, instance, json, layout, library, package, page, pdf, raster, render,
+    replace, scene, server, style, text, transaction,
 };
 
 use anyhow::{bail, Context, Result};
@@ -2018,6 +2018,11 @@ enum Command {
         #[command(subcommand)]
         action: InstanceAction,
     },
+    /// Pack, verify, install, list, remove, and run sandboxed wasm extensions.
+    Extension {
+        #[command(subcommand)]
+        action: ExtensionAction,
+    },
     /// Build, verify, publish, or install deterministic packages.
     Package {
         #[command(subcommand)]
@@ -3091,6 +3096,55 @@ enum InstanceAction {
         source: PathBuf,
         #[arg(long)]
         dry_run: bool,
+    },
+}
+#[derive(Subcommand)]
+enum ExtensionAction {
+    /// Build a deterministic .penext from a directory holding extension.json.
+    Pack { dir: PathBuf, output: PathBuf },
+    /// Verify a .penext offline (digests, manifest, module); runs nothing.
+    Verify { package: PathBuf },
+    /// Verify a .penext and install it. Without --approve only the requested
+    /// capabilities are shown and nothing is written.
+    Add {
+        package: PathBuf,
+        /// Grant every capability the manifest declares.
+        #[arg(long)]
+        approve: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// List installed extensions with capabilities and limits.
+    List {
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Remove an installed extension.
+    Remove {
+        name: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Run an installed extension on a document. Edits go through the shared
+    /// planner and transaction: --dry-run previews, --if-revision guards.
+    Run {
+        name: String,
+        file: PathBuf,
+        /// Command id declared in the manifest.
+        #[arg(long)]
+        command: Option<String>,
+        /// JSON arguments delivered to the extension.
+        #[arg(long)]
+        args: Option<String>,
+        /// Read-only JSON event delivered to the extension.
+        #[arg(long)]
+        event: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[arg(long)]
+        project: Option<PathBuf>,
     },
 }
 #[derive(Subcommand)]
@@ -6714,6 +6768,59 @@ async fn run() -> Result<()> {
                 Ok(())
             }
         },
+        Command::Extension { action } => {
+            let project_of = |p: Option<PathBuf>| -> Result<PathBuf> {
+                Ok(match p {
+                    Some(p) => p,
+                    None => std::env::current_dir()?,
+                })
+            };
+            let parse_json =
+                |label: &str, raw: Option<String>| -> Result<Option<serde_json::Value>> {
+                    raw.map(|r| {
+                        serde_json::from_str(&r)
+                            .with_context(|| format!("--{label} must be valid JSON"))
+                    })
+                    .transpose()
+                };
+            let value = match action {
+                ExtensionAction::Pack { dir, output } => extension::store::pack(&dir, &output)?,
+                ExtensionAction::Verify { package } => extension::store::verify(&package)?,
+                ExtensionAction::Add {
+                    package,
+                    approve,
+                    project,
+                } => extension::store::add(&package, &project_of(project)?, approve)?,
+                ExtensionAction::List { project } => extension::store::list(&project_of(project)?)?,
+                ExtensionAction::Remove { name, project } => {
+                    extension::store::remove(&project_of(project)?, &name)?
+                }
+                ExtensionAction::Run {
+                    name,
+                    file,
+                    command,
+                    args,
+                    event,
+                    dry_run,
+                    if_revision,
+                    project,
+                } => extension::store::run(
+                    &project_of(project)?,
+                    &name,
+                    &file,
+                    extension::store::RunOptions {
+                        command,
+                        args: parse_json("args", args)?,
+                        event: parse_json("event", event)?,
+                        page: selected_page.map(str::to_string),
+                        dry_run,
+                        if_revision,
+                    },
+                )?,
+            };
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            Ok(())
+        }
         Command::Package { action } => {
             let cwd = std::env::current_dir()?;
             let value = match action {
