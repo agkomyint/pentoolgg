@@ -471,6 +471,12 @@ pub fn run(args: PlanArgs, selected_page: Option<&str>) -> Result<()> {
         if_revision,
         expect_plan_hash,
     } = args;
+    // The help text documents that `-` is not stdin here; a literal-path error
+    // for `-` would send piped agents down a debugging dead end.
+    ensure!(
+        plan.as_os_str() != "-",
+        "[invalid-request] stdin is not supported for the plan file; write the plan JSON to a file first (see `pentool paint-plan --help`)"
+    );
     ensure!(
         std::fs::metadata(&plan)
             .with_context(|| format!("[missing-resource] cannot read {}", plan.display()))?
