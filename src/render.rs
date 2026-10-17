@@ -560,7 +560,9 @@ fn atomic_write(output: &Path, bytes: &[u8]) -> Result<()> {
         .and_then(|n| n.to_str())
         .unwrap_or("export");
     let temp = parent.join(format!(".{name}.{}.tmp", std::process::id()));
-    fs::write(&temp, bytes).with_context(|| format!("could not write {}", temp.display()))?;
+    // The user asked to write `output`; the staging name is an implementation
+    // detail and must not leak into the failure message.
+    fs::write(&temp, bytes).with_context(|| format!("could not write {}", output.display()))?;
     let backup = parent.join(format!(".{name}.{}.bak", std::process::id()));
     let had_output = output.exists();
     if had_output {
