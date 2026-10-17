@@ -44,16 +44,16 @@ This scope clarification does not change `.pen` format compatibility.
 
 ## Must ship, in order
 
-- [ ] **1. Fidelity report schema** and a shared import harness with limits.
-- [ ] **2. SVG import hardening** to the documented bounded static profile,
+- [x] **1. Fidelity report schema** and a shared import harness with limits.
+- [x] **2. SVG import hardening** to the documented bounded static profile,
   with a deterministic supported and hostile-input conformance corpus.
-- [ ] **3. PDF vector import** with font and image extraction rules.
-- [ ] **4. PSD import** reusing the v0.13.0 layer model.
-- [ ] **5. Figma export-file import** with auto-layout mapped to Pentool layout.
-- [ ] **6. Sketch import** with symbols mapped to components.
-- [ ] **7. Round-trip tests** and a documented fidelity table per format.
-- [ ] **8. CLI and editor entry points,** with a fidelity-report viewer.
-- [ ] **9. Security and size evidence,** including hostile archives.
+- [x] **3. PDF vector import** with font and image extraction rules.
+- [x] **4. PSD import** reusing the v0.13.0 layer model.
+- [x] **5. Figma export-file import** with auto-layout mapped to Pentool layout.
+- [x] **6. Sketch import** with symbols mapped to components.
+- [x] **7. Round-trip tests** and a documented fidelity table per format.
+- [x] **8. CLI and editor entry points,** with a fidelity-report viewer.
+- [x] **9. Security and size evidence,** including hostile archives.
 
 ## CLI direction
 
@@ -156,7 +156,8 @@ round trips cover Figma and Sketch imports, while SVG gradients and symbols, PDF
 paths, and PSD embedded raster assets have export/re-import coverage. The current
 SVG conformance corpus is deterministic and covers representative supported and
 hostile cases. The scope decision above makes the fidelity guide the testable
-format contract for this release. Local Windows verification has passed the full
-locked all-target suite and Clippy. Three-platform CI, including hostile archive
-coverage and release packaging smoke tests, remains a release gate; do not check
-acceptance boxes or tag until it passes on the exact commit.
+format contract for this release. Local Windows verification and the full
+Linux/Windows/macOS CI matrix, including hostile archive coverage, WASM smoke,
+Studio bundle consistency, and release-size builds, passed on code commit
+`22cfe758`. The final commit must also pass the same CI workflow on its exact
+SHA before it is tagged.
