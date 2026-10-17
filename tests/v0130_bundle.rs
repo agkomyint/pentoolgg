@@ -128,7 +128,7 @@ fn bundles_round_trip_between_documents() {
     let before = fs::read(&dst).unwrap();
     let conflict = fails(&["paint-bundle", &dst, "import", &bundle]);
     assert!(
-        conflict.contains("[conflict] brush preset \"round\" already exists"),
+        conflict.contains("[conflict] brush \"round\" already exists"),
         "{conflict}"
     );
     assert_eq!(before, fs::read(&dst).unwrap());
