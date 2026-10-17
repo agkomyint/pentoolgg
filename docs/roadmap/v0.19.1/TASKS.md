@@ -1,7 +1,7 @@
-# v0.18.1 — Studio workflow redesign
+# v0.19.1 — Studio workflow redesign
 
 This user-directed release is an exception to the patch-only bug-fix policy:
-the user chose v0.18.1 for a Studio UI redesign after v0.18.0 had shipped.
+the user chose v0.19.1 for a Studio UI redesign after v0.19.0 had shipped.
 This release changes the browser experience while preserving the `.pen` format
 and existing CLI behavior. Small server endpoints may be added where the UI
 cannot otherwise complete an existing workflow.
@@ -83,7 +83,7 @@ actions remain part of the Studio shell.
   UI/build, run focused server tests and CI/release gates, and inspect the
   packaged artifacts before publishing.
 
-## v0.18.1 acceptance
+## v0.19.1 acceptance
 
 - The start screen offers continue, `.pen` open, common canvas presets, and
   validated custom dimensions from 1 to 10,000 pixels per side.
