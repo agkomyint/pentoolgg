@@ -650,3 +650,74 @@ fn alternate_layouts_share_linked_stories_and_protect_local_edits() {
     ]);
     assert!(err.contains("already exists"), "{err}");
 }
+
+#[test]
+fn storyless_documents_support_alt_create_and_image_only_merge() {
+    let ws = Workspace::new("storyless");
+    // A freshly migrated v9 document has layout {engine, spreads} with no
+    // stories key, which the schema allows. Both write paths must tolerate
+    // the absent array instead of failing "layout.stories must be an array".
+    let alt = ws.s("alt.pen");
+    ok(&["new", &alt, "--overwrite"]);
+    ok(&["migrate", &alt, "--target", "9"]);
+    let mut raw = ws.json("alt.pen");
+    assert!(
+        raw["layout"].get("stories").is_none(),
+        "fixture premise: no stories key"
+    );
+    raw["pages"][0]["layers"][0]["nodes"] = json!([
+        {"kind": "graphic-frame", "id": "g1", "x": 20, "y": 80, "width": 100,
+         "height": 100, "fit": "fill"},
+    ]);
+    ws.write("alt.pen", &raw);
+
+    let r = ok(&[
+        "layout-alt",
+        &alt,
+        "create",
+        "page-1",
+        "tablet",
+        "--width",
+        "600",
+        "--height",
+        "800",
+    ]);
+    assert_eq!(r["operation"], "layout-alt-create");
+    assert_eq!(r["page"], "tablet");
+    assert_eq!(r["linked_stories"].as_array().unwrap().len(), 0);
+    assert_eq!(ws.json("alt.pen")["pages"].as_array().unwrap().len(), 2);
+    ok(&["tree", &alt, "--limit", "1"]);
+
+    // Image-only merge on the same story-less template shape.
+    let merge = ws.s("merge.pen");
+    ok(&["new", &merge, "--overwrite"]);
+    ok(&["migrate", &merge, "--target", "9"]);
+    let mut raw = ws.json("merge.pen");
+    raw["pages"][0]["layers"][0]["nodes"] = json!([
+        {"kind": "graphic-frame", "id": "g1", "x": 20, "y": 80, "width": 100,
+         "height": 100, "fit": "fill"},
+    ]);
+    ws.write("merge.pen", &raw);
+    let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([200, 30, 30, 255]));
+    img.save(ws.p("a.png")).unwrap();
+    ws.text("d.csv", "pic\na.png\n");
+    let report = ok(&[
+        "layout-merge",
+        &merge,
+        "--data",
+        &ws.s("d.csv"),
+        "--out",
+        &ws.s("out.pen"),
+        "--image-field",
+        "g1=pic",
+    ]);
+    assert_eq!(report["records"], 1);
+    assert_eq!(report["images_distinct"], 1);
+    let out = ws.json("out.pen");
+    assert_eq!(
+        out["layout"]["stories"].as_array().unwrap().len(),
+        0,
+        "merge output carries an empty stories array"
+    );
+    ok(&["tree", &ws.s("out.pen"), "--limit", "1"]);
+}
