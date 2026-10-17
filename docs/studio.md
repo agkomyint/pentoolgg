@@ -111,6 +111,29 @@ revision, one undoable step). Installing and approving capabilities stay CLI
 actions (`pentool extension add --approve`). Running is disabled while local
 edits are unsaved. Not yet exercised in a live browser. See `docs/extensions-v1.md`.
 
+### Collaboration (0.20)
+
+The Collab workspace talks to `pentool serve --collab`. It probes
+`GET /api/collab/session` and shows the caller's actor and role; a server without
+collaboration answers 404 and the panel says so (comments still work there).
+An access token is entered in the panel, kept in `sessionStorage` for the tab and
+sent as a Bearer header on every same-origin `/api/` call. The server enforces
+roles; the panel only hides controls the role cannot use (viewer: read only,
+commenter: comments, editor and owner: also edit).
+
+- Collaborators: the presence table over `GET /api/collab/presence/events`
+  (fetch-based, so the header can be sent). The page and the selected object are
+  published at most every 100 ms with a 5 s heartbeat, and removed on page hide.
+  Cursors are not published yet.
+- Comments: threads from `GET /api/comments` with add, reply, resolve, reopen and
+  the review states, guarded by the thread `version`.
+- Conflicts: named merge conflicts from the read-only
+  `GET /api/collab/conflicts` (replay of the verified log); each shows the kept
+  and the overridden value. Resolving means making a new edit; there is no
+  one-click "restore overridden value" yet.
+
+Not yet exercised in a live browser.
+
 ### Design systems (0.19)
 
 The Systems workspace has four tabs over the served document: Tokens (type filter,
