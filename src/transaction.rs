@@ -40,6 +40,22 @@ impl ChangeSummary {
     }
 }
 
+impl ChangeSummary {
+    /// Machine-readable summary with an explicit `changed` flag; an unchanged
+    /// document also carries a `note` so a no-op is never mistaken for success.
+    pub fn to_value(&self) -> Value {
+        let mut value = serde_json::to_value(self).unwrap_or(Value::Null);
+        let changed = self.revision_before != self.revision_after;
+        value["changed"] = Value::Bool(changed);
+        if !changed {
+            value["note"] = Value::String(
+                "the document is byte-identical after this command: every requested value already matched, or the option does not apply to the selected page".into(),
+            );
+        }
+        value
+    }
+}
+
 /// Commit related offline resources before the document and restore them if the
 /// guarded document commit fails. Validation and revision checks happen before
 /// any write, and the document commit remains the single visible history entry.
