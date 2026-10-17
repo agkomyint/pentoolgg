@@ -1,5 +1,5 @@
 name: Fuzz
-# Fuzzing is not a push gate: building six sanitizer targets takes far longer
+# Fuzzing is not a push gate: building ten sanitizer targets takes far longer
 # than the 30 s each one runs. It runs weekly and on demand.
 on:
   schedule:
@@ -22,6 +22,6 @@ jobs:
         run: cargo fuzz build
       - name: Run each target briefly
         run: |
-          for target in decode_source validate_document operation_stack image_assets processed_record package_verify; do
+          for target in decode_source validate_document operation_stack image_assets processed_record package_verify collab_op collab_merge collab_log collab_sync_request; do
             cargo fuzz run "$target" -- -max_total_time=30 -timeout=60 -rss_limit_mb=2048
           done

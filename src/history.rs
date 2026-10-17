@@ -2,11 +2,9 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, OpenOptions},
-    io::ErrorKind,
+    fs,
     path::{Path, PathBuf},
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,11 +21,36 @@ struct Manifest {
     cursor: usize,
 }
 
-struct Lock(PathBuf);
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+type Lock = crate::stale::LockFile;
+
+/// Crash points inside [`record`], used by the crash-recovery evidence tests.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrashPoint {
+    /// Revision blobs are stored; the manifest is not yet written.
+    AfterStore,
+    /// The manifest temp file is written; it is not yet renamed in.
+    AfterManifestTemp,
+}
+
+static CRASHES: std::sync::Mutex<Vec<(PathBuf, CrashPoint)>> = std::sync::Mutex::new(Vec::new());
+
+/// Arm a one-shot crash for `document`'s history (test support).
+#[doc(hidden)]
+pub fn inject_crash(document: &Path, point: CrashPoint) {
+    if let (Ok(root), Ok(mut crashes)) = (root(document), CRASHES.lock()) {
+        crashes.push((root, point));
     }
+}
+
+fn crash(root: &Path, point: CrashPoint) -> Result<()> {
+    if let Ok(mut crashes) = CRASHES.lock() {
+        if let Some(index) = crashes.iter().position(|(r, p)| r == root && *p == point) {
+            crashes.remove(index);
+            bail!("[fault-injected] history crashed at {point:?}");
+        }
+    }
+    Ok(())
 }
 
 /// Filesystem-safe form of a document's file name, shared by the hidden
@@ -59,17 +82,10 @@ fn root(document: &Path) -> Result<PathBuf> {
 
 fn lock(root: &Path) -> Result<Lock> {
     fs::create_dir_all(root)?;
-    let path = root.join("lock");
-    for _ in 0..100 {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(_) => return Ok(Lock(path)),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    bail!("history is locked by another pentool process")
+    let lock = crate::stale::acquire(&root.join("lock"), crate::stale::STALE_AFTER, "history")?;
+    // Every writer holds this lock, so a temp file here is a dead writer's.
+    crate::stale::sweep(root, std::time::Duration::ZERO, crate::stale::is_pid_temp);
+    Ok(lock)
 }
 
 fn load(root: &Path) -> Result<Manifest> {
@@ -84,9 +100,9 @@ fn save(root: &Path, manifest: &Manifest) -> Result<()> {
     let path = root.join("manifest.json");
     let temp = root.join(format!("manifest.{}.tmp", std::process::id()));
     fs::write(&temp, serde_json::to_vec_pretty(manifest)?)?;
-    if path.exists() {
-        fs::remove_file(&path)?;
-    }
+    crash(root, CrashPoint::AfterManifestTemp)?;
+    // Rename over the old manifest: removing it first would leave a window in
+    // which a crash loses the whole history.
     fs::rename(temp, path)?;
     Ok(())
 }
@@ -94,7 +110,11 @@ fn save(root: &Path, manifest: &Manifest) -> Result<()> {
 fn store(root: &Path, hash: &str, bytes: &[u8]) -> Result<()> {
     let path = root.join(format!("{hash}.pen"));
     if !path.exists() {
-        fs::write(path, bytes)?;
+        // Write beside, then rename, so a crash never leaves a truncated blob
+        // that a later `store` would trust because the file exists.
+        let temp = root.join(format!("{hash}.{}.tmp", std::process::id()));
+        fs::write(&temp, bytes)?;
+        fs::rename(temp, path)?;
     }
     Ok(())
 }
@@ -106,6 +126,7 @@ pub fn record(document: &Path, operation: &str, before: &[u8], after: &[u8]) -> 
     let after_hash = crate::transaction::revision(after);
     store(&root, &before_hash, before)?;
     store(&root, &after_hash, after)?;
+    crash(&root, CrashPoint::AfterStore)?;
     let mut manifest = load(&root)?;
     manifest.entries.truncate(manifest.cursor);
     manifest.entries.push(Entry {

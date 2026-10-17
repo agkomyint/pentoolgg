@@ -7,6 +7,9 @@
 //! recorded as intent-level operations in a hash-chained log, and the document
 //! can be rebuilt from that log by deterministic replay. Documents without a
 //! log are untouched.
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod evidence;
 pub mod hlc;
 pub mod log;
 pub mod merge;
@@ -211,6 +214,32 @@ pub(crate) fn build_ops(
     Ok(())
 }
 
+/// Remove the temp and moved-aside copies an interrupted `atomic_write` left
+/// beside the document. Only call this under the collaboration log lock, with
+/// the document present: every writer of a collaborative document takes that
+/// lock first, so any such sibling is an orphan of a dead process.
+pub(crate) fn sweep_document_temps(document: &Path) {
+    if !document.exists() {
+        return;
+    }
+    let (Some(parent), Some(name)) = (document.parent(), document.file_name()) else {
+        return;
+    };
+    let name = name.to_string_lossy();
+    let (temp, old) = (
+        format!(".{name}.pentool-tmp-"),
+        format!(".{name}.pentool-old-"),
+    );
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    crate::stale::sweep(parent, std::time::Duration::ZERO, |n| {
+        n.starts_with(&temp) || n.starts_with(&old)
+    });
+}
+
 /// Record a pending document change in the collaboration log, if enabled.
 ///
 /// Called by the transaction path after validation and before the document is
@@ -228,6 +257,7 @@ pub fn begin(
     let lock = log::lock(&dir)?;
     let before_revision = crate::transaction::revision(before);
     log::recover(&dir, &before_revision)?;
+    sweep_document_temps(document);
     let lines = log::read_lines(&dir)?;
     let head = log::check_tail(&dir, &lines)?;
     if lines.len() >= log::MAX_LOG_OPS {

@@ -695,6 +695,7 @@ pub fn integrate(
         fs::read(document).with_context(|| format!("could not read {}", document.display()))?;
     let before_revision = crate::transaction::revision(&before);
     log::recover(&dir, &before_revision)?;
+    super::sweep_document_temps(document);
     let lines = log::read_lines(&dir)?;
     let head = log::check_tail(&dir, &lines)?;
     let known: HashSet<&str> = lines.iter().map(|l| l.op.id.as_str()).collect();
@@ -866,7 +867,10 @@ pub fn integrate(
         let written = crate::history::record(document, "collab-sync", &before, &after)
             .and_then(|_| crate::editing::atomic_write(document, &after));
         if let Err(error) = written {
-            prepared.abort();
+            // An injected crash must leave the files a killed process would.
+            if !error.to_string().contains("[fault-injected]") {
+                prepared.abort();
+            }
             return Err(error);
         }
     }
@@ -1040,44 +1044,56 @@ struct OpsBody {
     ops: Vec<Value>,
 }
 
-async fn ops_post(
-    Extension(ctx): Extension<Arc<Ctx>>,
-    Extension(principal): Extension<Principal>,
-    body: Bytes,
-) -> Response {
-    if body.len() > ctx.limits.batch_bytes {
-        return problem(
+/// Decode and bound-check an `ops` request body. The error carries the status,
+/// problem code and message the endpoint answers with; this is also the fuzz
+/// entry point for the sync request decoder.
+#[doc(hidden)]
+pub fn decode_ops_body(
+    body: &[u8],
+    limits: &Limits,
+) -> std::result::Result<Vec<Value>, (StatusCode, &'static str, String)> {
+    if body.len() > limits.batch_bytes {
+        return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
             "limit-exceeded",
             format!(
                 "batch is {} bytes; the limit is {}",
                 body.len(),
-                ctx.limits.batch_bytes
+                limits.batch_bytes
             ),
-        );
+        ));
     }
-    let parsed: OpsBody = match serde_json::from_slice(&body) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            return problem(
-                StatusCode::BAD_REQUEST,
-                "invalid-input",
-                format!("malformed batch: {error}"),
-            )
-        }
-    };
-    if parsed.ops.len() > ctx.limits.batch_ops {
-        return problem(
+    let parsed: OpsBody = serde_json::from_slice(body).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            "invalid-input",
+            format!("malformed batch: {error}"),
+        )
+    })?;
+    if parsed.ops.len() > limits.batch_ops {
+        return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
             "limit-exceeded",
             format!(
                 "{} operations in one batch; the limit is {}",
                 parsed.ops.len(),
-                ctx.limits.batch_ops
+                limits.batch_ops
             ),
-        );
+        ));
     }
-    if !ctx.take_rate(&principal_key(&principal), parsed.ops.len()) {
+    Ok(parsed.ops)
+}
+
+async fn ops_post(
+    Extension(ctx): Extension<Arc<Ctx>>,
+    Extension(principal): Extension<Principal>,
+    body: Bytes,
+) -> Response {
+    let parsed = match decode_ops_body(&body, &ctx.limits) {
+        Ok(parsed) => parsed,
+        Err((status, code, message)) => return problem(status, code, message),
+    };
+    if !ctx.take_rate(&principal_key(&principal), parsed.len()) {
         let mut response = problem(
             StatusCode::TOO_MANY_REQUESTS,
             "rate-limited",
@@ -1097,7 +1113,7 @@ async fn ops_post(
     let result = blocking(move || {
         integrate(
             &document,
-            parsed.ops,
+            parsed,
             std::slice::from_ref(&actor),
             Origin::Push { actor: &actor },
             &limits,

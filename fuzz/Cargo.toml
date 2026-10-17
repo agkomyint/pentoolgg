@@ -49,3 +49,27 @@ name = "package_verify"
 path = "fuzz_targets/package_verify.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "collab_op"
+path = "fuzz_targets/collab_op.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "collab_merge"
+path = "fuzz_targets/collab_merge.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "collab_log"
+path = "fuzz_targets/collab_log.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "collab_sync_request"
+path = "fuzz_targets/collab_sync_request.rs"
+test = false
+doc = false
