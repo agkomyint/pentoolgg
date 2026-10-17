@@ -188,6 +188,7 @@ pub struct Replayer {
     applied: Vec<String>,
     max_stamp: Option<(u64, u32)>,
     next_index: u64,
+    ledger: super::stats::Ledger,
 }
 
 const DOC_REF: &str = "d::$doc";
@@ -410,6 +411,7 @@ impl Replayer {
             applied: Vec::new(),
             max_stamp: None,
             next_index: 1,
+            ledger: super::stats::Ledger::default(),
         };
         state.insert_flat(&flat, "", &(0, 0, String::new(), String::new()), "genesis");
         Ok(state)
@@ -676,6 +678,8 @@ impl Replayer {
         };
         match &result {
             Ok(()) => {
+                self.ledger.note_op(&op.actor, &op.page);
+                self.note_leaf(op);
                 self.applied.push(op.id.clone());
                 let stamp = (op.hlc.wall_ms, op.hlc.counter);
                 self.max_stamp = Some(self.max_stamp.map_or(stamp, |m| m.max(stamp)));
@@ -1233,12 +1237,82 @@ impl Replayer {
         );
         self.actors
             .insert(virtual_op.id.clone(), parent.actor.clone());
-        match virtual_op.kind.as_str() {
+        let result = match virtual_op.kind.as_str() {
             "set-property" => self.apply_set(virtual_op),
             "create" => self.apply_create(virtual_op),
             "delete" => self.apply_delete(virtual_op),
             _ => self.apply_move(virtual_op),
+        };
+        if result.is_ok() {
+            self.note_leaf(virtual_op);
         }
+        result
+    }
+
+    /// Record the statistics ledger entry of one effective native operation.
+    fn note_leaf(&mut self, op: &Op) {
+        let Some(id) = op.targets.first() else { return };
+        let Ok(level) = Self::payload_level(op) else {
+            return;
+        };
+        let rf = ref_of(level, &op.page, id);
+        match op.kind.as_str() {
+            "set-property" => {
+                if let Some(path) = op.payload.get("path").and_then(Value::as_str) {
+                    self.ledger.note_property(&op.actor, &rf, path);
+                }
+            }
+            "delete" | "move" => self.ledger.note_object(&op.actor, &rf),
+            _ => {}
+        }
+    }
+
+    /// Statistics inputs: the ledger plus creator, liveness and last-writer
+    /// attribution of the replayed objects.
+    pub fn stats_raw(&self) -> super::stats::Raw {
+        let mut raw = super::stats::Raw {
+            ledger: self.ledger.clone(),
+            ..Default::default()
+        };
+        let mut live_memo: HashMap<&str, bool> = HashMap::new();
+        for (rf, obj) in &self.objs {
+            raw.page_of.insert(
+                rf.clone(),
+                super::stats::page_for(obj.level, &obj.page, &obj.id),
+            );
+            let creator = self.actor_of(&obj.create_op);
+            if !creator.is_empty() {
+                raw.created.entry(creator).or_default().insert(rf.clone());
+            }
+            if self.is_live(rf, &mut live_memo) {
+                raw.live.insert(rf.clone());
+                for (path, writer) in &obj.writers {
+                    if writer.value.is_some() && path != "$position" {
+                        raw.surviving
+                            .entry(writer.actor.clone())
+                            .or_default()
+                            .insert((rf.clone(), path.clone()));
+                    }
+                }
+            }
+        }
+        raw
+    }
+
+    fn is_live<'a>(&'a self, rf: &'a str, memo: &mut HashMap<&'a str, bool>) -> bool {
+        if let Some(known) = memo.get(rf) {
+            return *known;
+        }
+        let live = match self.objs.get(rf) {
+            None => false,
+            Some(obj) if obj.deleted_by.is_some() => false,
+            Some(obj) => match &obj.parent {
+                Some(parent) => self.is_live(parent, memo),
+                None => true,
+            },
+        };
+        memo.insert(rf, live);
+        live
     }
 
     // --------------------------------------------------------- materialize

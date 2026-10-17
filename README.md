@@ -1008,6 +1008,18 @@ idempotent, resumable after an interruption and never changes the document when
 a step fails. The server derives each operation's actor from the token and
 rejects operations by anyone else.
 
+Contribution stats are derived only from the verified log, per actor, kind
+(human or agent) or page, with exact shares in basis points:
+
+```sh
+pentool stats artwork.pen --by kind
+pentool stats artwork.pen --by actor --json --limit 20
+```
+
+A compact `collab` summary is kept inside the `.pen` and is stripped from
+packages unless `pentool package pack --include-attribution` is given (rendered exports never contain it)
+(`pentool collab strip artwork.pen` removes it).
+
 ## Stroke edges (v0.2.0)
 
 New CLI/browser paths use flat caps and sharp corners by default. Existing paths

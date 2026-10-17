@@ -137,6 +137,11 @@ fn restore_hash(document: &Path, root: &Path, hash: &str, cause: &str) -> Result
     } else {
         crate::collab::begin(document, cause, &before, &bytes)?
     };
+    // The re-derived `collab` block rides in the same write as the restore.
+    let bytes = match &collab {
+        Some(pending) => pending.bytes().to_vec(),
+        None => bytes,
+    };
     if let Err(error) = crate::editing::atomic_write(document, &bytes) {
         if let Some(pending) = collab {
             pending.abort();
@@ -150,6 +155,19 @@ fn restore_hash(document: &Path, root: &Path, hash: &str, cause: &str) -> Result
     Ok(())
 }
 
+/// The document matches a history revision exactly, or differs only in its
+/// derived `collab` block (rewritten by the recorded undo/redo itself).
+fn same_state(root: &Path, current: &[u8], hash: &str) -> bool {
+    if crate::transaction::revision(current) == hash {
+        return true;
+    }
+    fs::read(root.join(format!("{hash}.pen")))
+        .map(|stored| {
+            crate::collab::content_revision(current) == crate::collab::content_revision(&stored)
+        })
+        .unwrap_or(false)
+}
+
 pub fn undo(document: &Path) -> Result<serde_json::Value> {
     let root = root(document)?;
     let _lock = lock(&root)?;
@@ -158,8 +176,7 @@ pub fn undo(document: &Path) -> Result<serde_json::Value> {
         bail!("nothing to undo")
     }
     let index = manifest.cursor - 1;
-    let current = crate::transaction::revision(&fs::read(document)?);
-    if current != manifest.entries[index].after {
+    if !same_state(&root, &fs::read(document)?, &manifest.entries[index].after) {
         bail!("document changed outside history; restore an explicit revision instead")
     }
     let hash = manifest.entries[index].before.clone();
@@ -177,8 +194,7 @@ pub fn redo(document: &Path) -> Result<serde_json::Value> {
         .entries
         .get(manifest.cursor)
         .context("nothing to redo")?;
-    let current = crate::transaction::revision(&fs::read(document)?);
-    if current != entry.before {
+    if !same_state(&root, &fs::read(document)?, &entry.before) {
         bail!("document changed outside history; restore an explicit revision instead")
     }
     let hash = entry.after.clone();

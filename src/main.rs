@@ -66,6 +66,8 @@ enum CollabAction {
     },
     /// Verify the hash chain, operation validity and replay.
     Verify { input: PathBuf },
+    /// Remove the embedded attribution (the `collab` block) from DOC, as one history entry.
+    Strip { input: PathBuf },
     /// Issue, list and revoke access tokens (owner only; secrets are shown once).
     Token {
         #[command(subcommand)]
@@ -2985,10 +2987,24 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Collaboration operation log: init, log, replay, verify.
+    /// Collaboration operation log: init, log, replay, verify, strip.
     Collab {
         #[command(subcommand)]
         action: CollabAction,
+    },
+    /// Contribution statistics per actor, kind or page, derived from the verified operation log.
+    Stats {
+        input: PathBuf,
+        /// Group rows by actor, kind (human|agent) or page.
+        #[arg(long, default_value = "actor")]
+        by: String,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Print the full JSON report instead of the compact table.
+        #[arg(long)]
+        json: bool,
     },
     /// Restore the preceding document revision.
     Undo { input: PathBuf },
@@ -3435,6 +3451,9 @@ enum PackageAction {
         dir: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        /// Keep each asset's embedded collaboration attribution (the `collab` block); stripped by default.
+        #[arg(long)]
+        include_attribution: bool,
     },
     Verify {
         file: PathBuf,
@@ -7119,7 +7138,11 @@ async fn run() -> Result<()> {
                     package::sign(&file, &key, output.as_deref())?
                 }
                 PackageAction::Init { dir, name } => package::init(&dir, &name)?,
-                PackageAction::Pack { dir, output } => package::pack(&dir, &output)?,
+                PackageAction::Pack {
+                    dir,
+                    output,
+                    include_attribution,
+                } => package::pack_with(&dir, &output, include_attribution)?,
                 PackageAction::Verify {
                     file,
                     signature,
@@ -10589,8 +10612,26 @@ async fn run() -> Result<()> {
                     })
                     .await??
                 }
+
+                CollabAction::Strip { input } => pentool::collab::strip_document(&input)?,
             };
             println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Stats {
+            input,
+            by,
+            offset,
+            limit,
+            json,
+        } => {
+            let by = pentool::collab::stats::By::parse(&by)?;
+            let report = pentool::collab::stats_report(&input, by, offset, limit)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", pentool::collab::stats::render_text(&report));
+            }
             Ok(())
         }
         Command::Undo { input } => {

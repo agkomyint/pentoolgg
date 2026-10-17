@@ -2852,6 +2852,7 @@ pub fn validate(raw: &Value) -> Result<()> {
     } else {
         None
     };
+    crate::collab::stats::validate_block(raw)?;
     if let Some(styles) = raw.get("styles") {
         crate::style::validate_aliases(styles)?;
     }

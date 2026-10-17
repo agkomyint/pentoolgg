@@ -150,12 +150,14 @@ the recorded revisions.
 ### 3.6 Document-side metadata
 
 The `.pen` file gains at most one optional top-level extension object,
-`"collab": {"schema": 1, "head": "sha256:…", "summary": {…}}`, which carries the
+`"collab": {"schema": 1, "head": "sha256:…", "seq": N, "stats_summary": {…}}`, which carries the
 chain head and the bounded contribution summary (section 7.4) so stats survive
 copying the file without its hidden directory. It is metadata only: it never
 changes rendering or export, unknown fields inside it survive, and a document
 without it is valid. Exporting it (to PDF, SVG, PNG or a package) is **off by
-default** because it can identify people (section 7.5).
+default** because it can identify people (section 7.5). The block is written in the
+same transaction as the operation it records (one history entry), is limited to
+128 KiB, and is checked, never trusted, against the log.
 
 ## 4. Merge rules
 
@@ -774,8 +776,26 @@ from sections 8 to 10:
 3. **Claims.** Is a 10-minute maximum claim TTL right for long agent tasks?
 4. **Compaction default.** Should compaction run automatically at the advised log
    length, or only on explicit command?
-5. **Attribution in the file.** Is carrying the bounded summary in the `.pen`
-   `collab` block acceptable given the privacy trade-off, or should it be
-   sidecar-only by default?
+5. **Attribution in the file.** Decided: the bounded summary lives in the `.pen`
+   `collab` block (stripped from exports by default); see section 13a.
 6. **Text content.** Is "text content is one LWW property" acceptable for v1
    given keystroke co-editing is deferred?
+
+### Contribution stats (item 3a, shipped)
+
+- `pentool stats DOC [--by actor|kind|page] [--offset N] [--limit N] [--json]` and
+  `GET /api/collab/stats` replay the chain-verified log; a missing log points to
+  `pentool collab init`, a log failing verification is refused. Shares are integer
+  basis points (largest remainder, sum exactly 10,000) plus a formatted percent.
+- The summary is **in the document** as `collab.stats_summary` (with `head`, `seq`),
+  written atomically with the op it records. A hand-edited or stale summary is
+  reported as `embedded_summary.status: "mismatch"` (also a `collab verify`
+  warning); reported figures always come from the log. Revisions recorded in the
+  log ignore `collab`, which breaks the head/revision circularity. Dry-run
+  `revision_after` does not include the summary.
+- Rendered exports ignore `collab`; `package pack` strips it unless `--include-attribution`;
+  `collab strip` removes it in place.
+- Deviations: `collab compact` and `summary.json` do not exist yet, so compaction
+  equivalence is tested as prefix-snapshot-plus-suffix replay equal to full
+  replay. Forgery is blocked by content-hash ids (a rewritten actor invalidates
+  the op and the chain); peer-claim forgery needs the token/signature work.
