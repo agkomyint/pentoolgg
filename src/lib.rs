@@ -14,10 +14,10 @@ pub mod diff;
 pub mod document;
 pub mod editing;
 pub mod effects;
-mod fig_binary;
-pub mod figma_import;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod extension;
+mod fig_binary;
+pub mod figma_import;
 pub mod fill;
 pub mod fonts;
 pub mod geometry;
