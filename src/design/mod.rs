@@ -2,6 +2,7 @@
 //! (`docs/design-systems-v1.md`). Logic lives here; `main.rs` only routes.
 // DesignError is a structured, self-describing error; it is only built on failure paths.
 #![allow(clippy::result_large_err)]
+pub mod audit;
 pub mod brand;
 pub mod cli;
 pub mod library;

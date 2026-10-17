@@ -1,6 +1,6 @@
 //! `pentool design ...` command definitions and handlers.
 use super::{
-    brand,
+    audit, brand,
     library::{self, DiffOptions},
     page_args, paginate,
     plan::{self, Options},
@@ -41,6 +41,36 @@ pub enum DesignCommand {
     Template {
         #[command(subcommand)]
         action: TemplateAction,
+    },
+    /// Read-only audit of hardcoded values, token references and brand rules.
+    Audit {
+        input: PathBuf,
+        /// Audit one page (default: the first page).
+        #[arg(long)]
+        page: Option<String>,
+        /// Audit every page.
+        #[arg(long)]
+        all_pages: bool,
+        /// Comma list of color,font,spacing,radius,refs,brand (default: all).
+        #[arg(long)]
+        rules: Option<String>,
+        /// Only suggest and report tokens that came from this library.
+        #[arg(long)]
+        library: Option<String>,
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Findings per page (default 50, max 500).
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Add batch operations that bind exact matches to their tokens.
+        #[arg(long)]
+        fix_plan: bool,
+        /// With --fix-plan, also bind near (deltaE <= 2) matches.
+        #[arg(long)]
+        fix_nearest: bool,
+        /// Exit with status 3 when findings of this severity exist.
+        #[arg(long, value_parser = ["warn", "error"])]
+        fail_on: Option<String>,
     },
 }
 
@@ -273,6 +303,7 @@ fn operation_name(command: &DesignCommand) -> &'static str {
             TemplateAction::List { .. } => "design template list",
             TemplateAction::Fill { .. } => "design template fill",
         },
+        DesignCommand::Audit { .. } => "design audit",
         DesignCommand::Brand { action } => match action {
             BrandAction::Show { .. } => "design brand show",
             BrandAction::Apply { .. } => "design brand apply",
@@ -295,9 +326,19 @@ fn operation_name(command: &DesignCommand) -> &'static str {
 /// `{"error": {...}}` object to stderr and exits with status 1.
 pub fn run_and_print(command: DesignCommand) -> anyhow::Result<()> {
     let operation = operation_name(&command);
+    let fail_on = match &command {
+        DesignCommand::Audit { fail_on, .. } => fail_on.clone(),
+        _ => None,
+    };
     match run(command) {
         Ok(value) => {
             println!("{}", serde_json::to_string_pretty(&value)?);
+            if let Some(level) = fail_on {
+                let status = audit::fail_status(&value, &level);
+                if status != 0 {
+                    std::process::exit(status);
+                }
+            }
             Ok(())
         }
         Err(mut error) => {
@@ -316,6 +357,35 @@ pub fn run(command: DesignCommand) -> Result<Value> {
         DesignCommand::Library { action } => library_action(action),
         DesignCommand::Brand { action } => brand_action(action),
         DesignCommand::Template { action } => template_action(action),
+        DesignCommand::Audit {
+            input,
+            page,
+            all_pages,
+            rules,
+            library,
+            offset,
+            limit,
+            fix_plan,
+            fix_nearest,
+            fail_on: _,
+        } => {
+            let (bytes, raw) = read_document(&input)?;
+            audit::run(
+                &bytes,
+                &raw,
+                &audit::Options {
+                    document: &input.to_string_lossy(),
+                    page: page.as_deref(),
+                    all_pages,
+                    rules: rules.as_deref(),
+                    library: library.as_deref(),
+                    offset,
+                    limit,
+                    fix_plan,
+                    fix_nearest,
+                },
+            )
+        }
     }
 }
 

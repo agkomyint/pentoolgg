@@ -736,3 +736,38 @@ is normative:
 - Q8: spacing and gap properties for audit are enumerated at implementation time from `src/layout.rs` and the node model, and listed in the spec once settled.
 - Q9: deltaE76 threshold 2.0 and the 256-candidate cap are accepted as proposed.
 - Q10: spot and ICC color tokens are refused in W3C export with a clear error.
+
+## Implementation notes: audit (item 6, v0.19.0)
+
+Shipped in `src/design/audit.rs`; the shipped behavior is normative where it
+differs from section 9.
+
+- Checks implemented: `color` (style `fill`/`stroke` literals; exact match gives
+  `suggest`+`exact:true`, else nearest by deltaE76 <= 2.0 gives `exact:false`,
+  `delta_e`; above 256 color tokens only exact matches are suggested and the
+  report says `"nearest":"skipped"`), `font` (text nodes vs `typography` tokens,
+  only keys the token sets are compared; a matching node yields no finding),
+  `radius` (rect `radius_x`/`radius_y`; a match yields no finding), `refs`
+  (`unresolved-token`, `invalid-token` on nodes and on tokens, `unused-token` as
+  `info`), and `brand` (`brand-contrast`: text fill vs opaque page background;
+  `brand-pair`: node fill/stroke, or text fill/page background; `brand-font`;
+  `brand-logo`: `min_width` and `forbidden_backgrounds` for image nodes whose
+  `id` or `asset` equals the logo's). A category with no tokens of that type is
+  skipped instead of flagging every literal.
+- `spacing` is accepted by `--rules` but yields nothing: v4-v12 nodes have no
+  gap/padding property (Q8). `clear_space` and shadow/gradient colors are not
+  audited. Instance internals are not walked.
+- Document-level token findings (no page) follow the page findings. `--library`
+  limits suggestions and `unused-token` to tokens vendored from that library.
+- `--fail-on warn|error` exits 3; `severities` gives the error/warn/info totals.
+- `--fix-plan` plans only the returned page of findings. Batch applies to one
+  page, so `plan.page` names it and `plan.other_pages` lists further pages with
+  fixes (re-run with `--page`). Only fill/stroke have render-time token binding,
+  so font and radius findings never produce operations.
+- Batch ops `bind-token {id, property: fill|stroke, token}` (resolved `color`
+  token; keeps the token value as fallback; refuses locked layers/groups) and
+  `set-token {name, token_type, value}` (typed value, keeps `source`, validated
+  by `tokens::check_write`) are additive; no format change.
+- Not done: `tree/search --resolve` and `validate --strict` (no top-level
+  `validate` command exists; the audit reports the same unresolved/invalid
+  conditions).

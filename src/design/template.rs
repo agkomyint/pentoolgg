@@ -790,6 +790,107 @@ pub fn batch_set_property(
     Ok(json!({"type":"set-property","id":id,"property":property}))
 }
 
+/// Batch operation `bind-token`: `{id, property: fill|stroke, token}` points the
+/// node's paint at a resolved `color` token, keeping the token's current value as
+/// the fallback. Refuses locked layers or groups and unresolved tokens.
+pub fn batch_bind_token(
+    raw: &mut Value,
+    page: Option<&str>,
+    id: &str,
+    operation: &Value,
+) -> AnyResult<Value> {
+    let property = operation
+        .get("property")
+        .and_then(Value::as_str)
+        .context("property is missing")?;
+    let token = operation
+        .get("token")
+        .and_then(Value::as_str)
+        .context("token is missing")?;
+    if !matches!(property, "fill" | "stroke") {
+        anyhow::bail!("bind-token supports the fill and stroke properties, not {property:?}")
+    }
+    let (layer_locked, node_locked, kind) = {
+        let page_ref = select_page(raw, page).map_err(|e| anyhow::anyhow!("{e}"))?;
+        locate(page_ref, id).with_context(|| format!("object not found: {id}"))?
+    };
+    if layer_locked || node_locked {
+        anyhow::bail!("[locked-node] object {id} is locked")
+    }
+    if !property_supported(&kind, property) {
+        anyhow::bail!("property {property} is not supported on a {kind} node")
+    }
+    let styles = raw.get("styles").cloned().unwrap_or(Value::Null);
+    let resolution = tokens::resolve(&styles, token);
+    if resolution.status != tokens::Status::Resolved {
+        anyhow::bail!(
+            "[{}-token] token {token:?} is {}: {}",
+            resolution.status.as_str(),
+            resolution.status.as_str(),
+            resolution.reason.unwrap_or_default()
+        )
+    }
+    if resolution.token_type.as_deref() != Some("color") {
+        anyhow::bail!("[token-type-mismatch] token {token:?} is not a color token")
+    }
+    let fallback = resolution
+        .value
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .with_context(|| {
+            format!("token {token:?} has a native color value; bind needs a hex color")
+        })?;
+    let page_value = crate::scene::page_mut(raw, page)?;
+    let node = crate::scene::find_node_mut(page_value, id).context("object not found")?;
+    *style_slot(node, property) = json!({"ref": token, "fallback": fallback});
+    Ok(json!({"type":"bind-token","id":id,"property":property,"token":token}))
+}
+
+/// Batch operation `set-token`: `{name, token_type, value}` with a typed JSON
+/// value (`set-style` stays string-valued). Keeps unknown record keys such as
+/// `source`, and validates cycles, depth and the value schema before accepting.
+pub fn batch_set_token(raw: &mut Value, operation: &Value) -> AnyResult<Value> {
+    let name = operation
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|n| !n.is_empty() && n.len() <= 128)
+        .context("name must be a token ID of 1 to 128 bytes")?;
+    let value = operation.get("value").context("value is missing")?.clone();
+    let existing = raw
+        .get("styles")
+        .and_then(|s| s.get(name))
+        .and_then(|r| r.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let token_type = operation
+        .get("token_type")
+        .or_else(|| operation.get("style_type"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or(existing)
+        .context("token_type is missing for a new token")?;
+    if !matches!(
+        token_type.as_str(),
+        "color" | "stroke" | "typography" | "spacing" | "radius" | "shadow"
+    ) {
+        anyhow::bail!("unknown token type {token_type:?}")
+    }
+    if !raw.get("styles").is_some_and(Value::is_object) {
+        raw["styles"] = json!({});
+    }
+    let styles = raw["styles"].as_object_mut().unwrap();
+    let record = styles
+        .entry(name.to_owned())
+        .or_insert_with(|| json!({"type": token_type, "value": Value::Null}));
+    if !record.is_object() {
+        *record = json!({"type": token_type, "value": Value::Null});
+    }
+    record["type"] = json!(token_type);
+    record["value"] = value;
+    tokens::check_write(&raw["styles"], Some(&[name.to_owned()]))
+        .map_err(|e| anyhow::anyhow!("[{}] {}", e.code, e.message))?;
+    Ok(json!({"type":"set-token","name":name,"token_type":token_type}))
+}
+
 fn style_slot<'a>(node: &'a mut Value, key: &str) -> &'a mut Value {
     if !node.get("style").is_some_and(Value::is_object) {
         node["style"] = json!({});

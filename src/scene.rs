@@ -1781,6 +1781,11 @@ pub fn apply_batch_at(
                     let id = resolve("id")?;
                     crate::design::template::batch_set_property(&mut candidate, page, document, &id, operation)?
                 }
+                "bind-token" => {
+                    let id = resolve("id")?;
+                    crate::design::template::batch_bind_token(&mut candidate, page, &id, operation)?
+                }
+                "set-token" => crate::design::template::batch_set_token(&mut candidate, operation)?,
                 other if crate::composite::is_document(&candidate) => crate::composite::batch_operation(&mut candidate,page,document,other,operation,&resolve)?,
                 other => bail!("unsupported v4 batch operation: {other}"),
             };

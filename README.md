@@ -600,6 +600,36 @@ missing required value, locked or missing target) is reported at once as
 `invalid-input`, and a failed fill writes nothing. The `changes` list is paginated
 with `--offset/--limit` (`matches returned offset limit has_more`).
 
+### Audit and fix plans
+
+`design audit` is read-only: it compares literal paint, text and corner values with
+the document's own tokens, reports unresolved or invalid token references, and
+evaluates the brand kit's usage rules (`contrast`, `forbidden_pairs`, `logo`,
+`fonts`).
+
+```sh
+pentool design audit doc.pen --limit 50
+pentool design audit doc.pen --all-pages --rules color,refs --offset 50
+pentool design audit doc.pen --fix-plan > audit.json
+pentool design audit doc.pen --fail-on error      # exit status 3 when errors exist
+```
+
+Findings are sorted in document order and paginated (`matches returned offset
+limit has_more`; default `--limit 50`, max 500; `summary` counts the whole result).
+`--fix-plan` adds `plan.operations`, plain `bind-token` batch operations for the
+exact matches on the returned page (`--fix-nearest` adds deltaE <= 2 matches);
+locked nodes are listed under `plan.skipped`. Apply a plan with the existing batch
+command (use `--page` for the plan's `page`):
+
+```sh
+pentool batch doc.pen ops.json --dry-run     # ops.json is the plan.operations array
+pentool batch doc.pen ops.json
+```
+
+The batch operations `{"type":"bind-token","id":"hero","property":"fill","token":"color.accent"}`
+and `{"type":"set-token","name":"space.md","token_type":"spacing","value":16}` are
+available to any batch file.
+
 ## Open design libraries and packages (v0.5–v0.6)
 
 Reusable assets remain ordinary editable `.pen` documents. Save a document, page,

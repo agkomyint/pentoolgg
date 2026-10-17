@@ -1217,3 +1217,327 @@ fn template_fill_changes_are_paginated_and_list_is_exact() {
     assert_eq!(listing["templates"][0]["parameters"], 5);
     assert_eq!(listing["has_more"], false);
 }
+
+fn audit_document(ws: &Workspace) -> PathBuf {
+    let path = ws.path("audit.pen");
+    quiet(ws, &["new", &text(&path)]);
+    let mut doc = read(&path);
+    doc["styles"] = json!({
+        "color.accent": color("#f59e0b"),
+        "color.brand": color("#2563eb"),
+        "color.white": color("#ffffff"),
+        "color.pale": color("#eeeeee"),
+        "type.body": {"type":"typography","value":{"font":"Inter","size":16,"weight":400}},
+        "radius.card": {"type":"radius","value":8},
+        "color.bad": {"type":"color","value":"nope"},
+    });
+    let fill = |id: &str, value: &str| {
+        json!({"kind":"rect","id":id,"x":0,"y":0,"width":10,"height":10,"radius_x":0,"radius_y":0,
+               "style":{"fill":{"fallback":value}}})
+    };
+    let mut nodes = vec![
+        fill("exact", "#F59E0B"),
+        fill("near", "#f59e0c"),
+        fill("far", "#123456"),
+        fill("clear", "none"),
+        json!({"kind":"rect","id":"ghost","x":0,"y":0,"width":10,"height":10,"radius_x":4,"radius_y":4,
+               "style":{"fill":{"ref":"color.missing","fallback":"#2563eb"}}}),
+        json!({"kind":"rect","id":"broken","x":0,"y":0,"width":10,"height":10,"radius_x":8,"radius_y":8,
+               "style":{"fill":{"ref":"color.bad","fallback":"#000000"}}}),
+        json!({"kind":"text","id":"body","x":0,"y":0,"content":"Hi","font_family":"Inter",
+               "font_size":16,"font_weight":400,"style":{"fill":{"ref":"color.pale","fallback":"#eeeeee"}}}),
+        json!({"kind":"text","id":"odd","x":0,"y":20,"content":"Hi","font_family":"Comic",
+               "font_size":13,"font_weight":400,"style":{"fill":{"ref":"color.brand","fallback":"#2563eb"}}}),
+    ];
+    for i in 0..60 {
+        nodes.push(fill(&format!("bulk{i:02}"), "#123456"));
+    }
+    doc["pages"][0]["layers"][0]["nodes"] = json!(nodes);
+    doc["pages"][0]["layers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id":"frozen","name":"Frozen","visible":true,"locked":true,
+            "nodes":[fill("sealed", "#2563eb")]
+        }));
+    doc["design"] = json!({"brand":{"schema":1,
+        "rules":[{"id":"legible","kind":"contrast","min":4.5},
+                 {"id":"fonts","kind":"fonts","allowed":["type.body"]}]}});
+    write(&path, &doc);
+    path
+}
+
+fn codes(report: &Value, code: &str) -> Vec<String> {
+    report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["code"] == code)
+        .map(|f| f["id"].as_str().or(f["token"].as_str()).unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn audit_reports_hardcoded_unresolved_and_brand_findings() {
+    let ws = Workspace::new("audit");
+    let doc = audit_document(&ws);
+    let path = text(&doc);
+    let before = fs::read(&doc).unwrap();
+    let report = ok(&ws, &["design", "audit", &path, "--limit", "500"]);
+    assert_eq!(fs::read(&doc).unwrap(), before, "audit is read-only");
+
+    let off = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["code"] == "off-token-color")
+        .collect::<Vec<_>>();
+    let exact = off.iter().find(|f| f["id"] == "exact").unwrap();
+    assert_eq!(exact["suggest"], "color.accent");
+    assert_eq!(exact["exact"], true);
+    let near = off.iter().find(|f| f["id"] == "near").unwrap();
+    assert_eq!(near["exact"], false);
+    assert_eq!(near["suggest"], "color.accent");
+    let far = off.iter().find(|f| f["id"] == "far").unwrap();
+    assert!(far.get("suggest").is_none());
+    assert!(off.iter().all(|f| f["id"] != "clear"));
+    // An unresolved reference is reported and its fallback literal still audited.
+    assert_eq!(codes(&report, "unresolved-token"), ["ghost"]);
+    assert!(off.iter().any(|f| f["id"] == "ghost" && f["exact"] == true));
+    assert_eq!(codes(&report, "invalid-token"), ["broken", "color.bad"]);
+    // Font and radius.
+    assert_eq!(codes(&report, "off-token-font"), ["odd"]);
+    assert_eq!(codes(&report, "off-token-radius"), ["ghost"]);
+    // Brand rules.
+    assert_eq!(codes(&report, "brand-contrast"), ["body"]);
+    assert_eq!(codes(&report, "brand-font"), ["odd"]);
+    // Locked layer findings are flagged.
+    let sealed = off.iter().find(|f| f["id"] == "sealed").unwrap();
+    assert_eq!(sealed["locked"], true);
+    // Unused tokens are info.
+    assert!(codes(&report, "unused-token").contains(&"color.white".to_owned()));
+    assert_eq!(report["severities"]["error"], 3);
+    assert_eq!(
+        report["matches"],
+        report["findings"].as_array().unwrap().len()
+    );
+}
+
+#[test]
+fn audit_is_paginated_exactly_and_rule_filtered() {
+    let ws = Workspace::new("auditpage");
+    let path = text(&audit_document(&ws));
+    let full = ok(&ws, &["design", "audit", &path, "--limit", "500"]);
+    let total = full["matches"].as_u64().unwrap() as usize;
+    assert!(total > 60);
+    let first = ok(&ws, &["design", "audit", &path]);
+    assert_eq!(first["limit"], 50);
+    assert_eq!(first["returned"], 50);
+    assert_eq!(first["has_more"], true);
+    assert_eq!(first["matches"], total);
+    assert_eq!(first["summary"], full["summary"]);
+    let last = ok(
+        &ws,
+        &["design", "audit", &path, "--offset", "50", "--limit", "500"],
+    );
+    assert_eq!(last["returned"], total - 50);
+    assert_eq!(last["has_more"], false);
+    assert_eq!(
+        first["findings"][0], full["findings"][0],
+        "order is deterministic"
+    );
+    for args in [["--limit", "0"], ["--limit", "501"], ["--rules", "nope"]] {
+        let mut command = vec!["design", "audit", &path];
+        command.extend(args);
+        assert_eq!(err(&ws, &command)["code"], "invalid-input");
+    }
+    err(&ws, &["design", "audit", &path, "--page", "ghost"]);
+    let only = ok(
+        &ws,
+        &[
+            "design", "audit", &path, "--rules", "refs", "--limit", "500",
+        ],
+    );
+    assert!(only["summary"].get("off-token-color").is_none());
+    assert!(only["summary"].get("unresolved-token").is_some());
+}
+
+#[test]
+fn audit_fail_on_sets_exit_status_three() {
+    let ws = Workspace::new("auditfail");
+    let path = text(&audit_document(&ws));
+    let out = run(&ws, &["design", "audit", &path, "--fail-on", "error"]);
+    assert_eq!(out.status.code(), Some(3));
+    let out = run(
+        &ws,
+        &[
+            "design",
+            "audit",
+            &path,
+            "--rules",
+            "font",
+            "--fail-on",
+            "error",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn audit_fix_plan_applies_exactly_through_batch() {
+    let ws = Workspace::new("auditfix");
+    let doc = audit_document(&ws);
+    let path = text(&doc);
+    let report = ok(
+        &ws,
+        &[
+            "design",
+            "audit",
+            &path,
+            "--rules",
+            "color",
+            "--fix-plan",
+            "--limit",
+            "500",
+        ],
+    );
+    let plan = &report["plan"];
+    let ops = plan["operations"].as_array().unwrap();
+    let ids: Vec<&str> = ops.iter().map(|o| o["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        ["exact", "ghost"],
+        "exact matches on unlocked nodes: {plan}"
+    );
+    assert!(ops.iter().all(|o| o["type"] == "bind-token"));
+    let skipped = plan["skipped"].as_array().unwrap();
+    assert!(skipped
+        .iter()
+        .any(|s| s["id"] == "sealed" && s["reason"] == "locked"));
+    assert!(skipped.iter().any(|s| s["id"] == "near"));
+
+    let ops_file = ws.path("plan.json");
+    write(&ops_file, &json!(ops));
+    let before = fs::read(&doc).unwrap();
+    quiet(&ws, &["batch", &path, &text(&ops_file), "--dry-run"]);
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    quiet(&ws, &["batch", &path, &text(&ops_file)]);
+
+    let after = read(&doc);
+    let mut expected = serde_json::from_slice::<Value>(&before).unwrap();
+    for (id, token, hex) in [
+        ("exact", "color.accent", "#f59e0b"),
+        ("ghost", "color.brand", "#2563eb"),
+    ] {
+        let node = expected["pages"][0]["layers"][0]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|n| n["id"] == id)
+            .unwrap();
+        node["style"]["fill"] = json!({"ref":token,"fallback":hex});
+    }
+    assert_eq!(
+        after["pages"], expected["pages"],
+        "only listed nodes change"
+    );
+    let again = ok(
+        &ws,
+        &[
+            "design", "audit", &path, "--rules", "color", "--limit", "500",
+        ],
+    );
+    let exact_left = again["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["exact"] == true && f["locked"].is_null())
+        .count();
+    assert_eq!(exact_left, 0);
+
+    let nearest = ok(
+        &ws,
+        &[
+            "design",
+            "audit",
+            &path,
+            "--rules",
+            "color",
+            "--fix-plan",
+            "--fix-nearest",
+            "--limit",
+            "500",
+        ],
+    );
+    assert!(nearest["plan"]["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|o| o["id"] == "near"));
+}
+
+#[test]
+fn bind_token_and_set_token_batch_ops_respect_locks_and_validity() {
+    let ws = Workspace::new("bindops");
+    let doc = audit_document(&ws);
+    let path = text(&doc);
+    let ops = ws.path("ops.json");
+    let before = fs::read(&doc).unwrap();
+    for (op, message) in [
+        (
+            json!({"type":"bind-token","id":"sealed","property":"fill","token":"color.accent"}),
+            "locked",
+        ),
+        (
+            json!({"type":"bind-token","id":"far","property":"fill","token":"color.missing"}),
+            "unresolved",
+        ),
+        (
+            json!({"type":"bind-token","id":"far","property":"fill","token":"radius.card"}),
+            "color",
+        ),
+        (
+            json!({"type":"bind-token","id":"far","property":"width","token":"color.accent"}),
+            "fill and stroke",
+        ),
+        (
+            json!({"type":"set-token","name":"color.new","token_type":"color","value":"nope"}),
+            "not a color",
+        ),
+        (
+            json!({"type":"set-token","name":"space.x","token_type":"bogus","value":1}),
+            "unknown token type",
+        ),
+    ] {
+        write(&ops, &json!([op]));
+        let out = run(&ws, &["batch", &path, &text(&ops)]);
+        assert!(!out.status.success(), "{op}");
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(stderr.contains(message), "{op}: {stderr}");
+        assert_eq!(fs::read(&doc).unwrap(), before, "failed batch leaves bytes");
+    }
+    write(
+        &ops,
+        &json!([
+            {"type":"set-token","name":"space.md","token_type":"spacing","value":16},
+            {"type":"set-token","name":"color.cta","token_type":"color","value":{"ref":"color.brand"}},
+            {"type":"bind-token","id":"far","property":"stroke","token":"color.cta"},
+        ]),
+    );
+    quiet(&ws, &["batch", &path, &text(&ops)]);
+    let after = read(&doc);
+    assert_eq!(
+        after["styles"]["space.md"],
+        json!({"type":"spacing","value":16})
+    );
+    let far = after["pages"][0]["layers"][0]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == "far")
+        .unwrap();
+    assert_eq!(
+        far["style"]["stroke"],
+        json!({"ref":"color.cta","fallback":"#2563eb"})
+    );
+}
