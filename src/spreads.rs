@@ -1740,8 +1740,11 @@ pub fn section_list(raw: &Value, offset: usize, limit: usize) -> Value {
     let labels = page_labels(raw);
     let matches = labels.len();
     let page: Vec<&Value> = labels.iter().skip(offset).take(limit).collect();
+    // Every emitted array obeys the window: unpaginated sections would leak
+    // past the reported `returned`/`has_more` contract.
+    let window: Vec<&Value> = sections.iter().skip(offset).take(limit).collect();
     json!({
-        "sections": sections,
+        "sections": window,
         "matches": matches,
         "returned": page.len(),
         "offset": offset,
