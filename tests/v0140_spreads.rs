@@ -284,7 +284,15 @@ fn parent_items_inherit_override_detach_and_report_orphans() {
     );
 
     // A parent in use or with derived parents cannot be removed.
-    assert!(fails(&["parent", &doc, "remove", "Chapter"]).contains("in-use"));
+    let err = fails(&["parent", &doc, "remove", "Chapter"]);
+    assert!(err.contains("in-use"), "{err}");
+    // The corrective hint must name the real command (`page parent` does not
+    // exist; assignment lives under `parent <file> assign`).
+    assert!(
+        err.contains("`pentool parent <file> assign <page> --parent <id>`"),
+        "{err}"
+    );
+    assert!(!err.contains("`page parent"), "{err}");
     assert!(fails(&["parent", &doc, "remove", "Base"]).contains("in-use"));
 }
 
