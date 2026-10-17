@@ -63,8 +63,7 @@ The current planned sequence is:
     Sketch);
 13. `docs/roadmap/v0.18.0/TASKS.md`: scripting and extension API;
 14. `docs/roadmap/v0.19.0/TASKS.md`: design systems, brand kits, templates;
-15. `docs/roadmap/v0.20.0/TASKS.md`: web and UX output (static and responsive);
-16. `docs/roadmap/v0.21.0/TASKS.md`: collaboration, with human and agent
+15. `docs/roadmap/v0.20.0/TASKS.md`: collaboration, with human and agent
     contribution stats;
 
 Product focus is vector, images, painting, layout and static 3D. Time-based

@@ -1,34 +1,58 @@
-# v0.20.0 — Web and UX output
+# v0.20.0 — Collaboration
 
-Turn designs into responsive web output: layout rules in the document, and
-HTML/CSS export that reflects them, from the same offline binary.
+Let several people and agents work on one document safely, without giving up
+the single binary, readable `.pen` files and atomic history.
 
 ## Product contract
 
-- Responsive behavior is data in the `.pen` document (constraints, auto layout,
-  breakpoints), not a separate export-time guess.
-- HTML/CSS export is deterministic, self-contained and readable, with stable
-  class names derived from node IDs and tokens (v0.19.0).
-- Text stays text, images stay images, vectors export as inline SVG. Where a
-  construct has no faithful web equivalent, the export report says so and falls
-  back to a raster with a named reason.
-- Accessibility is checked, not assumed: roles, alt text, reading order and
-  contrast problems are reported by a bounded audit.
-- No runtime framework, bundler or network access is required.
+- The `.pen` document remains the source of truth. Collaboration is a protocol
+  over operations, not a different storage format.
+- Edits are operations with stable IDs and revision guards. Concurrent edits
+  merge deterministically or are rejected with a named conflict; nothing is
+  silently overwritten, and locks are respected.
+- Works offline: a peer can work disconnected and reconcile later. No central
+  service is required to open or save a document.
+- Identity and access are explicit. A session shows who may read, comment or
+  edit, and every operation records its author.
+- Bounded: operation size, rate, session size and history are limited, and
+  limits are checked before work starts.
+- Comments and presence data are separate from the scene graph and never change
+  rendering or export.
+- Humans and agents are both first-class collaborators (human-human,
+  human-agent, agent-agent). Every operation records an **actor** with a kind
+  (`human` | `agent`), a stable ID, a display name and, for agents, the model or
+  tool name and the human who directed it.
+- A document carries **contribution stats** derived from the operation log:
+  per actor, the share of operations, objects created, objects modified,
+  properties changed, and net content authored, with human and agent totals.
+  Stats are computed deterministically from the log, never self-reported, and
+  surviving content is attributed (an object an agent created and a human later
+  restyled shows both contributions).
+- Attribution is honest and bounded: it is stored compactly in the document
+  (a bounded summary plus the hidden history), cannot be forged by a peer, and
+  is exported only when the user chooses, since it can identify people.
 
 ## Must ship, in order
 
-- [ ] **1. Specify constraints, auto layout and breakpoints** in the format.
-- [ ] **2. Layout solver** shared by the renderer, the editor and the exporter.
-- [ ] **3. HTML/CSS exporter** with a fidelity report and golden tests.
-- [ ] **4. Accessibility audit** command and report.
-- [ ] **5. Interaction metadata** (links, states) as declarative data only.
-- [ ] **6. Editor:** breakpoint switcher and responsive preview.
-- [ ] **7. Evidence:** browser-rendered comparison against the Rust renderer
-  within a documented tolerance, and size checks.
+- [ ] **1. Specify the operation log,** merge rules and conflict reporting in
+  `docs/collaboration-v1.md`, with a threat model.
+- [ ] **2. Operation log in the transaction path,** with deterministic replay
+  and a property-based convergence test.
+- [ ] **3. Local-network sync** between instances (`serve --collab`), with
+  authentication tokens and explicit peers.
+- [ ] **3a. Actor identity and contribution stats:** actor kinds in every
+  operation, `pentool stats DOC [--by actor|kind|page] [--json]` reporting
+  percent share of work for humans versus agents, a stats panel in the editor,
+  and tests that stats are deterministic, survive history compaction and
+  cannot be forged by a peer.
+- [ ] **4. Comments, mentions and review states** stored outside the scene.
+- [ ] **5. Presence and cursors,** best-effort and non-persistent.
+- [ ] **6. Permissions** (viewer, commenter, editor) enforced by the server.
+- [ ] **7. Editor:** collaborator list, comments panel, conflict resolution UI.
+- [ ] **8. Evidence:** convergence fuzzing, hostile-peer tests, and recovery
+  tests for crash during sync.
 
 ## Explicitly deferred
 
-- Scripted behavior and component frameworks (React/Vue code generation),
-  server-side rendering, and any animation export (time-based media is out of
-  scope for Pentool).
+- A hosted relay or account system, end-to-end encrypted rooms,
+  and real-time co-editing of a single text run at keystroke granularity.

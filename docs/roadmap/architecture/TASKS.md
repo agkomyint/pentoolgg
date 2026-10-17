@@ -78,8 +78,8 @@ media is out of scope (see `AGENTS.md`).
 
 ## Explicitly deferred
 
-- Real-time multi-user editing and CRDT merge (v0.21.0 collaboration).
-- Hosted multi-tenant operation (v0.22.0).
+- Real-time multi-user editing and CRDT merge (v0.20.0 collaboration).
+- Hosted multi-tenant operation.
 - Replacing the browser with a native GUI toolkit. The browser remains the
   front end because it ships everywhere with no per-platform UI code.
 - Video, audio and timeline features.
