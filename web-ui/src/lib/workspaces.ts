@@ -1,7 +1,7 @@
 // One entry per product area. `since` ties each workspace to the roadmap so the
 // shell shows what exists now and what each future milestone adds.
 import type { LucideIcon } from "lucide-react";
-import { Box, Brush, Camera, Image, Layers, Newspaper, PenTool, Palette, Printer, Puzzle, Users } from "lucide-react";
+import { Box, Brush, Camera, Image, Layers, MessagesSquare, Newspaper, PenTool, Palette, Printer, Puzzle, Users } from "lucide-react";
 
 export type Status = "available" | "partial" | "planned";
 export type Workspace = {
@@ -26,5 +26,6 @@ export const workspaces: Workspace[] = [
   { id: "3d", label: "3D", icon: Box, status: "partial", since: "0.15", summary: "Import, frame, light and render static 3D objects.", planned: ["Viewport orbit, pan and zoom", "Material controls", "Lighting controls"] },
   { id: "extensions", label: "Extensions", icon: Puzzle, status: "available", since: "0.18", summary: "Sandboxed WebAssembly extensions that read the document and propose undoable edits.", planned: [] },
   { id: "stats", label: "Stats", icon: Users, status: "available", since: "0.20", summary: "Read-only contribution stats for people and agents, derived from the operation log.", planned: [] },
+  { id: "collab", label: "Collab", icon: MessagesSquare, status: "available", since: "0.20", summary: "Collaborators, comments and review states, and named merge conflicts. Roles are enforced by the server.", planned: [] },
   { id: "systems", label: "Systems", icon: Palette, status: "available", since: "0.19", summary: "Design tokens, token libraries, templates and the token audit. Installing and updating libraries stays in the CLI.", planned: [] },
 ];

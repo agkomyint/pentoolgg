@@ -49,6 +49,7 @@ the single binary, readable `.pen` files and atomic history.
 - [ ] **5. Presence and cursors,** best-effort and non-persistent.
 - [ ] **6. Permissions** (viewer, commenter, editor) enforced by the server.
 - [ ] **7. Editor:** collaborator list, comments panel, conflict resolution UI.
+  Status: collaborator list, comments panel and a read-only conflict viewer exist (`docs/studio.md`, Collaboration); one-click conflict resolution, cursors and a live-browser check are outstanding, so the box stays open.
 - [ ] **8. Evidence:** convergence fuzzing, hostile-peer tests, and recovery
   tests for crash during sync.
 

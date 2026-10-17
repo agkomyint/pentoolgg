@@ -167,6 +167,7 @@ fn build_app(
         .route("/api/comments", get(comments_list).post(comments_apply))
         .route("/api/history", get(history_list))
         .route("/api/collab/stats", get(collab_stats))
+        .route("/api/collab/conflicts", get(collab_conflicts))
         .route("/api/undo", post(history_undo))
         .route("/api/redo", post(history_redo))
         .route("/api/geometry", post(geometry_command))
@@ -4439,6 +4440,26 @@ async fn collab_stats(
         });
     match result {
         Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+/// Named merge conflicts from replaying the verified operation log (read only).
+async fn collab_conflicts(State(state): State<Shared>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    match crate::collab::verify_report(&file) {
+        Ok(report) => Json(serde_json::json!({
+            "chain": report["chain"],
+            "head": report["head"],
+            "ops": report["ops"],
+            "conflicts_total": report["replay"]["conflicts_total"],
+            "conflicts": report["replay"]["conflicts"],
+            "rejected": report["replay"]["rejected"],
+            "pending": report["replay"]["pending"],
+        }))
+        .into_response(),
         Err(error) => problem(error),
     }
 }
