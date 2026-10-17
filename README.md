@@ -67,6 +67,28 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Comments and review states (v0.20, in development)
+
+Threads, `@mentions` and review states live in a sidecar next to the document
+(`.pentool/comments/<name>.json`). Commenting never changes the `.pen` bytes,
+its revision, rendering or export. The contract is
+[`docs/collaboration-comments.md`](docs/collaboration-comments.md).
+
+```sh
+pentool comment add logo.pen "Tighten this, @ana" --object title --author Ana --actor-id ana
+pentool comment add logo.pen "Check the corner" --x 12 --y 8
+pentool comment reply logo.pen t-1 "Done" --kind agent --actor-id bot-1 --author Painter --model claude --directed-by ana
+pentool comment review logo.pen t-1 requested        # none | requested | approved | changes-requested
+pentool comment resolve logo.pen t-1 --if-version 2  # refuses a stale thread version
+pentool comment reopen logo.pen t-1
+pentool comment list logo.pen --status open --limit 20 --json
+pentool comment list logo.pen --thread t-1           # one thread with every comment
+```
+
+The shared server exposes the same operations as `GET /api/comments` (filters
+and `offset`/`limit`) and `POST /api/comments` (`action` of `add`, `reply`,
+`resolve`, `reopen` or `review`).
+
 ## Extensions (v0.18)
 
 Sandboxed WebAssembly extensions read a document and propose edits through the

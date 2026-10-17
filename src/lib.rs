@@ -8,6 +8,7 @@ pub mod benchmark;
 pub mod blend;
 pub mod book;
 pub mod color;
+pub mod comments;
 pub mod compose;
 pub mod composite;
 #[cfg(not(target_arch = "wasm32"))]

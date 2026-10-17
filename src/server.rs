@@ -163,6 +163,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/design/template/fill", post(design_template_fill))
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/run", post(extensions_run))
+        .route("/api/comments", get(comments_list).post(comments_apply))
         .route("/api/history", get(history_list))
         .route("/api/undo", post(history_undo))
         .route("/api/redo", post(history_redo))
@@ -4291,6 +4292,58 @@ async fn photo_edit(State(state): State<Shared>, Json(body): Json<PhotoEditReque
     .map_err(anyhow::Error::from)
     .and_then(|r| r);
     match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CommentsQuery {
+    status: Option<String>,
+    review_state: Option<String>,
+    page: Option<String>,
+    object: Option<String>,
+    mention: Option<String>,
+    thread: Option<String>,
+    #[serde(default)]
+    comments: bool,
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+}
+
+async fn comments_list(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<CommentsQuery>,
+) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let options = crate::comments::ListOptions {
+        status: q.status,
+        review_state: q.review_state,
+        page: q.page,
+        object: q.object,
+        mention: q.mention,
+        thread: q.thread,
+        comments: q.comments,
+        offset: q.offset,
+        limit: q.limit,
+    };
+    match crate::comments::list(&file, &options) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+async fn comments_apply(
+    State(state): State<Shared>,
+    Json(request): Json<serde_json::Value>,
+) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    match crate::comments::apply(&file, &request) {
         Ok(value) => Json(value).into_response(),
         Err(error) => problem(error),
     }
