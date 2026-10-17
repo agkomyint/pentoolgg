@@ -24,6 +24,7 @@ pub struct Snapshot {
     pub version: String,
     pub package_hash: String,
     pub tokens: BTreeMap<String, LibToken>,
+    pub brand: Option<Value>,
 }
 
 fn invalid(message: impl Into<String>) -> DesignError {
@@ -167,11 +168,20 @@ pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
         }
     }
     tokens::check_write(&store, None)?;
+    let brand = match object.get("brand") {
+        None => None,
+        Some(brand) => {
+            let kind_of = |id: &str| out.get(id).map(|t| t.token_type.clone());
+            super::brand::validate_block(brand, &kind_of)?;
+            Some(brand.clone())
+        }
+    };
     Ok(Some(Snapshot {
         name: name.to_owned(),
         version: version.to_owned(),
         package_hash: String::new(),
         tokens: out,
+        brand,
     }))
 }
 
@@ -242,6 +252,7 @@ pub fn summary(snapshot: &Snapshot) -> Value {
         "version": snapshot.version,
         "tokens": snapshot.tokens.len(),
         "templates": 0,
+        "brand": snapshot.brand.is_some(),
         "warnings": [],
     })
 }
@@ -476,7 +487,12 @@ pub fn diff(a: &Path, b: &Path, options: &DiffOptions) -> Result<Value> {
 
 /// Pack a library directory (`design library pack`). With `previous`, refuse a
 /// version that is lower than the bump the token changes require (section 1.3).
-pub fn pack(dir: &Path, output: &Path, previous: Option<&Path>) -> Result<Value> {
+pub fn pack(
+    dir: &Path,
+    output: &Path,
+    previous: Option<&Path>,
+    allow_restricted_local: bool,
+) -> Result<Value> {
     let manifest_bytes = fs::read(dir.join("pentool.package.json")).map_err(|e| {
         invalid(format!(
             "missing pentool.package.json in {}: {e}",
@@ -516,6 +532,19 @@ pub fn pack(dir: &Path, output: &Path, previous: Option<&Path>) -> Result<Value>
             block.name, block.version, manifest.name, manifest.version
         ))
         .action("make design_library.name/version equal the package manifest"));
+    }
+    if let Some(brand) = &block.brand {
+        let restricted = super::brand::restricted_profiles(brand);
+        if !restricted.is_empty() && !allow_restricted_local {
+            return Err(DesignError::new(
+                "restricted-profile",
+                format!(
+                    "brand kit references ICC profile(s) that are not redistributable: {}",
+                    restricted.join(", ")
+                ),
+            )
+            .action("set redistribution to allowed, or pass --allow-restricted-local for a local-only package"));
+        }
     }
     if let Some(previous) = previous {
         let old = load_package(previous)?;

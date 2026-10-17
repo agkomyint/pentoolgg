@@ -320,6 +320,45 @@ package already provides content addressing, signatures and dependencies.
   (allowed typography tokens only). Rules are advisory: they never block rendering
   or writes; only `audit --fail-on` turns findings into an exit status.
 
+### 6.1 Implemented behavior (`pentool design brand`)
+
+Implemented in `src/design/brand.rs`; no format bump.
+
+- **Validation** (`brand::validate_block`, run by `design library pack`/`verify`,
+  `brand apply` and `brand show`): unknown keys are rejected at every level. Entry
+  names are `[a-z0-9_-]{1,64}`; at most 256 colors/type entries/spot inks and 64
+  logos, profiles and rules; `usage` is at most 512 bytes. `colors.*.token` and
+  `forbidden_on`, logo `forbidden_backgrounds`, `inks.spot[].token`, and
+  `contrast`/`forbidden_pairs` tokens must exist and be `color`; `type.*.token` and
+  `fonts.allowed` must be `typography` (`unknown-token`, `token-type-mismatch`,
+  otherwise `invalid-brand`, each with the JSON-pointer `path`). Logo `id` and
+  `asset` use `asset::validate_id`; `min_width > 0`, `clear_space >= 0`. Profiles
+  need `role` (`output|proof|display|working`), a `sha256:<64 hex>` identity and
+  `redistribution` (`allowed|restricted|unknown`). Rule kinds are `contrast`
+  (`min` 1..21), `forbidden_pairs` (`pairs`), `logo`, `fonts` (`allowed`).
+- **`design brand show DOC`** prints `present`, `counts`, colors and type with the
+  resolved token value/status, `logos`, `inks.spot` (resolved) and
+  `inks.profiles` (each with `state` `present|missing` against the document's
+  `color_management.profiles`), `rules`, and `libraries`. A document without a
+  brand prints `present:false`. Not paginated: every section is bounded above.
+- **`design brand apply LIB DOC [--dry-run] [--if-revision] [--project]`**
+  verifies the package, vendors exactly the tokens the kit references (plus alias
+  closure, with the section 4 conflict/override planning and report), sets
+  `design.brand` and marks `design.libraries.<name>.brand = true`, in one
+  transaction with the lock entry. A pre-existing `design.brand` that differs and
+  was not applied from this library is `conflict` and nothing changes. A later
+  `library update` preserves the `brand` marker (and the selection of tokens).
+- **`design library pack --allow-restricted-local`**: without it, a brand kit
+  with a `restricted`/`unknown` profile fails `restricted-profile`.
+- **Deviations from section 6.** ICC profile and spot `Ink` records are
+  *references only*: `brand apply` does not import profile bytes through
+  `color::catalog` or copy `Ink` records (a package here has no profile bytes);
+  it reports each profile as `present|missing` in the target document so the user
+  can import it with the existing color commands. Native (spot/ICC) color tokens
+  still fail with `unsupported-capability` on documents below the color-management
+  version, via the shared `apply_plan` check. Rules are stored and validated only;
+  evaluating them is the audit item (roadmap 6).
+
 ## 7. Templates
 
 A template is an ordinary `.pen` document (any supported version) plus a
@@ -518,7 +557,7 @@ support `--page` where page-scoped, and mutations support `--dry-run` and
 | `design token import / export` | section 10; `{imported[],skipped[],would_change,change}` |
 | `design library init/pack/verify/inspect/export` | `{ok,package_hash,name,version,tokens:int,templates:int,warnings[]}` |
 | `design library install/update/status/diff` | section 5 and 4.1 |
-| `design brand show DOC` / `design brand apply LIB DOC` | brand block; apply vendors tokens/inks/profiles (transaction) |
+| `design brand show DOC` / `design brand apply LIB DOC` | brand block with resolved values; apply vendors the kit's referenced tokens and `design.brand` (transaction, 6.1) |
 | `design template check/fill/list` | section 7; list is paginated like tree |
 | `design audit` | section 9 |
 
@@ -631,6 +670,27 @@ Each item also updates `README.md`, `docs/pen-format-v4.schema.json` (`design`
   from `src/layout.rs` and `src/scene.rs` when implementing (not audited here).
 - **Q9: delta E threshold** (2.0 CIE76) and 256-candidate cap are proposals.
 - **Q10: native-color (spot/ICC) tokens in W3C export** are refused; confirm.
+
+## Implementation deviations (items 2-4, v0.19.0)
+
+Where the shipped behavior differs from the sections above, the shipped behavior
+is normative:
+
+- `design library update` requires `--package FILE`. Resolving `--library NAME
+  --to VERSION` against the lock or `.pentool/packages` is not implemented;
+  `--library` and `--to` only assert the package's name and version.
+- The lock file and the document are not one transaction. `package::install`
+  writes `pentool.lock` first, then the document is committed through the shared
+  transaction; if the commit fails the previous lock bytes are restored (or the
+  lock removed if it did not exist). A crash between the two steps can leave a
+  lock entry the document does not record; `design library status` reports it.
+- Depth (8), count (5,000) and value-size limits are checked **on write** (token
+  mutation, install, update, pack). Opening a document checks only alias cycles,
+  so a document already over a limit still opens, resolves and renders.
+- A token removed from the library and resolved with `keep-local` or `detach`
+  becomes a local token (its `source` record is dropped); it is no longer tracked
+  by the library.
+- Brand kit: see 6.1.
 
 ## Decisions on open questions (lead, v0.19.0)
 

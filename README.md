@@ -559,6 +559,27 @@ SHA-256 digest. Export fails before replacing an existing output when a source i
 missing, changed, unsafe, malformed, or over its resource limit. Portable SVG
 embeds normalized pixels; PNG and PDF use the same verified image pipeline.
 
+## Design systems and brand kits (v0.19)
+
+`pentool design` inspects tokens, packs token libraries as `.penpkg` files and
+vendors them into documents (`docs/design-systems-v1.md`). A library may carry a
+brand kit in `design_library.brand`: named colors and type (by token ID), logo
+asset references with usage limits, spot-ink and ICC profile references, and
+advisory usage rules. No `.pen` format bump.
+
+```sh
+pentool design library init ./brand-lib acme/brand
+pentool design library pack ./brand-lib brand-1.0.0.penpkg
+pentool design brand apply brand-1.0.0.penpkg doc.pen --dry-run
+pentool design brand apply brand-1.0.0.penpkg doc.pen
+pentool design brand show doc.pen
+```
+
+`brand apply` vendors only the tokens the kit names (plus alias targets) and sets
+`design.brand` in one transaction. A different local brand kit is a `conflict`,
+never overwritten. `pack` refuses ICC profiles whose redistribution is
+`restricted` or `unknown` unless `--allow-restricted-local` is given.
+
 ## Open design libraries and packages (v0.5–v0.6)
 
 Reusable assets remain ordinary editable `.pen` documents. Save a document, page,

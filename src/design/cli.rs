@@ -1,5 +1,6 @@
 //! `pentool design ...` command definitions and handlers.
 use super::{
+    brand,
     library::{self, DiffOptions},
     page_args, paginate,
     plan::{self, Options},
@@ -29,6 +30,28 @@ pub enum DesignCommand {
     Library {
         #[command(subcommand)]
         action: LibraryAction,
+    },
+    /// Inspect a document's brand kit or vendor a library's brand kit into it.
+    Brand {
+        #[command(subcommand)]
+        action: BrandAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum BrandAction {
+    /// Show the document's brand kit with resolved token values and profile state.
+    Show { input: PathBuf },
+    /// Vendor a library package's brand kit (its tokens and design.brand) into a document.
+    Apply {
+        package: PathBuf,
+        input: PathBuf,
+        #[command(flatten)]
+        signing: Signing,
+        #[command(flatten)]
+        guard: Guard,
+        #[command(flatten)]
+        paging: Paging,
     },
 }
 
@@ -97,6 +120,9 @@ pub enum LibraryAction {
         /// Earlier release; the declared version must satisfy semver for the changes.
         #[arg(long)]
         previous: Option<PathBuf>,
+        /// Allow brand ICC profiles that are restricted or of unknown redistribution.
+        #[arg(long)]
+        allow_restricted_local: bool,
     },
     /// Verify a library package offline (hashes, schema, tokens).
     Verify {
@@ -197,6 +223,10 @@ fn operation_name(command: &DesignCommand) -> &'static str {
         DesignCommand::Token {
             action: TokenAction::Resolve { .. },
         } => "design token resolve",
+        DesignCommand::Brand { action } => match action {
+            BrandAction::Show { .. } => "design brand show",
+            BrandAction::Apply { .. } => "design brand apply",
+        },
         DesignCommand::Library { action } => match action {
             LibraryAction::Init { .. } => "design library init",
             LibraryAction::Pack { .. } => "design library pack",
@@ -234,6 +264,7 @@ pub fn run(command: DesignCommand) -> Result<Value> {
     match command {
         DesignCommand::Token { action } => token(action),
         DesignCommand::Library { action } => library_action(action),
+        DesignCommand::Brand { action } => brand_action(action),
     }
 }
 
@@ -336,7 +367,8 @@ fn library_action(action: LibraryAction) -> Result<Value> {
             dir,
             output,
             previous,
-        } => library::pack(&dir, &output, previous.as_deref()),
+            allow_restricted_local,
+        } => library::pack(&dir, &output, previous.as_deref(), allow_restricted_local),
         LibraryAction::Verify { package, signing } => {
             library::check_signature(
                 &package,
@@ -381,6 +413,7 @@ fn library_action(action: LibraryAction) -> Result<Value> {
                 &guard,
                 &paging,
                 (None, None),
+                false,
             )
         }
         LibraryAction::Update {
@@ -422,6 +455,7 @@ fn library_action(action: LibraryAction) -> Result<Value> {
                 &guard,
                 &paging,
                 (name, to),
+                false,
             )
         }
         LibraryAction::Status { input, project } => status(&input, project.as_deref()),
@@ -442,6 +476,39 @@ fn library_action(action: LibraryAction) -> Result<Value> {
             Ok(
                 json!({"ok": true, "library": snapshot.name, "version": snapshot.version,
                       "package_hash": snapshot.package_hash, "install": report}),
+            )
+        }
+    }
+}
+
+fn brand_action(action: BrandAction) -> Result<Value> {
+    match action {
+        BrandAction::Show { input } => {
+            let (_, raw) = read_document(&input)?;
+            brand::show(&raw)
+        }
+        BrandAction::Apply {
+            package,
+            input,
+            signing,
+            guard,
+            paging,
+        } => {
+            library::check_signature(
+                &package,
+                signing.signature.as_deref(),
+                signing.public_key.as_deref(),
+            )?;
+            update(
+                &input,
+                &package,
+                "design-brand-apply",
+                Options::default(),
+                &[],
+                &guard,
+                &paging,
+                (None, None),
+                true,
             )
         }
     }
@@ -477,6 +544,7 @@ fn update(
     guard: &Guard,
     paging: &Paging,
     assert: (Option<String>, Option<String>),
+    brand_kit: bool,
 ) -> Result<Value> {
     let (offset, limit) = page_args(paging.offset, paging.limit)?;
     let (before, raw) = read_document(input)?;
@@ -518,8 +586,19 @@ fn update(
             assert.1.unwrap()
         )));
     }
+    let mut options = options;
+    if brand_kit {
+        let kit = snapshot.brand.as_ref().ok_or_else(|| {
+            invalid(format!("library {} has no brand kit", snapshot.name))
+                .action("add a design_library.brand block and pack the library again")
+        })?;
+        options.selection = Some(brand::referenced_tokens(kit));
+    }
     let plan = plan::plan_update(&raw, &snapshot, resolutions, &options)?;
-    let candidate = plan::apply_plan(&raw, &snapshot, &plan)?;
+    let mut candidate = plan::apply_plan(&raw, &snapshot, &plan)?;
+    if let (true, Some(kit)) = (brand_kit, &snapshot.brand) {
+        brand::install_into(&mut candidate, &snapshot.name, kit)?;
+    }
     crate::scene::validate(&candidate).map_err(|e| match e.downcast::<DesignError>() {
         Ok(design) => design,
         Err(other) => invalid(format!("{other:#}")),
@@ -541,6 +620,13 @@ fn update(
     });
     for (key, value) in meta.as_object().unwrap() {
         report[key] = value.clone();
+    }
+    if let (true, Some(kit)) = (brand_kit, &snapshot.brand) {
+        report["brand"] = json!({
+            "colors": kit.get("colors").and_then(Value::as_object).map_or(0, |m| m.len()),
+            "type": kit.get("type").and_then(Value::as_object).map_or(0, |m| m.len()),
+            "profiles": brand::profile_report(&candidate, kit),
+        });
     }
     if guard.dry_run {
         return Ok(report);

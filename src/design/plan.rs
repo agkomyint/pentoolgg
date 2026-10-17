@@ -572,6 +572,16 @@ pub fn apply_plan(doc: &Value, snapshot: &Snapshot, plan: &Plan) -> Result<Value
         out["design"]["libraries"] = json!({});
     }
     let mut record = json!({"version": snapshot.version, "package_hash": snapshot.package_hash});
+    if doc
+        .pointer(&format!(
+            "/design/libraries/{}/brand",
+            snapshot.name.replace('/', "~1")
+        ))
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        record["brand"] = json!(true);
+    }
     if let Some(globs) = &plan.selection {
         record["tokens"] = json!(globs);
     }

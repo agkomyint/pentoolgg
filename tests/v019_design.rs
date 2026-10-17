@@ -778,3 +778,183 @@ fn resolution_is_offline_deterministic_and_falls_back() {
     quiet(&ws, &["export", &d, &text(&svg)]);
     assert_eq!(first, fs::read_to_string(&svg).unwrap().to_lowercase());
 }
+
+fn brand_tokens() -> Value {
+    json!({
+        "color.accent": color("#f59e0b"),
+        "color.dark": color("#111111"),
+        "color.unused": color("#123456"),
+        "type.heading": {"type":"typography","value":{"font":"Inter","size":32,"weight":700}},
+    })
+}
+
+fn brand_block() -> Value {
+    json!({
+        "colors": {"primary": {"token":"color.accent","usage":"CTAs","forbidden_on":["color.dark"]}},
+        "type": {"heading": {"token":"type.heading"}},
+        "logos": [{"id":"logo/primary","asset":"logo-primary","variants":["full","mark"],
+                   "min_width":24,"clear_space":0.5,"forbidden_backgrounds":["color.accent"]}],
+        "inks": {"spot": [{"id":"ink/pantone-1655","token":"color.accent"}],
+                 "profiles": [{"role":"output","profile":format!("sha256:{}", "ab".repeat(32)),
+                               "redistribution":"allowed"}]},
+        "rules": [{"id":"min-contrast","kind":"contrast","min":4.5},
+                  {"id":"fonts","kind":"fonts","allowed":["type.heading"]}],
+    })
+}
+
+/// Pack `brand-<version>.penpkg` carrying `brand`; returns the pack command output.
+fn brand_library(ws: &Workspace, version: &str, brand: Value, extra: &[&str]) -> (PathBuf, Output) {
+    let dir = ws.path(&format!("blib-{version}"));
+    if !dir.exists() {
+        quiet(
+            ws,
+            &["design", "library", "init", &text(&dir), "acme/brand"],
+        );
+    }
+    let manifest_path = dir.join("pentool.package.json");
+    let mut manifest = read(&manifest_path);
+    manifest["version"] = json!(version);
+    write(&manifest_path, &manifest);
+    let asset = dir.join("assets/acme-brand.pen");
+    let mut doc = read(&asset);
+    doc["design_library"]["version"] = json!(version);
+    doc["design_library"]["tokens"] = brand_tokens();
+    doc["design_library"]["brand"] = brand;
+    write(&asset, &doc);
+    let out = ws.path(&format!("brand-kit-{version}.penpkg"));
+    let mut args = vec!["design", "library", "pack"];
+    let (d, o) = (text(&dir), text(&out));
+    args.extend([d.as_str(), o.as_str()]);
+    args.extend(extra);
+    (out.clone(), run(ws, &args))
+}
+
+#[test]
+fn brand_apply_vendors_only_referenced_tokens_and_show_resolves() {
+    let ws = Workspace::new("brand-apply");
+    let (pkg, out) = brand_library(&ws, "1.0.0", brand_block(), &[]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let packed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(packed["brand"], true);
+    let doc = document(&ws);
+    let d = text(&doc);
+    assert_eq!(ok(&ws, &["design", "brand", "show", &d])["present"], false);
+    let before = fs::read(&doc).unwrap();
+    let dry = ok(
+        &ws,
+        &["design", "brand", "apply", &text(&pkg), &d, "--dry-run"],
+    );
+    assert_eq!(dry["would_change"], true);
+    assert_eq!(dry["brand"]["profiles"][0]["state"], "missing");
+    assert_eq!(before, fs::read(&doc).unwrap());
+    ok(&ws, &["design", "brand", "apply", &text(&pkg), &d]);
+    let raw = read(&doc);
+    assert!(raw["styles"].get("color.accent").is_some());
+    assert!(raw["styles"].get("type.heading").is_some());
+    // Tokens the brand kit does not name are not vendored.
+    assert!(raw["styles"].get("color.unused").is_none());
+    assert_eq!(raw["design"]["brand"], brand_block());
+    let shown = ok(&ws, &["design", "brand", "show", &d]);
+    assert_eq!(shown["counts"]["colors"], 1);
+    assert_eq!(shown["colors"][0]["name"], "primary");
+    assert_eq!(shown["colors"][0]["resolved"]["value"], "#f59e0b");
+    assert_eq!(shown["colors"][0]["resolved"]["status"], "resolved");
+    assert_eq!(shown["type"][0]["resolved"]["value"]["font"], "Inter");
+    assert_eq!(shown["inks"]["profiles"][0]["state"], "missing");
+    // Re-applying is idempotent; show is deterministic.
+    let again = ok(&ws, &["design", "brand", "apply", &text(&pkg), &d]);
+    assert_eq!(again["would_change"], false);
+    assert_eq!(shown, ok(&ws, &["design", "brand", "show", &d]));
+}
+
+#[test]
+fn brand_apply_does_not_overwrite_a_local_brand_kit() {
+    let ws = Workspace::new("brand-local");
+    let (pkg, _) = brand_library(&ws, "1.0.0", brand_block(), &[]);
+    let doc = document(&ws);
+    let mut raw = read(&doc);
+    raw["design"] = json!({"brand": {"colors": {}}});
+    write(&doc, &raw);
+    let before = fs::read(&doc).unwrap();
+    let error = err(&ws, &["design", "brand", "apply", &text(&pkg), &text(&doc)]);
+    assert_eq!(error["code"], "conflict");
+    assert_eq!(before, fs::read(&doc).unwrap());
+}
+
+#[test]
+fn brand_block_is_validated_at_pack_time() {
+    let ws = Workspace::new("brand-invalid");
+    let cases: [(Value, &str); 5] = [
+        (
+            json!({"colors":{"x":{"token":"color.missing"}}}),
+            "unknown-token",
+        ),
+        (
+            json!({"colors":{"x":{"token":"type.heading"}}}),
+            "token-type-mismatch",
+        ),
+        (
+            json!({"logos":[{"id":"a","asset":"../x"}]}),
+            "invalid-brand",
+        ),
+        (
+            json!({"rules":[{"id":"r","kind":"contrast","min":0.5}]}),
+            "invalid-brand",
+        ),
+        (json!({"surprise":1}), "invalid-brand"),
+    ];
+    for (index, (brand, code)) in cases.into_iter().enumerate() {
+        let (_, out) = brand_library(&ws, &format!("1.0.{index}"), brand, &[]);
+        assert!(!out.status.success());
+        let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["code"], code, "{error}");
+    }
+}
+
+#[test]
+fn restricted_profiles_block_packing_unless_allowed_locally() {
+    let ws = Workspace::new("brand-profile");
+    let mut brand = brand_block();
+    brand["inks"]["profiles"][0]["redistribution"] = json!("restricted");
+    let (_, out) = brand_library(&ws, "1.0.0", brand.clone(), &[]);
+    assert!(!out.status.success());
+    let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "restricted-profile");
+    let (_, out) = brand_library(&ws, "1.0.0", brand, &["--allow-restricted-local"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn brand_survives_library_update_flag_and_show_reports_profiles_present() {
+    let ws = Workspace::new("brand-update");
+    let (v1, _) = brand_library(&ws, "1.0.0", brand_block(), &[]);
+    let doc = document(&ws);
+    let d = text(&doc);
+    ok(&ws, &["design", "brand", "apply", &text(&v1), &d]);
+    let (v2, _) = brand_library(&ws, "1.1.0", brand_block(), &[]);
+    ok(
+        &ws,
+        &["design", "library", "update", &d, "--package", &text(&v2)],
+    );
+    let raw = read(&doc);
+    assert_eq!(raw["design"]["libraries"]["acme/brand"]["version"], "1.1.0");
+    assert_eq!(raw["design"]["libraries"]["acme/brand"]["brand"], true);
+    // A document brand that references a deleted token fails show with the token named.
+    let mut raw = raw;
+    raw["styles"]
+        .as_object_mut()
+        .unwrap()
+        .remove("type.heading");
+    write(&doc, &raw);
+    let error = err(&ws, &["design", "brand", "show", &d]);
+    assert_eq!(error["code"], "unknown-token");
+    assert_eq!(error["token"], "type.heading");
+}
