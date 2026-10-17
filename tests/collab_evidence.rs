@@ -75,6 +75,17 @@ fn head_seq(doc: &Path) -> u64 {
     log::read_head(&log::dir(doc).unwrap()).unwrap().seq
 }
 
+/// The document without the peer-local chain position (`collab.head`/`seq`),
+/// which legitimately differs between converged peers.
+fn converged(doc: &Path) -> Value {
+    let mut value = read_doc(doc);
+    if let Some(block) = value.get_mut("collab").and_then(Value::as_object_mut) {
+        block.remove("head");
+        block.remove("seq");
+    }
+    value
+}
+
 fn log_ids(doc: &Path) -> BTreeSet<String> {
     let dir = log::dir(doc).unwrap();
     log::read_lines(&dir)
@@ -253,7 +264,7 @@ fn simulated_peers_converge_through_partitions_and_reordering() {
             }
         }
 
-        let want = fs::read(&docs[0]).unwrap();
+        let want = converged(&docs[0]);
         let want_ids = log_ids(&docs[0]);
         assert_eq!(
             want_ids.len(),
@@ -261,11 +272,7 @@ fn simulated_peers_converge_through_partitions_and_reordering() {
             "seed {seed}: ops lost or invented"
         );
         for doc in &docs {
-            assert_eq!(
-                fs::read(doc).unwrap(),
-                want,
-                "seed {seed}: documents diverged"
-            );
+            assert_eq!(converged(doc), want, "seed {seed}: documents diverged");
             assert_eq!(
                 log_ids(doc),
                 want_ids,
@@ -275,8 +282,10 @@ fn simulated_peers_converge_through_partitions_and_reordering() {
         }
         // The pure replay of the whole set agrees with what the peers hold.
         let pure = replay(&genesis(), &ops).unwrap();
+        let mut held = want.clone();
+        held.as_object_mut().unwrap().remove("collab");
         assert_eq!(
-            serde_json::from_slice::<Value>(&want).unwrap(),
+            held,
             pure.document(),
             "seed {seed}: peers differ from a pure replay"
         );
@@ -301,7 +310,7 @@ fn concurrent_reparents_and_deletes_converge_in_both_orders() {
     for op in &reversed {
         deliver(&backward, std::slice::from_ref(op));
     }
-    assert_eq!(fs::read(&forward).unwrap(), fs::read(&backward).unwrap());
+    assert_eq!(converged(&forward), converged(&backward));
     assert_verified(&forward);
     assert_verified(&backward);
 }
@@ -446,7 +455,7 @@ fn hostile_duplicate_ids_keep_one_node() {
     deliver(&backward, std::slice::from_ref(&second));
     deliver(&backward, std::slice::from_ref(&first));
     assert_eq!(count_id(&read_doc(&forward), "dup"), 1);
-    assert_eq!(fs::read(&forward).unwrap(), fs::read(&backward).unwrap());
+    assert_eq!(converged(&forward), converged(&backward));
     assert!(
         outcome.conflicts.iter().any(|c| c.code == "duplicate-id"),
         "{:?}",
@@ -468,7 +477,7 @@ fn hostile_unicode_normalization_collisions_are_deterministic() {
     let backward = new_doc(&ws, "b.pen", &genesis());
     deliver(&forward, &[one.clone(), two.clone()]);
     deliver(&backward, &[two, one]);
-    assert_eq!(fs::read(&forward).unwrap(), fs::read(&backward).unwrap());
+    assert_eq!(converged(&forward), converged(&backward));
     let value = read_doc(&forward);
     pentool::transaction::validate_value(&value).expect("document stays valid");
     assert!(count_id(&value, composed) <= 1 && count_id(&value, decomposed) <= 1);

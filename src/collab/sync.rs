@@ -694,7 +694,7 @@ pub fn integrate(
     let before =
         fs::read(document).with_context(|| format!("could not read {}", document.display()))?;
     let before_revision = crate::transaction::revision(&before);
-    log::recover(&dir, &before_revision)?;
+    log::recover(&dir, &super::content_revision(&before))?;
     super::sweep_document_temps(document);
     let lines = log::read_lines(&dir)?;
     let head = log::check_tail(&dir, &lines)?;
