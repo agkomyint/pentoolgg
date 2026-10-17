@@ -177,3 +177,35 @@ fn unreadable_inputs_use_one_missing_resource_envelope() {
         );
     }
 }
+
+#[test]
+fn tree_and_search_bounds_are_rounded_to_three_decimals() {
+    let ws = Workspace::new("bounds");
+    let doc = ws.copy_fixture("v4-scene.pen", "a.pen");
+    let mut checked = 0;
+    for args in [vec!["tree", &doc], vec!["search", &doc, "title"]] {
+        let listed = ok(&args);
+        for layer in listed["layers"].as_array().unwrap() {
+            for object in layer["objects"].as_array().unwrap() {
+                let bounds = &object["bounds"];
+                for key in ["x", "y", "width", "height", "right", "bottom"] {
+                    let value = bounds[key].as_f64().unwrap();
+                    assert!(
+                        (value * 1000.0).round() / 1000.0 == value,
+                        "{}: {}={} carries float artifacts",
+                        args.join(" "),
+                        key,
+                        value
+                    );
+                    checked += 1;
+                }
+                if object["id"].as_str() == Some("title") {
+                    // The fixture's 48pt text measured 28.799999999999997
+                    // before output rounding (issue #45).
+                    assert_eq!(bounds["height"].as_f64().unwrap(), 28.8);
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "the fixture must emit bounds");
+}
