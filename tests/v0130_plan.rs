@@ -238,3 +238,16 @@ fn limits_and_malformed_plans_are_rejected() {
         assert_eq!(before, fs::read(&doc).unwrap(), "{name}");
     }
 }
+
+#[test]
+fn stdin_dash_is_refused_with_a_clear_message() {
+    let ws = Workspace::new("stdin");
+    let doc = ws.document();
+    let before = fs::read(&doc).unwrap();
+    // `-` is documented as unsupported; the error must say so instead of
+    // failing as a literal missing file (issue #161).
+    let error = fails(&["paint-plan", &doc, "-"]);
+    assert!(error.contains("stdin is not supported"), "{error}");
+    assert!(!error.contains("cannot read -"), "{error}");
+    assert_eq!(before, fs::read(&doc).unwrap());
+}
