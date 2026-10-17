@@ -405,6 +405,38 @@ A template is an ordinary `.pen` document (any supported version) plus a
 - Template gallery contents come from `design_library.templates` (name -> path of
   a template document inside the package, hash covered by the package manifest).
 
+### 7.1 Implemented behavior (`pentool design template`)
+
+- `design template check DOC [--page P]` validates the declaration (the same
+  parser used by fill) and reports every problem in one `invalid-template` error.
+  Targets are resolved on the selected page (default first page); a target on a
+  locked layer or inside a locked group is a problem, as is a property the node
+  kind does not support. Supported pairs: `content` (text), `fill` (rect, ellipse,
+  path, text), `stroke` and `stroke_width` (rect, ellipse, line, path), `width`
+  and `height` (rect, image), `visible` and `style_ref` (any node), `opacity`
+  (any node, composited versions only), `image` (image node, composited versions
+  only). The parameter type decides the allowed properties: `text`->`content`,
+  `number`->`stroke_width|opacity|width|height`, `bool`->`visible`,
+  `color`->`fill|stroke`, `token`->`fill|stroke` (color tokens, written as a
+  `{ref, fallback}` fill) or `style_ref` (other token types), `asset`->`image`.
+- `design template fill DOC --values FILE --output OUT [--page P] [--dry-run]
+  [--if-revision SHA] [--offset N --limit N]`. Fill is planned as `set-property`
+  batch operations run through `scene::apply_batch_at` on an in-memory copy, then
+  the candidate is validated; dry run and commit share that planner, and the
+  output is written atomically only after everything succeeded. `--output` may
+  not be the template. Result keys: `ok dry_run output would_change
+  template{name,version,content_hash} parameters{name:{applied,targets}} changes
+  matches returned offset limit has_more revision_before output_revision`;
+  `changes` is the paginated batch change list (`--limit` 1..=1000, default 100).
+- The output keeps `design.template` and adds `filled_from` `{name, version,
+  content_hash}` and `values` (the accepted values after defaults).
+- Asset parameters read a document-relative file (safe-path rules, <= 64 MiB) and
+  embed it as an image asset.
+- `design template list DIR` lists `*.pen` files in a directory that carry a
+  `design.template` (sorted by file name, paginated, <= 5,000 files scanned).
+- Not in this slice: `--data` multi-row batch fill, templates inside library
+  packages (`design_library.templates`), `--in-place`.
+
 ## 8. File-format impact
 
 **No `.pen` version bump and no migration are required.**

@@ -958,3 +958,262 @@ fn brand_survives_library_update_flag_and_show_reports_profiles_present() {
     assert_eq!(error["code"], "unknown-token");
     assert_eq!(error["token"], "type.heading");
 }
+
+/// A v4 template: headline text, accent bar, hidden badge and a locked layer.
+fn template(ws: &Workspace) -> PathBuf {
+    let path = ws.path("post.pen");
+    quiet(ws, &["new", &text(&path)]);
+    let mut doc = read(&path);
+    doc["styles"] = json!({
+        "color.accent": color("#f59e0b"),
+        "color.brand": color("#2563eb"),
+        "space.md": {"type":"spacing","value":16},
+    });
+    doc["pages"][0]["layers"][0]["nodes"] = json!([
+        {"kind":"text","id":"head","x":10,"y":30,"content":"Title","font_size":24,
+         "style":{"fill":{"fallback":"#111827"}}},
+        rect("bar", "color.accent"),
+        {"kind":"rect","id":"badge","x":0,"y":0,"width":10,"height":10,"radius_x":0,"radius_y":0,
+         "visible":false,"style":{"fill":{"fallback":"#ff0000"}}},
+    ]);
+    doc["pages"][0]["layers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id":"frozen","name":"Frozen","visible":true,"locked":true,
+            "nodes":[{"kind":"rect","id":"seal","x":0,"y":0,"width":4,"height":4,
+                      "radius_x":0,"radius_y":0,"style":{"fill":{"fallback":"#000000"}}}]
+        }));
+    doc["design"] = json!({"template":{"schema":1,"name":"social/post","version":"1.0.0",
+    "parameters":{
+        "headline":{"type":"text","default":"Title","targets":[{"object":"head","property":"content"}],
+                    "constraints":{"max_length":12,"required":true}},
+        "accent":{"type":"token","token_type":"color","default":"color.accent",
+                  "targets":[{"object":"bar","property":"fill"}]},
+        "ink":{"type":"color","default":"#111827","targets":[{"object":"head","property":"fill"}],
+               "constraints":{"enum":["#111827","#ffffff"]}},
+        "show_badge":{"type":"bool","default":false,
+                      "targets":[{"object":"badge","property":"visible"}]},
+        "bar_width":{"type":"number","default":10,
+                     "targets":[{"object":"bar","property":"width"}],
+                     "constraints":{"min":1,"max":300}},
+    }}});
+    write(&path, &doc);
+    path
+}
+
+fn values(ws: &Workspace, value: Value) -> String {
+    let path = ws.path("values.json");
+    write(&path, &value);
+    text(&path)
+}
+
+#[test]
+fn template_fill_dry_run_matches_commit() {
+    let ws = Workspace::new("tfill");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let before = fs::read(&t).unwrap();
+    quiet(&ws, &["design", "template", "check", &tpl]);
+    let v = values(
+        &ws,
+        json!({"headline":"Launch day","accent":"color.brand","ink":"#ffffff",
+               "show_badge":true,"bar_width":120}),
+    );
+    let out = ws.s("out.pen");
+    let base = [
+        "design", "template", "fill", &tpl, "--values", &v, "--output", &out,
+    ];
+    let mut dry_args = base.to_vec();
+    dry_args.push("--dry-run");
+    let dry = ok(&ws, &dry_args);
+    assert!(!ws.path("out.pen").exists(), "dry run wrote the output");
+    assert_eq!(dry["dry_run"], true);
+    let commit = ok(&ws, &base);
+    let mut left = dry.clone();
+    let mut right = commit.clone();
+    left["dry_run"] = json!(null);
+    right["dry_run"] = json!(null);
+    assert_eq!(left, right, "dry run and commit disagree");
+    assert_eq!(commit["matches"], 5);
+    assert_eq!(commit["parameters"]["headline"]["applied"], "Launch day");
+    assert_eq!(fs::read(&t).unwrap(), before, "template was modified");
+
+    let filled = read(&ws.path("out.pen"));
+    let nodes = &filled["pages"][0]["layers"][0]["nodes"];
+    assert_eq!(nodes[0]["content"], "Launch day");
+    assert_eq!(nodes[0]["style"]["fill"]["fallback"], "#ffffff");
+    assert_eq!(nodes[1]["style"]["fill"]["ref"], "color.brand");
+    assert_eq!(nodes[1]["width"], 120.0);
+    assert_eq!(nodes[2]["visible"], true);
+    let from = &filled["design"]["template"]["filled_from"];
+    assert_eq!(from["name"], "social/post");
+    assert!(from["content_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+    assert_eq!(filled["design"]["template"]["values"]["bar_width"], 120);
+    quiet(&ws, &["tree", &ws.s("out.pen"), "--limit", "5"]);
+
+    // Defaults only: a repeated fill is deterministic.
+    let empty = values(&ws, json!({}));
+    let (a, b) = (ws.s("a.pen"), ws.s("b.pen"));
+    let first = ok(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &empty, "--output", &a,
+        ],
+    );
+    ok(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &empty, "--output", &b,
+        ],
+    );
+    assert_eq!(
+        fs::read(ws.path("a.pen")).unwrap(),
+        fs::read(ws.path("b.pen")).unwrap()
+    );
+    assert_eq!(first["returned"], 5);
+}
+
+#[test]
+fn template_fill_reports_all_errors() {
+    let ws = Workspace::new("terrs");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let v = values(
+        &ws,
+        json!({"headline":"far too long for the limit","ink":"#123456",
+               "bar_width":9000,"accent":"color.missing","nope":1}),
+    );
+    let out = ws.s("out.pen");
+    let error = err(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &v, "--output", &out,
+        ],
+    );
+    assert_eq!(error["code"], "invalid-input");
+    let message = error["message"].as_str().unwrap();
+    for needle in [
+        "nope: unknown parameter",
+        "headline: text is longer",
+        "ink: value is not one of",
+        "bar_width:",
+        "accent: token \"color.missing\"",
+    ] {
+        assert!(message.contains(needle), "missing {needle:?} in {message}");
+    }
+    assert!(!ws.path("out.pen").exists());
+}
+
+#[test]
+fn template_fill_never_modifies_template() {
+    let ws = Workspace::new("tsafe");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let before = fs::read(&t).unwrap();
+    let v = values(&ws, json!({"headline":"Hi"}));
+    let out = ws.s("out.pen");
+    let stale = err(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--values",
+            &v,
+            "--output",
+            &out,
+            "--if-revision",
+            "deadbeef",
+        ],
+    );
+    assert_eq!(stale["code"], "conflict");
+    err(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &v, "--output", &tpl,
+        ],
+    );
+    err(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &v, "--output", &out, "--page", "nope",
+        ],
+    );
+    let limit = err(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &v, "--output", &out, "--limit", "0",
+        ],
+    );
+    assert_eq!(limit["code"], "invalid-input");
+    assert_eq!(fs::read(&t).unwrap(), before);
+    assert!(!ws.path("out.pen").exists());
+
+    let mut doc = read(&t);
+    doc["design"]["template"]["parameters"]["lock"] = json!({"type":"color",
+        "targets":[{"object":"seal","property":"fill"}]});
+    doc["design"]["template"]["parameters"]["Bad-Name"] = json!({"type":"bool",
+        "targets":[{"object":"ghost","property":"visible"}]});
+    write(&t, &doc);
+    let locked_before = fs::read(&t).unwrap();
+    let error = err(&ws, &["design", "template", "check", &tpl]);
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("seal") && message.contains("locked"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Bad-Name") && message.contains("ghost"),
+        "{message}"
+    );
+    err(
+        &ws,
+        &[
+            "design", "template", "fill", &tpl, "--values", &v, "--output", &out,
+        ],
+    );
+    assert_eq!(fs::read(&t).unwrap(), locked_before);
+    assert!(!ws.path("out.pen").exists());
+}
+
+#[test]
+fn template_fill_changes_are_paginated_and_list_is_exact() {
+    let ws = Workspace::new("tpage");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let v = values(&ws, json!({"headline":"Hi"}));
+    let out = ws.s("out.pen");
+    let page = ok(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--values",
+            &v,
+            "--output",
+            &out,
+            "--dry-run",
+            "--offset",
+            "3",
+            "--limit",
+            "1",
+        ],
+    );
+    assert_eq!(page["matches"], 5);
+    assert_eq!(page["returned"], 1);
+    assert_eq!(page["offset"], 3);
+    assert_eq!(page["has_more"], true);
+    let dir = text(&ws.0);
+    let listing = ok(&ws, &["design", "template", "list", &dir, "--limit", "1"]);
+    assert_eq!(listing["matches"], 1);
+    assert_eq!(listing["templates"][0]["name"], "social/post");
+    assert_eq!(listing["templates"][0]["parameters"], 5);
+    assert_eq!(listing["has_more"], false);
+}

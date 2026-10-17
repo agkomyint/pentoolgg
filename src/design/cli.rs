@@ -4,6 +4,7 @@ use super::{
     library::{self, DiffOptions},
     page_args, paginate,
     plan::{self, Options},
+    template,
 };
 use crate::{
     package, tokens as tok,
@@ -35,6 +36,50 @@ pub enum DesignCommand {
     Brand {
         #[command(subcommand)]
         action: BrandAction,
+    },
+    /// Check, list and fill parameterized templates.
+    Template {
+        #[command(subcommand)]
+        action: TemplateAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TemplateAction {
+    /// Validate a template's design.template declaration (all problems are listed).
+    Check {
+        input: PathBuf,
+        /// Page whose objects the targets refer to (default: first page).
+        #[arg(long)]
+        page: Option<String>,
+    },
+    /// List the templates (*.pen with design.template) in a directory, paginated.
+    List {
+        dir: PathBuf,
+        #[arg(long)]
+        offset: Option<usize>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Fill a template into a new document; the template is never modified.
+    Fill {
+        input: PathBuf,
+        /// JSON object of {parameter: value}.
+        #[arg(long)]
+        values: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        page: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        /// Revision (SHA-256) the template must still have.
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[arg(long)]
+        offset: Option<usize>,
+        #[arg(long)]
+        limit: Option<usize>,
     },
 }
 
@@ -223,6 +268,11 @@ fn operation_name(command: &DesignCommand) -> &'static str {
         DesignCommand::Token {
             action: TokenAction::Resolve { .. },
         } => "design token resolve",
+        DesignCommand::Template { action } => match action {
+            TemplateAction::Check { .. } => "design template check",
+            TemplateAction::List { .. } => "design template list",
+            TemplateAction::Fill { .. } => "design template fill",
+        },
         DesignCommand::Brand { action } => match action {
             BrandAction::Show { .. } => "design brand show",
             BrandAction::Apply { .. } => "design brand apply",
@@ -265,6 +315,7 @@ pub fn run(command: DesignCommand) -> Result<Value> {
         DesignCommand::Token { action } => token(action),
         DesignCommand::Library { action } => library_action(action),
         DesignCommand::Brand { action } => brand_action(action),
+        DesignCommand::Template { action } => template_action(action),
     }
 }
 
@@ -478,6 +529,32 @@ fn library_action(action: LibraryAction) -> Result<Value> {
                       "package_hash": snapshot.package_hash, "install": report}),
             )
         }
+    }
+}
+
+fn template_action(action: TemplateAction) -> Result<Value> {
+    match action {
+        TemplateAction::Check { input, page } => template::check(&input, page.as_deref()),
+        TemplateAction::List { dir, offset, limit } => template::list(&dir, offset, limit),
+        TemplateAction::Fill {
+            input,
+            values,
+            output,
+            page,
+            dry_run,
+            if_revision,
+            offset,
+            limit,
+        } => template::fill(&template::FillOptions {
+            input: &input,
+            values: &values,
+            output: &output,
+            page: page.as_deref(),
+            dry_run,
+            if_revision: if_revision.as_deref(),
+            offset,
+            limit,
+        }),
     }
 }
 

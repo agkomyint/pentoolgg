@@ -1777,6 +1777,10 @@ pub fn apply_batch_at(
                     }
                     result
                 }
+                "set-property" => {
+                    let id = resolve("id")?;
+                    crate::design::template::batch_set_property(&mut candidate, page, document, &id, operation)?
+                }
                 other if crate::composite::is_document(&candidate) => crate::composite::batch_operation(&mut candidate,page,document,other,operation,&resolve)?,
                 other => bail!("unsupported v4 batch operation: {other}"),
             };

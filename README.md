@@ -580,6 +580,26 @@ pentool design brand show doc.pen
 never overwritten. `pack` refuses ICC profiles whose redistribution is
 `restricted` or `unknown` unless `--allow-restricted-local` is given.
 
+### Templates
+
+A template is an ordinary v4+ `.pen` document with a `design.template`
+declaration of typed parameters (`text number bool color token asset`), each
+mapped to `{object, property}` targets. `fill` writes a new document and never
+touches the template.
+
+```sh
+pentool design template check post.pen
+pentool design template list ./templates --limit 20
+pentool design template fill post.pen --values values.json --output launch.pen --dry-run
+pentool design template fill post.pen --values values.json --output launch.pen --if-revision <sha256>
+```
+
+`values.json` is `{"headline": "Launch day", "accent": "color.brand"}`. Missing
+parameters use their defaults. Every problem (unknown name, constraint failure,
+missing required value, locked or missing target) is reported at once as
+`invalid-input`, and a failed fill writes nothing. The `changes` list is paginated
+with `--offset/--limit` (`matches returned offset limit has_more`).
+
 ## Open design libraries and packages (v0.5–v0.6)
 
 Reusable assets remain ordinary editable `.pen` documents. Save a document, page,

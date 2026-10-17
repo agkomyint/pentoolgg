@@ -6,6 +6,7 @@ pub mod brand;
 pub mod cli;
 pub mod library;
 pub mod plan;
+pub mod template;
 
 use crate::tokens::DesignError;
 use serde_json::{json, Value};
