@@ -490,3 +490,28 @@ fn layers_from_a_newer_engine_render_but_refuse_edits() {
         false
     );
 }
+
+#[test]
+fn info_on_a_vector_node_is_not_found() {
+    let ws = Workspace::new("vector-info");
+    let doc = ws.document("a.pen");
+    ok(&[
+        "raster", &doc, "add", "p", "--width", "600", "--height", "300",
+    ]);
+    // The v4 fixture carries a rect (card-bg) and a text (title); neither is a
+    // raster node, so addressing them must read as not-found, not as a
+    // malformed raster (issue #179).
+    for id in ["card-bg", "title"] {
+        let err = fail(&["raster", &doc, "info", id]);
+        assert!(err.contains("not-found"), "{id}: {err}");
+        assert!(err.contains(id), "{id}: {err}");
+        assert!(!err.contains("malformed-raster"), "{id}: {err}");
+    }
+    let missing = fail(&["raster", &doc, "info", "nosuch"]);
+    assert!(missing.contains("not-found"), "{missing}");
+    // Mutating siblings keep their not-found answer.
+    let checkpoint = fail(&["raster", &doc, "checkpoint", "card-bg"]);
+    assert!(checkpoint.contains("not-found"), "{checkpoint}");
+    let clear = fail(&["raster", &doc, "clear", "card-bg"]);
+    assert!(clear.contains("not-found"), "{clear}");
+}
