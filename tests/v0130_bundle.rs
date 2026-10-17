@@ -138,6 +138,37 @@ fn bundles_round_trip_between_documents() {
 }
 
 #[test]
+fn import_conflict_uses_singular_section_label() {
+    let ws = Workspace::new("singular");
+    let src = stocked(&ws, "src.pen");
+    let bundle = ws.path("bundle.json");
+    ok(&["paint-bundle", &src, "export", "--out", &bundle]);
+    // Both documents carry preset "round": the import must conflict, and the
+    // message must name the section with a real singular ("brush", not "brushe").
+    let dst = stocked(&ws, "dst.pen");
+    let message = fails(&["paint-bundle", &dst, "import", &bundle]);
+    assert!(
+        message.contains(r#"brush "round" already exists"#),
+        "conflict message: {message}"
+    );
+    assert!(!message.contains("brushe"), "conflict message: {message}");
+    // The export-side not-found label singularizes the same way.
+    let missing = fails(&[
+        "paint-bundle",
+        &src,
+        "export",
+        "--out",
+        &ws.path("b2.json"),
+        "--brushes",
+        "nope",
+    ]);
+    assert!(
+        missing.contains(r#"brush "nope" does not exist"#),
+        "not-found message: {missing}"
+    );
+}
+
+#[test]
 fn imports_validate_and_leave_scene_data_alone() {
     let ws = Workspace::new("safe");
     let src = stocked(&ws, "src.pen");

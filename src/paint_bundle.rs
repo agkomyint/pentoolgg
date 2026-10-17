@@ -22,6 +22,18 @@ const SECTIONS: &[(&str, &str)] = &[
     ("plans", "paint_plans"),
 ];
 
+/// Human-facing singular of a bundle section name. `trim_end_matches('s')`
+/// mangles `brushes` into `brushe`, so the mapping is explicit.
+fn singular(name: &str) -> &str {
+    match name {
+        "brushes" => "brush",
+        "palettes" => "palette",
+        "guides" => "guide",
+        "plans" => "plan",
+        _ => name,
+    }
+}
+
 #[derive(clap::Subcommand, Debug)]
 pub enum BundleAction {
     /// Write brushes, palettes, guides and plan templates to a portable bundle file.
@@ -202,7 +214,7 @@ fn pick(
 fn export(raw: &Value, selection: [&Option<Vec<String>>; 4]) -> Result<Value> {
     let mut bundle = json!({"schema": 1, "kind": KIND, "engine": raster::ENGINE});
     for ((name, key), names) in SECTIONS.iter().zip(selection) {
-        let mut map = pick(raw, key, names, name.trim_end_matches('s'))?;
+        let mut map = pick(raw, key, names, singular(name))?;
         if *name == "plans" {
             for rec in map.values_mut() {
                 *rec = rec["plan"].clone();
@@ -260,7 +272,7 @@ fn merge(raw: &mut Value, bundle: &Value, replace: bool) -> Result<Value> {
             ensure!(
                 replace || !exists,
                 "[conflict] {} {id:?} already exists; pass --replace to overwrite it. Nothing was written",
-                name.trim_end_matches('s')
+                singular(name)
             );
             let stored = match *name {
                 "plans" => plan_record(value).with_context(|| format!("plan {id}"))?,
