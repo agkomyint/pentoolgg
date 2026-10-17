@@ -54,6 +54,16 @@ fn ok(args: &[&str]) -> Value {
     serde_json::from_slice(&out.stdout).unwrap_or(Value::Null)
 }
 
+fn fails(args: &[&str]) -> String {
+    let out = run(args);
+    assert!(!out.status.success(), "{args:?} unexpectedly succeeded");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    )
+}
+
 fn version(path: &str) -> u64 {
     let doc: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     doc["version"].as_u64().unwrap()
@@ -128,4 +138,42 @@ fn production_set_merge_keeps_unlisted_keys() {
     let production = &doc_value["pages"][0]["production"];
     assert_eq!(production["bleed"], 3);
     assert_eq!(production["slug"], 2);
+}
+
+#[test]
+fn unreadable_inputs_use_one_missing_resource_envelope() {
+    let ws = Workspace::new("missing-input");
+    let doc = ws.path("doc.pen");
+    ok(&["new", &doc, "--overwrite"]);
+    ok(&["migrate", &doc, "--target", "9"]);
+    let missing = ws.path("NOPE.csv");
+    // The same unreadable-input condition must surface the same envelope
+    // across layout/book/idml commands (issue #167).
+    for args in [
+        vec![
+            "layout-merge",
+            &doc,
+            "--data",
+            &missing,
+            "--out",
+            &ws.path("o.pen"),
+        ],
+        vec!["idml-import", &missing, &ws.path("o.pen")],
+        vec!["idml-export", &missing, &ws.path("o.idml")],
+        vec!["layout-style", &doc, "import", &missing],
+        vec!["layout-table", &doc, "import", "t1", &missing],
+    ] {
+        let error = fails(&args);
+        assert!(
+            error.contains("[missing-resource] cannot read"),
+            "{}: {error}",
+            args.join(" ")
+        );
+        // The code must lead the message, not trail a raw cause.
+        assert!(
+            error.trim_start().starts_with("Error: [missing-resource]"),
+            "{}: {error}",
+            args.join(" ")
+        );
+    }
 }
