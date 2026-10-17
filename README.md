@@ -1020,6 +1020,15 @@ A compact `collab` summary is kept inside the `.pen` and is stripped from
 packages unless `pentool package pack --include-attribution` is given (rendered exports never contain it)
 (`pentool collab strip artwork.pen` removes it).
 
+Presence (who is connected, their page, selection and cursor) is best-effort and
+held in memory only: it is never written to the document, history or log, and
+expires about 15 seconds after a participant's last update.
+
+```sh
+pentool collab presence copy.pen --peer http://127.0.0.1:4711 --token ptc_...
+pentool collab presence copy.pen --peer http://127.0.0.1:4711 --token ptc_... --json
+```
+
 ## Stroke edges (v0.2.0)
 
 New CLI/browser paths use flat caps and sharp corners by default. Existing paths

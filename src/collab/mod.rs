@@ -17,6 +17,8 @@ pub mod op;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod perm;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod presence;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod sync;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod token;

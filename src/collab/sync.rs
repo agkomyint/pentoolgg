@@ -12,6 +12,7 @@ use super::{
     merge,
     op::{check_id, parse_op, Actor, Op},
     perm::problem,
+    presence,
     token::{self, Principal, Role},
 };
 use anyhow::{anyhow, bail, Context, Result};
@@ -123,6 +124,8 @@ pub struct Ctx {
     rate: Mutex<HashMap<String, (Instant, usize)>>,
     streams: AtomicUsize,
     stream_owners: Mutex<HashMap<String, usize>>,
+    /// Best-effort, in-memory presence (never persisted).
+    pub presence: super::presence::Store,
 }
 
 impl Ctx {
@@ -137,6 +140,7 @@ impl Ctx {
             rate: Mutex::new(HashMap::new()),
             streams: AtomicUsize::new(0),
             stream_owners: Mutex::new(HashMap::new()),
+            presence: super::presence::Store::new(Default::default()),
         })
     }
 
@@ -161,13 +165,13 @@ impl Ctx {
     }
 }
 
-struct StreamSlot {
+pub(super) struct StreamSlot {
     ctx: Arc<Ctx>,
     owner: String,
 }
 
 impl StreamSlot {
-    fn acquire(ctx: &Arc<Ctx>, owner: &str) -> Option<StreamSlot> {
+    pub(super) fn acquire(ctx: &Arc<Ctx>, owner: &str) -> Option<StreamSlot> {
         let mut owners = ctx.stream_owners.lock().ok()?;
         let mine = owners.entry(owner.to_string()).or_insert(0);
         if *mine >= ctx.limits.sse_per_principal
@@ -917,7 +921,7 @@ fn status_for(code: &str) -> StatusCode {
     }
 }
 
-fn error_response(error: anyhow::Error) -> Response {
+pub(super) fn error_response(error: anyhow::Error) -> Response {
     let (code, message) = code_of(&error);
     let code = if message.starts_with('[') {
         code
@@ -931,7 +935,7 @@ fn error_response(error: anyhow::Error) -> Response {
     problem(status_for(&code), &code, message)
 }
 
-async fn blocking<T: Send + 'static>(
+pub(super) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     tokio::task::spawn_blocking(work)
@@ -939,7 +943,7 @@ async fn blocking<T: Send + 'static>(
         .map_err(|error| anyhow!("collaboration task failed: {error}"))?
 }
 
-fn principal_key(principal: &Principal) -> String {
+pub(super) fn principal_key(principal: &Principal) -> String {
     principal.token.clone().unwrap_or_else(|| "local".into())
 }
 
@@ -978,6 +982,7 @@ async fn session(
             "claims": claims_view(&ctx.dir),
             "active_streams": ctx.streams.load(Ordering::SeqCst),
             "limits": ctx.limits.view(),
+            "presence": ctx.presence.limits().view(),
         }))
     })
     .await;
@@ -1378,6 +1383,13 @@ pub fn routes<S: Clone + Send + Sync + 'static>(limits: &Limits) -> Router<S> {
                 .post(ops_post)
                 .layer(DefaultBodyLimit::max(body_limit)),
         )
+        .route(
+            "/api/collab/presence",
+            get(presence::snapshot)
+                .post(presence::publish)
+                .layer(DefaultBodyLimit::max(presence::MAX_BODY_BYTES + 1024)),
+        )
+        .route("/api/collab/presence/events", get(presence::events))
         .route("/api/collab/claim", post(claim_post))
         .route("/api/collab/release", post(release_post))
         .route("/api/collab/tokens", get(tokens_get).post(tokens_post))
@@ -1563,6 +1575,20 @@ fn merge_counts(total: &mut BTreeMap<&'static str, usize>, outcome: &Outcome) {
     *total.entry("rejected").or_default() += outcome.rejected.len();
     *total.entry("pending").or_default() += outcome.pending.len();
     *total.entry("merge_rejected").or_default() += outcome.merge_rejected.len();
+}
+
+/// `pentool collab presence DOC --peer P --token T`: who is connected to the
+/// peer right now. Read-only and in-memory on both sides.
+pub fn peer_presence(
+    document: &Path,
+    peer_ref: &str,
+    token: &str,
+    allow_insecure_lan: bool,
+) -> Result<Value> {
+    let dir = super::doc_dir(document)?;
+    let peer = find_peer(&load_peers(&dir)?, peer_ref)?;
+    let remote = Remote::new(&peer.url, token, allow_insecure_lan)?;
+    remote.get("/api/collab/presence", &[])
 }
 
 /// `pentool collab sync DOC --peer P --token T`: pull what we lack, then push

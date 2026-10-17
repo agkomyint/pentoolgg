@@ -91,6 +91,22 @@ enum CollabAction {
         #[arg(long)]
         allow_insecure_lan: bool,
     },
+    /// List who is connected to a peer right now (best-effort, in-memory presence).
+    Presence {
+        input: PathBuf,
+        /// Registered peer name or URL.
+        #[arg(long)]
+        peer: String,
+        /// Access token; defaults to the PENTOOL_COLLAB_TOKEN environment variable.
+        #[arg(long)]
+        token: Option<String>,
+        /// Allow plain HTTP to a non-loopback peer on a trusted network.
+        #[arg(long)]
+        allow_insecure_lan: bool,
+        /// Print the full JSON snapshot instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a new local copy of a peer's document and pull its history.
     Join {
         /// New document path (must not exist).
@@ -10593,6 +10609,39 @@ async fn run() -> Result<()> {
                         )
                     })
                     .await??
+                }
+                CollabAction::Presence {
+                    input,
+                    peer,
+                    token,
+                    allow_insecure_lan,
+                    json,
+                } => {
+                    let snapshot = tokio::task::spawn_blocking(move || {
+                        pentool::collab::sync::peer_presence(
+                            &input,
+                            &peer,
+                            &collab_token(token)?,
+                            allow_insecure_lan,
+                        )
+                    })
+                    .await??;
+                    if !json {
+                        let text = |v: &serde_json::Value| v.as_str().unwrap_or("-").to_string();
+                        println!("{} connected", snapshot["matches"]);
+                        for entry in snapshot["entries"].as_array().into_iter().flatten() {
+                            println!(
+                                "{}\t{}\t{}\tpage={}\tselected={}",
+                                text(&entry["actor"]["id"]),
+                                text(&entry["actor"]["kind"]),
+                                text(&entry["actor"]["display_name"]),
+                                text(&entry["page"]),
+                                entry["selection"].as_array().map_or(0, |s| s.len()),
+                            );
+                        }
+                        return Ok(());
+                    }
+                    snapshot
                 }
                 CollabAction::Join {
                     input,

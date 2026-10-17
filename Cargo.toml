@@ -149,6 +149,10 @@ name = "collab_evidence"
 path = "tests/collab_evidence.rs"
 
 [[test]]
+name = "collab_presence"
+path = "tests/collab_presence.rs"
+
+[[test]]
 name = "v017_interchange"
 path = "tests/v017_interchange.rs"
 
