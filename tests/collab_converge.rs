@@ -539,7 +539,9 @@ fn cli_mutations_are_recorded_and_replay_matches_the_document() {
     let rebuilt = ws.path("rebuilt.pen");
     let replay = ok_json(&["collab", "replay", &doc, "--out", &rebuilt]);
     assert_eq!(replay["matches_document"], json!(true));
-    let a: Value = serde_json::from_slice(&fs::read(&doc).unwrap()).unwrap();
+    let mut a: Value = serde_json::from_slice(&fs::read(&doc).unwrap()).unwrap();
+    // the embedded attribution block is derived, not replayed content
+    a.as_object_mut().unwrap().remove("collab");
     let b: Value = serde_json::from_slice(&fs::read(&rebuilt).unwrap()).unwrap();
     assert_eq!(a, b);
     // replay must never overwrite the document

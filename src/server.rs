@@ -165,6 +165,7 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/extensions/run", post(extensions_run))
         .route("/api/comments", get(comments_list).post(comments_apply))
         .route("/api/history", get(history_list))
+        .route("/api/collab/stats", get(collab_stats))
         .route("/api/undo", post(history_undo))
         .route("/api/redo", post(history_redo))
         .route("/api/geometry", post(geometry_command))
@@ -4344,6 +4345,36 @@ async fn comments_apply(
         return (StatusCode::NOT_FOUND, "No shared document").into_response();
     };
     match crate::comments::apply(&file, &request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CollabStatsQuery {
+    by: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+/// Read-only contribution statistics derived from the verified operation log.
+async fn collab_stats(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<CollabStatsQuery>,
+) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result =
+        crate::collab::stats::By::parse(q.by.as_deref().unwrap_or("actor")).and_then(|by| {
+            crate::collab::stats_report(
+                &file,
+                by,
+                q.offset.unwrap_or(0),
+                q.limit.unwrap_or(crate::collab::stats::DEFAULT_LIMIT),
+            )
+        });
+    match result {
         Ok(value) => Json(value).into_response(),
         Err(error) => problem(error),
     }

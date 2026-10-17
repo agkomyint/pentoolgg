@@ -143,6 +143,12 @@ pub fn init(dir: &Path, name: &str) -> Result<Value> {
 }
 
 pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
+    pack_with(dir, output, false)
+}
+
+/// `include_attribution` keeps each asset's embedded `collab` block, which can
+/// identify people; it is stripped unless the user opts in.
+pub fn pack_with(dir: &Path, output: &Path, include_attribution: bool) -> Result<Value> {
     let mut m = read_manifest(dir)?;
     let package_root = dir.canonicalize()?;
     let mut seen = HashSet::new();
@@ -165,7 +171,10 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
             continue;
         }
         let rel = slash(e.path().strip_prefix(dir).unwrap());
-        let bytes = read_package_payload(&package_root, &rel)?;
+        let bytes = crate::collab::export_bytes(
+            read_package_payload(&package_root, &rel)?,
+            include_attribution,
+        )?;
         let raw: Value = serde_json::from_slice(&bytes)?;
         let am = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
         asset::validate_properties(&raw)?;
@@ -221,7 +230,10 @@ pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
             }
             continue;
         }
-        let bytes = read_package_payload(&package_root, &entry.path)?;
+        let bytes = crate::collab::export_bytes(
+            read_package_payload(&package_root, &entry.path)?,
+            include_attribution,
+        )?;
         let raw: Value = serde_json::from_slice(&bytes)?;
         let metadata = asset::manifest(&raw)?.context("package asset lacks asset metadata")?;
         if metadata.id != *id {

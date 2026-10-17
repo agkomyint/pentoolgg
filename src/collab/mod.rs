@@ -11,6 +11,7 @@ pub mod hlc;
 pub mod log;
 pub mod merge;
 pub mod op;
+pub mod stats;
 
 use anyhow::{bail, Context, Result};
 use op::{Actor, Draft, Op};
@@ -131,9 +132,15 @@ fn external_actor() -> Actor {
 // ------------------------------------------------------------------ hook
 
 /// A staged log append waiting for the document commit.
-pub struct Pending(log::Prepared);
+pub struct Pending(log::Prepared, Vec<u8>);
 
 impl Pending {
+    /// The exact bytes to write and record in history: the new document with
+    /// its embedded `collab` block, so one commit carries both.
+    pub fn bytes(&self) -> &[u8] {
+        &self.1
+    }
+
     /// The document is committed: make the log durable.
     pub fn commit(self) -> Result<()> {
         self.0.finalize()
@@ -142,6 +149,34 @@ impl Pending {
     pub fn abort(self) {
         self.0.abort()
     }
+}
+
+/// Revision of a document ignoring its `collab` block, which is derived from
+/// the log and therefore cannot take part in the log's own revisions.
+pub fn content_revision(bytes: &[u8]) -> String {
+    match serde_json::from_slice::<Value>(bytes) {
+        Ok(mut value) => {
+            stats::strip(&mut value);
+            crate::transaction::revision(op::canonical_json(&value).as_bytes())
+        }
+        Err(_) => crate::transaction::revision(bytes),
+    }
+}
+
+/// The document bytes without attribution, unless `include` is set. Used by
+/// every export and package path (spec section 7.5).
+pub fn export_bytes(bytes: Vec<u8>, include: bool) -> Result<Vec<u8>> {
+    if include {
+        return Ok(bytes);
+    }
+    let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
+        return Ok(bytes);
+    };
+    if value.get("collab").is_none() {
+        return Ok(bytes);
+    }
+    stats::strip(&mut value);
+    Ok(serde_json::to_vec_pretty(&value)?)
 }
 
 fn parse_document(bytes: &[u8], what: &str) -> Result<Value> {
@@ -208,7 +243,7 @@ pub fn begin(
         return Ok(None);
     }
     let lock = log::lock(&dir)?;
-    let before_revision = crate::transaction::revision(before);
+    let before_revision = content_revision(before);
     log::recover(&dir, &before_revision)?;
     let lines = log::read_lines(&dir)?;
     let head = log::check_tail(&dir, &lines)?;
@@ -219,12 +254,17 @@ pub fn begin(
             log::MAX_LOG_OPS
         )
     }
-    let (_, genesis) = log::read_genesis(&dir)?;
+    let (_, mut genesis) = log::read_genesis(&dir)?;
+    stats::strip(&mut genesis);
     let replayed = merge::replay(&genesis, &log::ops_of(&lines))?;
     let mut state = replayed.state;
-    let before_value = parse_document(before, "existing document")?;
-    let after_value = parse_document(after, "new document")?;
-    require_v4(&after_value, "the new document")?;
+    let mut before_value = parse_document(before, "existing document")?;
+    let after_full = parse_document(after, "new document")?;
+    require_v4(&after_full, "the new document")?;
+    // The embedded `collab` block is derived output, not recorded content.
+    stats::strip(&mut before_value);
+    let mut after_value = after_full.clone();
+    stats::strip(&mut after_value);
     let mut clock = hlc::Clock::new(&log::peer_id(&dir)?, state.max_stamp());
     let base = format!("sha256:{before_revision}");
     let (actor, director) = current_actor()?;
@@ -263,7 +303,7 @@ pub fn begin(
     if ops.is_empty() {
         return Ok(None);
     }
-    let after_revision = crate::transaction::revision(after);
+    let after_revision = content_revision(after);
     let mut prev = head.hash;
     let mut seq = head.seq;
     let mut staged = Vec::with_capacity(ops.len());
@@ -273,8 +313,27 @@ pub fn begin(
         prev = line.hash.clone();
         staged.push(line);
     }
+    let (tip_seq, tip_hash) = staged
+        .last()
+        .map(|line| (line.seq, line.hash.clone()))
+        .expect("operations produce lines");
+    let mut known = log::read_actors(&dir)?;
+    for actor in &registry {
+        if !known.iter().any(|a| a.id == actor.id) {
+            known.push(actor.clone());
+        }
+    }
+    let summary = stats::summary(&state.stats_raw(), &known)?;
+    let mut final_value = after_full;
+    let block = stats::embed(final_value.get("collab"), tip_seq, &tip_hash, summary);
+    final_value["collab"] = block;
+    stats::validate_block(&final_value)?;
+    let mut final_bytes = serde_json::to_vec_pretty(&final_value)?;
+    if after.ends_with(b"\n") {
+        final_bytes.push(b'\n');
+    }
     let prepared = log::prepare(&dir, lock, staged, registry, &after_revision)?;
-    Ok(Some(Pending(prepared)))
+    Ok(Some(Pending(prepared, final_bytes)))
 }
 
 // ------------------------------------------------------------------- CLI
@@ -390,11 +449,16 @@ fn replay_summary(
     dir: &Path,
     lines: &[log::Line],
 ) -> Result<(merge::Replay, Value)> {
-    let (_, genesis) = log::read_genesis(dir)?;
+    let (_, mut genesis) = log::read_genesis(dir)?;
+    stats::strip(&mut genesis);
     let replay = merge::replay(&genesis, &log::ops_of(lines))?;
     let current = std::fs::read(document)
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .map(|mut value| {
+            stats::strip(&mut value);
+            value
+        });
     let rebuilt = replay.document();
     let conflicts = replay.state.conflicts();
     let shown: Vec<&merge::Conflict> = conflicts.iter().take(50).collect();
@@ -443,10 +507,14 @@ pub fn verify_report(document: &Path) -> Result<Value> {
     let document_revision = std::fs::read(document)
         .ok()
         .map(|bytes| crate::transaction::revision(&bytes));
+    let embedded = embedded_status(document, &dir, &lines, &head)?;
     let last_revision = lines.last().map(|l| l.applied_at_revision.clone());
     let mut warnings = Vec::new();
     if summary["matches_document"] != Value::Bool(true) {
         warnings.push("document differs from the replayed log (edited outside the transaction path); the next recorded change adds a catch-up entry");
+    }
+    if embedded["status"] == "mismatch" {
+        warnings.push("the embedded collab summary disagrees with the operation log; it is not trusted (run `pentool stats` for the derived figures)");
     }
     Ok(json!({
         "ok": true,
@@ -456,6 +524,73 @@ pub fn verify_report(document: &Path) -> Result<Value> {
         "replay": summary,
         "document_revision": document_revision,
         "last_recorded_revision": last_revision,
+        "embedded_summary": embedded,
         "warnings": warnings,
     }))
+}
+
+// ----------------------------------------------------------------- stats
+
+/// Replay the verified log and return the statistics inputs, the actor
+/// registry and the summary that the document must embed.
+fn derive_stats(dir: &Path, lines: &[log::Line]) -> Result<(stats::Raw, Vec<Actor>, Value)> {
+    let (_, mut genesis) = log::read_genesis(dir)?;
+    stats::strip(&mut genesis);
+    let replay = merge::replay(&genesis, &log::ops_of(lines))?;
+    let registry = log::read_actors(dir)?;
+    let raw = replay.state.stats_raw();
+    let summary = stats::summary(&raw, &registry)?;
+    Ok((raw, registry, summary))
+}
+
+fn embedded_status(
+    document: &Path,
+    dir: &Path,
+    lines: &[log::Line],
+    head: &log::Head,
+) -> Result<Value> {
+    let current = std::fs::read(document)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let Some(current) = current else {
+        return Ok(json!({"status": "missing"}));
+    };
+    if current.get("collab").is_none() {
+        return Ok(json!({"status": "missing"}));
+    }
+    let (_, _, summary) = derive_stats(dir, lines)?;
+    Ok(stats::check_embedded(
+        &current, head.seq, &head.hash, &summary,
+    ))
+}
+
+/// `pentool stats DOC [--by actor|kind|page]`: contribution statistics from
+/// the verified operation log. The embedded summary is checked, never trusted.
+pub fn stats_report(document: &Path, by: stats::By, offset: usize, limit: usize) -> Result<Value> {
+    let dir = doc_dir(document)?;
+    let lines = log::read_lines(&dir)?;
+    let head = log::verify_chain(&dir, &lines)?;
+    let (raw, registry, _) = derive_stats(&dir, &lines)?;
+    let mut report = stats::report(&raw, &registry, by, offset, limit)?;
+    let embedded = embedded_status(document, &dir, &lines, &head)?;
+    let object = report.as_object_mut().expect("report is an object");
+    object.insert("ok".into(), json!(true));
+    object.insert("operation".into(), json!("stats"));
+    object.insert("file".into(), json!(document));
+    object.insert("head".into(), json!(head));
+    object.insert("embedded_summary".into(), embedded);
+    Ok(report)
+}
+
+/// `pentool collab strip DOC`: remove the embedded attribution in place.
+pub fn strip_document(document: &Path) -> Result<Value> {
+    let bytes = std::fs::read(document)
+        .with_context(|| format!("could not read {}", document.display()))?;
+    let stripped = export_bytes(bytes.clone(), false)?;
+    if stripped == bytes {
+        return Ok(json!({"ok": true, "operation": "collab-strip", "changed": false}));
+    }
+    let summary =
+        crate::transaction::commit_bytes(document, "collab-strip", false, None, &stripped)?;
+    Ok(serde_json::to_value(summary)?)
 }

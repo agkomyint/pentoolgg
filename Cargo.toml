@@ -136,6 +136,10 @@ name = "collab_converge"
 path = "tests/collab_converge.rs"
 
 [[test]]
+name = "collab_stats"
+path = "tests/collab_stats.rs"
+
+[[test]]
 name = "v017_interchange"
 path = "tests/v017_interchange.rs"
 

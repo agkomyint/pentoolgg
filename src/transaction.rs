@@ -170,11 +170,21 @@ pub fn commit_bytes(
     if expected.is_some_and(|wanted| wanted != before_revision) {
         bail!("revision mismatch: expected {expected:?}, current {before_revision}")
     }
-    let after_revision = revision(after);
+    let mut after_revision = revision(after);
+    let mut committed_len = after.len();
     let history = if dry_run || before == after {
         None
     } else {
         let collab = crate::collab::begin(path, operation, &before, after)?;
+        // With collaboration enabled the committed bytes carry the derived
+        // `collab` block, so the document, its history entry and the log
+        // append all describe the same revision.
+        let after = collab
+            .as_ref()
+            .map(crate::collab::Pending::bytes)
+            .unwrap_or(after);
+        after_revision = revision(after);
+        committed_len = after.len();
         let written = crate::history::record(path, operation, &before, after).and_then(|history| {
             crate::editing::atomic_write(path, after)?;
             Ok(history)
@@ -214,7 +224,7 @@ pub fn commit_bytes(
         revision_before: before_revision,
         revision_after: after_revision,
         bytes_before: before.len(),
-        bytes_after: after.len(),
+        bytes_after: committed_len,
         backup: None,
         history,
         changed,

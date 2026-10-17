@@ -39,5 +39,18 @@ Legacy IDs and transforms are retained. Flattening recursively applies transform
 resolves styles to fallbacks, expands primitives/groups/instances to v3 paths and
 texts, and fails rather than dropping unsupported clipping or text-box semantics.
 
+## Collaboration attribution (`collab`)
+
+A document under `pentool collab init` carries one optional top-level `collab`
+object: `{"schema": 1, "head": "sha256:…", "seq": N, "stats_summary": {…}}`. It
+holds the operation-log chain head and a bounded contribution summary, written in
+the same transaction as the operation it records. It never affects rendering or
+export, unknown fields inside it survive edits, and it is limited to 128 KiB
+(summary 64 KiB, 256 actors); `scene::validate` rejects larger blocks. It is
+derived data: `pentool stats` and `collab verify` compare it with the log and
+report a disagreement instead of trusting it. SVG, PNG and PDF output never contains it (rendering ignores it), and
+`package pack` strips it unless `--include-attribution` is passed; `pentool collab strip DOC`
+removes it in place. See [`collaboration-v1.md`](collaboration-v1.md).
+
 The normative machine schema is [`pen-format-v4.schema.json`](pen-format-v4.schema.json)
 and the minimal fixture is [`fixtures/v4-scene.pen`](fixtures/v4-scene.pen).

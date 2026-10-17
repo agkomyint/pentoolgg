@@ -14,6 +14,7 @@ import { CompositePanel, ImagePanel, SceneConsole } from "@/workspaces/Operation
 import { PrintPanel } from "@/workspaces/PrintPanel";
 import { LayoutPanel } from "@/workspaces/LayoutPanel";
 import { DesignSystemsPanel } from "@/workspaces/DesignSystemsPanel";
+import { StatsPanel } from "@/workspaces/StatsPanel";
 import { ExtensionsPanel, ExtensionPalette } from "@/workspaces/ExtensionsPanel";
 import { Planned } from "@/workspaces/Planned";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
@@ -117,6 +118,8 @@ function WorkspaceBody() {
       );
     case "extensions":
       return <ExtensionsPanel />;
+    case "stats":
+      return <StatsPanel />;
     case "systems":
       return <DesignSystemsPanel />;
     default:
