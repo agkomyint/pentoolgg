@@ -15,6 +15,103 @@ pub struct Scene3dBenchmark {
     pub repetitions: usize,
 }
 
+/// Measure the normative full-node 3D render cold and warm in the process-local
+/// PNG cache using the tracked v11 product fixture.
+pub fn run_scene3d_cache(repetitions: usize) -> Result<Value> {
+    anyhow::ensure!(
+        (1..=20).contains(&repetitions),
+        "scene3d cache benchmark repetitions must be 1..=20"
+    );
+    let mut document: Value =
+        serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))?;
+    let page = document["pages"]
+        .as_array_mut()
+        .context("fixture pages are missing")?
+        .iter_mut()
+        .find(|page| page["id"] == "products")
+        .context("fixture products page is missing")?;
+    let node = page["layers"][0]["nodes"]
+        .as_array_mut()
+        .context("fixture product nodes are missing")?
+        .iter_mut()
+        .find(|node| node["id"] == "perfume-preview")
+        .context("fixture perfume node is missing")?;
+    node.as_object_mut()
+        .context("fixture perfume node is not an object")?
+        .remove("surface_graphics");
+    node["width"] = json!(256.0);
+    node["height"] = json!(320.0);
+    let render_node = document["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["id"] == "products")
+        .unwrap()["layers"][0]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["id"] == "perfume-preview")
+        .unwrap()
+        .clone();
+    let render_node = render_node
+        .as_object()
+        .context("fixture perfume node is not an object")?;
+
+    let mut samples = Vec::with_capacity(repetitions);
+    let mut digest = String::new();
+    let mut cold_times = Vec::with_capacity(repetitions);
+    let mut warm_times = Vec::with_capacity(repetitions);
+    for _ in 0..repetitions {
+        let _ = crate::scene3d::node::clear_png_cache();
+        let cold_started = Instant::now();
+        let (cold_png, cold_report) = crate::scene3d::node::render_png_report_in_page(
+            &document,
+            std::path::Path::new("."),
+            Some("products"),
+            render_node,
+        )?;
+        let cold_us = cold_started.elapsed().as_micros() as u64;
+        anyhow::ensure!(
+            cold_report["cache_hit"] == false,
+            "cold scene3d cache benchmark unexpectedly hit cache"
+        );
+        let warm_started = Instant::now();
+        let (warm_png, warm_report) = crate::scene3d::node::render_png_report_in_page(
+            &document,
+            std::path::Path::new("."),
+            Some("products"),
+            render_node,
+        )?;
+        let warm_us = warm_started.elapsed().as_micros() as u64;
+        anyhow::ensure!(
+            warm_report["cache_hit"] == true,
+            "warm scene3d cache benchmark did not hit cache"
+        );
+        anyhow::ensure!(cold_png == warm_png, "cold and warm scene3d output differs");
+        digest = crate::resource::sha256(&cold_png);
+        cold_times.push(cold_us);
+        warm_times.push(warm_us);
+        samples.push(json!({"cold_us":cold_us,"warm_us":warm_us}));
+    }
+    let mut cold_sorted = cold_times.clone();
+    let mut warm_sorted = warm_times.clone();
+    cold_sorted.sort_unstable();
+    warm_sorted.sort_unstable();
+    let cold_median = cold_sorted[cold_sorted.len() / 2];
+    let warm_median = warm_sorted[warm_sorted.len() / 2];
+    Ok(json!({
+        "schema_version":1,
+        "benchmark":"scene3d-cache-reference",
+        "fixture":{"document":"v11-product-packaging.pen","node":"perfume-preview","width":256,"height":320,"bindings":"disabled for cache eligibility"},
+        "samples":samples,
+        "timings_us":{"cold_median":cold_median,"warm_median":warm_median,
+            "median_speedup":if warm_median == 0 { Value::Null } else { json!(cold_median as f64 / warm_median as f64) }},
+        "output_sha256":digest,
+        "cache":crate::scene3d::node::png_cache_status(),
+        "peak_resident_bytes":peak_resident_bytes()
+    }))
+}
+
 /// Deterministic CPU budget probe for the v0.15 reference rasterizer. The
 /// geometry deliberately reuses three vertices so the measurement isolates
 /// triangle traversal/raster work rather than importer or allocation noise.
@@ -46,6 +143,8 @@ pub fn run_scene3d(c: Scene3dBenchmark) -> Result<Value> {
         material.base_color_texture = Some(TexRef {
             texture: 0,
             uv_set: 0,
+            wrap: Default::default(),
+            projection: Default::default(),
         });
         let mut rgba = vec![192; c.texture_edge as usize * c.texture_edge as usize * 4];
         for alpha in rgba.iter_mut().skip(3).step_by(4) {

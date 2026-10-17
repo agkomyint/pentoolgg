@@ -4,7 +4,7 @@
 
 [Vector logo](examples/pentoolgg-logo.svg) · [Transparent icon](examples/pentoolgg-icon.png) · [Editable logo](examples/pentoolgg-logo.pen)
 
-Pentool is an open-source, agent-friendly vector editor distributed as **one Rust binary**. It serves a browser canvas, stores editable layered artwork in a readable `.pen` JSON format, exposes rendering APIs, and exports PNG, SVG, or PDF.
+Pentool is an open-source, agent-friendly vector editor distributed as **one Rust binary**. It serves a browser canvas, stores editable layered artwork in a readable `.pen` JSON format, exposes rendering APIs, and exports PNG, SVG, PDF, or flattened and layered PSD.
 
 AI agents can draw through CLI commands; humans can edit the same artwork visually.
 
@@ -67,6 +67,136 @@ pentool export logo.pen logo.svg
 
 Running `pentool` without a command starts the server.
 
+## Extensions (v0.18)
+
+Sandboxed WebAssembly extensions read a document and propose edits through the
+same planner and transaction as `pentool batch` (dry run, revision guard, locks,
+rollback, one undo step). They get no filesystem, network, clock or randomness,
+and run under fixed CPU and memory limits. Capabilities are declared in the
+manifest and shown before install. See [docs/extensions-v1.md](docs/extensions-v1.md).
+
+```sh
+pentool extension pack examples/extensions/stamp/package stamp.penext
+pentool extension verify stamp.penext
+pentool extension add stamp.penext                 # shows capabilities, installs nothing
+pentool extension add stamp.penext --approve
+pentool extension run stamp logo.pen --args '{"text":"SALE"}' --dry-run
+pentool extension list
+pentool extension remove stamp
+```
+
+## 3D mockups and UVs (v0.16 in development)
+
+Pentool imports GLB, glTF, and OBJ models into ordinary `.pen` scene nodes.
+Format v10 supports model import and static rendering; v11 adds linked product
+artwork and editable UV islands. Migrations are explicit:
+
+```sh
+pentool migrate products.pen --target 10
+pentool scene3d products.pen add bottle --model bottle.glb --layer mockups --page front
+pentool scene3d products.pen uv bottle show
+pentool scene3d products.pen uv bottle project --primitive 0 --projection cylindrical --axis y
+pentool migrate products.pen --target 11
+pentool mockup list --json
+pentool mockup apply products.pen --preset perfume-bottle --id bottle-preview --layer mockups --page products --width 400 --height 600 --dry-run --json
+pentool mockup apply products.pen --preset perfume-bottle --id bottle-preview --layer mockups --page products --width 400 --height 600 --if-revision 0123456789abcdef --json
+pentool scene3d products.pen form presets
+pentool scene3d products.pen form add bottle-preview --form bottle --preset perfume-bottle --layer mockups --page front --width 400 --height 600
+pentool scene3d products.pen dependencies
+pentool scene3d products.pen render-report bottle-preview
+pentool scene3d-cache --server http://127.0.0.1:4711 status
+pentool scene3d-cache --server http://127.0.0.1:4711 clear
+pentool scene3d products.pen batch --node bottle-preview --node carton-preview --out-dir mockup-renders
+# For page-local duplicate IDs, qualify the selector as PAGE::ID.
+pentool scene3d products.pen batch --node products::bottle-preview --node alternate::bottle-preview --out-dir mockup-renders
+pentool scene3d mockup-queue.json batch-queue --out-dir all-mockups --cancel-file cancel.request
+pentool scene3d products.pen uv bottle island add --primitive 0 --id label --uv-set 0 --triangles 12,13,14 --scale 0.8,0.8 --offset 0.1,0
+pentool scene3d products.pen uv bottle island set --primitive 0 label --rotate 12
+pentool scene3d products.pen uv bottle layout --primitive 0 --out bottle-uv.svg
+pentool scene3d products.pen graphic bottle add label-art --source page:front --slot label --mode decal
+pentool scene3d products.pen pack sleeve --dieline sleeve --node sleeve-preview --layer mockups --length-mm 120 --width-mm 70 --height-mm 180 --dry-run
+pentool scene3d products.pen pack carton --dieline carton --node carton-preview --layer mockups --template straight-tuck --length-mm 120 --width-mm 80 --height-mm 220 --dry-run
+pentool scene3d products.pen pack tube --dieline label --node tube-preview --layer mockups --radius-mm 30 --height-mm 140 --overlap-mm 3 --dry-run
+pentool scene3d products.pen pack pouch --dieline pouch --node pouch-preview --layer mockups --front-width-mm 120 --gusset-mm 35 --height-mm 180 --dry-run
+pentool scene3d products.pen pack bottle-label --dieline bottle-label --node label-preview --layer mockups --radius-mm 30 --height-mm 90 --overlap-mm 3 --dry-run
+pentool pack products.pen import imported-carton --svg carton.svg --node imported-preview --layer mockups --dry-run
+pentool scene3d products.pen pack carton --dieline mailer --node mailer-preview --layer mockups --template mailer --length-mm 180 --width-mm 120 --height-mm 35 --glue-flap-mm 18 --dry-run
+pentool scene3d products.pen pack crease carton front-body-fold --angle-deg -45 --direction mountain --dry-run
+pentool scene3d products.pen pack settings carton --board-mm 0.5 --bleed-mm 3 --dry-run
+pentool scene3d products.pen pack settings bottle-label --seam-angle-deg 42 --wrap-direction counterclockwise --dry-run
+pentool scene3d products.pen pack preview carton --fold 0.75 --out carton-preview.png
+pentool scene3d products.pen pack templates
+pentool scene3d products.pen pack inspect carton
+pentool scene3d products.pen pack preflight carton --min-ppi 300
+pentool scene3d products.pen pack export carton --out carton-flat.svg --min-ppi 300
+pentool scene3d products.pen pack separate carton --out carton-plates --ppi 300 --bits 8
+pentool scene3d products.pen pack vector-separate carton --out carton-vector-plates
+pentool pack products.pen export-bundle carton --out dist/carton --min-ppi 300 --ppi 300 --fold 1
+pentool pack verify-bundle dist/carton
+pentool pack templates
+pentool pack products.pen inspect carton
+pentool pack products.pen preflight carton --min-ppi 300
+pentool serve products.pen
+```
+
+`mockup list` prints the offline starter catalog as JSON. `mockup apply` creates
+an ordinary editable product form plus its scene node in one validated
+transaction; the form record ID is deterministically derived as `<node-id>-form`.
+The command supports `--dry-run` and `--if-revision`, and JSON reports are the
+default (`--json` is accepted for consistency with other commands).
+
+The `batch-queue` manifest lists up to eight documents and their selected
+mockups; document paths are relative to the manifest. It preflights aggregate
+work before rendering, stages the whole queue, and atomically publishes one
+output directory. Individual render failures are reported per item while the
+successful PNGs are published together; a summary reports rendered/failed
+counts. Creating the optional cancel marker stops between renders and discards
+all staged output. See `docs/scene3d-batch-queue.schema.json` for the manifest
+contract and `docs/scene3d-v2.md` for the report behavior.
+
+Packaging preview and SVG export accept `--if-revision REV`; successful JSON
+reports include the exact source document revision, while stale guards fail
+before creating an output file. `--dry-run` performs the same preview/export
+work and reports planned bytes without creating or replacing its destination;
+this applies to folded PNG, flat SVG, and PDF/X draft export.
+`pentool pack DOC export ID --out proof.pdf --pdfx --ppi 300` creates a
+flattened PDF/X-4 draft through the document's declared CMYK output role. Its
+technical marks are process-color raster content, not spot separations, and it
+is not a certified manufacturing file; keep the SVG for editable cut paths.
+SVG dieline import is a bounded subset: explicit millimeter dimensions and
+viewBox, named rectangular panels, labeled production paths, and straight
+creases with explicit direction and angle. Unsupported SVG geometry is refused.
+`pentool pack verify-bundle DIR` checks every hash-listed bundle artifact and
+rejects missing, modified, or out-of-bundle files. It also checks that the
+cutting map retains its reference-only legend and that each vector spot plate
+declares one finishing role matching its manifest ink. It also compares the
+map's cut/fold path geometry to `flat.svg`; this verifies handoff integrity,
+not manufacturing readiness or certification.
+
+Island triangle numbers are zero-based within a model primitive. Island changes
+are stored as overlays; imported model bytes remain unchanged. Studio's 3D
+workspace can edit linked artwork and UV islands, and previews/exports use the
+Rust reference renderer. Studio can generate simplified sleeve, straight- or
+reverse-tuck carton, hinged-lid mailer, stand-up pouch, tube-label, and
+cylindrical bottle-label mockups, with a static fold preview for panel nets.
+These are visual design nets, not manufacturing dielines. Positive board
+thickness adds inner panel faces and exposed cut-edge walls, offsets fold axes
+to keep the outer seams connected, and bridges the interior wedge at folded
+hinges. That bridge is visual only; score compression, cut/fold allowances,
+collision-free structural geometry, and certified production output are not
+modeled.
+The flat SVG export includes linked artwork and stored technical paths; vector
+art stays vector and unsupported source content is embedded as bounded PNG with
+an effective-ppi warning. Configured bleed expands the flat export and extends
+raster artwork along eligible cut edges; crease edges and wrap seams are
+excluded. The editor also supports 3D face selection/art placement and UV island
+packing. Broader carton structures, profile-conforming bottle labels, and
+manufacturing conformance remain in development; see the [v0.16
+roadmap](docs/roadmap/v0.16.0/TASKS.md) and
+[v11 3D contract](docs/scene3d-v2.md) (schema:
+[`docs/pen-format-v11.schema.json`](docs/pen-format-v11.schema.json); upgrade with
+`pentool migrate FILE --target 11`) for current limits.
+
 ## ICC profile tools (v0.12 in development)
 
 Inspect a local ICC profile and validate a requested transform without changing
@@ -90,6 +220,7 @@ Explicitly migrate an existing document to v8 before importing profiles:
 ```sh
 pentool migrate campaign.pen --target 8 --dry-run
 pentool migrate campaign.pen --target 8
+pentool migrate campaign.pen --target 11 --dry-run
 pentool color profile import campaign.pen docs/fixtures/print-rgb-linear-v4.icc --name rgb-probe --redistribution allowed --dry-run
 pentool color profile import campaign.pen docs/fixtures/print-rgb-linear-v4.icc --name rgb-probe --redistribution allowed
 pentool color profile list campaign.pen --limit 10 --json
@@ -534,6 +665,70 @@ pentool --page mobile import design.pen icons.pen \
 Omit `--prefix` to derive one from the source filename, or pass `--no-prefix` to
 require collision-free source IDs. Byte-identical fonts are deduplicated. Import
 copies content; it does not create a live dependency.
+
+### Import static design formats
+
+The design interchange importer accepts bounded static SVG, PDF with classic
+xref tables or plain/FlateDecode xref streams, including bounded type-2 entries
+for non-stream values in plain/FlateDecode object streams,
+(including PDF-compatible Illustrator `.ai` files), bounded PSD layer subsets,
+Sketch archives, saved Figma REST `DOCUMENT` JSON, and legacy unwrapped Figma
+`.fig` v15 subsets. `.ai` export uses the PDF writer and is not a native
+Illustrator export. Imports into v4+ `.pen`
+documents are placed in a separate namespaced layer and return a fidelity report
+(`exact`, `approximated`, and `dropped` counts). Save the detailed report with
+`--report`; unsupported features are reported or rejected rather than silently
+executed. Sketch symbols/shared styles and Figma responsive auto-layout are not
+fully preserved yet. SVG local `<use>` references to primitive shapes and static
+groups and viewBox-backed symbols expand into editable geometry with bounded
+instance transforms; unsupported symbol content remains reported as dropped.
+Sketch maps shared left/center/right text alignment and
+applies uniquely matched string overrides to materialized and master-derived
+text fallbacks; other symbol overrides remain unsupported. Figma component definitions and instance links are retained
+as Pentool component snapshots with visual fallbacks. Unique `TEXT` component
+properties named `<layer>#text` are applied to the matching materialized
+fallback text node; other property types, ambiguous matches, and live override
+propagation remain unsupported. PDF import supports classic cross-reference tables, plain/FlateDecode xref streams, and bounded object-stream scalar/array/dictionary entries, vector paths,
+simple one-byte `Tj`/`TJ` text runs, permitted embedded TrueType fonts, FlateDecode
+RGB/gray and packed 1-bit gray images, FlateDecode DeviceCMYK images, and
+baseline JPEG DeviceRGB/DeviceGray images, plus matching 8-bit DeviceGray
+FlateDecode image soft masks applied as alpha. DeviceCMYK vectors and images use
+a reported simple sRGB approximation. 8-bit DeviceGray/DeviceRGB color-key
+`/Mask` arrays are applied as binary transparency. Calibrated colors, other
+soft-mask variants, object-stream members containing streams, nested object
+streams, inline images, and incremental/hybrid xrefs remain unsupported. PSD import supports raster layers/folders, root-level clipping
+alpha against the preceding base layer, and bounded 8-bit raster masks with
+relative-position and/or invert flags; adjustment/effect layers and other mask layouts are
+unsupported. PSD export writes a flattened composite or named full-canvas raster
+layers with visibility preserved; editable vector structure and profiles are
+not retained. Figma import accepts saved REST JSON and the
+legacy unwrapped `fig-kiwi` v15 Deflate container. ZIP/Zstandard containers,
+FigJam files, and other `.fig` versions are rejected; see the
+[interchange limits](docs/design-interchange-v1.md#native-figma-fig-subset).
+
+```sh
+pentool import artwork.pen icons.svg --report icons-fidelity.json
+pentool import artwork.pen proof.pdf --report proof-fidelity.json
+pentool import artwork.pen layered.psd --report layered-fidelity.json
+pentool import artwork.pen library.sketch --prefix library
+pentool import artwork.pen figma-export.json --format figma
+pentool import artwork.pen design.fig --report fig-fidelity.json
+```
+
+Studio also exposes SVG, PDF, PSD, Sketch, Figma JSON, and supported `.fig` import in the Design panel and
+shows the returned fidelity report. This does not change the existing legacy
+`.pen` composition workflow above.
+
+Exports to PNG, SVG, PDF, and PSD emit bounded fidelity counts in the command's JSON
+result. PSD export defaults to one flattened 8-bit RGBA page. Add `--layers` to
+write one full-canvas raster layer per source layer, preserving layer names and
+visibility. Neither PSD mode retains vector editability or profiles. Pass
+`--report PATH` to save the full per-object report.
+
+```sh
+pentool export design.pen flattened.psd --report psd-fidelity.json
+pentool export design.pen layered.psd --layers
+```
 
 Large searches are paginated for compact agent context:
 

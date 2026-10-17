@@ -1,7 +1,7 @@
 use pentool::{
-    agent, ai, asset, benchmark, composite, diff, document, editing, fonts, geometry, history,
-    image, import, instance, json, layout, library, package, page, pdf, raster, render, replace,
-    scene, server, style, text, transaction,
+    agent, ai, asset, benchmark, composite, diff, document, editing, extension, fonts, geometry,
+    history, image, import, instance, json, layout, library, package, page, pdf, raster, render,
+    replace, scene, server, style, text, transaction,
 };
 
 use anyhow::{bail, Context, Result};
@@ -498,6 +498,15 @@ impl SearchKind {
             ),
         }
     }
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum DesignFormat {
+    Svg,
+    Pdf,
+    Psd,
+    Sketch,
+    Figma,
 }
 
 #[derive(clap::Args, Default)]
@@ -2009,6 +2018,11 @@ enum Command {
         #[command(subcommand)]
         action: InstanceAction,
     },
+    /// Pack, verify, install, list, remove, and run sandboxed wasm extensions.
+    Extension {
+        #[command(subcommand)]
+        action: ExtensionAction,
+    },
     /// Build, verify, publish, or install deterministic packages.
     Package {
         #[command(subcommand)]
@@ -2049,7 +2063,7 @@ enum Command {
         #[arg(long)]
         images: Option<usize>,
         /// Benchmark compositing stacks, shared masks, clipping and blur.
-        #[arg(long, conflicts_with = "images")]
+        #[arg(long, conflicts_with_all = ["images", "photo", "scene3d", "scene3d_cache"])]
         composite: bool,
         #[arg(long, default_value_t = 16)]
         clipped: usize,
@@ -2065,11 +2079,14 @@ enum Command {
         operations: usize,
         /// Benchmark photography: ingest, cull, develop, preview and export a
         /// synthetic Bayer shoot.
-        #[arg(long, conflicts_with_all = ["images", "composite"])]
+        #[arg(long, conflicts_with_all = ["images", "composite", "scene3d", "scene3d_cache"])]
         photo: bool,
         /// Benchmark the deterministic static-3D CPU renderer.
-        #[arg(long, conflicts_with_all = ["images", "composite", "photo"])]
+        #[arg(long, conflicts_with_all = ["images", "composite", "photo", "scene3d_cache"])]
         scene3d: bool,
+        /// Benchmark full-node cold and warm render time through the PNG cache.
+        #[arg(long, conflicts_with_all = ["images", "composite", "photo", "scene3d"])]
+        scene3d_cache: bool,
         /// Rendered triangle count for --scene3d (1-1,000,000).
         #[arg(long, default_value_t = 100_000)]
         triangles: usize,
@@ -2106,7 +2123,7 @@ enum Command {
         #[command(subcommand)]
         action: pentool::layout_cli::SpreadAction,
     },
-    /// Version 10 static 3D: import models, camera, lights, inspect.
+    /// Static 3D and v11 product forms: import models, generate forms, camera, lights, inspect.
     Scene3d {
         input: PathBuf,
         #[arg(long)]
@@ -2115,6 +2132,35 @@ enum Command {
         if_revision: Option<String>,
         #[command(subcommand)]
         action: pentool::scene3d::cli::Scene3dAction,
+    },
+    /// Inspect or clear render cache in a running loopback Pentool server.
+    Scene3dCache {
+        #[arg(long, default_value = "http://127.0.0.1:4711")]
+        server: String,
+        #[command(subcommand)]
+        action: pentool::scene3d::cli::CacheAction,
+    },
+    /// List procedural product starters or add one as an editable mockup.
+    Mockup {
+        /// Validate and report without writing the document (apply only).
+        #[arg(long, global = true)]
+        dry_run: bool,
+        /// Reject apply if the document revision no longer matches this value.
+        #[arg(long, global = true)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: MockupAction,
+    },
+    /// Create, inspect, preview, preflight, and export packaging dielines.
+    Pack {
+        /// Document file; omitted only for the static `templates` listing.
+        input: Option<PathBuf>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[command(subcommand)]
+        action: pentool::scene3d::cli::PackAction,
     },
     /// Version 9 parent pages: create, items, assignment, resolution.
     Parent {
@@ -2362,16 +2408,25 @@ enum Command {
         #[command(subcommand)]
         action: ai::AiAction,
     },
-    /// Copy a page from another .pen file into the selected destination page.
+    /// Compose a legacy .pen page or import a static design format into the destination.
     Import {
         destination: PathBuf,
         source: PathBuf,
+        /// Explicit design interchange format; normally inferred from the source extension.
+        #[arg(long, value_enum)]
+        format: Option<DesignFormat>,
+        /// Write the full format fidelity report as JSON after a successful commit.
+        #[arg(long)]
+        report: Option<PathBuf>,
+        /// Select a source page when composing legacy .pen documents.
         #[arg(long)]
         source_page: Option<String>,
         #[arg(long)]
         prefix: Option<String>,
+        /// Disable ID prefixing for legacy .pen composition (requires collision-free IDs).
         #[arg(long, conflicts_with = "prefix")]
         no_prefix: bool,
+        /// Placement options apply to legacy .pen composition; interchange imports retain source coordinates.
         #[arg(long, num_args = 2, value_names = ["X", "Y"], default_values_t = [0.0, 0.0])]
         at: Vec<f64>,
         #[arg(long, default_value_t = 1.0)]
@@ -2507,7 +2562,7 @@ enum Command {
     },
     /// Print document metadata as JSON.
     Info { input: PathBuf },
-    /// Explicitly migrate between compatible v3 through v10 document formats.
+    /// Explicitly migrate between compatible v3 through v12 document formats.
     Migrate {
         input: PathBuf,
         #[arg(long, default_value_t = 4)]
@@ -2724,6 +2779,9 @@ enum Command {
     Export {
         input: PathBuf,
         output: PathBuf,
+        /// Write the complete bounded fidelity report as JSON; counts are always included in the command result.
+        #[arg(long)]
+        report: Option<PathBuf>,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
         /// Convert text to glyph outlines for a font-independent SVG.
@@ -2739,9 +2797,47 @@ enum Command {
         /// instead of embedding them. Fails for cropped or processed images.
         #[arg(long)]
         link_images: bool,
+        /// PSD only: retain each document layer as a raster layer.
+        #[arg(long)]
+        layers: bool,
         /// 3D renderer: deterministic `reference` or optional `accelerated`.
         #[arg(long, default_value = "reference")]
         renderer: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum MockupAction {
+    /// List offline procedural mockup starters as JSON.
+    List,
+    /// Add a preset as a new editable product form and scene3d node.
+    Apply {
+        /// Target v11 `.pen` document.
+        input: PathBuf,
+        /// Offline starter ID from `mockup list`.
+        #[arg(long)]
+        preset: String,
+        /// Stable ID for the new scene3d node; its form ID is `<id>-form`.
+        #[arg(long)]
+        id: String,
+        /// Existing target layer ID.
+        #[arg(long)]
+        layer: String,
+        /// Target page ID (defaults to the first page).
+        #[arg(long)]
+        page: Option<String>,
+        /// Horizontal placement in document units.
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        x: f64,
+        /// Vertical placement in document units.
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        y: f64,
+        /// Placed width in document units.
+        #[arg(long, default_value_t = 400.0)]
+        width: f64,
+        /// Placed height in document units.
+        #[arg(long, default_value_t = 400.0)]
+        height: f64,
     },
 }
 
@@ -3000,6 +3096,55 @@ enum InstanceAction {
         source: PathBuf,
         #[arg(long)]
         dry_run: bool,
+    },
+}
+#[derive(Subcommand)]
+enum ExtensionAction {
+    /// Build a deterministic .penext from a directory holding extension.json.
+    Pack { dir: PathBuf, output: PathBuf },
+    /// Verify a .penext offline (digests, manifest, module); runs nothing.
+    Verify { package: PathBuf },
+    /// Verify a .penext and install it. Without --approve only the requested
+    /// capabilities are shown and nothing is written.
+    Add {
+        package: PathBuf,
+        /// Grant every capability the manifest declares.
+        #[arg(long)]
+        approve: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// List installed extensions with capabilities and limits.
+    List {
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Remove an installed extension.
+    Remove {
+        name: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Run an installed extension on a document. Edits go through the shared
+    /// planner and transaction: --dry-run previews, --if-revision guards.
+    Run {
+        name: String,
+        file: PathBuf,
+        /// Command id declared in the manifest.
+        #[arg(long)]
+        command: Option<String>,
+        /// JSON arguments delivered to the extension.
+        #[arg(long)]
+        args: Option<String>,
+        /// Read-only JSON event delivered to the extension.
+        #[arg(long)]
+        event: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[arg(long)]
+        project: Option<PathBuf>,
     },
 }
 #[derive(Subcommand)]
@@ -3265,7 +3410,7 @@ fn cli_main() -> Result<()> {
                 .to_ascii_lowercase()
                 .contains("broken pipe") =>
         {
-            return Ok(())
+            return Ok(());
         }
         Err(_) => return Err(anyhow::anyhow!("pentool CLI thread panicked")),
     };
@@ -3981,7 +4126,9 @@ async fn run() -> Result<()> {
                     anyhow::bail!("[limit-exceeded] raw source is larger than 512 MiB")
                 }
                 if !external && length > image::MAX_SOURCE_BYTES {
-                    anyhow::bail!("[limit-exceeded] raw source is larger than the 128 MiB embedding limit; pass --external with a document-relative path")
+                    anyhow::bail!(
+                        "[limit-exceeded] raw source is larger than the 128 MiB embedding limit; pass --external with a document-relative path"
+                    )
                 }
                 let bytes = fs::read(&source_path)
                     .with_context(|| format!("[missing-resource] {}", source_path.display()))?;
@@ -4049,7 +4196,9 @@ async fn run() -> Result<()> {
             } => {
                 use pentool::photo::catalog::{DevelopChanges, WhiteBalance};
                 if exposure.is_some() && auto_tone {
-                    anyhow::bail!("[invalid-input] --exposure and --auto-tone both set tone.exposure; choose one")
+                    anyhow::bail!(
+                        "[invalid-input] --exposure and --auto-tone both set tone.exposure; choose one"
+                    )
                 }
                 let triple = |text: &str, flag: &str| -> anyhow::Result<[f64; 3]> {
                     let values = text
@@ -4143,7 +4292,9 @@ async fn run() -> Result<()> {
                     auto_tone,
                 };
                 if changes.is_empty() {
-                    anyhow::bail!("[invalid-input] raw develop needs a setting: --set, --unset, --exposure, --auto-tone, --camera-profile, --lens-profile, --upright, --as-shot, --temperature, --neutral, --sample or --suggest")
+                    anyhow::bail!(
+                        "[invalid-input] raw develop needs a setting: --set, --unset, --exposure, --auto-tone, --camera-profile, --lens-profile, --upright, --as-shot, --temperature, --neutral, --sample or --suggest"
+                    )
                 }
                 let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let result =
@@ -4244,7 +4395,9 @@ async fn run() -> Result<()> {
         } => {
             use pentool::color::roles;
             if selected_page.is_some() {
-                bail!("[invalid-input] document color roles have no page scope; --page is not applicable");
+                bail!(
+                    "[invalid-input] document color roles have no page scope; --page is not applicable"
+                );
             }
             let result = match action {
                 ColorRoleAction::Assign {
@@ -4323,10 +4476,14 @@ async fn run() -> Result<()> {
                 },
         } => {
             if selected_page.is_some() {
-                bail!("[invalid-input] color interpolation has no page scope; --page is not applicable");
+                bail!(
+                    "[invalid-input] color interpolation has no page scope; --page is not applicable"
+                );
             }
             if from.len() > 4096 || to.len() > 4096 || space.len() > 256 {
-                bail!("[limit-exceeded] color JSON is limited to 4096 bytes and interpolation destination JSON to 256 bytes");
+                bail!(
+                    "[limit-exceeded] color JSON is limited to 4096 bytes and interpolation destination JSON to 256 bytes"
+                );
             }
             if !position.is_finite() || !(0.0..=1.0).contains(&position) {
                 bail!("[invalid-input] color interpolation position must be finite and in [0,1]");
@@ -4360,10 +4517,14 @@ async fn run() -> Result<()> {
                 },
         } => {
             if selected_page.is_some() {
-                bail!("[invalid-input] color sample evaluation has no page scope; --page is not applicable");
+                bail!(
+                    "[invalid-input] color sample evaluation has no page scope; --page is not applicable"
+                );
             }
             if color.len() > 4096 || to.as_ref().is_some_and(|value| value.len() > 256) {
-                bail!("[limit-exceeded] color JSON is limited to 4096 bytes and destination JSON to 256 bytes");
+                bail!(
+                    "[limit-exceeded] color JSON is limited to 4096 bytes and destination JSON to 256 bytes"
+                );
             }
             let color: serde_json::Value =
                 serde_json::from_str(&color).context("invalid native color JSON")?;
@@ -4448,7 +4609,9 @@ async fn run() -> Result<()> {
                         .unwrap_or(serde_json::Value::Null);
                     let next = if merge {
                         if !patch.is_object() {
-                            bail!("[invalid-input] --merge needs a JSON object, e.g. '{{\"bleed\":9}}'")
+                            bail!(
+                                "[invalid-input] --merge needs a JSON object, e.g. '{{\"bleed\":9}}'"
+                            )
                         }
                         let mut base = if previous.is_object() {
                             previous.clone()
@@ -4829,7 +4992,9 @@ async fn run() -> Result<()> {
                 profile,
             };
             if selected_page.is_some() {
-                bail!("[invalid-input] profile file/catalog operations have no page scope; --page is not applicable");
+                bail!(
+                    "[invalid-input] profile file/catalog operations have no page scope; --page is not applicable"
+                );
             }
             let read = |input: &Path| -> Result<serde_json::Value> {
                 serde_json::from_slice(&pentool::resource::read_bounded(
@@ -6603,6 +6768,59 @@ async fn run() -> Result<()> {
                 Ok(())
             }
         },
+        Command::Extension { action } => {
+            let project_of = |p: Option<PathBuf>| -> Result<PathBuf> {
+                Ok(match p {
+                    Some(p) => p,
+                    None => std::env::current_dir()?,
+                })
+            };
+            let parse_json =
+                |label: &str, raw: Option<String>| -> Result<Option<serde_json::Value>> {
+                    raw.map(|r| {
+                        serde_json::from_str(&r)
+                            .with_context(|| format!("--{label} must be valid JSON"))
+                    })
+                    .transpose()
+                };
+            let value = match action {
+                ExtensionAction::Pack { dir, output } => extension::store::pack(&dir, &output)?,
+                ExtensionAction::Verify { package } => extension::store::verify(&package)?,
+                ExtensionAction::Add {
+                    package,
+                    approve,
+                    project,
+                } => extension::store::add(&package, &project_of(project)?, approve)?,
+                ExtensionAction::List { project } => extension::store::list(&project_of(project)?)?,
+                ExtensionAction::Remove { name, project } => {
+                    extension::store::remove(&project_of(project)?, &name)?
+                }
+                ExtensionAction::Run {
+                    name,
+                    file,
+                    command,
+                    args,
+                    event,
+                    dry_run,
+                    if_revision,
+                    project,
+                } => extension::store::run(
+                    &project_of(project)?,
+                    &name,
+                    &file,
+                    extension::store::RunOptions {
+                        command,
+                        args: parse_json("args", args)?,
+                        event: parse_json("event", event)?,
+                        page: selected_page.map(str::to_string),
+                        dry_run,
+                        if_revision,
+                    },
+                )?,
+            };
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            Ok(())
+        }
         Command::Package { action } => {
             let cwd = std::env::current_dir()?;
             let value = match action {
@@ -6693,14 +6911,31 @@ async fn run() -> Result<()> {
             operations,
             photo: photo_benchmark,
             scene3d: scene3d_benchmark,
+            scene3d_cache: scene3d_cache_benchmark,
             triangles,
             texture_edge,
             photos,
             megapixels,
             json: _,
         } => {
-            if !scene3d_benchmark && (triangles != 100_000 || texture_edge != 0) {
+            if !scene3d_benchmark
+                && !scene3d_cache_benchmark
+                && (triangles != 100_000 || texture_edge != 0)
+            {
                 anyhow::bail!("--triangles and --texture-edge require --scene3d")
+            }
+            let modes = [
+                images.is_some(),
+                composite_benchmark,
+                photo_benchmark,
+                scene3d_benchmark,
+                scene3d_cache_benchmark,
+            ]
+            .into_iter()
+            .filter(|active| *active)
+            .count();
+            if modes > 1 {
+                anyhow::bail!("choose only one benchmark mode")
             }
             let value = if scene3d_benchmark {
                 if render_benchmark || paths_only || scale != 1.0 || warmups != 1 {
@@ -6713,6 +6948,19 @@ async fn run() -> Result<()> {
                     texture_edge,
                     repetitions,
                 })?
+            } else if scene3d_cache_benchmark {
+                if render_benchmark
+                    || paths_only
+                    || scale != 1.0
+                    || warmups != 1
+                    || triangles != 100_000
+                    || texture_edge != 0
+                {
+                    anyhow::bail!(
+                        "scene3d cache benchmark sets its own render workload; omit render, paths, scale, warmups, triangle and texture options"
+                    )
+                }
+                benchmark::run_scene3d_cache(repetitions)?
             } else if photo_benchmark {
                 if scale != 1.0 || warmups != 1 {
                     anyhow::bail!("photo benchmark sets its own sizes; omit --scale and --warmups")
@@ -6724,7 +6972,9 @@ async fn run() -> Result<()> {
                 })?
             } else if composite_benchmark {
                 if scale != 1.0 || warmups != 1 {
-                    anyhow::bail!("composite benchmark uses scale 1 and one cold run; omit --scale and --warmups")
+                    anyhow::bail!(
+                        "composite benchmark uses scale 1 and one cold run; omit --scale and --warmups"
+                    )
                 }
                 benchmark::run_composite(benchmark::CompositeBenchmark {
                     clipped,
@@ -6795,6 +7045,23 @@ async fn run() -> Result<()> {
                     if worst as u128 > max_ms * 1000 {
                         anyhow::bail!(
                             "scene3d benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
+                            worst as f64 / 1000.0
+                        )
+                    }
+                }
+            }
+            if scene3d_cache_benchmark {
+                if let Some(max_ms) = max_ms {
+                    let worst = value["samples"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|sample| sample["cold_us"].as_u64())
+                        .max()
+                        .unwrap_or(0);
+                    if worst as u128 > max_ms * 1000 {
+                        anyhow::bail!(
+                            "scene3d cache benchmark exceeded --max-ms: {:.3} ms > {max_ms} ms",
                             worst as f64 / 1000.0
                         )
                     }
@@ -6998,6 +7265,55 @@ async fn run() -> Result<()> {
             if_revision,
             action,
         } => pentool::scene3d::cli::run(&input, dry_run, if_revision.as_deref(), action),
+        Command::Scene3dCache { server, action } => {
+            pentool::scene3d::cli::run_cache_command(&server, action)
+        }
+        Command::Mockup {
+            dry_run,
+            if_revision,
+            action,
+        } => match action {
+            MockupAction::List => {
+                anyhow::ensure!(
+                    !dry_run && if_revision.is_none(),
+                    "--dry-run and --if-revision apply only to `mockup apply`"
+                );
+                pentool::scene3d::cli::run_mockup_list()
+            }
+            MockupAction::Apply {
+                input,
+                preset,
+                id,
+                layer,
+                page,
+                x,
+                y,
+                width,
+                height,
+            } => pentool::scene3d::cli::run_mockup_apply(
+                &input,
+                dry_run,
+                if_revision.as_deref(),
+                &preset,
+                &id,
+                &layer,
+                pentool::scene3d::cli::MockupPlacement {
+                    page,
+                    rect: [x, y, width, height],
+                },
+            ),
+        },
+        Command::Pack {
+            input,
+            dry_run,
+            if_revision,
+            action,
+        } => pentool::scene3d::cli::run_pack(
+            input.as_deref(),
+            dry_run,
+            if_revision.as_deref(),
+            action,
+        ),
         Command::LayoutStyle {
             input,
             dry_run,
@@ -7069,7 +7385,10 @@ async fn run() -> Result<()> {
             overwrite,
         } => {
             if out.exists() && !overwrite && !dry_run {
-                anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written", out.display())
+                anyhow::bail!(
+                    "[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written",
+                    out.display()
+                )
             }
             let pair = |text: &str, what: &str| -> Result<(f64, f64)> {
                 let (a, b) = text
@@ -7204,7 +7523,9 @@ async fn run() -> Result<()> {
         } => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
             if !scene::is_scene_document(&raw) {
-                bail!("[unsupported-version] raster layers need a v6 scene document; run `pentool migrate` first")
+                bail!(
+                    "[unsupported-version] raster layers need a v6 scene document; run `pentool migrate` first"
+                )
             }
             let page = selected_page;
             let heal_tool = matches!(action, RasterAction::HealStroke { .. });
@@ -7231,7 +7552,9 @@ async fn run() -> Result<()> {
                     let report = raster::verify(&raw, page, id.as_deref(), replay)?;
                     println!("{}", serde_json::to_string(&report)?);
                     if report["ok"] != true {
-                        bail!("[corrupt-raster] raster verification found damage; see the report for the fix")
+                        bail!(
+                            "[corrupt-raster] raster verification found damage; see the report for the fix"
+                        )
                     }
                     return Ok(());
                 }
@@ -7902,6 +8225,8 @@ async fn run() -> Result<()> {
         Command::Import {
             destination,
             source,
+            format,
+            report,
             source_page,
             prefix,
             no_prefix,
@@ -7912,6 +8237,104 @@ async fn run() -> Result<()> {
             dry_run,
             revision,
         } => {
+            let format = format
+                .map(|format| match format {
+                    DesignFormat::Svg => "svg",
+                    DesignFormat::Pdf => "pdf",
+                    DesignFormat::Psd => "psd",
+                    DesignFormat::Sketch => "sketch",
+                    DesignFormat::Figma => "figma",
+                })
+                .or_else(|| pentool::interchange::detect_format(&source));
+            if let Some(format) = format {
+                if source_page.is_some()
+                    || no_prefix
+                    || at != [0.0, 0.0]
+                    || scale != 1.0
+                    || rotate != 0.0
+                    || expand_canvas
+                {
+                    anyhow::bail!(
+                        "[invalid-input] --source-page, --no-prefix, --at, --scale, --rotate, and --expand-canvas apply only to legacy .pen composition; design-format imports use a dedicated namespaced layer"
+                    );
+                }
+                if source == destination
+                    || report.as_ref() == Some(&source)
+                    || report.as_ref() == Some(&destination)
+                {
+                    anyhow::bail!(
+                        "[invalid-input] source, destination, and fidelity report paths must be distinct"
+                    );
+                }
+                let destination_bytes =
+                    pentool::resource::read_bounded(&destination, 512 * 1024 * 1024).with_context(
+                        || format!("could not read destination {}", destination.display()),
+                    )?;
+                let destination_document: serde_json::Value =
+                    serde_json::from_slice(&destination_bytes)
+                        .context("destination is not a valid Pentool JSON document")?;
+                let source_bytes = pentool::resource::read_bounded(&source, 512 * 1024 * 1024)
+                    .with_context(|| format!("could not read source {}", source.display()))?;
+                let imported = pentool::interchange::import_design(
+                    format,
+                    &source_bytes,
+                    &source.display().to_string(),
+                )?;
+                let mut fidelity_report = imported.report;
+                let prefix = prefix.unwrap_or_else(|| {
+                    source
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .replace(
+                            |c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_',
+                            "-",
+                        )
+                });
+                let (document, import_summary) = pentool::interchange::append_imported_document(
+                    &destination_document,
+                    &imported.document,
+                    selected_page,
+                    &prefix,
+                    &mut fidelity_report,
+                )?;
+                let change = transaction::commit_value(
+                    &destination,
+                    "import",
+                    dry_run,
+                    revision.as_deref(),
+                    &document,
+                )?;
+                if let Some(report_path) = &report {
+                    if !dry_run {
+                        editing::atomic_write(
+                            report_path,
+                            &serde_json::to_vec_pretty(&fidelity_report)?,
+                        )
+                        .with_context(|| format!("could not write {}", report_path.display()))?;
+                    }
+                }
+                let mut fidelity = serde_json::to_value(&fidelity_report)?;
+                if report.is_some() && !dry_run {
+                    if let Some(object) = fidelity.as_object_mut() {
+                        object.remove("items");
+                        object.insert(
+                            "report_path".into(),
+                            serde_json::json!(report.as_ref().unwrap().display().to_string()),
+                        );
+                    }
+                }
+                println!(
+                    "{}",
+                    serde_json::json!({"change":change,"summary":import_summary,"fidelity":fidelity})
+                );
+                return Ok(());
+            }
+            if report.is_some() {
+                anyhow::bail!(
+                    "[invalid-input] --report is available for design-format imports; choose --format"
+                );
+            }
             const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
             for path in [&destination, &source] {
                 if fs::metadata(path)?.len() > MAX_IMPORT_BYTES {
@@ -8267,7 +8690,10 @@ async fn run() -> Result<()> {
             overwrite,
         } => {
             if output.exists() && !overwrite {
-                anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written", output.display())
+                anyhow::bail!(
+                    "[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written",
+                    output.display()
+                )
             }
             let bytes =
                 pentool::resource::read_bounded(&input, pentool::idml::MAX_ARCHIVE_BYTES as usize)?;
@@ -8300,7 +8726,10 @@ async fn run() -> Result<()> {
             overwrite,
         } => {
             if output.exists() && !overwrite {
-                anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written", output.display())
+                anyhow::bail!(
+                    "[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written",
+                    output.display()
+                )
             }
             let raw: serde_json::Value = serde_json::from_slice(&pentool::resource::read_bounded(
                 &input,
@@ -8339,13 +8768,18 @@ async fn run() -> Result<()> {
             overwrite,
         } => {
             if !(1..=16384).contains(&width) || !(1..=16384).contains(&height) {
-                anyhow::bail!("[invalid-input] canvas dimensions must be between 1 and 16384, got {width}x{height}; nothing was written")
+                anyhow::bail!(
+                    "[invalid-input] canvas dimensions must be between 1 and 16384, got {width}x{height}; nothing was written"
+                )
             }
             let doc = scene::new_document(width, height);
             scene::validate(&doc)?;
             if output.exists() {
                 if !overwrite {
-                    anyhow::bail!("[policy-denied] {} already exists; choose another path or pass --overwrite (the previous document stays recoverable with `pentool undo`)", output.display())
+                    anyhow::bail!(
+                        "[policy-denied] {} already exists; choose another path or pass --overwrite (the previous document stays recoverable with `pentool undo`)",
+                        output.display()
+                    )
                 }
                 transaction::commit_value(&output, "new", false, None, &doc)
                     .with_context(|| format!("could not replace {}; the existing file is not a valid Pentool document, so move or delete it explicitly", output.display()))?;
@@ -8369,10 +8803,12 @@ async fn run() -> Result<()> {
             if_revision,
         } => {
             if selected_page.is_some() {
-                bail!("[invalid-input] format migration affects the entire document; --page is not applicable");
+                bail!(
+                    "[invalid-input] format migration affects the entire document; --page is not applicable"
+                );
             }
-            if !matches!(target, 3..=10) {
-                anyhow::bail!("migration target must be 3, 4, 5, 6, 7, 8, 9, or 10")
+            if !matches!(target, 3..=12) {
+                anyhow::bail!("migration target must be 3 through 12")
             }
             let before = if u64::from(target) >= pentool::color::VERSION {
                 pentool::resource::read_bounded(
@@ -8386,7 +8822,12 @@ async fn run() -> Result<()> {
                 serde_json::from_slice(&before).context("invalid .pen document")?;
             let from = raw.get("version").and_then(serde_json::Value::as_u64);
             let migrated = match target {
-                10 => pentool::scene3d::node::migrate(raw)?,
+                12 => scene::migrate_to_v12(raw)?,
+                11 if from == Some(pentool::scene::PAINT_VERSION) => {
+                    pentool::svg_paint::downgrade_to_v11(raw)?
+                }
+                11 => pentool::scene3d::node::migrate_to_v11(raw)?,
+                10 => pentool::scene3d::node::migrate(pentool::scene3d::node::to_v10(raw)?)?,
                 9 => pentool::spreads::migrate(raw)?,
                 8 => pentool::color::catalog::migrate(raw)?,
                 7 => pentool::photo::catalog::migrate(raw)?,
@@ -9672,11 +10113,13 @@ async fn run() -> Result<()> {
         Command::Export {
             input,
             output,
+            report,
             scale,
             outline_text,
             all_pages,
             format,
             link_images,
+            layers,
             renderer,
         } => {
             let renderer = match renderer.as_str() {
@@ -9693,6 +10136,14 @@ async fn run() -> Result<()> {
             if !scale.is_finite() || !(0.1..=8.0).contains(&scale) {
                 anyhow::bail!("export scale must be finite and between 0.1 and 8")
             }
+            if report
+                .as_ref()
+                .is_some_and(|path| path == &input || path == &output)
+            {
+                anyhow::bail!(
+                    "[invalid-input] input, export output, and fidelity report paths must be distinct"
+                );
+            }
             if link_images
                 && (all_pages || output.extension().and_then(|e| e.to_str()) != Some("svg"))
             {
@@ -9700,8 +10151,143 @@ async fn run() -> Result<()> {
                     "[unsupported-capability] --link-images applies to a single-page .svg output"
                 )
             }
-            let wants_pdf = output.extension().and_then(|value| value.to_str()) == Some("pdf");
-            if all_pages || wants_pdf {
+            let wants_pdf = output
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("pdf") || extension.eq_ignore_ascii_case("ai")
+                });
+            let wants_psd = output
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("psd"));
+            if layers && !wants_psd {
+                bail!("[unsupported-capability] --layers applies only to .psd output");
+            }
+            if wants_psd {
+                if all_pages {
+                    anyhow::bail!(
+                        "[unsupported-capability] PSD export writes one selected page; omit --all-pages"
+                    )
+                }
+                if outline_text {
+                    anyhow::bail!(
+                        "[unsupported-capability] PSD export is flattened; --outline-text applies only to SVG"
+                    )
+                }
+                if link_images {
+                    anyhow::bail!(
+                        "[unsupported-capability] PSD export is flattened; --link-images applies only to SVG"
+                    )
+                }
+                let raw: serde_json::Value = serde_json::from_slice(
+                    &pentool::resource::read_bounded(&input, 512 * 1024 * 1024)?,
+                )?;
+                if layers
+                    && (composite::is_document(&raw)
+                        || raw
+                            .get("version")
+                            .and_then(serde_json::Value::as_u64)
+                            .is_some_and(|version| version >= image::VERSION))
+                {
+                    anyhow::bail!(
+                        "[unsupported-capability] --layers currently supports scene and legacy documents; this document uses a composite image pipeline"
+                    )
+                }
+                let png = if composite::is_document(&raw) {
+                    composite::png(&raw, &input, selected_page, scale)?
+                } else if raw
+                    .get("version")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|version| version >= image::VERSION)
+                    && raw
+                        .get("image_assets")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|assets| !assets.is_empty())
+                {
+                    let scene = image::to_svg(&raw, &input, selected_page)?;
+                    render::scene_to_png(&scene, scale)?
+                } else {
+                    let document = read_render_document(&input, selected_page)?;
+                    render::to_png(&document, scale)?
+                };
+                let raster = ::image::load_from_memory(&png)
+                    .context("could not decode the rendered PSD composite")?
+                    .to_rgba8();
+                let psd = if layers {
+                    let document = read_render_document(&input, selected_page)?;
+                    let pixel_bytes = usize::try_from(raster.width())
+                        .ok()
+                        .and_then(|width| {
+                            usize::try_from(raster.height())
+                                .ok()
+                                .and_then(|height| width.checked_mul(height))
+                        })
+                        .and_then(|pixels| pixels.checked_mul(4))
+                        .context("[limit-exceeded] PSD layer pixel size overflow")?;
+                    let projected = pixel_bytes
+                        .checked_mul(
+                            document
+                                .layers
+                                .len()
+                                .checked_add(1)
+                                .context("[limit-exceeded] PSD layer count overflow")?,
+                        )
+                        .and_then(|bytes| {
+                            bytes.checked_add(document.layers.len().checked_mul(400)?)
+                        })
+                        .context("[limit-exceeded] PSD layer output size overflow")?;
+                    if document.layers.len() > 2_000 || projected > 256 * 1024 * 1024 {
+                        bail!(
+                            "[limit-exceeded] layered PSD output would exceed the 256 MiB or 2000-layer limit"
+                        );
+                    }
+                    let mut rendered_layers = Vec::with_capacity(document.layers.len());
+                    for (index, source_layer) in document.layers.iter().enumerate() {
+                        let mut isolated = document.clone();
+                        isolated.canvas.background = "none".into();
+                        for (layer_index, layer) in isolated.layers.iter_mut().enumerate() {
+                            layer.visible = layer_index == index;
+                        }
+                        let png = render::to_png(&isolated, scale)?;
+                        let layer_raster = ::image::load_from_memory(&png)
+                            .context("could not decode isolated PSD layer raster")?
+                            .to_rgba8();
+                        if layer_raster.dimensions() != raster.dimensions() {
+                            bail!(
+                                "[invalid-state] isolated PSD layer dimensions differ from composite"
+                            );
+                        }
+                        rendered_layers.push((
+                            source_layer.name.clone(),
+                            source_layer.visible,
+                            layer_raster.into_raw(),
+                        ));
+                    }
+                    let layer_refs = rendered_layers
+                        .iter()
+                        .rev()
+                        .map(|(name, visible, rgba)| pentool::psd_export::RasterLayer {
+                            name,
+                            visible: *visible,
+                            rgba,
+                        })
+                        .collect::<Vec<_>>();
+                    pentool::psd_export::encode_layers(
+                        raster.width(),
+                        raster.height(),
+                        &layer_refs,
+                        raster.as_raw(),
+                    )?
+                } else {
+                    pentool::psd_export::encode_rgba(
+                        raster.width(),
+                        raster.height(),
+                        raster.as_raw(),
+                    )?
+                };
+                editing::atomic_write(&output, &psd)?;
+            } else if all_pages || wants_pdf {
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let page_ids: Vec<String> = raw
                     .get("pages")
@@ -9718,8 +10304,10 @@ async fn run() -> Result<()> {
                     })
                     .unwrap_or_else(|| vec!["page-1".into()]);
                 let has_images = composite::is_document(&raw)
-                    || raw.get("version").and_then(serde_json::Value::as_u64)
-                        == Some(image::VERSION)
+                    || raw
+                        .get("version")
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some_and(|version| version >= image::VERSION)
                         && raw
                             .get("image_assets")
                             .and_then(serde_json::Value::as_object)
@@ -9831,8 +10419,10 @@ async fn run() -> Result<()> {
             } else {
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 if composite::is_document(&raw)
-                    || raw.get("version").and_then(serde_json::Value::as_u64)
-                        == Some(image::VERSION)
+                    || raw
+                        .get("version")
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some_and(|version| version >= image::VERSION)
                         && raw
                             .get("image_assets")
                             .and_then(serde_json::Value::as_object)
@@ -9852,7 +10442,85 @@ async fn run() -> Result<()> {
                     render::write_export_options(&doc, &output, scale, outline_text)?;
                 }
             }
-            println!("Exported {}", output.display());
+            let source_bytes = pentool::resource::read_bounded(&input, 512 * 1024 * 1024)?;
+            let source_document: serde_json::Value = serde_json::from_slice(&source_bytes)
+                .context("export source is not a valid Pentool document")?;
+            let export_format = if wants_pdf {
+                "pdf".to_owned()
+            } else if all_pages {
+                format.as_deref().unwrap_or("png").to_ascii_lowercase()
+            } else {
+                output
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or("unknown")
+                    .to_ascii_lowercase()
+            };
+            let report_page_ids = if all_pages || export_format == "pdf" {
+                None
+            } else {
+                source_document
+                    .get("pages")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|pages| {
+                        selected_page
+                            .or_else(|| {
+                                pages.first()?.get("id").and_then(serde_json::Value::as_str)
+                            })
+                            .context("export source page has no ID")
+                            .map(|page_id| vec![page_id.to_owned()])
+                    })
+                    .transpose()?
+            };
+            let rasterized_export = export_format == "png"
+                || export_format == "psd"
+                || (matches!(export_format.as_str(), "svg" | "pdf")
+                    && ((composite::is_document(&source_document)
+                        && !(export_format == "svg" && has_shape_gradient(&source_document)))
+                        || export_format == "pdf"
+                            && source_document
+                                .get("version")
+                                .and_then(serde_json::Value::as_u64)
+                                .is_some_and(|version| version >= image::VERSION)
+                            && source_document
+                                .get("image_assets")
+                                .and_then(serde_json::Value::as_object)
+                                .is_some_and(|assets| !assets.is_empty())));
+            let fidelity = pentool::interchange::export_fidelity_report_for(
+                &source_document,
+                &export_format,
+                &input.display().to_string(),
+                report_page_ids.as_deref(),
+                rasterized_export,
+            )?;
+            if let Some(report_path) = &report {
+                editing::atomic_write(report_path, &serde_json::to_vec_pretty(&fidelity)?)
+                    .with_context(|| format!("could not write {}", report_path.display()))?;
+            }
+            let mut fidelity_summary = serde_json::to_value(&fidelity)?;
+            if report.is_none() {
+                if let Some(object) = fidelity_summary.as_object_mut() {
+                    object.insert(
+                        "items_omitted".into(),
+                        serde_json::json!(fidelity.items.len() + fidelity.items_omitted),
+                    );
+                    object.insert("items".into(), serde_json::json!([]));
+                    object.insert(
+                        "report_hint".into(),
+                        serde_json::json!("pass --report PATH to write detailed fidelity items"),
+                    );
+                }
+            } else if let Some(object) = fidelity_summary.as_object_mut() {
+                object.remove("items");
+                object.insert(
+                    "report_path".into(),
+                    serde_json::json!(report.as_ref().unwrap().display().to_string()),
+                );
+            }
+            println!(
+                "{}",
+                serde_json::json!({"exported":output.display().to_string(),"fidelity":fidelity_summary})
+            );
             Ok(())
         }
     }
@@ -9867,9 +10535,16 @@ fn write_image_export(
     outline_text: bool,
     link_images: bool,
 ) -> Result<()> {
-    if composite::is_document(raw) {
+    let vector_gradient_svg = output
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+        && has_shape_gradient(raw);
+    if composite::is_document(raw) && !vector_gradient_svg {
         if outline_text || link_images {
-            anyhow::bail!("[unsupported-capability] v6 composite exports require embedded pixels; omit --outline-text and --link-images")
+            anyhow::bail!(
+                "[unsupported-capability] v6 composite exports require embedded pixels; omit --outline-text and --link-images"
+            )
         }
         let bytes = match output
             .extension()
@@ -9904,6 +10579,40 @@ fn write_image_export(
         _ => anyhow::bail!("output must end in .png, .svg or .pdf"),
     };
     editing::atomic_write(output, &bytes)
+}
+
+fn has_shape_gradient(raw: &serde_json::Value) -> bool {
+    fn paint_is_gradient(node: &serde_json::Value, slot: &str) -> bool {
+        node.pointer(&format!("/style/{slot}/fallback"))
+            .is_some_and(|paint| {
+                paint
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|kind| matches!(kind, "linear" | "radial"))
+                    && paint.get("stops").is_some_and(serde_json::Value::is_array)
+            })
+    }
+    fn visit_node(node: &serde_json::Value) -> bool {
+        let supported_shape = node
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|kind| matches!(kind, "rect" | "ellipse" | "path" | "line"));
+        (supported_shape && (paint_is_gradient(node, "fill") || paint_is_gradient(node, "stroke")))
+            || node
+                .get("children")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|children| children.iter().any(visit_node))
+            || node.get("fallback").is_some_and(visit_node)
+    }
+    raw.get("pages")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|page| page.get("layers").and_then(serde_json::Value::as_array))
+        .flatten()
+        .flat_map(|layer| layer.get("nodes").and_then(serde_json::Value::as_array))
+        .flatten()
+        .any(visit_node)
 }
 
 fn ensure_v8_production(raw: &serde_json::Value) -> Result<()> {

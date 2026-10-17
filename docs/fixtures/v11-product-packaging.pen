@@ -1,0 +1,68 @@
+{
+  "format": "pentool",
+  "version": 11,
+  "name": "Product and packaging contract fixture",
+  "color_management": { "engine": 1, "legacy_rgb": "srgb", "working_space": "srgb:linear", "profiles": {}, "aliases": {} },
+  "compositing": { "engine": 1, "color_space": "srgb8" },
+  "image_assets": {},
+  "styles": {},
+  "pages": [
+    {
+      "id": "artwork",
+      "name": "Label artwork",
+      "canvas": { "width": 300, "height": 180, "background": "#fffaf0" },
+      "layers": [
+        { "id": "label-art", "name": "Label", "nodes": [
+          { "kind": "rect", "id": "label-ground", "x": 0, "y": 0, "width": 300, "height": 180, "style": { "fill": { "fallback": "#fffaf0" } } },
+          { "kind": "text", "id": "label-name", "content": "FORM / 01", "x": 32, "y": 78, "font_family": "Arial", "font_size": 28, "style": { "fill": { "fallback": "#30251f" } } }
+        ] }
+      ]
+    },
+    {
+      "id": "products",
+      "name": "Product previews",
+      "canvas": { "width": 1200, "height": 800, "background": "#eee9df" },
+      "layers": [
+        { "id": "mockups", "name": "Mockups", "nodes": [
+          { "kind": "scene3d", "id": "perfume-preview", "x": 50, "y": 50, "width": 480, "height": 680, "product_form": "perfume-bottle", "surface_graphics": [
+            { "id": "perfume-label", "source": { "kind": "page", "page": "artwork" }, "slot": "label-band", "mode": "decal", "projection": "uv", "fit": "contain", "wrap": "clamp", "offset": [0.5, 0.48], "scale": [0.82, 0.3], "rotate": 0, "opacity": 1, "blend": "normal" }
+          ] },
+          { "kind": "scene3d", "id": "carton-preview", "x": 600, "y": 100, "width": 500, "height": 600, "dieline": "shirt-carton" }
+        ] }
+      ]
+    }
+  ],
+  "product_forms": {
+    "perfume-bottle": { "kind": "lathe-bottle", "generator": 1, "parameters": { "height_mm": 180, "radial_segments": 64, "profile_mm": [[24, 0], [26, 12], [26, 105], [23, 120], [11, 132], [11, 169], [8, 180]] }, "material_slots": ["glass-body", "label-band"] },
+    "shirt-carton": { "kind": "box", "generator": 1, "parameters": { "length_mm": 340, "width_mm": 260, "height_mm": 90, "bevel_mm": 1 }, "material_slots": ["front", "back", "sides", "top", "bottom"] }
+  },
+  "models": {
+    "sha256:5f32296497f0c937569f9eac6a5ca28cf3e8123206d765f81c5bf3076ca0ee73": {
+      "format": "obj",
+      "bytes": 59,
+      "storage": { "kind": "embedded", "data": "diAwIDAgMAp2IDEgMCAwCnYgMCAxIDAKdnQgMCAwCnZ0IDEgMAp2dCAwIDEKZiAxLzEgMi8yIDMvMwo=" },
+      "uv": { "0": { "projection": "planar" } }
+    }
+  },
+  "dielines": {
+    "shirt-carton": {
+      "template": "mailer",
+      "units": "mm",
+      "dimensions_mm": { "length": 340, "width": 260, "height": 90, "board": 0.6, "bleed": 3, "glue_flap": 22 },
+      "panels": [
+        { "id": "front", "rect_mm": [22, 22, 340, 260], "face_slot": "front", "uv_rect": [0, 0, 1, 1], "artwork": { "kind": "page", "page": "artwork" } },
+        { "id": "back", "rect_mm": [362, 22, 340, 260], "face_slot": "back", "uv_rect": [0, 0, 1, 1] }
+      ],
+      "creases": [
+        { "id": "front-left-fold", "line_mm": [[22, 22], [22, 282]], "angle_deg": 90, "direction": "valley" },
+        { "id": "front-right-fold", "line_mm": [[362, 22], [362, 282]], "angle_deg": 90, "direction": "mountain" }
+      ],
+      "paths": [
+        { "id": "cut-outline", "role": "cut", "d": "M 0 0 L 724 0 L 724 304 L 0 304 Z", "spot": "CutContour" },
+        { "id": "fold-lines", "role": "crease", "d": "M 22 22 L 22 282 M 362 22 L 362 282", "spot": "Crease" }
+      ],
+      "scene3d_node": "carton-preview",
+      "fold_state": 1
+    }
+  }
+}

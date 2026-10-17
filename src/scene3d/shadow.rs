@@ -234,7 +234,7 @@ fn casters(model: &Model, map: &mut Map) {
         let blend = prim
             .material
             .and_then(|m| model.materials.get(m))
-            .is_some_and(|m| m.alpha_mode == AlphaMode::Blend);
+            .is_some_and(|m| matches!(m.alpha_mode, AlphaMode::Blend | AlphaMode::GraphicBlend(_)));
         if blend {
             continue;
         }

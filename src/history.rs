@@ -122,7 +122,11 @@ fn restore_hash(document: &Path, root: &Path, hash: &str) -> Result<()> {
         .with_context(|| format!("history revision not found: {hash}"))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
     crate::transaction::validate_value(&value)?;
-    crate::editing::atomic_write(document, &bytes)
+    let before = fs::read(document)?;
+    let before_value: serde_json::Value = serde_json::from_slice(&before)?;
+    crate::editing::atomic_write(document, &bytes)?;
+    crate::scene3d::node::invalidate_png_cache_for_document_change(&before_value, &value);
+    Ok(())
 }
 
 pub fn undo(document: &Path) -> Result<serde_json::Value> {

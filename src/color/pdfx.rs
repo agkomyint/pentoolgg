@@ -320,6 +320,111 @@ struct PagePart {
     slug_text: usize,
 }
 
+/// A full-page, already-composited sRGB image can be delivered directly to the
+/// PDF/X output profile without allocating the much larger float compositing
+/// surface. This conservative fast path is equivalent only for a white page
+/// containing one opaque, untransformed, full-bleed image and empty sibling
+/// layers; all other pages continue through the normative compositor.
+fn full_page_srgb_image(
+    raw: &Value,
+    document: &Path,
+    page: &Value,
+    canvas: (f64, f64),
+    scale: f64,
+) -> Result<Option<(u32, u32, Vec<u8>)>> {
+    if page["canvas"]["background"].as_str() != Some("#ffffffff") {
+        return Ok(None);
+    }
+    let Some(layers) = page.get("layers").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    let mut image_node = None;
+    for layer in layers {
+        if layer.get("visible").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        if layer
+            .get("opacity")
+            .and_then(Value::as_f64)
+            .is_some_and(|v| v != 1.0)
+            || layer
+                .get("blend_mode")
+                .and_then(Value::as_str)
+                .is_some_and(|v| v != "normal")
+            || layer
+                .get("effects")
+                .is_some_and(|effects| effects.as_array().is_some_and(|v| !v.is_empty()))
+        {
+            return Ok(None);
+        }
+        let Some(nodes) = layer.get("nodes").and_then(Value::as_array) else {
+            return Ok(None);
+        };
+        for node in nodes {
+            if image_node.is_some() || node.get("kind").and_then(Value::as_str) != Some("image") {
+                return Ok(None);
+            }
+            image_node = Some(node);
+        }
+    }
+    let Some(node) = image_node else {
+        return Ok(None);
+    };
+    let approx = |value: Option<f64>, expected: f64| {
+        value.is_some_and(|actual| (actual - expected).abs() <= expected.abs().max(1.0) * 1e-10)
+    };
+    let array_equals = |value: Option<&Value>, expected: &[f64]| {
+        value.and_then(Value::as_array).is_some_and(|actual| {
+            actual.len() == expected.len()
+                && actual
+                    .iter()
+                    .zip(expected)
+                    .all(|(actual, expected)| actual.as_f64() == Some(*expected))
+        })
+    };
+    if !approx(node.get("x").and_then(Value::as_f64), 0.0)
+        || !approx(node.get("y").and_then(Value::as_f64), 0.0)
+        || !approx(node.get("width").and_then(Value::as_f64), canvas.0)
+        || !approx(node.get("height").and_then(Value::as_f64), canvas.1)
+        || node.get("fit").and_then(Value::as_str) != Some("fill")
+        || node
+            .get("opacity")
+            .and_then(Value::as_f64)
+            .is_some_and(|v| v != 1.0)
+        || node
+            .get("blend_mode")
+            .and_then(Value::as_str)
+            .is_some_and(|v| v != "normal")
+        || node.get("mask").is_some()
+        || node
+            .get("operations")
+            .and_then(Value::as_array)
+            .is_some_and(|v| !v.is_empty())
+        || node.get("crop").is_some() && !array_equals(node.get("crop"), &[0.0, 0.0, 1.0, 1.0])
+        || node.get("transform").is_some()
+            && !array_equals(node.get("transform"), &[1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+    {
+        return Ok(None);
+    }
+    let Some(digest) = node.get("asset").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let bytes = crate::image::load_asset_bytes_for_document(raw, document, digest)?;
+    let (_source, rgba) = crate::image::decode_source_pixels(&bytes)?;
+    let expected_width = (canvas.0 * scale).ceil();
+    let expected_height = (canvas.1 * scale).ceil();
+    if !expected_width.is_finite()
+        || !expected_height.is_finite()
+        || expected_width < 1.0
+        || expected_height < 1.0
+        || rgba.width() as f64 != expected_width
+        || rgba.height() as f64 != expected_height
+    {
+        return Ok(None);
+    }
+    Ok(Some((rgba.width(), rgba.height(), rgba.into_raw())))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_part(
     raw: &Value,
@@ -342,23 +447,45 @@ fn render_part(
         pixels <= MAX_PIXELS as f64,
         "[limit-exceeded] page raster of {pixels:.0} pixels exceeds {MAX_PIXELS}; lower --ppi or shrink the canvas"
     );
-    let image = output::render(
-        raw,
-        document,
-        page_id,
-        scale as f32,
-        &output::Options {
-            destination: Some(destination.clone()),
-            intent: Some(intent),
-            depth: Depth::Eight,
-            alpha: Alpha::FlattenOnWhite,
-        },
-    )?;
-    ensure!(
-        image.channels == 4,
-        "[internal] CMYK delivery is not 4-channel"
-    );
-    let (width, height) = (image.width as usize, image.height as usize);
+    let direct = full_page_srgb_image(raw, document, page, canvas, scale)?;
+    let (width, height, mut samples, direct_raster) = if let Some((w, h, rgba)) = direct {
+        let (samples, _report) =
+            output::deliver_srgb8(raw, document, w, h, &rgba, destination, intent)?;
+        (w as usize, h as usize, samples, true)
+    } else {
+        let image = output::render(
+            raw,
+            document,
+            page_id,
+            scale as f32,
+            &output::Options {
+                destination: Some(destination.clone()),
+                intent: Some(intent),
+                depth: Depth::Eight,
+                alpha: Alpha::FlattenOnWhite,
+            },
+        )?;
+        ensure!(
+            image.channels == 4,
+            "[internal] CMYK delivery is not 4-channel"
+        );
+        let (width, height) = (image.width as usize, image.height as usize);
+        let sx = width as f64 / canvas.0;
+        let sy = height as f64 / canvas.1;
+        let m = geometry.media;
+        let x0 = ((m.x * sx).floor().max(0.0)) as usize;
+        let y0 = ((m.y * sy).floor().max(0.0)) as usize;
+        let x1 = (((m.x + m.width) * sx).ceil() as usize).min(width);
+        let y1 = (((m.y + m.height) * sy).ceil() as usize).min(height);
+        ensure!(x1 > x0 && y1 > y0, "[internal] empty media crop");
+        let mut cropped = Vec::with_capacity((x1 - x0) * (y1 - y0) * 4);
+        for row in y0..y1 {
+            for sample in &image.samples[(row * width + x0) * 4..(row * width + x1) * 4] {
+                cropped.push(*sample as u8);
+            }
+        }
+        (width, height, cropped, false)
+    };
     let sx = width as f64 / canvas.0;
     let sy = height as f64 / canvas.1;
     let m = geometry.media;
@@ -368,13 +495,14 @@ fn render_part(
     let y1 = (((m.y + m.height) * sy).ceil() as usize).min(height);
     ensure!(x1 > x0 && y1 > y0, "[internal] empty media crop");
     let (cw, ch) = (x1 - x0, y1 - y0);
-    let mut samples = Vec::with_capacity(cw * ch * 4);
-    for row in y0..y1 {
-        for s in &image.samples[(row * width + x0) * 4..(row * width + x1) * 4] {
-            samples.push(*s as u8);
-        }
+    if direct_raster {
+        ensure!(
+            x0 == 0 && y0 == 0 && x1 == width && y1 == height,
+            "[internal] preflattened PDF/X raster must cover the complete media box"
+        );
     }
-    let marks = geometry.paint_marks(image.width, image.height, |x, y, coverage| {
+    let (render_width, render_height) = (width as u32, height as u32);
+    let marks = geometry.paint_marks(render_width, render_height, |x, y, coverage| {
         let (x, y) = (x as usize, y as usize);
         if x >= x0 && x < x1 && y >= y0 && y < y1 {
             let at = ((y - y0) * cw + (x - x0)) * 4;
@@ -384,7 +512,7 @@ fn render_part(
             }
         }
     });
-    let patches = geometry.paint_color_bars(image.width, image.height, |x, y, coverage, cmyk| {
+    let patches = geometry.paint_color_bars(render_width, render_height, |x, y, coverage, cmyk| {
         let (x, y) = (x as usize, y as usize);
         if x >= x0 && x < x1 && y >= y0 && y < y1 {
             let at = ((y - y0) * cw + (x - x0)) * 4;

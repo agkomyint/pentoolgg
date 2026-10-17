@@ -68,6 +68,9 @@ pub struct Separations {
     pub intent: Option<Intent>,
     pub plates: Vec<Plate>,
     pub objects: usize,
+    /// Scene3D mockups flattened to process-color raster coverage. Spot inks
+    /// embedded in source artwork are not retained by this path.
+    pub flattened_scene3d_objects: usize,
     pub knockouts: usize,
     pub overprints: usize,
     pub clipped_paints: usize,
@@ -367,7 +370,27 @@ fn walk<'a>(
                     out,
                 )?;
             }
-            "image" | "photo" | "raster" => {
+            // Imported/generated 3D mockups are already rendered by the shared
+            // SVG fragment path, so their visible pixels separate as process
+            // color just like other raster artwork. Spot semantics inside a
+            // texture are not preserved by this flattened surface.
+            "image" | "photo" | "raster" | "scene3d" => {
+                ensure!(
+                    node["style"].get("overprint").is_none(),
+                    "[unsupported-capability] raster node {} declares overprint; raster and scene3d surfaces are flattened to process plates and cannot preserve vector overprint semantics",
+                    name(node)
+                );
+                ensure!(
+                    node["style"].get("trap").is_none(),
+                    "[unsupported-capability] raster node {} declares a trap; raster and scene3d surfaces cannot be manually trapped as vector ink",
+                    name(node)
+                );
+                ensure!(
+                    node["style"]["fill"].get("spot").is_none()
+                        && node["style"]["stroke"].get("spot").is_none(),
+                    "[unsupported-capability] raster node {} declares spot ink in style; define spot inks in vector artwork or a supported named plate instead",
+                    name(node)
+                );
                 ensure!(
                     out.len() < MAX_OBJECTS,
                     "[limit-exceeded] separation supports at most {MAX_OBJECTS} painted slots"
@@ -877,6 +900,10 @@ pub fn separate(
         intent: process.as_ref().map(|(_, i)| *i),
         plates,
         objects: items.len(),
+        flattened_scene3d_objects: items
+            .iter()
+            .filter(|item| item.node["kind"] == "scene3d")
+            .count(),
         knockouts,
         overprints,
         clipped_paints,
@@ -1183,6 +1210,8 @@ impl Separations {
             "destination":self.destination.as_ref().map(Destination::json),
             "intent":self.intent,
             "objects":self.objects,
+            "flattened_scene3d_objects":self.flattened_scene3d_objects,
+            "warnings":if self.flattened_scene3d_objects > 0 { vec!["scene3d surfaces are flattened to process color; spot inks, vector overprint, and source-texture plate semantics are not preserved" ] } else { Vec::new() },
             "knockouts":self.knockouts,
             "overprints":self.overprints,
             "clipped_paints":self.clipped_paints,

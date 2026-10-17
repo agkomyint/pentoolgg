@@ -73,6 +73,7 @@ export function NumberField({
   step = 1,
   className,
   ariaLabel,
+  disabled = false,
 }: {
   value: number;
   onCommit: (n: number) => void;
@@ -81,6 +82,7 @@ export function NumberField({
   step?: number;
   className?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   const shown = String(Math.round(value * 100) / 100);
   const [text, setText] = useState(shown);
@@ -96,11 +98,14 @@ export function NumberField({
   return (
     <input
       aria-label={ariaLabel}
+      disabled={disabled}
+      autoComplete="off"
       className={cn("h-6 w-full min-w-0 flex-1 px-1.5 text-[12px] tabular-nums", className)}
-      type="number"
-      step={step}
-      min={min}
-      max={max}
+      type="text"
+      inputMode="decimal"
+      pattern="-?[0-9]*\.?[0-9]*"
+      data-step={step}
+      spellCheck={false}
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}
@@ -143,16 +148,18 @@ export function Segmented<T extends string>({
 
 export function Check({
   checked,
+  disabled = false,
   onChange,
   children,
 }: {
   checked: boolean;
+  disabled?: boolean;
   onChange: (v: boolean) => void;
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex items-center gap-1.5 text-[12px]">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <label className="flex min-h-10 cursor-pointer items-center gap-2 text-xs has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+      <input type="checkbox" className="h-4 w-4 accent-[var(--primary)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       {children}
     </label>
   );

@@ -95,7 +95,7 @@ fn explicit_migration_preserves_legacy_scene_and_photography_and_refuses_conflic
         .to_string()
         .contains("extension conflicts"));
     let mut future = v8;
-    future["version"] = json!(11);
+    future["version"] = json!(13);
     assert!(transaction::validate_value(&future).is_err());
 }
 

@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }},wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
@@ -66,6 +66,8 @@ jobs:
             echo "reused the CI binary"
           else
             echo "CI binary unavailable; building"
+            cargo build -p pentool-wasm --release --locked --target wasm32-unknown-unknown
+            cp target/wasm32-unknown-unknown/release/pentool_wasm.wasm web/pentool_core.wasm
             cargo build --release --locked --target ${{ matrix.target }}
           fi
       - name: Smoke test CLI rendering
@@ -128,11 +130,35 @@ jobs:
           "$BIN" page import-smoke.pen add assets --name Assets --width 800 --height 600
           "$BIN" --page assets import import-smoke.pen examples/eye.pen --prefix eye --at 40 40
           "$BIN" --page assets search import-smoke.pen eye --limit 2
+      - name: Smoke test design interchange import and PSD export
+        shell: bash
+        run: |
+          cp docs/fixtures/v4-scene.pen interchange-source.pen
+          "$BIN" new interchange-target.pen --width 320 --height 240
+          "$BIN" import interchange-target.pen docs/fixtures/v017-interchange-smoke.svg --prefix svg-smoke --report svg-import-report.json
+          "$BIN" export interchange-source.pen interchange-smoke.pdf
+          "$BIN" import interchange-target.pen interchange-smoke.pdf --prefix pdf-smoke --report pdf-import-report.json
+          "$BIN" export interchange-source.pen interchange-smoke.psd --report psd-export-report.json
+          "$BIN" import interchange-target.pen interchange-smoke.psd --prefix psd-smoke --report psd-import-report.json
+          "$BIN" import interchange-target.pen docs/fixtures/figma-weather-now-v15.fig --report fig-import-report.json
       - name: Smoke test page layout and IDML
         shell: bash
         run: |
           mkdir -p layout-smoke
           python3 scripts/layout-smoke.py target/${{ matrix.target }}/release/${{ matrix.binary }} layout-smoke || python scripts/layout-smoke.py target/${{ matrix.target }}/release/${{ matrix.binary }} layout-smoke
+      - name: Smoke test v11 mockup bindings and packaging export
+        shell: bash
+        run: |
+          cp docs/fixtures/v11-product-packaging.pen packaging-smoke.pen
+          "$BIN" scene3d packaging-smoke.pen dependencies --json
+          "$BIN" scene3d packaging-smoke.pen render-report perfume-preview --json
+          "$BIN" pack packaging-smoke.pen preflight shirt-carton --json
+          "$BIN" pack packaging-smoke.pen preview shirt-carton --fold 0.5 --out packaging-preview.png --json
+          "$BIN" pack packaging-smoke.pen export shirt-carton --out packaging-flat.svg --json
+          "$BIN" color profile import packaging-smoke.pen docs/fixtures/print-CGATS21_CRPC7.icc --name press-coated --redistribution allowed --json
+          "$BIN" color role assign packaging-smoke.pen output --to '{"space":"icc-cmyk","profile":"press-coated"}' --intent relative-colorimetric --json
+          "$BIN" pack packaging-smoke.pen export-bundle shirt-carton --out packaging-bundle --min-ppi 36 --ppi 36 --fold 0.5 --json
+          "$BIN" pack verify-bundle packaging-bundle
       - name: Smoke test outlined typography
         shell: bash
         run: $BIN export examples/text-demo.pen text-smoke.svg --outline-text

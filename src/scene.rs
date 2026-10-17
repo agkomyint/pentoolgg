@@ -1,12 +1,13 @@
 //! Version 4 ordered scene graph migration and validation.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use kurbo::{Affine, BezPath, Rect, Shape};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
-pub const LATEST_VERSION: u64 = crate::color::VERSION;
+pub const PAINT_VERSION: u64 = 12;
+pub const LATEST_VERSION: u64 = PAINT_VERSION;
 pub const MAX_DEPTH: usize = 64;
 
 pub fn is_scene_document(raw: &Value) -> bool {
@@ -19,6 +20,8 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::color::VERSION)
             | Some(crate::spreads::VERSION)
             | Some(crate::scene3d::node::VERSION)
+            | Some(crate::scene3d::node::BINDINGS_VERSION)
+            | Some(PAINT_VERSION)
     )
 }
 
@@ -1612,6 +1615,7 @@ pub fn apply_batch_at(
                         "line" => ShapeKind::Line,
                         other => bail!("unsupported shape: {other}"),
                     };
+                    ensure_layer_unlocked(page_mut(&mut candidate, page)?, &layer)?;
                     let n = |key| operation.get(key).and_then(Value::as_f64);
                     let previous = if is_replace(operation)? {
                         take_for_replace(page_mut(&mut candidate, page)?, &id)?
@@ -1664,6 +1668,7 @@ pub fn apply_batch_at(
                     let id = resolve("id")?;
                     let layer = resolve("layer")?;
                     let page_value = page_mut(&mut candidate, page)?;
+                    ensure_layer_unlocked(page_value, &layer)?;
                     let previous = if is_replace(operation)? {
                         take_for_replace(page_value, &id)?
                     } else {
@@ -2004,6 +2009,23 @@ pub fn migrate_to_v5(raw: Value) -> Result<Value> {
         .context("document must be a JSON object")?;
     object.insert("version".into(), Value::from(crate::image::VERSION));
     object.entry("image_assets").or_insert_with(|| json!({}));
+    validate(&raw)?;
+    Ok(raw)
+}
+
+/// Explicitly migrate a supported document to v12, which adds gradient paints
+/// to vector shape style slots while preserving all older style fallbacks.
+pub fn migrate_to_v12(raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(PAINT_VERSION) {
+        validate(&raw)?;
+        return Ok(raw);
+    }
+    let mut raw = crate::scene3d::node::migrate_to_v11(raw)?;
+    ensure!(
+        raw.get("version").and_then(Value::as_u64) == Some(crate::scene3d::node::BINDINGS_VERSION),
+        "[unsupported-capability] migration to v12 requires a v11-compatible document"
+    );
+    raw["version"] = json!(PAINT_VERSION);
     validate(&raw)?;
     Ok(raw)
 }
@@ -2804,6 +2826,8 @@ pub fn validate(raw: &Value) -> Result<()> {
                 | crate::color::VERSION
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
+                | crate::scene3d::node::BINDINGS_VERSION
+                | PAINT_VERSION
         )
     {
         bail!("not a supported Pentool scene document")
@@ -2868,6 +2892,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 .context("v4 layer has no nodes")?
             {
                 validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)?;
+                crate::svg_paint::validate_tree(raw, node)?;
             }
         }
         fn check_instances(node: &Value, components: &HashSet<&str>) -> Result<()> {
@@ -2913,6 +2938,7 @@ pub fn validate(raw: &Value) -> Result<()> {
             {
                 validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)
                     .with_context(|| format!("parent {parent} item is invalid"))?;
+                crate::svg_paint::validate_tree(raw, node)?;
             }
         }
     }

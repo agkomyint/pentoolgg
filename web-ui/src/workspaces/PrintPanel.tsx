@@ -73,6 +73,18 @@ export function PrintPanel() {
                 {report.errors} error(s), {report.warnings} warning(s)
               </span>
             </div>
+            {!!report.scene3d_ppi?.length && <section className="space-y-1" aria-label="3D mockup effective resolution">
+              <h4 className="text-xs font-medium">3D mockup resolution</h4>
+              <ul className="space-y-1">
+                {report.scene3d_ppi.map((item) => <li key={item.node}>
+                  <button className="flex min-h-10 w-full items-center gap-2 rounded border bg-card px-2 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => select(item.node)} aria-pressed={selectedId === item.node}>
+                    <span className="truncate text-xs">{item.node}</span>
+                    <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-muted-foreground">{item.width_px} × {item.height_px} px · {item.effective_ppi.x.toFixed(0)} × {item.effective_ppi.y.toFixed(0)} ppi</span>
+                  </button>
+                </li>)}
+              </ul>
+              {!!report.scene3d_ppi_omitted && <p className="text-[11px] text-muted-foreground">{report.scene3d_ppi_omitted} more mockup resolution result(s) omitted by the report limit.</p>}
+            </section>}
             <ul className="space-y-1">
               {report.issues.map((issue, index) => (
                 <li key={`${issue.code}-${issue.node ?? index}-${index}`}>

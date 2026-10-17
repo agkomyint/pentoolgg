@@ -766,6 +766,13 @@ full ink) plus `separations.json` carrying dimensions, ink map, per-plate
 statistics and PNG SHA-256 digests. Existing files are never replaced. The
 document is not modified.
 
+Image, photo, raster, and scene3d nodes contribute flattened process-color
+coverage. Scene3d count is reported as `flattened_scene3d_objects`, with a
+`warnings` entry that linked spot inks, vector overprint, and source-texture
+plate semantics are not preserved. Raster nodes with overprint, trap, or
+style-level spot declarations are rejected rather than silently treating those
+vector-only declarations as if they affected the flattened pixels.
+
 Declarations are ordinary `style` fields, so preview rendering is unchanged:
 
 - a paint with `"spot": {"ink": ID, "tint": 0..1}` deposits only that ink; its
@@ -826,7 +833,15 @@ v4-or-older (`output-role-missing`, `output-not-cmyk`, `output-profile-*`);
 production geometry valid and present with PDF/X box rules (`production-*`);
 bleed under 1/8 inch and unpainted bleed bands measured from rendered alpha
 (`bleed-below-minimum`, `bleed-incomplete`); nominal image resolution from the asset
-pixel size and node width (`image-low-resolution`, `image-unresolved`); text,
+pixel size and node width (`image-low-resolution`, `image-unresolved`); scene3d
+output raster dimensions, page units, and accumulated final affine placement
+(`scene3d-low-resolution`, reported separately in `scene3d_ppi`); each scene3d
+mockup also emits `scene3d-print-flattened`, because linked spot inks, overprint,
+traps, and source vector plates are not retained by rasterization. Preflight
+follows visible linked page/node artwork and packaging-panel sources for spot
+paints (`scene3d-spot-flattened`); the recipe's `reject_spot_flattening` policy
+turns that finding into an error. This audit is capped at 100,000 visited nodes
+and reports `scene3d-spot-audit-incomplete` if it cannot finish; text,
 live transparency, spot and overprint constructs the flattened PDF/X subset
 cannot carry (`text-rasterized-in-pdfx`, `transparency-flattened`,
 `spot-not-in-pdfx`, `overprint-not-in-pdfx`).

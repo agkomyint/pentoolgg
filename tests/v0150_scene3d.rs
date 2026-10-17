@@ -8,12 +8,16 @@ const TETRA: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 3 2\nf 1 2 4\nf 1 4
 fn scratch() -> PathBuf {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static N: AtomicUsize = AtomicUsize::new(0);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_nanos();
     let dir = std::env::temp_dir().join(format!(
-        "pentool-scene3d-{}-{}",
+        "pentool-scene3d-{}-{nonce}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::SeqCst)
     ));
-    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir(&dir).unwrap();
     dir
 }
 
@@ -45,6 +49,153 @@ fn base(dir: &Path) -> PathBuf {
 
 fn read(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+struct TestServer(std::process::Child);
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn start_server(dir: &Path, port: u16) -> TestServer {
+    let child = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args(["serve", "doc.pen", "--port", &port.to_string()])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let server = TestServer(child);
+    let client = reqwest::blocking::Client::new();
+    let health = format!("http://127.0.0.1:{port}/api/health");
+    assert!(
+        (0..100).any(|_| {
+            let up = client.get(&health).send().is_ok();
+            if !up {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            up
+        }),
+        "server did not start"
+    );
+    server
+}
+
+#[test]
+fn scene3d_render_cache_is_discarded_when_server_process_restarts() {
+    let dir = scratch();
+    let mut document: Value =
+        serde_json::from_slice(include_bytes!("../docs/fixtures/v11-product-packaging.pen"))
+            .unwrap();
+    let product = document["pages"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|page| page["id"] == "products")
+        .unwrap();
+    let bottle = product["layers"][0]["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|node| node["id"] == "perfume-preview")
+        .unwrap();
+    // Keep the valid product form/model, but use an unbound render so it is
+    // eligible for the PNG cache rather than the linked-art bypass path.
+    bottle.as_object_mut().unwrap().remove("surface_graphics");
+    std::fs::write(dir.join("doc.pen"), serde_json::to_vec(&document).unwrap()).unwrap();
+
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let base = format!("http://127.0.0.1:{port}");
+    let client = reqwest::blocking::Client::new();
+    let request = serde_json::json!({
+        "document": document,
+        "page": "products",
+        "node": "perfume-preview"
+    });
+    let request_body = serde_json::to_vec(&request).unwrap();
+
+    let first_output;
+    {
+        let _server = start_server(&dir, port);
+        let first = client
+            .post(format!("{base}/api/scene3d/render-report"))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(request_body.clone())
+            .send()
+            .unwrap();
+        let first_text = first.text().unwrap();
+        let first: Value = serde_json::from_str(&first_text)
+            .unwrap_or_else(|_| panic!("render report failed: {first_text}"));
+        assert_eq!(first["render"]["cache_hit"], false);
+        first_output = first["render"]["output"].clone();
+
+        let cached = client
+            .post(format!("{base}/api/scene3d/render-report"))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(request_body.clone())
+            .send()
+            .unwrap();
+        let cached: Value = serde_json::from_str(&cached.text().unwrap()).unwrap();
+        assert_eq!(cached["render"]["cache_hit"], true);
+        let status: Value = serde_json::from_str(
+            &client
+                .get(format!("{base}/api/scene3d/cache"))
+                .send()
+                .unwrap()
+                .text()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(status["entries"], 1);
+        assert!(status["bytes"].as_u64().unwrap() > 0);
+        pentool::scene3d::cli::run_cache_command(&base, pentool::scene3d::cli::CacheAction::Status)
+            .unwrap();
+        pentool::scene3d::cli::run_cache_command(&base, pentool::scene3d::cli::CacheAction::Clear)
+            .unwrap();
+        let cleared: Value = serde_json::from_str(
+            &client
+                .get(format!("{base}/api/scene3d/cache"))
+                .send()
+                .unwrap()
+                .text()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cleared["entries"], 0);
+        assert_eq!(cleared["bytes"], 0);
+    }
+
+    {
+        let _server = start_server(&dir, port);
+        let status: Value = serde_json::from_str(
+            &client
+                .get(format!("{base}/api/scene3d/cache"))
+                .send()
+                .unwrap()
+                .text()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(status["entries"], 0);
+        assert_eq!(status["bytes"], 0);
+
+        let after_restart = client
+            .post(format!("{base}/api/scene3d/render-report"))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(request_body)
+            .send()
+            .unwrap();
+        let after_restart: Value = serde_json::from_str(&after_restart.text().unwrap()).unwrap();
+        assert_eq!(after_restart["render"]["cache_hit"], false);
+        assert_eq!(after_restart["render"]["output"], first_output);
+    }
 }
 
 #[test]

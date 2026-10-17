@@ -277,6 +277,17 @@ the developer baseline so shared hosted runners do not turn ordinary variance
 into failures. Triangle count is limited by the importer budget, texture memory
 uses the same decoded-byte limit, and repetitions are limited to 20.
 
+The full-node cache qualification uses the tracked v11 product-and-packaging
+fixture with its bottle binding removed (so the result is cache-eligible), at
+256×320. Each repetition clears the process cache, measures one CPU render and
+one warm lookup, asserts the cache-hit flags, and compares the exact PNG bytes.
+It reports cold/warm samples, median speedup, output SHA-256, and peak resident
+memory:
+
+```sh
+pentool benchmark --scene3d-cache --repetitions 5 --max-ms 10000
+```
+
 The initial untextured baseline was measured on 2026-10-14 with an optimized
 x86_64-pc-windows-msvc build on Windows 11 Pro 10.0.26200, an Intel Core
 i9-11900H (8 cores/16 threads), rustc 1.99.0 and LLVM 23.1.1. Three samples were
@@ -285,3 +296,43 @@ was 33,103,872 bytes, and every run produced pixel digest
 `sha256:afe972e005866dbef2d148ba2e34ba9a52fece4e8c477d22ea3297a67732635b`.
 The default release binary was 42,787,328 bytes. These are local observations;
 the CI matrix remains the cross-platform performance authority.
+
+Cache benchmark, measured 2026-10-15 with the optimized x86_64-pc-windows-msvc
+build on Windows 11 Pro, Intel Core i9-11900H, rustc 1.99.0. Three full-node
+runs measured cold at 28.240, 30.123, and 30.192 ms, and warm at 0.115, 0.130,
+and 0.107 ms (30123 µs vs 115 µs medians, 261.94× median speedup). Peak
+resident memory was 38,244,352 bytes. All cold/warm PNGs matched exactly with
+digest `sha256:7b6fee7260d525dc8710cf8bcae34d672adb77aed688ca626e80c0f9963f1273`.
+This measurement qualifies the unbound in-process PNG lookup; linked artwork
+still has to be rasterized to compute its source-content digest before lookup.
+
+The current worktree was rerun on 2026-10-15 with the optimized Windows x64
+GPU-feature artifact; the cache benchmark still explicitly uses the reference
+renderer. `benchmark --scene3d-cache --repetitions 5 --max-ms 10000 --json`
+reported cold samples 27.009, 30.538, 28.304, 27.941, and 25.447 ms; warm
+samples 0.155, 0.154, 0.126, 0.115, and 0.123 ms. Medians were 27.941 ms cold
+and 0.126 ms warm (221.75×). Peak resident memory was 39,104,512 bytes. All
+five cold/warm pairs matched byte-for-byte with digest
+`sha256:0528c022cd91d17e7fdb920e7a8281561b6a7b26681476c0345211434d9749b7`.
+
+The same optimized artifact ran one 100,000-triangle CPU reference sample with
+`benchmark --scene3d --triangles 100000 --repetitions 1 --max-ms 30000 --json`:
+9.763 seconds, peak resident memory 20,004,864 bytes, and the pinned digest
+`sha256:afe972e005866dbef2d148ba2e34ba9a52fece4e8c477d22ea3297a67732635b`.
+
+### v0.16 Windows release-artifact and optional GPU-size check (2026-10-16)
+
+Optimized Windows x64 artifacts were rebuilt from the current worktree after
+refreshing the embedded Studio bundle, using rustc 1.99.0 and
+`x86_64-pc-windows-msvc`. The default artifact was 47,493,632 bytes; enabling
+the optional `gpu` Cargo feature produced a 51,678,208-byte artifact (4,184,576
+bytes larger). Both are below the 60,000,000-byte release limit enforced by
+`scripts/check-binary-size.sh`.
+
+The refreshed GPU-feature build exported the v11 packaging fixture's `products`
+page with `--renderer accelerated`. It reported the NVIDIA GeForce RTX 3050 Ti
+Laptop GPU through Vulkan and the `reference-raster+wgpu-resolve` pipeline. Its
+PNG SHA-256 matched the default release binary's CPU-reference render:
+`e8d807bebf56bf0d26ab16809134ad13c55f4373ee00a0e608e0379486dca940`. This
+qualifies the current optional GPU resolve path on this device; it does not make
+GPU output normative or replace cross-platform CI measurements.

@@ -8,7 +8,8 @@ below the file being changed.
 
 Pentool is a single-binary, offline-capable Rust vector editor built for both
 people and software agents. It serves a browser editor, reads and writes `.pen`
-documents, exposes deterministic CLI operations, and exports PNG, SVG, and PDF.
+documents, exposes deterministic CLI operations, and exports PNG, SVG, PDF,
+and flattened PSD.
 
 Protect these product properties in every change:
 
@@ -65,7 +66,6 @@ The current planned sequence is:
 15. `docs/roadmap/v0.20.0/TASKS.md`: web and UX output (static and responsive);
 16. `docs/roadmap/v0.21.0/TASKS.md`: collaboration, with human and agent
     contribution stats;
-17. `docs/roadmap/v0.22.0/TASKS.md`: self-hostable hosted service.
 
 Product focus is vector, images, painting, layout and static 3D. Time-based
 media (keyframe animation, video, audio) is out of scope and has no roadmap;

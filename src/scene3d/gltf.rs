@@ -355,6 +355,8 @@ fn texture_ref(
         return Ok(Some(TexRef {
             texture: done,
             uv_set,
+            wrap: Default::default(),
+            projection: Default::default(),
         }));
     }
     if model.textures.len() >= LIMITS.max_textures {
@@ -397,6 +399,8 @@ fn texture_ref(
     Ok(Some(TexRef {
         texture: id,
         uv_set,
+        wrap: Default::default(),
+        projection: Default::default(),
     }))
 }
 

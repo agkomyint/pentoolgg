@@ -39,12 +39,39 @@ pub enum AlphaMode {
     Opaque,
     Mask(f32),
     Blend,
+    GraphicBlend(GraphicBlend),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GraphicBlend {
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WrapMode {
+    #[default]
+    Repeat,
+    Clamp,
+    Mirror,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TexRef {
     pub texture: usize,
     pub uv_set: usize,
+    pub wrap: WrapMode,
+    pub projection: TextureProjection,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextureProjection {
+    #[default]
+    Uv,
+    Triplanar,
 }
 
 #[derive(Clone, Debug)]

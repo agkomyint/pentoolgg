@@ -482,8 +482,8 @@ fn build_svg(
     proxy_edge: Option<u32>,
 ) -> Result<SceneSvg> {
     crate::scene::validate(raw)?;
-    if raw.get("version").and_then(Value::as_u64) != Some(VERSION) {
-        bail!("image rendering requires a version 5 document")
+    if raw.get("version").and_then(Value::as_u64).unwrap_or(0) < VERSION {
+        bail!("image rendering requires a version 5 or newer scene document")
     }
     let resolved = crate::scene::with_resolved_tokens(raw)?;
     let raw = &resolved;
@@ -507,7 +507,7 @@ fn build_svg(
     let mut svg = String::new();
     write!(
         svg,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="100%" height="100%" fill="{}"/>"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect x="0" y="0" width="{width}" height="{height}" fill="{}"/>"#,
         escape(background)
     )?;
     let root = &SvgContext {
@@ -637,59 +637,74 @@ fn write_node(
             root,
             clip_index,
         )?,
-        "path" => write!(
-            svg,
-            r#"<path d="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
-            escape(string(object, "d")?),
-            escape(style_string(object, "fill", "none")),
-            escape(style_string(object, "stroke", "none")),
-            style_number(object, "stroke_width", 0.0)
-        )?,
-        "rect" => write!(
-            svg,
-            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
-            finite(object, "x")?,
-            finite(object, "y")?,
-            finite(object, "width")?,
-            finite(object, "height")?,
-            object
-                .get("radius_x")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0),
-            object
-                .get("radius_y")
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0),
-            escape(style_string(object, "fill", "none")),
-            escape(style_string(object, "stroke", "none")),
-            style_number(object, "stroke_width", 0.0)
-        )?,
-        "ellipse" => write!(
-            svg,
-            r#"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
-            finite(object, "cx")?,
-            finite(object, "cy")?,
-            finite(object, "radius_x")?,
-            finite(object, "radius_y")?,
-            escape(style_string(object, "fill", "none")),
-            escape(style_string(object, "stroke", "none")),
-            style_number(object, "stroke_width", 0.0)
-        )?,
-        "line" => write!(
-            svg,
-            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}"/>"#,
-            finite(object, "x1")?,
-            finite(object, "y1")?,
-            finite(object, "x2")?,
-            finite(object, "y2")?,
-            escape(style_string(object, "stroke", "none")),
-            style_number(object, "stroke_width", 0.0)
-        )?,
+        "path" => {
+            let fill = style_paint(svg, object, "fill", "none", raw, clip_index)?;
+            let stroke = style_paint(svg, object, "stroke", "none", raw, clip_index)?;
+            write!(
+                svg,
+                r#"<path d="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
+                escape(string(object, "d")?),
+                escape(&fill),
+                escape(&stroke),
+                style_number(object, "stroke_width", 0.0)
+            )?;
+        }
+        "rect" => {
+            let fill = style_paint(svg, object, "fill", "none", raw, clip_index)?;
+            let stroke = style_paint(svg, object, "stroke", "none", raw, clip_index)?;
+            write!(
+                svg,
+                r#"<rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
+                finite(object, "x")?,
+                finite(object, "y")?,
+                finite(object, "width")?,
+                finite(object, "height")?,
+                object
+                    .get("radius_x")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                object
+                    .get("radius_y")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                escape(&fill),
+                escape(&stroke),
+                style_number(object, "stroke_width", 0.0)
+            )?;
+        }
+        "ellipse" => {
+            let fill = style_paint(svg, object, "fill", "none", raw, clip_index)?;
+            let stroke = style_paint(svg, object, "stroke", "none", raw, clip_index)?;
+            write!(
+                svg,
+                r#"<ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
+                finite(object, "cx")?,
+                finite(object, "cy")?,
+                finite(object, "radius_x")?,
+                finite(object, "radius_y")?,
+                escape(&fill),
+                escape(&stroke),
+                style_number(object, "stroke_width", 0.0)
+            )?;
+        }
+        "line" => {
+            let stroke = style_paint(svg, object, "stroke", "none", raw, clip_index)?;
+            write!(
+                svg,
+                r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}"/>"#,
+                finite(object, "x1")?,
+                finite(object, "y1")?,
+                finite(object, "x2")?,
+                finite(object, "y2")?,
+                escape(&stroke),
+                style_number(object, "stroke_width", 0.0)
+            )?;
+        }
         "text" => write_text(svg, object, root)?,
         "image" => write_image(svg, object, raw, root, clip_index)?,
         "raster" => write_raster(svg, node, raw)?,
         "photo" => write_photo(svg, object, raw, root, clip_index)?,
-        "scene3d" => write_scene3d(svg, object, raw, root)?,
+        "scene3d" => write_scene3d(svg, object, raw, page, root)?,
         kind => bail!("[unsupported-capability] cannot render node kind {kind}"),
     }
     svg.push_str("</g>");
@@ -772,9 +787,15 @@ fn write_scene3d(
     svg: &mut String,
     node: &Map<String, Value>,
     raw: &Value,
+    page: &Value,
     context: &SvgContext,
 ) -> Result<()> {
-    let png = crate::scene3d::node::render_png(raw, context.root, node)?;
+    let png = crate::scene3d::node::render_png_in_page(
+        raw,
+        context.root,
+        page.get("id").and_then(Value::as_str),
+        node,
+    )?;
     let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
     write!(
         svg,
@@ -1095,6 +1116,93 @@ fn style_string<'a>(object: &'a Map<String, Value>, key: &str, default: &'a str)
         .and_then(|value| value.get("fallback"))
         .and_then(Value::as_str)
         .unwrap_or(default)
+}
+
+fn style_paint(
+    svg: &mut String,
+    object: &Map<String, Value>,
+    key: &str,
+    default: &str,
+    raw: &Value,
+    sequence: &mut usize,
+) -> Result<String> {
+    let Some(paint) = object
+        .get("style")
+        .and_then(|style| style.get(key))
+        .and_then(|slot| slot.get("fallback"))
+    else {
+        return Ok(default.into());
+    };
+    let Some(kind) = paint["kind"].as_str() else {
+        return Ok(paint.as_str().unwrap_or(default).into());
+    };
+    if !matches!(kind, "linear" | "radial") {
+        bail!("[unsupported-capability] SVG shape paint kind {kind} is not supported")
+    }
+    let id = *sequence;
+    *sequence = sequence.saturating_add(1);
+    let spread = match paint["spread"].as_str().unwrap_or("pad") {
+        "pad" => "pad",
+        "repeat" => "repeat",
+        "reflect" => "reflect",
+        other => bail!("[invalid-fill] unsupported SVG gradient spread {other}"),
+    };
+    let tag = if kind == "linear" {
+        "linearGradient"
+    } else {
+        "radialGradient"
+    };
+    write!(svg, "<defs><{tag} id=\"pentool-gradient-{id}\" gradientUnits=\"objectBoundingBox\" spreadMethod=\"{spread}\"")?;
+    if kind == "linear" {
+        write!(
+            svg,
+            " x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"",
+            paint.get("x1").and_then(Value::as_f64).unwrap_or(0.0),
+            paint.get("y1").and_then(Value::as_f64).unwrap_or(0.0),
+            paint.get("x2").and_then(Value::as_f64).unwrap_or(1.0),
+            paint.get("y2").and_then(Value::as_f64).unwrap_or(0.0)
+        )?;
+    } else {
+        write!(
+            svg,
+            " cx=\"{}\" cy=\"{}\" r=\"{}\"",
+            paint.get("cx").and_then(Value::as_f64).unwrap_or(0.5),
+            paint.get("cy").and_then(Value::as_f64).unwrap_or(0.5),
+            paint.get("radius").and_then(Value::as_f64).unwrap_or(0.5)
+        )?;
+    }
+    if paint["space"].as_str() == Some("linear") {
+        svg.push_str(" color-interpolation=\"linearRGB\"");
+    }
+    if let Some(transform) = paint.get("transform").and_then(Value::as_array) {
+        let matrix = transform
+            .iter()
+            .map(|value| value.as_f64().unwrap_or_default().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        write!(svg, " gradientTransform=\"matrix({matrix})\"")?;
+    }
+    svg.push('>');
+    let styles = raw.get("styles").unwrap_or(&Value::Null);
+    for stop in paint["stops"]
+        .as_array()
+        .context("[invalid-fill] gradient stops are missing")?
+    {
+        let position = stop["position"]
+            .as_f64()
+            .context("[invalid-fill] gradient stop position is missing")?;
+        let rgba = crate::fill::color(&stop["color"], styles)?;
+        write!(
+            svg,
+            "<stop offset=\"{position}\" stop-color=\"#{:02x}{:02x}{:02x}\" stop-opacity=\"{}\"/>",
+            (rgba[0] * 255.0).round() as u8,
+            (rgba[1] * 255.0).round() as u8,
+            (rgba[2] * 255.0).round() as u8,
+            rgba[3]
+        )?;
+    }
+    write!(svg, "</{tag}></defs>")?;
+    Ok(format!("url(#pentool-gradient-{id})"))
 }
 
 fn style_number(object: &Map<String, Value>, key: &str, default: f64) -> f64 {

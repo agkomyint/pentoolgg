@@ -256,7 +256,12 @@ pub fn import(bytes: &[u8], resolver: Resolver) -> Result<Model> {
                                 }
                             },
                         };
-                        mat.base_color_texture = id.map(|texture| TexRef { texture, uv_set: 0 });
+                        mat.base_color_texture = id.map(|texture| TexRef {
+                            texture,
+                            uv_set: 0,
+                            wrap: Default::default(),
+                            projection: Default::default(),
+                        });
                     }
                     material_ids.insert(mat_name, model.materials.len());
                     model.materials.push(mat);

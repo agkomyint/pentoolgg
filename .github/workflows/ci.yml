@@ -6,6 +6,22 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  studio-build:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install locked Studio dependencies
+        working-directory: web-ui
+        run: bun install --frozen-lockfile
+      - name: Typecheck and build embedded Studio UI
+        working-directory: web-ui
+        run: bun run build
+      - name: Require committed Studio bundle to match its source
+        run: git diff --exit-code -- web/studio.html
   test:
     timeout-minutes: 30
     strategy:
@@ -42,10 +58,33 @@ jobs:
         continue-on-error: true
         with:
           command: check advisories
+  browser-core:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32-unknown-unknown
+      - name: Build browser renderer
+        run: cargo build -p pentool-wasm --release --target wasm32-unknown-unknown --locked
+      - name: Check browser renderer artifact
+        run: test -s target/wasm32-unknown-unknown/release/pentool_wasm.wasm
+      - name: Smoke render a painted raster layer in WebAssembly
+        run: node scripts/smoke-wasm-raster.mjs target/wasm32-unknown-unknown/release/pentool_wasm.wasm docs/fixtures/raster-v6.pen
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pentool-browser-core
+          path: target/wasm32-unknown-unknown/release/pentool_wasm.wasm
+          if-no-files-found: error
   binary-size:
     # Builds the exact binaries the release workflow ships (same runners), checks
     # the size budget, and hands them to the release so it does not rebuild.
     timeout-minutes: 30
+    needs: browser-core
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +103,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: pentool-browser-core
+          path: target/browser-core
+      - name: Embed browser renderer in release binary
+        shell: bash
+        run: cp target/browser-core/pentool_wasm.wasm web/pentool_core.wasm
       - run: cargo build --release --locked
       - name: Check release binary size on every target (60 MB budget approved for v0.15.0 GPU work)
         shell: bash
