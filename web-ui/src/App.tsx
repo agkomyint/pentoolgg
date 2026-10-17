@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, FilePlus2, FolderOpen, Moon, Redo2, RefreshCw, Save, Sun, Undo2 } from "lucide-react";
+import { Download, FilePlus2, FolderOpen, Home, Moon, Redo2, RefreshCw, Save, Sun, Undo2 } from "lucide-react";
 import { LATEST_FORMAT, collectIds, useStudio } from "@/store";
 import { workspaces } from "@/lib/workspaces";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ import { findNode, pageOf } from "@/lib/model";
 import { exportAs } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { useRenderStats } from "@/lib/wasmCore";
+import { Welcome } from "@/components/Welcome";
 
 const HINTS = {
   select: "Click to select, drag to move, drag handles to resize (Shift keeps proportions). Arrow keys nudge.",
@@ -149,6 +150,7 @@ export default function App() {
   const render = useRenderStats();
   const openInput = useRef<HTMLInputElement>(null);
   const [mobilePanelsOpen, setMobilePanelsOpen] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(true);
   useEffect(() => {
     void s.load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,10 +213,45 @@ export default function App() {
   const hasSelectedDieline = stage === "3d" && selectedNode?.kind === "scene3d" && typeof selectedNode.dieline === "string";
   return (
     <TooltipProvider>
+      <input
+        ref={openInput}
+        hidden
+        type="file"
+        accept=".pen,application/json"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file || !confirmDiscard()) return;
+          try {
+            s.openDoc(JSON.parse(await file.text()));
+            setShowWelcome(false);
+          } catch {
+            s.notify("That file is not a valid .pen document.", true);
+          }
+        }}
+      />
+      {showWelcome ? (
+        <Welcome
+          busy={s.busy}
+          hasDocument={Boolean(s.doc)}
+          onCreate={(width, height) => {
+            if (!confirmDiscard()) return;
+            void s.newDoc(width, height);
+            setShowWelcome(false);
+          }}
+          onOpen={() => openInput.current?.click()}
+          onContinue={() => setShowWelcome(false)}
+        />
+      ) : (
       <div className="flex h-full flex-col bg-background text-foreground">
         <ExtensionPalette />
         {/* Application bar: file actions, module switcher, history. */}
         <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-card px-2">
+          <Tip label="Start screen">
+            <Button variant="ghost" size="icon" aria-label="Start screen" onClick={() => setShowWelcome(true)}>
+              <Home size={15} />
+            </Button>
+          </Tip>
           <strong className="mr-1 text-[13px] tracking-tight">Pentool</strong>
           <Tip label="New document">
             <Button variant="ghost" size="icon" aria-label="New" onClick={() => confirmDiscard() && s.newDoc()}>
@@ -226,22 +263,6 @@ export default function App() {
               <FolderOpen size={15} />
             </Button>
           </Tip>
-          <input
-            ref={openInput}
-            hidden
-            type="file"
-            accept=".pen,application/json"
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file || !confirmDiscard()) return;
-              try {
-                s.openDoc(JSON.parse(await file.text()));
-              } catch {
-                s.notify("That file is not a valid .pen document.", true);
-              }
-            }}
-          />
           <Tip label="Save (Ctrl+S)">
             <Button variant="ghost" size="icon" aria-label="Save" onClick={() => void s.save()}>
               <Save size={15} />
@@ -414,6 +435,7 @@ export default function App() {
           {s.version && <Badge>v{s.version}</Badge>}
         </footer>
       </div>
+      )}
     </TooltipProvider>
   );
 }

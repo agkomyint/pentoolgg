@@ -38,7 +38,7 @@ type State = {
   edit: (label: string, mutate: Mutator) => void;
   /** Replace the whole document with a server-produced one (one undo step). */
   replaceDoc: (doc: Doc, label?: string) => void;
-  newDoc: () => Promise<void>;
+  newDoc: (width?: number, height?: number) => Promise<void>;
   /** Upgrade the open document to a newer format version (undoable, not saved until Save). */
   upgradeDoc: (target?: number) => Promise<void>;
   openDoc: (doc: Doc) => void;
@@ -71,7 +71,7 @@ const HISTORY_LIMIT = 100;
 /** Newest `.pen` format the server can migrate to (`pentool migrate --target 11`). */
 export const LATEST_FORMAT = 11;
 
-function blankDoc(): Doc {
+function blankDoc(width = 1200, height = 800): Doc {
   return {
     format: "pentool",
     version: 4,
@@ -80,7 +80,7 @@ function blankDoc(): Doc {
       {
         id: "page-1",
         name: "Page 1",
-        canvas: { width: 1200, height: 800, background: "#ffffff" },
+        canvas: { width, height, background: "#ffffff" },
         layers: [{ id: "layer-1", name: "Layer 1", visible: true, locked: false, nodes: [] }],
       },
     ],
@@ -166,8 +166,8 @@ export const useStudio = create<State>((set, get) => {
       if (!doc) return;
       adopt(next, { past: [...past, JSON.stringify(doc)].slice(-HISTORY_LIMIT), future: [], dirty: true });
     },
-    async newDoc() {
-      let doc = blankDoc();
+    async newDoc(width = 1200, height = 800) {
+      let doc = blankDoc(width, height);
       let note = "New document. Use Save to download it as .pen.";
       try {
         // Start at the newest format so images, compositing, photo and print work without a manual upgrade.
