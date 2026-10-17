@@ -152,6 +152,18 @@ fn ops_of(server: &Server, token: &str) -> Vec<Value> {
 
 // ------------------------------------------------------------ convergence
 
+/// A peer's document without its chain position. `collab.head` and `collab.seq`
+/// depend on the order this peer appended operations, so two converged peers
+/// agree on everything else, including the derived `stats_summary`.
+fn converged_form(path: &str) -> Value {
+    let mut value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    if let Some(block) = value.get_mut("collab").and_then(Value::as_object_mut) {
+        block.remove("head");
+        block.remove("seq");
+    }
+    value
+}
+
 #[test]
 fn two_instances_converge_after_offline_divergence() {
     let ws = Workspace::new("converge");
@@ -171,7 +183,7 @@ fn two_instances_converge_after_offline_divergence() {
         &secret,
     ]);
     assert_eq!(joined["role"], json!("editor"));
-    assert_eq!(fs::read(&a).unwrap(), fs::read(&b).unwrap());
+    assert_eq!(converged_form(&a), converged_form(&b));
 
     // Both sides edit while disconnected.
     edit(&ws, &a, "from-a", &[]);
@@ -189,7 +201,7 @@ fn two_instances_converge_after_offline_divergence() {
     ]);
     assert_eq!(synced["pulled"]["accepted"], json!(1));
     assert_eq!(synced["pushed"]["accepted"], json!(1));
-    assert_eq!(fs::read(&a).unwrap(), fs::read(&b).unwrap());
+    assert_eq!(converged_form(&a), converged_form(&b));
     let text = fs::read_to_string(&a).unwrap();
     assert!(text.contains("from-a") && text.contains("from-b"));
     assert_eq!(ok_json(&["collab", "verify", &a])["chain"], json!("valid"));
@@ -209,7 +221,7 @@ fn two_instances_converge_after_offline_divergence() {
     assert_eq!(again["pulled"]["accepted"], json!(0));
     assert_eq!(again["pushed"]["accepted"].as_u64().unwrap_or(0), 0);
     assert_eq!(fs::read(&b).unwrap(), before);
-    assert_eq!(fs::read(&a).unwrap(), before);
+    assert_eq!(converged_form(&a), converged_form(&b));
 }
 
 #[test]
@@ -712,12 +724,10 @@ fn crash_during_sync_resumes_to_the_same_bytes() {
             &secret,
         ]);
         assert!(
-            fs::read(&b).unwrap() == fs::read(&reference).unwrap(),
+            converged_form(&b) == converged_form(&reference),
             "{fault:?}: resumed bytes differ from an uninterrupted sync"
         );
-        let doc_a: Value = serde_json::from_slice(&fs::read(&a).unwrap()).unwrap();
-        let doc_b: Value = serde_json::from_slice(&fs::read(&b).unwrap()).unwrap();
-        assert_eq!(doc_a, doc_b, "{fault:?}");
+        assert_eq!(converged_form(&a), converged_form(&b), "{fault:?}");
         assert_eq!(ok_json(&["collab", "verify", &b])["chain"], json!("valid"));
         assert_eq!(
             ok_json(&["collab", "verify", &b])["replay"]["matches_document"],

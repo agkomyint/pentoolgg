@@ -144,6 +144,7 @@ static ROUTES: &[Entry] = &[
     e("/api/extensions/run", NONE, OWNER),
     e("/api/registry/install", NONE, OWNER),
     // collaboration
+    e("/api/collab/stats", VIEW, NONE),
     e("/api/collab/session", VIEW, NONE),
     e("/api/collab/genesis", VIEW, NONE),
     e("/api/collab/events", VIEW, NONE),

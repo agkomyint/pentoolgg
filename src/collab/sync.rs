@@ -758,9 +758,12 @@ pub fn integrate(
     let mut staged_actors: Vec<Actor> = Vec::new();
 
     // Edits made outside the transaction path are attributed to the external
-    // actor first, exactly as a local mutation would, so nothing is lost.
-    if state.materialize() != before_value {
-        let drafts = state.derive(&before_value)?;
+    // actor first, exactly as a local mutation would, so nothing is lost. The
+    // embedded `collab` block is derived data, not an edit.
+    let mut before_plain = before_value.clone();
+    super::stats::strip(&mut before_plain);
+    if state.materialize() != before_plain {
+        let drafts = state.derive(&before_plain)?;
         let mut clock = super::hlc::Clock::new(&log::peer_id(&dir)?, state.max_stamp());
         let base = format!("sha256:{before_revision}");
         let mut catch_up = Vec::new();
@@ -773,7 +776,7 @@ pub fn integrate(
             "catch-up",
             &mut catch_up,
         )?;
-        if state.materialize() != before_value {
+        if state.materialize() != before_plain {
             bail!("[collab-divergence] the existing document could not be reconciled with the operation log; run `pentool collab verify`")
         }
         staged_actors.push(super::external_actor());
@@ -807,7 +810,9 @@ pub fn integrate(
     let after_value: Value = serde_json::from_slice(&after)?;
     crate::transaction::validate_value(&after_value)
         .context("[invalid-merge] the merged document is not valid; the batch was not applied")?;
-    let after_revision = crate::transaction::revision(&after);
+    // Log lines record the revision of the document without its `collab`
+    // block, exactly like a local mutation (the block embeds the log head).
+    let after_revision = super::content_revision(&after);
 
     // Report: which of the fresh ops were applied, parked or merge-rejected.
     let fresh_ids: HashSet<&str> = fresh.iter().map(|o| o.id.as_str()).collect();
@@ -842,7 +847,6 @@ pub fn integrate(
     outcome.duplicate.sort();
     outcome.duplicate.dedup();
     outcome.pending.sort();
-    outcome.document_revision = after_revision.clone();
 
     // Stage 3: the write-ahead unit.
     let mut prev = head.hash.clone();
@@ -858,6 +862,23 @@ pub fn integrate(
         seq,
         hash: prev.clone(),
     });
+    // Embed the derived stats summary in the same write as the operations it
+    // records, as a local mutation does, so peers stay byte-identical.
+    let mut known = log::read_actors(&dir)?;
+    for actor in &staged_actors {
+        if !known.iter().any(|a| a.id == actor.id) {
+            known.push(actor.clone());
+        }
+    }
+    let summary = super::stats::summary(&merged.state.stats_raw(), &known)?;
+    let mut final_value = after_value;
+    final_value["collab"] = super::stats::embed(before_value.get("collab"), seq, &prev, summary);
+    super::stats::validate_block(&final_value)?;
+    let mut after = serde_json::to_vec_pretty(&final_value)?;
+    after.push(b'\n');
+    crate::transaction::validate_value(&final_value)
+        .context("[invalid-merge] the merged document is not valid; the batch was not applied")?;
+    outcome.document_revision = crate::transaction::revision(&after);
     let prepared = log::prepare(&dir, lock, staged_lines, staged_actors, &after_revision)?;
     if take_fault(document, Fault::AfterPrepare) {
         bail!("[fault-injected] stopped after the write-ahead record was staged");
