@@ -1,7 +1,7 @@
 use pentool::{
-    agent, ai, asset, benchmark, composite, diff, document, editing, extension, fonts, geometry,
-    history, image, import, instance, json, layout, library, package, page, pdf, raster, render,
-    replace, scene, server, style, text, transaction,
+    agent, ai, asset, benchmark, comments, composite, diff, document, editing, extension, fonts,
+    geometry, history, image, import, instance, json, layout, library, package, page, pdf, raster,
+    render, replace, scene, server, style, text, transaction,
 };
 
 use anyhow::{bail, Context, Result};
@@ -591,6 +591,124 @@ impl OpFlags {
         }
         Ok(image::OpParams(map))
     }
+}
+
+#[derive(Args)]
+struct CommentActor {
+    /// Display name of the commenter.
+    #[arg(long, default_value = "local")]
+    author: String,
+    /// Stable actor id.
+    #[arg(long, default_value = "local")]
+    actor_id: String,
+    /// human or agent.
+    #[arg(long, default_value = "human")]
+    kind: String,
+    /// For agents: the model or tool name.
+    #[arg(long)]
+    model: Option<String>,
+    /// For agents: the human who directed the work.
+    #[arg(long)]
+    directed_by: Option<String>,
+}
+
+impl CommentActor {
+    fn actor(self) -> comments::Actor {
+        comments::Actor {
+            kind: self.kind,
+            id: self.actor_id,
+            name: self.author,
+            model: self.model,
+            directed_by: self.directed_by,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum CommentAction {
+    /// Start a thread on the document, a page, an object or a point.
+    Add {
+        input: PathBuf,
+        body: String,
+        #[arg(long)]
+        page: Option<String>,
+        #[arg(long)]
+        object: Option<String>,
+        #[arg(long, requires = "y", allow_negative_numbers = true)]
+        x: Option<f64>,
+        #[arg(long, requires = "x", allow_negative_numbers = true)]
+        y: Option<f64>,
+        #[command(flatten)]
+        actor: CommentActor,
+        /// Print compact single-line JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reply to a thread.
+    Reply {
+        input: PathBuf,
+        thread: String,
+        body: String,
+        #[arg(long)]
+        if_version: Option<u64>,
+        #[command(flatten)]
+        actor: CommentActor,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a thread resolved.
+    Resolve {
+        input: PathBuf,
+        thread: String,
+        #[arg(long)]
+        if_version: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reopen a resolved thread.
+    Reopen {
+        input: PathBuf,
+        thread: String,
+        #[arg(long)]
+        if_version: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set a review state: none, requested, approved or changes-requested.
+    Review {
+        input: PathBuf,
+        thread: String,
+        state: String,
+        #[arg(long)]
+        if_version: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List threads (compact, paginated); --thread shows one with its comments.
+    List {
+        input: PathBuf,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        review_state: Option<String>,
+        #[arg(long)]
+        page: Option<String>,
+        #[arg(long)]
+        object: Option<String>,
+        #[arg(long)]
+        mention: Option<String>,
+        #[arg(long)]
+        thread: Option<String>,
+        /// Include every comment body.
+        #[arg(long)]
+        comments: bool,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2726,6 +2844,12 @@ enum Command {
     /// Edit primitive parameters, or explicitly convert a primitive to a path.
     #[command(allow_negative_numbers = true)]
     ShapeEdit(Box<ShapeEditArgs>),
+    /// Comment threads, mentions and review states kept beside the document.
+    #[command(allow_negative_numbers = true)]
+    Comment {
+        #[command(subcommand)]
+        action: CommentAction,
+    },
     /// Show history, or prune it with `history prune FILE`.
     History {
         target: String,
@@ -10102,6 +10226,101 @@ async fn run() -> Result<()> {
                     &serde_json::json!({"change":change,"result":result})
                 )?
             );
+            Ok(())
+        }
+        Command::Comment { action } => {
+            let (result, compact) = match action {
+                CommentAction::Add {
+                    input,
+                    body,
+                    page,
+                    object,
+                    x,
+                    y,
+                    actor,
+                    json,
+                } => {
+                    let target = comments::Target {
+                        page,
+                        object,
+                        point: x.zip(y).map(|(x, y)| [x, y]),
+                    };
+                    (comments::add(&input, target, &actor.actor(), &body)?, json)
+                }
+                CommentAction::Reply {
+                    input,
+                    thread,
+                    body,
+                    if_version,
+                    actor,
+                    json,
+                } => (
+                    comments::reply(&input, &thread, &actor.actor(), &body, if_version)?,
+                    json,
+                ),
+                CommentAction::Resolve {
+                    input,
+                    thread,
+                    if_version,
+                    json,
+                } => (
+                    comments::set_resolved(&input, &thread, true, if_version)?,
+                    json,
+                ),
+                CommentAction::Reopen {
+                    input,
+                    thread,
+                    if_version,
+                    json,
+                } => (
+                    comments::set_resolved(&input, &thread, false, if_version)?,
+                    json,
+                ),
+                CommentAction::Review {
+                    input,
+                    thread,
+                    state,
+                    if_version,
+                    json,
+                } => (
+                    comments::set_review(&input, &thread, &state, if_version)?,
+                    json,
+                ),
+                CommentAction::List {
+                    input,
+                    status,
+                    review_state,
+                    page,
+                    object,
+                    mention,
+                    thread,
+                    comments: with_comments,
+                    offset,
+                    limit,
+                    json,
+                } => (
+                    comments::list(
+                        &input,
+                        &comments::ListOptions {
+                            status,
+                            review_state,
+                            page,
+                            object,
+                            mention,
+                            thread,
+                            comments: with_comments,
+                            offset,
+                            limit,
+                        },
+                    )?,
+                    json,
+                ),
+            };
+            if compact {
+                println!("{}", serde_json::to_string(&result)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
             Ok(())
         }
         Command::History {

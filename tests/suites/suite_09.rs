@@ -29,3 +29,6 @@ mod v0120_ink_cli;
 
 #[path = "../v080_compositing.rs"]
 mod v080_compositing;
+
+#[path = "../comments.rs"]
+mod comments;
