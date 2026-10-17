@@ -178,7 +178,7 @@ pub fn execute(doc: &mut Document, layer_id: &str, id: &str, op: &Operation) -> 
     let result = match *op {
         Operation::Bounds => {
             let r = bez.bounding_box();
-            json!({"x":r.x0,"y":r.y0,"width":r.width(),"height":r.height(),"includes_stroke":false})
+            json!({"x":crate::json::round3(r.x0),"y":crate::json::round3(r.y0),"width":crate::json::round3(r.width()),"height":crate::json::round3(r.height()),"includes_stroke":false})
         }
         Operation::Nodes => {
             let mut index = 0;
@@ -362,7 +362,7 @@ fn execute_text(doc: &mut Document, layer_id: &str, id: &str, op: &Operation) ->
         Operation::Bounds => {
             let r = crate::render::text_bounds(doc, text)?;
             Ok(
-                json!({"x":r.x0,"y":r.y0,"width":r.width(),"height":r.height(),"kind":"text","includes_stroke":false}),
+                json!({"x":crate::json::round3(r.x0),"y":crate::json::round3(r.y0),"width":crate::json::round3(r.width()),"height":crate::json::round3(r.height()),"kind":"text","includes_stroke":false}),
             )
         }
         Operation::Hit { x, y, tolerance } => {

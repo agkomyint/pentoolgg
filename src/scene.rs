@@ -627,7 +627,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
                 .as_f64()
                 .context("canvas height missing")?;
             return Ok(
-                json!({"id":id,"x":0,"y":0,"width":width,"height":height,"right":width,"bottom":height}),
+                json!({"id":id,"x":0,"y":0,"width":crate::json::round3(width),"height":crate::json::round3(height),"right":crate::json::round3(width),"bottom":crate::json::round3(height)}),
             );
         }
     }
@@ -774,7 +774,7 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
             Affine::IDENTITY,
         )? {
             return Ok(
-                json!({"id":id,"x":rect.x0,"y":rect.y0,"width":rect.width(),"height":rect.height(),"right":rect.x1,"bottom":rect.y1}),
+                json!({"id":id,"x":crate::json::round3(rect.x0),"y":crate::json::round3(rect.y0),"width":crate::json::round3(rect.width()),"height":crate::json::round3(rect.height()),"right":crate::json::round3(rect.x1),"bottom":crate::json::round3(rect.y1)}),
             );
         }
     }
