@@ -1314,7 +1314,7 @@ pub fn parent_remove(raw: &mut Value, id: &str) -> Result<Value> {
     let users = pages_using(raw, id);
     ensure!(
         users.is_empty(),
-        "[in-use] parent {id} is used by pages {}; assign them another parent first (`page parent <page> --parent <id>` or `--none`)",
+        "[in-use] parent {id} is used by pages {}; assign them another parent first (`pentool parent <file> assign <page> --parent <id>` or `--none`)",
         users.join(", ")
     );
     let derived: Vec<&str> = list(&raw["layout"], "parents")
