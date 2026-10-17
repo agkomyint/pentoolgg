@@ -138,6 +138,8 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/color/pdfx", get(color_pdfx))
         .route("/api/photo/catalog", get(photo_catalog))
         .route("/api/photo/detail", get(photo_detail))
+        .route("/api/photo/import", post(photo_import))
+        .route("/api/photo/place", post(photo_place))
         .route("/api/photo/preview", post(photo_preview))
         .route("/api/photo/edit", post(photo_edit))
         .route("/api/composite/analyze", post(composite_analyze))
@@ -3985,6 +3987,189 @@ async fn photo_detail(
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PhotoImportQuery {
+    id: String,
+    name: String,
+}
+
+/// Import a DNG, JPEG or PNG from Studio into the shared project.
+fn photo_import_apply(
+    file: &std::path::Path,
+    gate: &Mutex<()>,
+    query: &PhotoImportQuery,
+    expected: &str,
+    bytes: &[u8],
+) -> Result<serde_json::Value> {
+    const MAX_STUDIO_DNG_BYTES: usize = 64 * 1024 * 1024;
+    anyhow::ensure!(
+        !bytes.is_empty() && bytes.len() <= MAX_STUDIO_DNG_BYTES,
+        "[limit-exceeded] Studio accepts photo files up to 64 MiB"
+    );
+    anyhow::ensure!(
+        !query.name.trim().is_empty() && query.name.len() <= 512,
+        "[invalid-input] photo name must contain 1 to 512 bytes"
+    );
+    let _guard = gate
+        .lock()
+        .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+    let original = std::fs::read(file)?;
+    let current = crate::transaction::revision(&original);
+    anyhow::ensure!(
+        expected == current,
+        "[conflict] the document changed since revision {expected} (now {current}); reload the photo catalog and retry"
+    );
+    let mut raw: serde_json::Value = serde_json::from_slice(&original)?;
+    let is_dng = crate::photo::dng::Dng::inspect(bytes).is_ok();
+    let result = if is_dng {
+        crate::photo::catalog::add_raw(
+            &mut raw,
+            &query.id,
+            query.name.trim(),
+            bytes,
+            crate::image::embedded_storage(bytes),
+            crate::photo::catalog::camera_profile("auto")?,
+        )?
+    } else {
+        crate::photo::catalog::add_rendered(
+            &mut raw,
+            &query.id,
+            query.name.trim(),
+            bytes,
+            crate::image::embedded_storage(bytes),
+        )?
+    };
+    let change = crate::transaction::commit_value(
+        file,
+        "browser-photo-raw-add",
+        false,
+        Some(expected),
+        &raw,
+    )?;
+    let revision = crate::transaction::revision(&std::fs::read(file)?);
+    Ok(serde_json::json!({"change":change,"result":result,"revision":revision}))
+}
+
+async fn photo_import(
+    State(state): State<Shared>,
+    axum::extract::Query(query): axum::extract::Query<PhotoImportQuery>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(expected) = headers
+        .get("x-pentool-revision")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+    else {
+        return problem(anyhow::anyhow!(
+            "[invalid-input] photo import requires the latest x-pentool-revision header"
+        ));
+    };
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let file = state
+            .file
+            .clone()
+            .context("[missing-resource] no shared document; run `pentool serve PROJECT.pen`")?;
+        photo_import_apply(&file, &state.gate, &query, &expected, &body)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|result| result);
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PhotoPlaceRequest {
+    photo: String,
+    #[serde(default = "master")]
+    variant: String,
+    page: String,
+    layer: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    #[serde(default = "photo_fit_contain")]
+    fit: String,
+    #[serde(default = "photo_center_position")]
+    position: [f64; 2],
+    revision: String,
+}
+
+fn photo_fit_contain() -> String {
+    "contain".into()
+}
+
+fn photo_center_position() -> [f64; 2] {
+    [0.5, 0.5]
+}
+
+fn photo_place_apply(
+    file: &std::path::Path,
+    gate: &Mutex<()>,
+    body: &PhotoPlaceRequest,
+) -> Result<serde_json::Value> {
+    let _guard = gate
+        .lock()
+        .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+    let bytes = std::fs::read(file)?;
+    let current = crate::transaction::revision(&bytes);
+    anyhow::ensure!(
+        body.revision == current,
+        "[conflict] the document changed since revision {} (now {current}); reload the photo and retry",
+        body.revision
+    );
+    let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let result = crate::photo::catalog::place(
+        &mut raw,
+        file,
+        &body.photo,
+        &body.variant,
+        &crate::photo::catalog::Placement {
+            page: Some(body.page.clone()),
+            layer: body.layer.clone(),
+            id: None,
+            x: body.x,
+            y: body.y,
+            width: Some(body.width),
+            height: Some(body.height),
+            fit: body.fit.clone(),
+            position: body.position,
+        },
+    )?;
+    let change = crate::transaction::commit_value(
+        file,
+        "browser-photo-place",
+        false,
+        Some(&body.revision),
+        &raw,
+    )?;
+    let revision = crate::transaction::revision(&std::fs::read(file)?);
+    Ok(serde_json::json!({"change":change,"result":result,"revision":revision}))
+}
+
+async fn photo_place(State(state): State<Shared>, Json(body): Json<PhotoPlaceRequest>) -> Response {
+    let result = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
+        let file = state
+            .file
+            .clone()
+            .context("[missing-resource] no shared document; run `pentool serve PROJECT.pen`")?;
+        photo_place_apply(&file, &state.gate, &body)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|result| result);
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+#[derive(serde::Deserialize)]
 struct PhotoPreviewRequest {
     photo: String,
     #[serde(default = "master")]
@@ -4478,6 +4663,72 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn studio_photo_import_embeds_dng_and_rejects_stale_or_invalid_input_atomically() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "pentool-photo-import-test-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("photos.pen");
+        let original = serde_json::to_vec(&crate::scene::new_document(80, 60)).unwrap();
+        std::fs::write(&file, &original).unwrap();
+        let gate = std::sync::Mutex::new(());
+        let query = super::PhotoImportQuery {
+            id: "studio-shot".into(),
+            name: "Studio Shot.dng".into(),
+        };
+        let expected = crate::transaction::revision(&original);
+        let dng = include_bytes!("../docs/fixtures/photo-dng-rggb16.dng");
+        let imported = super::photo_import_apply(&file, &gate, &query, &expected, dng).unwrap();
+        let saved = std::fs::read(&file).unwrap();
+        let document: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(imported["result"]["photo"], "studio-shot");
+        assert!(document["photography"]["photos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|photo| photo["id"] == "studio-shot"));
+
+        let after_import = saved.clone();
+        let stale = super::photo_import_apply(&file, &gate, &query, &expected, dng).unwrap_err();
+        assert!(stale.to_string().contains("[conflict]"));
+        assert_eq!(std::fs::read(&file).unwrap(), after_import);
+
+        let latest = crate::transaction::revision(&after_import);
+        let invalid = super::photo_import_apply(&file, &gate, &query, &latest, b"not a DNG");
+        assert!(invalid.is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), after_import);
+
+        let place = super::PhotoPlaceRequest {
+            photo: "studio-shot".into(),
+            variant: "master".into(),
+            page: "page-1".into(),
+            layer: "layer-1".into(),
+            x: 20.0,
+            y: 10.0,
+            width: 40.0,
+            height: 30.0,
+            fit: "contain".into(),
+            position: [0.5, 0.5],
+            revision: latest,
+        };
+        let placed = super::photo_place_apply(&file, &gate, &place).unwrap();
+        assert_eq!(placed["result"]["photo"], "studio-shot");
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert!(document["pages"][0]["layers"][0]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|node| node["kind"] == "photo" && node["photo"] == "studio-shot"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn browser_design_import_is_local_namespaced_and_reports_fidelity() {
         use base64::Engine;

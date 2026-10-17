@@ -151,3 +151,86 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--primary); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 8px; border: 2px solid var(--card); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+.studio-brand { display: flex; align-items: center; gap: .5rem; font-size: .82rem; letter-spacing: -.01em; }
+.studio-export-menu > summary { list-style: none; }
+.studio-export-menu > summary::-webkit-details-marker { display: none; }
+.studio-export-popover { color: var(--foreground); }
+.studio-export-option { display: flex; min-height: 2.75rem; flex-direction: column; align-items: flex-start; justify-content: center; gap: .1rem; border-radius: 4px; padding: .35rem .5rem; text-align: left; font-size: .78rem; font-weight: 600; cursor: pointer; }
+.studio-export-option:hover { background: var(--accent); }
+.studio-export-option:disabled { cursor: not-allowed; opacity: .5; }
+.studio-export-option small { color: var(--muted-foreground); font-size: .66rem; font-weight: 400; }
+.studio-workflowbar { min-height: 3rem; }
+.studio-workflow-button { display: inline-flex; min-height: 2.5rem; flex: 0 0 auto; align-items: center; gap: .5rem; padding: 0 .9rem; border: 1px solid transparent; border-radius: 6px; color: var(--muted-foreground); background: transparent; font-size: .8rem; font-weight: 550; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease; }
+.studio-workflow-button:hover { color: var(--foreground); background: var(--muted); }
+.studio-workflow-button.is-active { border-color: var(--border); color: var(--foreground); background: var(--background); box-shadow: 0 1px 2px oklch(0 0 0 / 5%); }
+.studio-modebar { min-height: 2.75rem; }
+.studio-mode-button { display: inline-flex; min-height: 2.2rem; flex: 0 0 auto; align-items: center; gap: .45rem; padding: 0 .8rem; border-radius: 5px; color: var(--muted-foreground); font-size: .76rem; cursor: pointer; }
+.studio-mode-button:hover { color: var(--foreground); background: var(--accent); }
+.studio-mode-button.is-active { color: var(--primary); background: color-mix(in oklab, var(--primary) 9%, transparent); font-weight: 600; }
+.studio-toolrail { display: flex; width: 4rem; flex: 0 0 4rem; flex-direction: column; align-items: center; gap: .4rem; overflow-y: auto; border-right: 1px solid var(--border); background: var(--card); padding: .6rem .4rem; }
+.studio-toolrail-label { margin: 0 0 .25rem; color: var(--muted-foreground); font-size: .55rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap; }
+.studio-toolrail-group { display: flex; flex-direction: column; align-items: center; gap: .3rem; }
+.studio-toolrail-divider { width: 1.5rem; height: 1px; flex: 0 0 auto; margin: .2rem 0; background: var(--border); }
+.studio-tool-button { display: grid; width: 2.75rem; height: 2.75rem; flex: 0 0 auto; place-items: center; border: 1px solid transparent; border-radius: 7px; color: var(--muted-foreground); background: transparent; cursor: pointer; transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease; }
+.studio-tool-button:hover { border-color: var(--border); color: var(--foreground); background: var(--muted); }
+.studio-tool-button.is-active { border-color: color-mix(in oklab, var(--primary) 35%, var(--border)); color: var(--primary); background: color-mix(in oklab, var(--primary) 10%, var(--card)); }
+.studio-appbar button:focus-visible, .studio-workflow-button:focus-visible, .studio-mode-button:focus-visible, .studio-tool-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .studio-appbar { gap: .2rem; }
+  .studio-brand { gap: .35rem; font-size: .72rem; }
+  .studio-workflowbar { gap: .2rem; padding-inline: .4rem; }
+  .studio-workflow-button { min-height: 2.75rem; gap: .4rem; padding-inline: .65rem; font-size: .72rem; }
+  .studio-modebar { padding-inline: .5rem; }
+  .studio-contextbar { gap: .45rem; padding-inline: .6rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-workflow-button, .studio-mode-button, .studio-tool-button { transition: none; }
+}
+
+/* One application bar; creative tools stay beside the canvas. */
+.studio-appbar { flex-wrap: nowrap; }
+.studio-header-select { height: 2rem; max-width: 9rem; flex-shrink: 0; border: 1px solid var(--border); border-radius: 4px; padding: 0 .5rem; background: var(--background); color: var(--foreground); font-size: .75rem; }
+.studio-header-page { max-width: 10rem; }
+.studio-header-select:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.studio-brush-options { display: flex; flex-shrink: 0; align-items: center; gap: .65rem; padding-inline: .5rem; border-inline: 1px solid var(--border); font-size: .7rem; color: var(--muted-foreground); }
+.studio-brush-options label { display: flex; align-items: center; gap: .3rem; }
+.studio-brush-options input[type="number"] { width: 3rem; height: 1.75rem; padding: .2rem; color: var(--foreground); }
+.studio-brush-options input[type="color"] { width: 1.75rem; height: 1.75rem; padding: 2px; }
+.studio-editor-body { position: relative; }
+.studio-toolrail { width: 3rem; flex-basis: 3rem; padding: .4rem .15rem; }
+.studio-tool-button { width: 2.5rem; height: 2.5rem; }
+@media (max-width: 1279px) { .studio-appbar > span[title] { display: none; } .studio-appbar .studio-brand { display: none; } .studio-appbar .studio-header-page { max-width: 7rem; } }
+@media (max-width: 1023px) { #mobile-panels { position: absolute; right: 0; top: 0; bottom: 0; z-index: 40; width: min(320px, calc(100% - 3rem)); max-height: none; border-left: 1px solid var(--border); } }
+@media (max-width: 767px) { .studio-brush-options, .studio-header-page { display: none; } .studio-appbar { gap: .1rem; } .studio-header-select { max-width: 6rem; margin-right: auto; } .studio-appbar > .studio-export-menu summary span { display: none; } }
+
+/* Stable editor shell: independent inspector and document hierarchy. */
+.studio-stage-area { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.studio-stage { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.studio-stage[hidden] { display: none; }
+.studio-dock { position: relative; display: flex; flex: 0 0 auto; flex-direction: column; min-height: 0; border-left: 1px solid var(--border); background: var(--card); }
+.studio-dock.is-collapsed { display: none; }
+.studio-inspector { display: flex; flex: 1; min-height: 160px; overflow: hidden; }
+.studio-layers { flex: 0 1 auto; min-height: 120px; max-height: calc(100% - 160px); overflow: auto; padding: .6rem; }
+.studio-dock-resizer { position: absolute; z-index: 5; top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; touch-action: none; }
+.studio-layers-resizer { z-index: 5; flex: 0 0 5px; height: 5px; border-top: 1px solid var(--border); cursor: row-resize; touch-action: none; }
+.studio-dock-resizer:hover, .studio-layers-resizer:hover { background: var(--primary); }
+.studio-dock [role="separator"]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.studio-toolrail { gap: .15rem; }
+.studio-toolrail-group { gap: .05rem; }
+@media (max-width: 1023px) {
+  #mobile-panels.studio-dock { display: none; position: absolute; width: min(320px, calc(100% - 3rem)) !important; }
+  #mobile-panels.studio-dock.is-mobile-open { display: flex; }
+}
+
+@media (max-width: 1100px) { .studio-brush-options, .studio-app-actions { display: none !important; } }
+@media (max-width: 899px) { .studio-header-page { display: none; } }
+@media (max-width: 639px) {
+  .studio-appbar button[aria-label="Redo"], .studio-appbar button[aria-label="Reload project"], .studio-appbar button[aria-label="Toggle theme"] { display: none; }
+  .studio-compact-menu { display: block; }
+  .studio-appbar > button { flex-shrink: 0; }
+}
+
+.studio-shell > footer { white-space: nowrap; overflow: hidden; }
+.studio-shell > footer > .tabular-nums { flex-shrink: 0; }

@@ -19,7 +19,24 @@ export function clone<T>(value: T): T {
 }
 
 export function pageOf(doc: Doc | null, pageId: string | undefined): Page | undefined {
-  return doc?.pages?.find((p) => p.id === pageId) ?? doc?.pages?.[0];
+  if (!doc) return undefined;
+  if (Array.isArray(doc.pages) && doc.pages.length > 0) {
+    return doc.pages.find((p) => p.id === pageId) ?? doc.pages[0];
+  }
+  // v1-v3 store one canvas and its layers at the document root. Expose that
+  // legacy canvas through the same editing helpers without changing its format.
+  const legacy = doc as Doc & { canvas?: Page["canvas"]; layers?: Page["layers"] };
+  if (doc.version >= 1 && doc.version <= 3 && legacy.canvas && Array.isArray(legacy.layers)) {
+    return { id: "legacy-canvas", name: String(doc.name ?? "Canvas"), canvas: legacy.canvas, layers: legacy.layers };
+  }
+  return undefined;
+}
+
+export function pagesOf(doc: Doc | null): Page[] {
+  if (!doc) return [];
+  if (Array.isArray(doc.pages)) return doc.pages;
+  const legacyPage = pageOf(doc, undefined);
+  return legacyPage ? [legacyPage] : [];
 }
 
 /** Direct children of a layer in paint order. Legacy v3 layers keep paths then texts. */
@@ -130,7 +147,7 @@ export function collectIds(doc: Doc): Set<string> {
       visit(children(node));
     }
   };
-  for (const page of doc.pages ?? []) {
+  for (const page of pagesOf(doc)) {
     ids.add(page.id);
     for (const layer of page.layers ?? []) {
       ids.add(layer.id);

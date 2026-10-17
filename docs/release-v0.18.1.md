@@ -1,20 +1,24 @@
 # Pentool v0.18.1
 
-This user-requested release is an exception to the patch-only bug-fix policy:
-it adds the first slice of the Studio workflow redesign after v0.18.0 had
-already shipped. Future releases should use the documented semantic versioning
-policy.
+This user-directed Studio UI redesign is an exception to the patch-only bug-fix
+policy after v0.18.0 had shipped. Future releases should use the documented
+semantic versioning policy.
 
-## Studio project entry
+## Studio workflow redesign
 
-- New startup welcome screen with Continue, Open `.pen`, and canvas creation.
-- Canvas presets for social square, poster, screen, and A4 page, plus custom
-  dimensions from 1 to 10,000 pixels per side.
-- Home action returns to the welcome screen while keeping the current project
-  in memory. Unsaved edits are protected before replacing the document.
-- Workflow redesign scope and remaining tasks are tracked in
-  [`roadmap/v0.18.1/TASKS.md`](roadmap/v0.18.1/TASKS.md).
+- Welcome screen to continue a project, open `.pen`, or create a common or
+  custom-sized canvas.
+- Grouped Design, Photo, Layout, Packaging, Print, and Extensions navigation;
+  Canvas, Images, Composite, and Paint are contextual Design modes.
+- One application bar with contextual tool settings, a combined vector/paint
+  tool rail, and a resizable dock with layers visible alongside the inspector.
+- Persistent visited canvases, shared Design/Paint zoom and framing, and bounded
+  preview reuse for unchanged documents. Hidden canvases pause editing shortcuts.
+- DNG/JPEG/PNG import into a shared served project, rendered-image tone/color/
+  detail/effects/crop edits, and placement of a developed photo on the active
+  page. Camera-specific RAW controls remain DNG-only.
+- Main export menu for current-page PNG/SVG and document PDF/EPUB.
 
-The existing editor workspaces and project formats are unchanged. This is the
-entry-flow foundation; workspace consolidation, shared canvas behavior, and
-cross-project asset flows remain future work.
+The project roadmap lists scope, acceptance criteria, and limits in
+[`roadmap/v0.18.1/TASKS.md`](roadmap/v0.18.1/TASKS.md). Specialized photo,
+paint, and 3D stages remain in the same project shell.

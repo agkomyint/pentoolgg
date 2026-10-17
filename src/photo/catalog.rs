@@ -1242,7 +1242,28 @@ pub fn develop_raw(
     let source = photo["source"].as_str().unwrap_or_default();
     let asset = &catalog["assets"][source];
     if asset["kind"] == "rendered" {
-        bail!("[invalid-develop] photo {photo_id} has a rendered source; `raw develop` applies to raw sources")
+        anyhow::ensure!(white_balance.is_none() && upright.is_none() && guides.is_empty() && !auto_tone && camera_profile.is_none() && lens_profile.is_none(), "[unsupported-capability] camera white balance, camera profiles and automatic geometry currently require a DNG source");
+        let raw_only = ["raw", "white_balance", "lens", "calibration"];
+        anyhow::ensure!(
+            !set.iter().any(|(path, _)| raw_only.iter().any(|group| path == group || path.starts_with(&format!("{group}."))))
+                && !unset.iter().any(|path| raw_only.iter().any(|group| path == group || path.starts_with(&format!("{group}.")))),
+            "[unsupported-capability] raw, white balance, lens and calibration settings require a DNG source"
+        );
+        let mut develop = photo["variants"][variant_index]["develop"].clone();
+        for path in &unset {
+            unset_path(&mut develop, path)?;
+        }
+        for (path, value) in set {
+            set_path(&mut develop, &path, value)?;
+        }
+        let mut changed = raw.clone();
+        changed["photography"]["photos"][photo_index]["variants"][variant_index]["develop"] =
+            develop;
+        crate::scene::validate(&changed)?;
+        *raw = changed;
+        return Ok(
+            json!({"photo":photo_id,"variant":variant_id,"changed":true,"source":"rendered"}),
+        );
     }
     if !guides.is_empty() && upright.as_deref() != Some("guided") {
         bail!("[invalid-input] --guide segments need --upright guided")
@@ -1491,9 +1512,6 @@ fn find<'a>(
         })?;
     let source = photo["source"].as_str().unwrap_or_default();
     let asset = &catalog["assets"][source];
-    if asset["kind"] == "rendered" {
-        bail!("[unsupported-capability] photo {photo_id} has a rendered source; photo development currently renders raw sources only")
-    }
     let bytes = stored_bytes(document, &asset["storage"], source)
         .with_context(|| format!("photo {photo_id} source"))?;
     Ok((&variant["develop"], bytes, &catalog["profiles"]))
@@ -1519,10 +1537,105 @@ pub fn render_validated(
     variant_id: &str,
 ) -> Result<super::pipeline::Developed> {
     let (develop, bytes, profiles) = find(raw, document, photo_id, variant_id)?;
+    let source = raw["photography"]["photos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|photo| photo["id"] == photo_id)
+        .map(|photo| photo["source"].as_str().unwrap_or_default())
+        .unwrap_or_default();
+    if raw["photography"]["assets"][source]["kind"] == "rendered" {
+        return render_raster(raw, document, &bytes, develop);
+    }
     let dng = Dng::inspect(&bytes)?;
     let loader = profile_loader(document, profiles);
     let masks = super::local::Lookup { raw, document };
     super::pipeline::develop(&dng, develop, &loader, Some(&masks))
+}
+
+fn render_raster(
+    raw: &Value,
+    document: &Path,
+    bytes: &[u8],
+    develop: &Value,
+) -> Result<super::pipeline::Developed> {
+    use super::pixels::{Raster, Samples};
+    use image::ImageDecoder;
+    let format = image::guess_format(bytes)?;
+    let mut decoder = image::ImageReader::with_format(std::io::Cursor::new(bytes), format)
+        .into_decoder()
+        .context("[malformed-resource] could not initialize rendered photo decoder")?;
+    let orientation = decoder
+        .orientation()
+        .context("[malformed-resource] invalid photo orientation metadata")?;
+    let mut decoded = image::DynamicImage::from_decoder(decoder)
+        .context("[malformed-resource] rendered photo decode failed")?;
+    decoded.apply_orientation(orientation);
+    let rgba = decoded.to_rgba16();
+    let raster = Raster::new(
+        rgba.width(),
+        rgba.height(),
+        true,
+        Samples::Sixteen(rgba.into_raw()),
+    )?;
+    let space = super::color::ColorSpace::named("srgb")?;
+    let mut image = super::pixels::to_working(&raster, &space)?;
+    if let Some(rect) = develop["crop"]["rect"]
+        .as_array()
+        .filter(|rect| rect.len() == 4)
+    {
+        let values: Option<Vec<f64>> = rect.iter().map(Value::as_f64).collect();
+        if let Some(values) = values {
+            let [x, y, width, height] = [values[0], values[1], values[2], values[3]];
+            let (source_width, source_height) = (image.width as usize, image.height as usize);
+            let left = (x * source_width as f64).floor() as usize;
+            let top = (y * source_height as f64).floor() as usize;
+            let right = ((x + width) * source_width as f64).ceil() as usize;
+            let bottom = ((y + height) * source_height as f64).ceil() as usize;
+            let right = right.min(source_width);
+            let bottom = bottom.min(source_height);
+            anyhow::ensure!(
+                left < right && top < bottom,
+                "[invalid-develop] crop.rect selects no source pixels"
+            );
+            let mut cropped = super::pixels::Working::new(
+                (right - left) as u32,
+                (bottom - top) as u32,
+                image.alpha.is_some(),
+            )?;
+            for row in 0..bottom - top {
+                let from = (top + row) * source_width + left;
+                let to = row * (right - left);
+                cropped.rgb[to * 3..(to + right - left) * 3]
+                    .copy_from_slice(&image.rgb[from * 3..(from + right - left) * 3]);
+                if let (Some(source), Some(target)) = (&image.alpha, &mut cropped.alpha) {
+                    target[to..to + right - left]
+                        .copy_from_slice(&source[from..from + right - left]);
+                }
+            }
+            image = cropped;
+        }
+    }
+    let frame = (image.width as usize, image.height as usize);
+    let context = super::adjust::Context {
+        baseline_exposure: 0.0,
+        long_edge: frame.0.max(frame.1) as f64,
+        origin: (0, 0),
+        frame,
+    };
+    let lookup = super::local::Lookup { raw, document };
+    let mut local = super::local::Local::new(develop, Some(&lookup))?;
+    super::adjust::apply_with(&mut image, develop, &context, local.as_mut())?;
+    let mut report = json!({"decoded":[frame.0,frame.1],"oriented":[frame.0,frame.1],"output":[frame.0,frame.1],"orientation":1,"invalid_pixels":0});
+    if let Some(local) = local {
+        report["local"] = local.report();
+    }
+    Ok(super::pipeline::Developed {
+        image,
+        invalid_pixels: 0,
+        report,
+        rendering: super::profile::Rendering::default(),
+    })
 }
 
 /// [`render_validated`] plus the weights of local adjustment `mask`, one per
@@ -2236,6 +2349,88 @@ pub fn add_raw(
     }))
 }
 
+/// Add a rendered JPEG or PNG as an editable photo source.
+pub fn add_rendered(
+    raw: &mut Value,
+    photo_id: &str,
+    name: &str,
+    bytes: &[u8],
+    storage: Value,
+) -> Result<Value> {
+    if !is_id(photo_id) {
+        bail!("[malformed-resource] photo ID {photo_id:?} must be a valid catalog ID")
+    }
+    let format =
+        image::guess_format(bytes).context("[malformed-resource] unsupported image format")?;
+    if !matches!(format, image::ImageFormat::Jpeg | image::ImageFormat::Png) {
+        bail!("[unsupported-capability] photo import accepts DNG, JPEG and PNG")
+    }
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::with_format(std::io::Cursor::new(bytes), format)
+        .into_decoder()
+        .context("[malformed-resource] could not initialize image decoder")?;
+    let (width, height) = decoder.dimensions();
+    super::pixels::check_surface(width, height)?;
+    let bit_depth = match decoder.color_type() {
+        image::ColorType::L8
+        | image::ColorType::La8
+        | image::ColorType::Rgb8
+        | image::ColorType::Rgba8 => 8,
+        image::ColorType::L16
+        | image::ColorType::La16
+        | image::ColorType::Rgb16
+        | image::ColorType::Rgba16 => 16,
+        _ => bail!("[unsupported-capability] photo import supports 8-bit or 16-bit integer JPEG/PNG images"),
+    };
+    let orientation = decoder
+        .orientation()
+        .context("[malformed-resource] invalid image orientation metadata")?
+        .to_exif();
+    let decoded = image::DynamicImage::from_decoder(decoder)
+        .context("[malformed-resource] image decode failed")?;
+    anyhow::ensure!(
+        (decoded.width(), decoded.height()) == (width, height),
+        "[malformed-resource] decoded photo dimensions changed unexpectedly"
+    );
+    let digest = crate::resource::sha256(bytes);
+    let (mut document, upgraded) = with_catalog(raw)?;
+    let catalog = &mut document["photography"];
+    if catalog["photos"]
+        .as_array()
+        .context("[malformed-resource] photography photos must be an array")?
+        .iter()
+        .any(|photo| photo["id"] == photo_id)
+    {
+        bail!("[invalid-input] photo ID {photo_id} is already used; choose a unique ID")
+    }
+    let assets = catalog["assets"]
+        .as_object_mut()
+        .context("[malformed-resource] photography assets must be an object")?;
+    let deduplicated = assets.contains_key(&digest);
+    if !deduplicated {
+        let media_type = if format == image::ImageFormat::Jpeg {
+            "image/jpeg"
+        } else {
+            "image/png"
+        };
+        assets.insert(
+            digest.clone(),
+            json!({
+                "kind":"rendered", "media_type":media_type, "byte_length":bytes.len(),
+                "pixel_width":width, "pixel_height":height, "orientation":orientation, "bit_depth":bit_depth,
+                "input_profile":"srgb", "storage":storage
+            }),
+        );
+    }
+    let photo = json!({"id":photo_id,"source":digest,"name":name,"variants":[{"id":"master","name":"Master","develop":{"process":1}}]});
+    catalog["photos"].as_array_mut().unwrap().push(photo);
+    crate::scene::validate(&document)?;
+    *raw = document;
+    Ok(
+        json!({"photo":photo_id,"asset":digest,"deduplicated":deduplicated,"upgraded":upgraded,"variant":"master"}),
+    )
+}
+
 /// `raw info`: a photo's recorded source facts, storage and variants, without
 /// embedded bytes or develop settings.
 pub fn info(raw: &Value, photo_id: &str) -> Result<Value> {
@@ -2301,5 +2496,69 @@ mod tests {
             &json!({"engine": 1, "working_space": WORKING_SPACE, "assets": {}, "photos": []})
         ));
         assert!(!is_empty_catalog(&json!({"recipes": {"a": {}}})));
+    }
+
+    #[test]
+    fn rendered_png_imports_and_keeps_photo_edits_nondestructive() {
+        let mut raw: Value =
+            serde_json::from_slice(include_bytes!("../../docs/fixtures/photo-v7.pen")).unwrap();
+        let image = image::RgbaImage::from_pixel(8, 4, image::Rgba([96, 128, 160, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        let source = bytes.into_inner();
+        add_rendered(
+            &mut raw,
+            "rendered-test",
+            "test.png",
+            &source,
+            crate::image::embedded_storage(&source),
+        )
+        .unwrap();
+        let path = Path::new("rendered-test.pen");
+        let before = render_photo(&raw, path, "rendered-test", "master")
+            .unwrap()
+            .image;
+        develop_raw(
+            &mut raw,
+            path,
+            "rendered-test",
+            "master",
+            DevelopChanges {
+                set: vec![
+                    ("tone.exposure".into(), json!(1.0)),
+                    ("crop.rect".into(), json!([0, 0, 0.5, 1])),
+                ],
+                ..DevelopChanges::default()
+            },
+        )
+        .unwrap();
+        let after = render_photo(&raw, path, "rendered-test", "master")
+            .unwrap()
+            .image;
+        assert_eq!((after.width, after.height), (4, 4));
+        assert_ne!(before.rgb, after.rgb);
+        assert_eq!(
+            source,
+            stored_bytes(
+                path,
+                &raw["photography"]["assets"][raw["photography"]["photos"]
+                    .as_array()
+                    .unwrap()
+                    .last()
+                    .unwrap()["source"]
+                    .as_str()
+                    .unwrap()]["storage"],
+                raw["photography"]["photos"]
+                    .as_array()
+                    .unwrap()
+                    .last()
+                    .unwrap()["source"]
+                    .as_str()
+                    .unwrap()
+            )
+            .unwrap()
+        );
     }
 }

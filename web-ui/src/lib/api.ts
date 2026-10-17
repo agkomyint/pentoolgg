@@ -1,4 +1,4 @@
-import { noteServerRender, renderLocal } from "@/lib/wasmCore";
+import { noteServerRender, renderLocal, useRenderStats } from "@/lib/wasmCore";
 // Thin client for the Pentool server. The server stays the single source of
 // truth; this file never re-implements document logic.
 export type Doc = { version: number; pages: Page[]; [key: string]: unknown };
@@ -64,6 +64,11 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  return (await check(r)).json();
+}
+
+export async function postBytes<T>(url: string, bytes: Blob, headers: Record<string, string> = {}): Promise<T> {
+  const r = await fetch(url, { method: "POST", headers, body: bytes });
   return (await check(r)).json();
 }
 
@@ -135,6 +140,10 @@ export type Scene3dUvPrimitive = {
   island_overlap_analysis_truncated?: boolean;
 };
 
+// Studio edits replace the document object. Reuse previews only for the same
+// immutable snapshot, page, size and renderer setting; failed renders can retry.
+const previewCache = new WeakMap<Doc, Map<string, Promise<Blob>>>();
+
 export const api = {
   health: () => getJson<{ ok: boolean; version: string }>("/api/health"),
   document: () => getJson<{ revision: string; document: Doc }>("/api/document"),
@@ -143,21 +152,37 @@ export const api = {
   undo: () => postJson<unknown>("/api/undo", {}),
   redo: () => postJson<unknown>("/api/redo", {}),
   async renderPng(doc: Doc, page: string | undefined, maxEdge: number): Promise<Blob> {
-    const local = await renderLocal(doc, page, maxEdge);
-    if (local) return local;
-    const started = performance.now();
-    const q = new URLSearchParams({ max_edge: String(maxEdge) });
-    if (page) q.set("page", page);
-    const r = await check(
-      await fetch(`/api/render/png?${q}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(doc),
-      }),
-    );
-    const blob = await r.blob();
-    noteServerRender(performance.now() - started);
-    return blob;
+    let cache = previewCache.get(doc);
+    if (!cache) {
+      cache = new Map();
+      previewCache.set(doc, cache);
+    }
+    const key = JSON.stringify([page, maxEdge, useRenderStats.getState().enabled]);
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const request = (async () => {
+      const local = await renderLocal(doc, page, maxEdge);
+      if (local) return local;
+      const started = performance.now();
+      const q = new URLSearchParams({ max_edge: String(maxEdge) });
+      if (page) q.set("page", page);
+      const r = await check(
+        await fetch(`/api/render/png?${q}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(doc),
+        }),
+      );
+      const blob = await r.blob();
+      noteServerRender(performance.now() - started);
+      return blob;
+    })();
+    cache.set(key, request);
+    if (cache.size > 4) cache.delete(cache.keys().next().value!);
+    void request.catch(() => {
+      if (cache.get(key) === request) cache.delete(key);
+    });
+    return request;
   },
   preflight(opts: { page?: string; min_ppi: number; min_bleed_inches: number; max_total_ink?: number }) {
     const q = new URLSearchParams();

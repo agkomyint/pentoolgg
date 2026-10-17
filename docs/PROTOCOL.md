@@ -96,6 +96,20 @@ format-migration consent; local plans never load linked files from the network.
 
 ### Photo studio API
 
+`POST /api/photo/import?id=ID&name=FILENAME` accepts one DNG, JPEG or PNG as an
+`application/octet-stream` body (up to 64 MiB) and requires the latest
+`x-pentool-revision` header. The source is embedded in the shared `.pen` file
+and committed as one undoable transaction. A stale revision or invalid image
+leaves the file unchanged. JPEG/PNG photos support the shared rendered develop
+controls; camera white balance, camera profiles, lens profiles and RAW controls
+require DNG. The larger 512 MiB limit remains available through `pentool raw add`.
+
+`POST /api/photo/place` accepts `photo`, `variant`, `page`, `layer`, `x`, `y`,
+`width`, `height`, `fit`, `position`, and `revision`. It places the selected
+developed variant on the requested page as one revision-guarded, undoable edit.
+Missing photos/pages/layers, locked layers, or stale revisions leave the file
+unchanged.
+
 `GET /api/photo/catalog` (`query`, `offset`, `limit`) and `GET /api/photo/detail`
 (`photo`) read the shared catalog and return its `revision`. `POST
 /api/photo/preview` (`photo`, `variant`, `edge`, `space` `srgb`|`display-p3`,

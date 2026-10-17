@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { LABELS } from "@/lib/photo";
 import { cn } from "@/lib/utils";
 import { usePhoto } from "./photoStore";
+import { useStudio } from "@/store";
 
 const stars = (rating: number) => "★".repeat(rating) + "☆".repeat(5 - rating);
 const LABEL_COLORS: Record<string, string> = {
@@ -42,7 +43,10 @@ function Thumb({ id }: { id: string }) {
 
 function Grid() {
   const { photos, selected, current, select, setView } = usePhoto();
-  if (!photos.length) return <p className="p-6 text-sm text-muted-foreground">No photos match. Add DNGs with <code>pentool raw add</code>.</p>;
+  if (!photos.length) return <div className="m-auto max-w-sm p-6 text-center">
+    <p className="text-sm font-medium">Your photo shoot starts here</p>
+    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Import DNG files from the Photo workflow panel. Studio embeds them in this project and opens the first image for editing.</p>
+  </div>;
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-2 overflow-auto p-3">
       {photos.map((photo) => (
@@ -239,18 +243,25 @@ function Loupe() {
   );
 }
 
-export function PhotoStage() {
+export function PhotoStage({ active = true }: { active?: boolean } = {}) {
   const s = usePhoto();
-  // Load once on entry; a changed filter reloads from the panel.
+  const shared = useStudio((state) => state.shared);
+  // The catalog API reads the shared served document, never a standalone draft.
   useEffect(() => {
+    if (!active) return;
+    if (!shared) {
+      usePhoto.getState().set({ photos: [], selected: [], current: null, detail: null, revision: null, shots: [], report: null, count: "", status: "Open a shared served project to use its RAW catalog." });
+      return;
+    }
     void usePhoto.getState().run(() => usePhoto.getState().loadCatalog());
-  }, []);
+  }, [shared, active]);
   // Re-develop when the view-affecting settings change.
   useEffect(() => {
-    void usePhoto.getState().run(() => usePhoto.getState().renderLoupe());
-  }, [s.variant, s.compareB, s.overlay, s.space, s.cropping, s.brush]);
+    if (active) void usePhoto.getState().run(() => usePhoto.getState().renderLoupe());
+  }, [s.variant, s.compareB, s.overlay, s.space, s.cropping, s.brush, active]);
 
   useEffect(() => {
+    if (!active || !shared) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (target.matches("input, textarea, select")) return;
@@ -284,7 +295,12 @@ export function PhotoStage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [shared, active]);
+
+  if (!shared) return <main className="m-auto max-w-sm p-6 text-center">
+    <p className="text-sm font-medium">Open this project as a shared workspace</p>
+    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Photo editing changes the served project catalog. Save the project, then start Studio with <code>pentool serve PROJECT.pen</code>.</p>
+  </main>;
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-muted/30" aria-busy={s.busy}>
@@ -321,7 +337,7 @@ export function PhotoStage() {
         <span className="text-muted-foreground">{s.count}</span>
         <span className="ml-auto truncate text-muted-foreground">{s.status}</span>
       </div>
-      {s.view === "grid" ? <Grid /> : <Loupe />}
+      {active && (s.view === "grid" ? <Grid /> : <Loupe />)}
     </main>
   );
 }

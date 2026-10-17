@@ -44,7 +44,7 @@ function modelId(node: SceneNode | null): string | null {
   return typeof node?.model === "string" ? node.model : null;
 }
 
-export function UvWorkspaceStage() {
+export function UvWorkspaceStage({ active = true }: { active?: boolean } = {}) {
   const studio = useStudio();
   const [primitive, setPrimitive] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -121,7 +121,7 @@ export function UvWorkspaceStage() {
     };
   })() : null;
   const graphicSourceCandidates = useMemo(() => {
-    const page = doc?.pages.find((candidate) => candidate.id === graphicSourcePage);
+    const page = doc?.pages?.find((candidate) => candidate.id === graphicSourcePage);
     const out: SceneNode[] = [];
     const visit = (items: SceneNode[]) => items.forEach((item) => { out.push(item); visit(children(item)); });
     page?.layers?.filter((layer) => !layer.locked && layer.visible !== false).forEach((layer) => visit(layerNodes(layer)));
@@ -192,8 +192,8 @@ export function UvWorkspaceStage() {
   }, [node?.id]);
 
   useEffect(() => {
-    const fallbackPage = studio.pageId ?? doc?.pages[0]?.id ?? "";
-    if (!doc?.pages.some((page) => page.id === graphicSourcePage)) setGraphicSourcePage(fallbackPage);
+    const fallbackPage = studio.pageId ?? doc?.pages?.[0]?.id ?? "";
+    if (!doc?.pages?.some((page) => page.id === graphicSourcePage)) setGraphicSourcePage(fallbackPage);
   }, [doc, graphicSourcePage, studio.pageId]);
 
   useEffect(() => {
@@ -213,6 +213,7 @@ export function UvWorkspaceStage() {
 
   useEffect(() => {
     const cancelGesture = (event: KeyboardEvent) => {
+      if (!active) return;
       if (event.key !== "Escape") return;
       const islandGesture = islandTransformGesture.current;
       if (islandGesture) {
@@ -237,11 +238,12 @@ export function UvWorkspaceStage() {
     };
     window.addEventListener("keydown", cancelGesture);
     return () => window.removeEventListener("keydown", cancelGesture);
-  }, []);
+  }, [active]);
 
   useEffect(() => setProjection(selectedOverlay.projection ?? "box"), [primitive, node?.id, selectedOverlay.projection]);
 
   useEffect(() => {
+    if (!active) return;
     if (!doc || !node || !digest) {
       setPreview(null);
       setError("");
@@ -258,9 +260,10 @@ export function UvWorkspaceStage() {
         .finally(() => { if (current) setLoading(false); });
     }, 180);
     return () => { current = false; window.clearTimeout(timer); };
-  }, [doc, node, digest, primitive, refreshNonce, textureResolution, minimumDensity]);
+  }, [doc, node, digest, primitive, refreshNonce, textureResolution, minimumDensity, active]);
 
   useEffect(() => {
+    if (!active) return;
     if (!doc || !node || !targetPageId || !digest) {
       setModelPreview(null);
       setModelPreviewError("");
@@ -288,7 +291,7 @@ export function UvWorkspaceStage() {
         .finally(() => { if (current) setModelPreviewLoading(false); });
     }, 120);
     return () => { current = false; window.clearTimeout(timer); };
-  }, [doc, node, digest, targetPageId, primitive, selectedIsland?.id, refreshNonce]);
+  }, [doc, node, digest, targetPageId, primitive, selectedIsland?.id, refreshNonce, active]);
 
   useEffect(() => setIslandId(""), [primitive, node?.id]);
 
@@ -831,7 +834,7 @@ export function UvWorkspaceStage() {
       const source = JSON.parse(event.dataTransfer.getData("application/x-pentool-uv-source")) as
         | { kind: "page"; page: string }
         | { kind: "node"; page: string; node: string };
-      const sourcePage = doc.pages.find((page) => page.id === source.page);
+      const sourcePage = doc.pages?.find((page) => page.id === source.page);
       if (!sourcePage || source.page === targetPageId && source.kind === "node" && source.node === node.id) {
         setPackMessage("Choose artwork on a page other than the target model.");
         return;
@@ -890,8 +893,12 @@ export function UvWorkspaceStage() {
           setShowPageContext((value) => !value);
         }}>{showPageContext ? "Show model" : "Show page"}</Button>
       </header>
-      {showPageContext ? <Canvas dragToUv />
-        : !node ? <div className="flex flex-1 items-center justify-center p-6"><Empty>Select a 3D model or product form to inspect its UV layout.</Empty></div>
+      {showPageContext ? <Canvas dragToUv active={active && showPageContext} />
+        : !node ? <div className="flex flex-1 items-center justify-center p-6"><div className="max-w-sm space-y-4 text-center">
+              <h2 className="text-lg font-semibold">Create a packaging mockup</h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">Choose a package template and dimensions in the right panel, or import a 3D model. Your flat artwork and folded preview will appear here.</p>
+              {doc && doc.version < 11 && <div className="space-y-3 rounded-md border bg-card p-4"><p className="text-xs text-muted-foreground">This project uses an older document format. Upgrade it to enable packaging tools. The file changes only when you save.</p><Button disabled={studio.busy} onClick={() => { if (window.confirm("Upgrade this project to format v11 for packaging? Save keeps the upgrade; Undo reverts it.")) void studio.upgradeDoc(); }}>Enable packaging tools</Button></div>}
+            </div></div>
           : modelPreviewLoading && !modelPreview ? <div role="status" className="m-4 flex-1 animate-pulse rounded border bg-muted" aria-label="Rendering 3D model preview" />
             : modelPreviewError ? <div className="m-4 flex flex-col items-start justify-center gap-2 rounded border border-destructive/40 bg-destructive/5 p-3 text-xs"><p className="text-destructive">Couldn’t render this model preview.</p><p className="break-words text-muted-foreground">{modelPreviewError}</p><Button variant="outline" className="min-h-10" onClick={() => setRefreshNonce((value) => value + 1)}>Try again</Button></div>
               : modelPreview ? <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-muted/30 p-3"><img onPointerDown={beginModelGraphicDrag} onPointerMove={moveModelGraphicDrag} onPointerUp={(event) => { void endModelGraphicDrag(event); }} onPointerCancel={() => { modelGraphicDrag.current = null; }} onClick={pickModelFace} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void pickModelAt(0.5, 0.5); } }} role="button" tabIndex={0} aria-label={selectedGraphic?.mode === "decal" && !placingOnFace ? `Drag linked decal ${selectedGraphic.id} across faces on slot ${selectedGraphic.slot}; click to select a UV island` : placingOnFace ? "Choose a visible model face to place linked artwork" : "Select a visible model face and its UV island"} aria-busy={facePicking} title={selectedGraphic?.mode === "decal" && !placingOnFace ? "Drag the selected decal to reposition it on visible faces with the same material slot" : placingOnFace ? "Click a face to place linked art; keyboard activation picks the preview center" : "Click a face to select its UV island"} className={`max-h-full max-w-full touch-none object-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${selectedGraphic?.mode === "decal" && !placingOnFace ? "cursor-move" : "cursor-crosshair"} ${placingOnFace ? "rounded ring-2 ring-primary" : ""}`} src={`data:image/png;base64,${modelPreview.png_base64}`} alt={selectedIsland ? `3D model preview with UV island ${selectedIsland.id} highlighted` : `3D model preview for ${node.name || node.id}`} /></div>
@@ -1066,7 +1073,7 @@ export function UvWorkspaceStage() {
                   <label className="space-y-1 text-[11px] text-muted-foreground">Graphic ID<input aria-label="New surface graphic ID" spellCheck={false} autoComplete="off" type="text" maxLength={128} className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicDraftId} onChange={(event) => setGraphicDraftId(event.target.value)} /></label>
                   <label className="space-y-1 text-[11px] text-muted-foreground">Mode<select aria-label="Surface graphic mode" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicMode} onChange={(event) => setGraphicMode(event.target.value as "decal" | "fill")}><option value="decal">Decal</option><option value="fill">Repeating fill</option></select></label>
                   <label className="space-y-1 text-[11px] text-muted-foreground">Source type<select aria-label="Surface graphic source type" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicSourceKind} onChange={(event) => setGraphicSourceKind(event.target.value as "page" | "node")}><option value="page">Whole page</option><option value="node">Single node</option></select></label>
-                  <label className="space-y-1 text-[11px] text-muted-foreground">Source page<select aria-label="Surface graphic source page" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicSourcePage} onChange={(event) => { setGraphicSourcePage(event.target.value); setGraphicSourceNode(""); }}>{doc?.pages.map((page) => <option key={page.id} value={page.id}>{page.name || page.id}</option>)}</select></label>
+                  <label className="space-y-1 text-[11px] text-muted-foreground">Source page<select aria-label="Surface graphic source page" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicSourcePage} onChange={(event) => { setGraphicSourcePage(event.target.value); setGraphicSourceNode(""); }}>{doc?.pages?.map((page) => <option key={page.id} value={page.id}>{page.name || page.id}</option>)}</select></label>
                   {graphicSourceKind === "node" && <label className="col-span-2 space-y-1 text-[11px] text-muted-foreground">Source node<select aria-label="Surface graphic source node" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicSourceNode} onChange={(event) => setGraphicSourceNode(event.target.value)}>{graphicSourceCandidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name || candidate.id} · {candidate.kind || "object"}</option>)}</select></label>}
                   <label className="space-y-1 text-[11px] text-muted-foreground">Fit<select aria-label="Surface graphic fit" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicFit} onChange={(event) => setGraphicFit(event.target.value)}><option value="contain">Contain</option><option value="cover">Cover</option><option value="stretch">Stretch</option></select></label>
                   <label className="space-y-1 text-[11px] text-muted-foreground">Tile edge<select aria-label="Surface graphic tile edge" className="h-10 w-full rounded border bg-input px-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={graphicWrap} onChange={(event) => setGraphicWrap(event.target.value)}><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select></label>
