@@ -844,7 +844,9 @@ impl Replayer {
             return reject("invalid-op", "$c may only be set to true or removed");
         }
         self.deleted_target(op, &rf, Some(path), value.as_ref())?;
-        self.guard(&rf, op, false)?;
+        // A layer's own properties (including `locked`) stay editable; a node
+        // in a locked layer does not (spec 4.6).
+        self.guard(&rf, op, level == Level::Node)?;
         let obj = self.objs.get_mut(&rf).expect("checked");
         let previous = obj.writers.get(path).cloned();
         set_path(&mut obj.props, &segments, value.clone());

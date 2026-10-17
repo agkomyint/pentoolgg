@@ -767,6 +767,65 @@ from sections 8 to 10:
   `perm::ROUTES` (viewer-level) and reuse `Ctx` and the SSE slot limiter; item 7
   reads `GET /api/collab/session` for `role` and `may`.
 
+## 13c. Evidence and invariants
+
+`tests/collab_evidence.rs` (fast, seeded, no network) and four `cargo-fuzz`
+targets back the guarantees above. Each invariant names the test that proves it.
+
+| Id | Invariant | Test |
+| --- | --- | --- |
+| C1 | 3-5 peers converge through partitions, duplicate and reordered delivery | `simulated_peers_converge_through_partitions_and_reordering` |
+| C2 | Delivery order never changes the result (concurrent reparent/delete) | `concurrent_reparents_and_deletes_converge_in_both_orders` |
+| H1 | Oversized operations are rejected before state is read | `hostile_oversized_fields_are_rejected` |
+| H2 | A batch over the count limit is refused whole | `hostile_oversized_batch_is_refused_before_any_work` |
+| H3 | Huge identifiers are rejected | `hostile_huge_ids_are_rejected` |
+| H4 | Deep nesting is bounded | `hostile_deep_nesting_is_bounded` |
+| H5 | Duplicate ids keep one node and report `duplicate-id` | `hostile_duplicate_ids_keep_one_node` |
+| H6 | Ids differing by unicode normalization resolve deterministically (ids compare byte-wise, no normalization) | `hostile_unicode_normalization_collisions_are_deterministic` |
+| H7 | Non-finite numbers never reach the document; the batch is rejected whole (`[invalid-merge]`) | `hostile_non_finite_numbers_are_rejected` |
+| H8 | Locked layers reject edits, including `set-property` (spec 4.6) | `hostile_edits_on_locked_layers_are_not_applied` |
+| H9 | Instance-protected layers reject direct edits | `hostile_edits_on_instance_protected_layers_are_not_applied` |
+| H10 | Cycle-forming reparent is rejected (`reparent-cycle`) | `hostile_cycle_forming_reparent_is_rejected` |
+| H11 | Forged or unknown actors are rejected | `hostile_forged_and_unknown_actors_are_rejected` |
+| H12 | Clocks more than 10 minutes ahead are rejected | `hostile_far_future_clocks_are_rejected` |
+| H13 | Replaying integrated operations is a no-op | `hostile_replay_of_old_operations_is_a_no_op` |
+| D1-D5 | A crash at every durability boundary (staging, history store, history manifest, document write, actors, torn line, lines, head) recovers to either the old or the new document, a verified chain, and reruns to the uninterrupted bytes | `crash_at_every_durability_boundary_recovers_to_the_uninterrupted_result` |
+| D6 | Repeated crashes still converge | `repeated_crashes_still_converge` |
+| D7 | A failed commit aborts the staged record | `failed_commit_leaves_no_staged_record` |
+| D8 | A torn tail is cut; corruption inside the committed prefix is refused | `torn_log_tail_is_cut_but_committed_corruption_is_not` |
+| L1 | A lock older than 60 s is reclaimed | `stale_locks_are_reclaimed` |
+| L2 | A fresh lock is still honoured | `fresh_locks_are_still_honoured` |
+| L3 | Orphaned `*.PID.tmp` / `.stale-PID` files are swept under the held lock | `orphaned_temp_files_are_swept_under_the_lock` |
+| F1 | The fuzz entry points never panic on seeded input | `fuzz_entry_points_never_panic_on_seeded_input` |
+
+### Stale-lock policy
+
+`src/stale.rs` is shared by the collaboration log and document history. A lock
+file older than `STALE_AFTER` (60 s) is reclaimed by renaming it aside and
+retrying; fresh locks fail with a clear error. Temp files matching
+`X.<digits>.tmp` are swept at age 0 while the lock is held, since every writer
+holds it. `atomic_write` also removes `.NAME.pentool-tmp-*` siblings older than
+60 s. Residual risks: a writer paused for more than 60 s while holding the lock
+can lose it; history debris from a crashed writer remains until the next
+history write.
+
+### Fuzzing
+
+Targets `collab_op`, `collab_merge`, `collab_log` and `collab_sync_request`
+(`fuzz/fuzz_targets/`) call `pentool::collab::evidence`. They run in the weekly
+`fuzz.yml` workflow, not in the push gate.
+
+### Bugs found by this work
+
+- `set-property` on a node ignored the layer lock (spec 4.6); `merge.rs`
+  now checks it. Regression: H8.
+- A torn final log line from a crash blocked recovery; it is now cut.
+- Dead-process lock files blocked history and the log forever; now reclaimed.
+- Orphan temp files accumulated after crashes; now swept.
+- Hardening without a failing-before test: the manifest and log atomic writes
+  rename over the old file instead of remove-then-rename (the window is
+  between two syscalls and cannot be hooked).
+
 ## 14. Open questions for review
 
 1. **Transport.** Is plain HTTP plus SSE enough for v1, or do we want WebSocket

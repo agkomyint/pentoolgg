@@ -17,10 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs::{self, File, OpenOptions},
-    io::{ErrorKind, Write},
+    io::Write,
     path::{Path, PathBuf},
-    thread,
-    time::Duration,
 };
 
 /// Log length at which compaction is advised; appends stop here until the
@@ -77,10 +75,53 @@ struct Staged {
     lines: Vec<Line>,
 }
 
-pub struct Lock(PathBuf);
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+pub type Lock = crate::stale::LockFile;
+
+/// Crash points inside the log append, used by the crash-recovery evidence
+/// tests: the call returns an error at that point and leaves exactly the files
+/// a killed process would.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrashPoint {
+    /// `actors.json` was replaced; no log line was written.
+    AfterActors,
+    /// Only the first half of the first new line reached the log.
+    TornLine,
+    /// All new lines are written; `head` still names the old tip.
+    AfterLines,
+    /// `head` is replaced; `append.tmp` still exists.
+    AfterHead,
+    /// A `write_atomic` temp file is written but not yet renamed in.
+    AfterAtomicTemp,
+}
+
+static CRASHES: std::sync::Mutex<Vec<(PathBuf, CrashPoint)>> = std::sync::Mutex::new(Vec::new());
+
+/// Arm a one-shot crash for the log in `dir` (test support).
+#[doc(hidden)]
+pub fn inject_crash(dir: &Path, point: CrashPoint) {
+    if let Ok(mut crashes) = CRASHES.lock() {
+        crashes.push((dir.to_path_buf(), point));
+    }
+}
+
+fn crash(dir: &Path, point: CrashPoint) -> Result<()> {
+    if take_crash(dir, point) {
+        bail!("[fault-injected] log crashed at {point:?}");
+    }
+    Ok(())
+}
+
+fn take_crash(dir: &Path, point: CrashPoint) -> bool {
+    let Ok(mut crashes) = CRASHES.lock() else {
+        return false;
+    };
+    match crashes.iter().position(|(d, p)| d == dir && *p == point) {
+        Some(index) => {
+            crashes.remove(index);
+            true
+        }
+        None => false,
     }
 }
 
@@ -98,17 +139,11 @@ pub fn enabled(dir: &Path) -> bool {
 
 pub fn lock(dir: &Path) -> Result<Lock> {
     fs::create_dir_all(dir)?;
-    let path = dir.join("lock");
-    for _ in 0..100 {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(_) => return Ok(Lock(path)),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    bail!("collaboration log is locked by another pentool process")
+    crate::stale::acquire(
+        &dir.join("lock"),
+        crate::stale::STALE_AFTER,
+        "collaboration log",
+    )
 }
 
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -118,9 +153,11 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
     }
-    if path.exists() {
-        fs::remove_file(path)?;
+    if let Some(dir) = path.parent() {
+        crash(dir, CrashPoint::AfterAtomicTemp)?;
     }
+    // Rename over the target: removing it first would leave a window in which
+    // a crash loses `head` or the whole log.
     fs::rename(&temp, path)?;
     Ok(())
 }
@@ -198,6 +235,42 @@ pub fn read_lines(dir: &Path) -> Result<Vec<Line>> {
         lines.push(line);
     }
     Ok(lines)
+}
+
+/// Read the valid prefix of the log. A malformed or truncated final line is a
+/// torn append, not corruption, and is reported as `torn` (byte length of the
+/// valid prefix). Any other failure is returned as in [`read_lines`].
+pub fn read_lines_prefix(dir: &Path) -> Result<(Vec<Line>, Option<u64>)> {
+    let path = dir.join("log.jsonl");
+    let size = fs::metadata(&path)
+        .context("collaboration log is missing")?
+        .len();
+    if size > MAX_LOG_BYTES {
+        bail!("[limit-exceeded] collaboration log is {size} bytes; the limit is {MAX_LOG_BYTES}")
+    }
+    let bytes = fs::read(&path)?;
+    let mut lines = Vec::new();
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = bytes[offset..]
+            .iter()
+            .position(|b| *b == b'\n')
+            .map(|i| offset + i);
+        let (raw, next) = match end {
+            Some(end) => (&bytes[offset..end], end + 1),
+            None => (&bytes[offset..], bytes.len()),
+        };
+        let parsed = (raw.len() <= MAX_OP_BYTES + LINE_SLACK)
+            .then(|| serde_json::from_slice::<Line>(raw).ok())
+            .flatten();
+        match parsed {
+            // A final line with no newline is torn even if it happens to parse.
+            Some(line) if end.is_some() => lines.push(line),
+            _ => return Ok((lines, Some(offset as u64))),
+        }
+        offset = next;
+    }
+    Ok((lines, None))
 }
 
 /// Full chain verification: sequence, linkage, hashes, op validity, and head.
@@ -344,7 +417,12 @@ impl Prepared {
 fn apply_staged(dir: &Path, staged: &Staged) -> Result<()> {
     let registry = serde_json::json!({"actors": staged.actors});
     write_atomic(&dir.join("actors.json"), &serde_json::to_vec(&registry)?)?;
-    let existing = read_lines(dir)?;
+    crash(dir, CrashPoint::AfterActors)?;
+    // Cut a torn tail left by an earlier crash before appending after it.
+    let (existing, torn) = read_lines_prefix(dir)?;
+    if let Some(valid) = torn {
+        truncate_log(dir, valid)?;
+    }
     let mut last = existing.len() as u64;
     let mut file = OpenOptions::new()
         .append(true)
@@ -355,10 +433,16 @@ fn apply_staged(dir: &Path, staged: &Staged) -> Result<()> {
         }
         let mut bytes = serde_json::to_vec(line)?;
         bytes.push(b'\n');
+        if take_crash(dir, CrashPoint::TornLine) {
+            file.write_all(&bytes[..bytes.len() / 2])?;
+            file.sync_all()?;
+            bail!("[fault-injected] log crashed at {:?}", CrashPoint::TornLine);
+        }
         file.write_all(&bytes)?;
         last = line.seq;
     }
     file.sync_all()?;
+    crash(dir, CrashPoint::AfterLines)?;
     if let Some(tip) = staged.lines.last() {
         let head = Head {
             seq: tip.seq,
@@ -366,7 +450,15 @@ fn apply_staged(dir: &Path, staged: &Staged) -> Result<()> {
         };
         write_atomic(&dir.join("head"), &serde_json::to_vec(&head)?)?;
     }
+    crash(dir, CrashPoint::AfterHead)?;
     let _ = fs::remove_file(dir.join("append.tmp"));
+    Ok(())
+}
+
+fn truncate_log(dir: &Path, valid: u64) -> Result<()> {
+    let file = OpenOptions::new().write(true).open(dir.join("log.jsonl"))?;
+    file.set_len(valid)?;
+    file.sync_all()?;
     Ok(())
 }
 
@@ -378,6 +470,24 @@ fn apply_staged(dir: &Path, staged: &Staged) -> Result<()> {
 ///   never applied, discard it;
 /// * log lines beyond `head` are uncommitted and are cut off.
 pub fn recover(dir: &Path, current_revision: &str) -> Result<()> {
+    // Run under the lock, which every writer holds: a temp file is a dead
+    // writer's.
+    crate::stale::sweep(dir, std::time::Duration::ZERO, crate::stale::is_pid_temp);
+    // A torn final line is the only damage a crash can cause to the log; it is
+    // uncommitted by construction (head is written after the lines are synced).
+    let (_, torn) = read_lines_prefix(dir)?;
+    if let Some(valid) = torn {
+        let head = read_head(dir)?;
+        let (prefix, _) = read_lines_prefix(dir)?;
+        if (prefix.len() as u64) < head.seq {
+            bail!(
+                "[corrupt-log] log line {} is malformed but head says {} lines are committed",
+                prefix.len() + 1,
+                head.seq
+            )
+        }
+        truncate_log(dir, valid)?;
+    }
     let staged_path = dir.join("append.tmp");
     if staged_path.is_file() {
         let staged: Option<Staged> = fs::read(&staged_path)

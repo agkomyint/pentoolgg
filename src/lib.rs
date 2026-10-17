@@ -77,6 +77,7 @@ pub mod server;
 pub mod shaping;
 pub mod sketch_import;
 pub mod spreads;
+pub mod stale;
 pub mod stories;
 pub mod style;
 pub mod style_eval;

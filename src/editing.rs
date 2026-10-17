@@ -261,6 +261,11 @@ pub fn atomic_write(file: &FilePath, bytes: &[u8]) -> Result<()> {
     if previous.exists() {
         fs::remove_file(previous)?;
     }
+    // Temp copies orphaned by a process killed before its rename.
+    let orphan = format!(".{name}.pentool-tmp-");
+    crate::stale::sweep(parent, crate::stale::STALE_AFTER, |n| {
+        n.starts_with(&orphan)
+    });
     Ok(())
 }
 
