@@ -20,6 +20,9 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
   Layout (0.14), 3D (0.15). A workspace whose format or CLI is
   not implemented says so and lists what the roadmap promises; it has no
   controls that cannot work.
+- Startup opens a project welcome screen with continue, `.pen` open, and common
+  canvas presets. The Home control returns there without closing the current
+  document; choosing a preset creates a canvas at that pixel size.
 
 ## Develop
 
@@ -43,6 +46,12 @@ raw node JSON, a scene-batch console, Images (operations stack), Composite
 (blend, opacity, adjustments, masks, clips; needs format v6), Print (preflight,
 plates, soft proof), New/Open/Save (shared file or `.pen` download), PNG/SVG
 export, dark mode.
+
+The start screen is the first step in the broader Studio workflow redesign. It
+helps people enter a project and pick a useful canvas size; it does not yet
+combine the existing Design, Images, Photo, Paint, Layout, Print, and 3D
+workspaces into one contextual tool system. Their capabilities and limitations
+remain as described below.
 
 Print preflight also lists every placed 3D mockup's rendered pixel dimensions
 and effective X/Y PPI. Selecting a resolution row selects that mockup on the
