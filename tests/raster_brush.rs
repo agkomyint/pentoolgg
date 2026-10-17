@@ -169,6 +169,27 @@ fn tip_add_paint_replay_remove_and_release() {
 }
 
 #[test]
+fn referenced_brush_tip_removal_names_the_blocking_preset() {
+    let ws = Workspace::new("tip-preset-reference");
+    let doc = ws.document("doc.pen");
+    let tip = ws.tip_image();
+    ok(&["raster", &doc, "tip-add", "tipA", "--image", &tip]);
+    let textured = TEXTURED.replace("ring", "tipA");
+    ok(&["raster", &doc, "preset-add", "ptex", "--brush", &textured]);
+
+    let before = fs::read(&doc).unwrap();
+    let error = fail(&["raster", &doc, "tip-remove", "tipA"]);
+    assert!(error.contains("[conflict]"), "{error}");
+    assert!(error.contains("ptex"), "{error}");
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    assert_eq!(ok(&["raster", &doc, "tips"])["tips"][0]["name"], "tipA");
+
+    ok(&["raster", &doc, "preset-remove", "ptex"]);
+    ok(&["raster", &doc, "tip-remove", "tipA"]);
+    assert_eq!(ok(&["raster", &doc, "tips"])["returned"], 0);
+}
+
+#[test]
 fn tips_and_textured_strokes_are_deterministic_across_documents() {
     let ws = Workspace::new("determinism");
     let tip = ws.tip_image();

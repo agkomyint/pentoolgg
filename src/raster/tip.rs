@@ -186,14 +186,38 @@ pub(super) fn tip_register(
 
 /// Unname a tip. Its tile stays only while a journal entry still records it.
 pub fn tip_remove(raw: &mut Value, name: &str) -> Result<Value> {
-    let mut next = raw.clone();
-    let Some(digest) = next
-        .get_mut("brush_tips")
-        .and_then(Value::as_object_mut)
-        .and_then(|t| t.remove(name))
+    let Some(digest) = raw
+        .get("brush_tips")
+        .and_then(Value::as_object)
+        .and_then(|tips| tips.get(name))
+        .cloned()
     else {
         bail!("[not-found] brush tip {name:?} was not found; list tips with `raster DOC tips`")
     };
+    let blockers: Vec<&str> = raw
+        .get("brush_presets")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(preset, value)| {
+            (value
+                .get("brush")
+                .and_then(|brush| brush.get("tip"))
+                .and_then(Value::as_str)
+                == Some(name))
+            .then_some(preset.as_str())
+        })
+        .collect();
+    anyhow::ensure!(
+        blockers.is_empty(),
+        "[conflict] brush tip {name:?} is used by presets {}; remove or update those presets first",
+        blockers.join(", ")
+    );
+    let mut next = raw.clone();
+    next.get_mut("brush_tips")
+        .and_then(Value::as_object_mut)
+        .expect("tip exists in validated object")
+        .remove(name);
     let released = collect_garbage(&mut next);
     crate::scene::validate(&next)?;
     *raw = next;

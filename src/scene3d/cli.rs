@@ -1687,6 +1687,40 @@ fn scene3d_node_with_page(raw: &Value, id: &str) -> Result<(String, Map<String, 
     bail!("[missing-resource] no scene3d node `{id}`; list them with `pentool scene3d <doc> list`")
 }
 
+fn ensure_scene3d_layer_unlocked(raw: &Value, id: &str) -> Result<()> {
+    scene3d_node_with_page(raw, id)?;
+    for page in raw
+        .get("pages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        for layer in page
+            .get("layers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if layer
+                .get("nodes")
+                .and_then(Value::as_array)
+                .is_some_and(|nodes| find_node_readonly(nodes, id).is_some())
+            {
+                ensure!(
+                    layer.get("locked").and_then(Value::as_bool) != Some(true),
+                    "[locked] layer `{}` is locked",
+                    layer
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<unknown>")
+                );
+                return Ok(());
+            }
+        }
+    }
+    bail!("[missing-resource] no scene3d node `{id}`")
+}
+
 fn scene3d_node_on_page(raw: &Value, page_id: &str, id: &str) -> Result<Map<String, Value>> {
     let page = raw
         .get("pages")
@@ -2911,6 +2945,14 @@ pub fn run(
         );
     }
     let mut raw = read(input)?;
+    if let Scene3dAction::Camera { id, .. }
+    | Scene3dAction::Frame { id, .. }
+    | Scene3dAction::Light { id, .. }
+    | Scene3dAction::Environment { id, .. }
+    | Scene3dAction::Set { id, .. } = &action
+    {
+        ensure_scene3d_layer_unlocked(&raw, id)?;
+    }
     match &action {
         Scene3dAction::Dependencies => {
             require_v11(&raw)?;

@@ -126,7 +126,11 @@ fn bundles_round_trip_between_documents() {
     );
     // A second import conflicts until --replace is given; undo restores the original.
     let before = fs::read(&dst).unwrap();
-    assert!(fails(&["paint-bundle", &dst, "import", &bundle]).contains("conflict"));
+    let conflict = fails(&["paint-bundle", &dst, "import", &bundle]);
+    assert!(
+        conflict.contains("[conflict] brush preset \"round\" already exists"),
+        "{conflict}"
+    );
     assert_eq!(before, fs::read(&dst).unwrap());
     ok(&["paint-bundle", &dst, "import", &bundle, "--replace"]);
     ok(&["undo", &dst]);
@@ -231,7 +235,16 @@ fn diff_summarizes_plans_data_and_tile_impact() {
     );
     let file = ws.file("changed.json", &changed);
     ok(&["paint-bundle", &b, "plan-add", "wash", &file, "--replace"]);
-    ok(&["paint-plan", &b, &file]);
+    let dry = ok(&["paint-plan", &b, &file, "--dry-run"]);
+    ok(&[
+        "paint-plan",
+        &b,
+        &file,
+        "--if-revision",
+        dry["commit"]["if_revision"].as_str().unwrap(),
+        "--expect-plan-hash",
+        dry["commit"]["plan_hash"].as_str().unwrap(),
+    ]);
     ok(&["paint-bundle", &b, "plan-remove", "wash"]);
     ok(&["paint-guide", &b, "remove", "thirds"]);
     let r = ok(&["paint-diff", &a, &b]);

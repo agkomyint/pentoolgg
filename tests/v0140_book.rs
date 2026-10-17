@@ -151,6 +151,12 @@ fn init_add_move_remove_and_refusals() {
         fails(&["book", &book, "init", "--name", "x", "--member", "a.pen"])
             .contains("already exists")
     );
+    let before_missing_add = ws.bytes("new.penbook");
+    let missing = fails(&["book", &book, "add", "missing.pen"]);
+    assert!(missing.contains("[missing-resource]"), "{missing}");
+    assert_eq!(ws.bytes("new.penbook"), before_missing_add);
+
+    member(&ws, "c.pen", "C", 1);
     ok(&["book", &book, "add", "c.pen", "--at", "0"]);
     assert_eq!(ws.json("new.penbook")["documents"][0]["path"], "c.pen");
     ok(&["book", &book, "move", "c.pen", "--to", "2"]);
@@ -180,6 +186,63 @@ fn init_add_move_remove_and_refusals() {
     assert!(fails(&["book", &book, "add", "a.pen"]).contains("listed twice"));
     assert!(fails(&["book", &book, "remove", "ghost.pen"]).contains("missing-resource"));
     assert_eq!(ws.bytes("new.penbook"), before, "refusals must not write");
+}
+
+#[test]
+fn layout_export_validates_input_format_and_page_before_writing() {
+    let ws = Workspace::new("layout-export-validation");
+    member(&ws, "single.pen", "Single", 1);
+    let input = ws.s("single.pen");
+
+    let existing = ws.p("existing.pdf");
+    std::fs::write(&existing, b"preserve me").unwrap();
+    let missing_input = fails(&[
+        "layout-export",
+        &ws.s("missing.pen"),
+        &ws.s("existing.pdf"),
+        "--format",
+        "bogus",
+    ]);
+    assert!(
+        missing_input.contains("[missing-resource]"),
+        "{missing_input}"
+    );
+
+    let bad_format = fails(&[
+        "layout-export",
+        &input,
+        &ws.s("existing.pdf"),
+        "--format",
+        "bogus",
+    ]);
+    assert!(bad_format.contains("[invalid-input]"), "{bad_format}");
+
+    let bad_page = fails(&[
+        "layout-export",
+        &input,
+        &ws.s("bad-page.pdf"),
+        "--format",
+        "pdf",
+        "--overwrite",
+        "--page",
+        "missing-page",
+    ]);
+    assert!(bad_page.contains("[missing-resource]"), "{bad_page}");
+    assert!(!ws.p("bad-page.pdf").exists());
+
+    let valid_page = fails(&[
+        "layout-export",
+        &input,
+        &ws.s("page.pdf"),
+        "--page",
+        "page-1",
+    ]);
+    assert!(
+        valid_page.contains("does not support --page"),
+        "{valid_page}"
+    );
+    assert!(!ws.p("page.pdf").exists());
+    assert_eq!(std::fs::read(existing).unwrap(), b"preserve me");
 }
 
 #[test]

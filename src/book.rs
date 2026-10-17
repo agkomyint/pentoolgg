@@ -926,6 +926,37 @@ fn run_with(book_path: &Path, action: BookAction, fail_after: Option<usize>) -> 
             dry_run,
         } => {
             check_member_path(&path)?;
+            ensure!(
+                !book
+                    .members
+                    .iter()
+                    .any(|member| member.rel.eq_ignore_ascii_case(&path)),
+                "[invalid-input] member listed twice: {path}"
+            );
+            let root = book
+                .path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .canonicalize()
+                .with_context(|| {
+                    format!(
+                        "could not resolve book directory for {}",
+                        book.path.display()
+                    )
+                })?;
+            let member_path = root.join(&path);
+            let real = member_path.canonicalize().with_context(|| {
+                format!("[missing-resource] book member {path} does not exist or cannot be read")
+            })?;
+            ensure!(
+                real.starts_with(&root),
+                "[unsafe-path] member {path} resolves outside the book directory"
+            );
+            ensure!(
+                real.is_file(),
+                "[invalid-input] book member {path} is not a regular file"
+            );
             let mut manifest = book.manifest.clone();
             let docs = manifest["documents"].as_array_mut().unwrap();
             let position = at.unwrap_or(docs.len());

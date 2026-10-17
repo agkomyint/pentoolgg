@@ -269,10 +269,17 @@ fn merge(raw: &mut Value, bundle: &Value, replace: bool) -> Result<Value> {
         let mut replaced = Vec::new();
         for (id, value) in entries {
             let exists = section(&next, key)?.is_some_and(|m| m.contains_key(id));
+            let entry_name = match *name {
+                "brushes" => "brush preset",
+                "palettes" => "palette",
+                "guides" => "guide",
+                "plans" => "plan",
+                _ => *name,
+            };
             ensure!(
                 replace || !exists,
                 "[conflict] {} {id:?} already exists; pass --replace to overwrite it. Nothing was written",
-                singular(name)
+                entry_name
             );
             let stored = match *name {
                 "plans" => plan_record(value).with_context(|| format!("plan {id}"))?,
