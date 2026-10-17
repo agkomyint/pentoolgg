@@ -11,6 +11,7 @@ and preserves the existing CLI while making Studio workflows more coherent.
   toolbar.
 - Add a project welcome screen with resume/open/create flows and common canvas
   sizes.
+- Show the running Pentool version on both the welcome screen and editor bar.
 - Support JPEG and PNG photo import into the served project, non-destructive
   image adjustments, and placing the developed image onto the active page.
 - Expose document export actions and keep layers visible while editing.

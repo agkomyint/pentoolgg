@@ -12,12 +12,13 @@ const sizes = [
 type WelcomeProps = {
   busy: boolean;
   hasDocument: boolean;
+  version: string | null;
   onCreate: (width: number, height: number) => void;
   onOpen: () => void;
   onContinue: () => void;
 };
 
-export function Welcome({ busy, hasDocument, onCreate, onOpen, onContinue }: WelcomeProps) {
+export function Welcome({ busy, hasDocument, version, onCreate, onOpen, onContinue }: WelcomeProps) {
   const [selected, setSelected] = useState<string>(sizes[0].id);
   const preset = sizes.find((size) => size.id === selected) ?? sizes[0];
   const [width, setWidth] = useState<number>(preset.width);
@@ -33,7 +34,7 @@ export function Welcome({ busy, hasDocument, onCreate, onOpen, onContinue }: Wel
 
   return (
     <main className="welcome-screen" aria-labelledby="welcome-title">
-      <div className="welcome-topline"><span className="welcome-mark">P</span><span>Pentool Studio</span><span className="welcome-version">Creative workspace</span></div>
+      <div className="welcome-topline"><span className="welcome-mark">P</span><span>Pentool Studio</span><span className="welcome-version">{version ? `v${version}` : "Creative workspace"}</span></div>
       <div className="welcome-content">
         <section className="welcome-intro">
           <p className="welcome-eyebrow">A workspace for the whole project</p>

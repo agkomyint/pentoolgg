@@ -290,6 +290,7 @@ export default function App() {
         <Welcome
           busy={s.busy}
           hasDocument={Boolean(s.doc)}
+          version={s.version}
           onCreate={(width, height) => {
             if (!confirmDiscard()) return;
             void s.newDoc(width, height);
