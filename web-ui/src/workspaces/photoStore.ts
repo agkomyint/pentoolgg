@@ -59,6 +59,7 @@ type State = {
   set: (patch: Partial<State>) => void;
   run: (work: () => Promise<void>) => Promise<void>;
   loadCatalog: () => Promise<void>;
+  importFiles: (files: File[]) => Promise<void>;
   loadDetail: () => Promise<void>;
   renderLoupe: (box?: { w: number; h: number }) => Promise<void>;
   edit: (op: Record<string, unknown>, message?: string) => Promise<void>;
@@ -127,7 +128,53 @@ export const usePhoto = create<State>((set, get) => ({
       count: `${data.matches} photo${data.matches === 1 ? "" : "s"}${data.has_more ? " (first 500)" : ""}`,
     });
     if (current) await get().loadDetail();
-    else set({ detail: null, shots: [], report: null, status: "No photos match. Add DNGs with `pentool raw add`." });
+    else set({ detail: null, shots: [], report: null, status: "No photos yet. Import DNG, JPEG or PNG photos from the Photo workflow panel." });
+  },
+
+  async importFiles(files) {
+    if (get().busy || files.length === 0) return;
+    set({ busy: true, status: `Importing ${files.length} photo${files.length === 1 ? "" : "s"}…` });
+    const imported: string[] = [];
+    const errors: string[] = [];
+    const used = new Set(get().photos.map((photo) => photo.id));
+    let revision = get().revision;
+    try {
+      if (!revision) {
+        await get().loadCatalog();
+        revision = get().revision;
+      }
+      if (!revision) throw new Error("Could not read the shared photo catalog. Open a project with `pentool serve PROJECT.pen` and retry.");
+      for (const file of files) {
+        if (file.size === 0 || file.size > 64 * 1024 * 1024) {
+          errors.push(`${file.name}: Studio accepts DNG, JPEG and PNG photos up to 64 MiB each.`);
+          continue;
+        }
+        const stem = file.name.replace(/\.[^.]+$/, "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+        const base = stem.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, 64) || "photo";
+        let id = base;
+        let suffix = 2;
+        while (used.has(id)) id = `${base.slice(0, Math.max(1, 62 - String(suffix).length))}-${suffix++}`;
+        used.add(id);
+        try {
+          const result = await photoApi.import(file, id, revision);
+          revision = result.revision;
+          imported.push(result.result.photo);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Import failed.";
+          errors.push(`${file.name}: ${message}`);
+          if (message.includes("[conflict]")) break;
+        }
+      }
+      if (imported.length) {
+        set({ current: imported[imported.length - 1]!, selected: [imported[imported.length - 1]!], revision });
+        await get().loadCatalog();
+      }
+      set({ status: errors.length ? `${imported.length} imported; ${errors.length} could not be imported. ${errors[0]}` : `Imported ${imported.length} photo${imported.length === 1 ? "" : "s"}.` });
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : "Could not import photos. Check the project and retry." });
+    } finally {
+      set({ busy: false });
+    }
   },
 
   async loadDetail() {

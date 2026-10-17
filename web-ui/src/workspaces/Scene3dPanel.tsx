@@ -1104,7 +1104,7 @@ export function Scene3dPanel() {
                 setArtworkDropNotice("That drag did not contain a valid artwork source; use the source picker instead.");
                 return;
               }
-              const pageExists = studio.doc?.pages.some((page) => page.id === source.page);
+              const pageExists = studio.doc?.pages?.some((page) => page.id === source.page);
               const nodeExists = source.kind === "page" || artworkSources.some(({ page, node: item }) => page === source.page && item.id === source.node);
               if (!pageExists || !nodeExists) {
                 setArtworkDropNotice("The dragged page or node is no longer in this document. Choose an available source from the picker.");

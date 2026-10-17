@@ -35,7 +35,7 @@ function artworkNodes(doc: Doc): { page: string; node: SceneNode }[] {
     found.push({ page, node });
     visit(page, children(node));
   });
-  doc.pages.forEach((page) => page.layers?.forEach((layer) => visit(page.id, layerNodes(layer))));
+  (doc.pages ?? []).forEach((page) => page.layers?.forEach((layer) => visit(page.id, layerNodes(layer))));
   return found;
 }
 
@@ -65,7 +65,7 @@ function flatSvgSizeMm(svg: string): [number, number] | null {
 }
 
 /** Paired packaging views: the folded document canvas and Rust-rendered flat net. */
-export function PackagingWorkspaceStage() {
+export function PackagingWorkspaceStage({ active = true }: { active?: boolean } = {}) {
   const studio = useStudio();
   const request = useRef(0);
   const selected = useMemo(() => studio.doc
@@ -99,6 +99,7 @@ export function PackagingWorkspaceStage() {
   const dragMoved = useRef(false);
 
   useEffect(() => {
+    if (!active) return;
     if (!studio.doc || !dielineId) {
       request.current += 1;
       setPreview(null);
@@ -135,9 +136,10 @@ export function PackagingWorkspaceStage() {
     return () => {
       if (request.current === requestId) request.current += 1;
     };
-  }, [studio.doc, dielineId, printPpi]);
+  }, [studio.doc, dielineId, printPpi, active]);
 
   useEffect(() => {
+    if (!active) return;
     if (!dielineId || !panels.length) {
       if (selectedPanel !== null) studio.setSelectedPackagePanel(null);
       return;
@@ -145,7 +147,7 @@ export function PackagingWorkspaceStage() {
     if (!panels.some((panel) => panel.id === selectedPanel)) {
       studio.setSelectedPackagePanel(panels[0]?.id ?? null);
     }
-  }, [dielineId, panels, selectedPanel, studio.setSelectedPackagePanel]);
+  }, [dielineId, panels, selectedPanel, studio.setSelectedPackagePanel, active]);
 
   const bounds = panels.reduce((result, panel) => ({
     width: Math.max(result.width, panel.rect_mm[0] + panel.rect_mm[2]),
@@ -430,7 +432,7 @@ export function PackagingWorkspaceStage() {
         <span className="min-w-0 flex-1 truncate text-muted-foreground">{node.name || node.id}{dieline.template === "tube" ? " · cylindrical label preview · click a face to select its panel" : ` · ${foldedPercent}% folded · click a face to select its panel`}</span>
         {selectedPanel && <span className="max-w-36 truncate rounded border bg-muted px-2 py-1" aria-live="polite">Face · {selectedPanel}</span>}
       </header>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col"><Canvas /></div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col"><Canvas active={active} /></div>
     </section>
     <section aria-label="Flat dieline view" aria-busy={loading} className="flex min-h-[360px] min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1">
       <header className="flex h-10 shrink-0 items-center gap-2 border-b bg-card px-3 text-xs">
@@ -541,7 +543,7 @@ export function PackagingWorkspaceStage() {
                 studio.setSelectedPackagePanel(panel.id);
                 const source = parseArtworkSourceDrag(event.dataTransfer.getData(ARTWORK_SOURCE_DRAG_TYPE));
                 const doc = useStudio.getState().doc;
-                const pageExists = !!doc?.pages.some((page) => page.id === source?.page);
+                const pageExists = !!doc?.pages?.some((page) => page.id === source?.page);
                 const nodeExists = source?.kind !== "node" || !!doc && artworkNodes(doc).some(({ page, node: item }) => page === source.page && item.id === source.node);
                 if (!source || !pageExists || !nodeExists) {
                   setPanelArtworkMessage({ text: "That page or node is no longer available. Choose an artwork source from the picker.", error: true });

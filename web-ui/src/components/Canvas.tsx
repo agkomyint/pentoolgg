@@ -77,7 +77,7 @@ function resizedBox(box: Rect, h: Handle, p: Point, keepAspect: boolean): Rect {
 }
 
 /** Interactive page: Rust-rendered preview under an SVG layer for selection and drawing. */
-export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
+export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean; active?: boolean } = {}) {
   const s = useStudio();
   const { doc, preview, pageId, view, zoom, setZoom, notify, tool, selectedId, layerId } = s;
   const [url, setUrl] = useState<string | null>(null);
@@ -89,6 +89,12 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
   const [live, setLive] = useState<Matrix | null>(null);
   const drag = useRef<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const scrollPosition = useRef({ left: 0, top: 0 });
+  useLayoutEffect(() => {
+    if (!active) return;
+    const frame = requestAnimationFrame(() => scroller.current?.scrollTo(scrollPosition.current.left, scrollPosition.current.top));
+    return () => cancelAnimationFrame(frame);
+  }, [active]);
   const svg = useRef<SVGSVGElement>(null);
   const token = useRef(0);
   // While an object is dragged, the page is shown as two server-rendered
@@ -119,6 +125,7 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
 
   useEffect(() => {
     const token = ++facePreviewToken.current;
+    if (!active) return;
     if (!doc || !page || !selectedDielineNode || !selectedPackagePanel) {
       setFaceHighlight(null);
       return;
@@ -132,12 +139,12 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
         if (token === facePreviewToken.current) useStudio.getState().notify(cause instanceof Error ? cause.message : "The selected package face could not be highlighted.", true);
       });
     return () => { if (token === facePreviewToken.current) facePreviewToken.current += 1; };
-  }, [doc, page, selectedDielineNode, selectedPackagePanel]);
+  }, [doc, page, selectedDielineNode, selectedPackagePanel, active]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const observe = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    const observe = () => { if (el.clientWidth > 0 && el.clientHeight > 0) setBox({ w: el.clientWidth, h: el.clientHeight }); };
     observe();
     const ro = new ResizeObserver(observe);
     ro.observe(el);
@@ -162,7 +169,8 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
       const mine = ++spriteToken.current;
       const parts = dragLayers(doc, pageId, id);
       const edge = 2048;
-      void Promise.all([api.renderPng(parts.backdrop, pageId, edge), api.renderPng(parts.sprite, pageId, edge)])
+      const renderPage = isScene(doc) ? pageId : undefined;
+      void Promise.all([api.renderPng(parts.backdrop, renderPage, edge), api.renderPng(parts.sprite, renderPage, edge)])
         .then(([backdrop, object]) => {
           if (mine !== spriteToken.current) return;
           setSprite({ backdrop: URL.createObjectURL(backdrop), object: URL.createObjectURL(object), id });
@@ -178,7 +186,7 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
   // changing the native reference renderer used for either pass.
   useEffect(() => {
     const shown = preview ?? doc;
-    if (!shown || view.kind !== "document") return;
+    if (!active || !shown || view.kind !== "document") return;
     const mine = ++token.current;
     const timer = window.setTimeout(() => {
       setLoading(true);
@@ -191,11 +199,12 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
         if (!drag.current) clearSprite();
         return true;
       };
+      const renderPage = isScene(shown) ? pageId : undefined;
       api
-        .renderPng(shown, pageId, preview ? 1024 : 768)
+        .renderPng(shown, renderPage, preview ? 1024 : 768)
         .then(async (blob) => {
           if (!publish(blob) || preview) return;
-          publish(await api.renderPng(shown, pageId, 2048));
+          publish(await api.renderPng(shown, renderPage, 2048));
         })
         .catch((error: unknown) => {
           if (mine !== token.current) return;
@@ -205,8 +214,8 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
           if (mine === token.current) setLoading(false);
         });
     }, preview ? 40 : 30);
-    return () => window.clearTimeout(timer);
-  }, [doc, preview, pageId, view.kind, notify]);
+    return () => { window.clearTimeout(timer); if (token.current === mine) token.current += 1; };
+  }, [doc, preview, pageId, view.kind, notify, active]);
 
   const toPage = useCallback(
     (e: { clientX: number; clientY: number }): Point => {
@@ -414,7 +423,7 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
   useEffect(() => {
     const typing = (t: EventTarget | null) => /input|select|textarea/i.test((t as HTMLElement | null)?.tagName ?? "") || (t as HTMLElement | null)?.isContentEditable;
     const onKey = (e: KeyboardEvent) => {
-      if (typing(e.target)) return;
+      if (!active || e.defaultPrevented || typing(e.target)) return;
       const ctrl = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (e.code === "Space") {
@@ -484,11 +493,12 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
       window.removeEventListener("keyup", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s, draft, selectedId, page]);
+  }, [s, draft, selectedId, page, active]);
 
   // Paste: clipboard images become embedded images, text becomes a text object.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (!active || e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       if (t && /input|select|textarea/i.test(t.tagName)) return;
       const items = Array.from(e.clipboardData?.items ?? []);
@@ -510,7 +520,7 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [canvas.width, canvas.height]);
+  }, [canvas.width, canvas.height, active]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -538,6 +548,7 @@ export function Canvas({ dragToUv = false }: { dragToUv?: boolean } = {}) {
     <div className="relative flex min-h-0 flex-1 flex-col bg-canvas">
       <div
         ref={scroller}
+        onScroll={(event) => { if (active) scrollPosition.current = { left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; }}
         className="flex-1 select-none overflow-auto [&_img]:pointer-events-none [&_img]:select-none [-webkit-user-drag:none]"
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}

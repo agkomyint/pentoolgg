@@ -16,7 +16,7 @@ import {
   renamePage,
   resizeCanvas,
 } from "@/lib/actions";
-import { findNode, pageOf } from "@/lib/model";
+import { findNode, pageOf, pagesOf } from "@/lib/model";
 import { cn } from "@/lib/utils";
 
 const input = "mt-0.5 h-7 w-full rounded border bg-card px-1.5 text-xs";
@@ -24,30 +24,34 @@ const heading = "text-[11px] font-semibold uppercase tracking-wide text-muted-fo
 
 function Pages() {
   const { doc, pageId, setPage } = useStudio();
+  const pages = pagesOf(doc);
+  const legacy = !!doc && !Array.isArray(doc.pages);
   return (
     <section className="space-y-1.5">
       <div className="flex items-center justify-between">
         <h3 className={heading}>Pages</h3>
         <div className="flex">
-          <Button variant="ghost" size="icon" aria-label="Add page" onClick={addPage}>
+          {!legacy && <Button variant="ghost" size="icon" aria-label="Add page" onClick={addPage}>
             <Plus size={14} />
-          </Button>
-          <Button variant="ghost" size="icon" aria-label="Duplicate page" onClick={duplicatePage}>
+          </Button>}
+          {!legacy && <Button variant="ghost" size="icon" aria-label="Duplicate page" onClick={duplicatePage}>
             <Copy size={14} />
-          </Button>
+          </Button>}
         </div>
       </div>
+      {legacy && <p className="text-[11px] text-muted-foreground">Single-page legacy document · upgrade the format to add pages.</p>}
       <ul className="space-y-0.5">
-        {doc?.pages.map((p) => (
+        {pages.map((p) => (
           <li key={p.id} className={cn("flex items-center gap-1 rounded px-1.5 py-1 hover:bg-accent", p.id === pageId && "bg-accent font-medium")}>
             <button
               type="button"
-              draggable
+              draggable={!legacy}
               aria-label={`Drag page ${p.name ?? p.id} as artwork`}
               title="Drag onto a mockup artwork slot"
               className="grid size-12 shrink-0 cursor-grab place-items-center rounded text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
               onClick={(event) => { event.stopPropagation(); setPage(p.id); }}
               onDragStart={(event) => {
+                if (legacy) return;
                 event.stopPropagation();
                 event.dataTransfer.effectAllowed = "copy";
                 event.dataTransfer.setData(ARTWORK_SOURCE_DRAG_TYPE, JSON.stringify({ kind: "page", page: p.id }));
@@ -56,7 +60,7 @@ function Pages() {
             <button className="min-w-0 flex-1 truncate text-left" onClick={() => setPage(p.id)}>
               {p.name ?? p.id}
             </button>
-            <button
+            {!legacy && <button
               aria-label="Rename page"
               className="text-[11px] text-muted-foreground"
               onClick={() => {
@@ -65,10 +69,10 @@ function Pages() {
               }}
             >
               rename
-            </button>
-            <button aria-label="Delete page" disabled={(doc?.pages.length ?? 0) <= 1} onClick={() => removePage(p.id)} className="opacity-60 hover:opacity-100 disabled:opacity-20">
+            </button>}
+            {!legacy && <button aria-label="Delete page" disabled={(doc?.pages.length ?? 0) <= 1} onClick={() => removePage(p.id)} className="opacity-60 hover:opacity-100 disabled:opacity-20">
               <Trash2 size={12} />
-            </button>
+            </button>}
           </li>
         ))}
       </ul>
@@ -374,19 +378,20 @@ function Assets() {
   );
 }
 
+export function DocumentSettings() {
+  const { doc } = useStudio();
+  if (!doc) return <p className="text-xs text-muted-foreground">Loading project…</p>;
+  return <div className="space-y-5"><h2 className="text-xs font-semibold">Document</h2><CanvasSettings /><Defaults /><DielineProductionRole /></div>;
+}
+
+export function DesignAssets() {
+  return <div className="space-y-5"><Insert /><Assets /></div>;
+}
+
 export function DesignPanel() {
   const { doc } = useStudio();
-  if (!doc) return <p className="text-muted-foreground">Loading...</p>;
-  return (
-    <div className="space-y-5">
-      <Pages />
-      <CanvasSettings />
-      <DielineProductionRole />
-      <Defaults />
-      <Insert />
-      <Assets />
-    </div>
-  );
+  if (!doc) return <p className="text-muted-foreground">Loading…</p>;
+  return <div className="space-y-5"><Insert /><details className="rounded border p-2"><summary className="cursor-pointer text-xs font-medium">Page management</summary><div className="pt-3"><Pages /></div></details><DielineProductionRole /></div>;
 }
 
 export { FilePlus2 };

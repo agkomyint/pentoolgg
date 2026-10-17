@@ -82,7 +82,8 @@ export function Properties() {
   const page = pageOf(doc, pageId);
   const found = useMemo(() => findNode(page, selectedId), [page, selectedId]);
   const [json, setJson] = useState("");
-  useEffect(() => setJson(found ? JSON.stringify(found.node, null, 2) : ""), [found]);
+  const [jsonOpen, setJsonOpen] = useState(false);
+  useEffect(() => { if (jsonOpen) setJson(found ? JSON.stringify(found.node, null, 2) : ""); }, [found?.node, jsonOpen]);
 
   if (!doc || !found) {
     return <p className="text-muted-foreground">Select an object on the canvas or in Layers to edit it.</p>;
@@ -261,12 +262,12 @@ export function Properties() {
         </section>
       )}
 
-      <details className="text-xs">
-        <summary className="cursor-pointer text-muted-foreground">Raw node JSON</summary>
-        <textarea className="mt-1 h-48 w-full rounded border bg-card p-1.5 font-mono text-[11px]" value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
+      <details className="text-xs" open={jsonOpen} onToggle={(event) => setJsonOpen(event.currentTarget.open)}>
+        <summary className="cursor-pointer text-muted-foreground">Advanced object data</summary>
+        {jsonOpen && <><textarea className="mt-1 h-48 w-full rounded border bg-card p-1.5 font-mono text-[11px]" value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
         <Button size="sm" className="mt-1" onClick={() => replaceNodeJson(node.id, json)} disabled={locked}>
           Apply JSON
-        </Button>
+        </Button></>}
       </details>
     </div>
   );

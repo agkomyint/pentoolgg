@@ -1,6 +1,6 @@
 // Photo studio client. Every preview is developed by the Rust pipeline and every
 // edit is one guarded Rust transaction (/api/photo/*); nothing is computed here.
-import { getJson, postJson } from "@/lib/api";
+import { getJson, postBytes, postJson } from "@/lib/api";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Develop = Record<string, any>;
@@ -15,6 +15,7 @@ export type PhotoSummary = {
 export type Variant = { id: string; name?: string; develop?: Develop };
 export type PhotoDetail = {
   revision: string;
+  kind?: "raw" | "derived" | "rendered";
   width?: number;
   height?: number;
   photo: { variants: Variant[]; snapshots?: { id: string; name?: string }[]; keywords?: string[] };
@@ -55,6 +56,16 @@ export const photoApi = {
       `/api/photo/catalog?query=${encodeURIComponent(query)}&limit=500`,
     ),
   detail: (photo: string) => getJson<PhotoDetail>(`/api/photo/detail?photo=${encodeURIComponent(photo)}`),
+  import: (file: File, id: string, revision: string) => {
+    const query = new URLSearchParams({ id, name: file.name });
+    return postBytes<{ revision: string; result: { photo: string; asset: string; upgraded: boolean } }>(
+      `/api/photo/import?${query}`,
+      file,
+      { "content-type": "application/octet-stream", "x-pentool-revision": revision },
+    );
+  },
+  place: (body: { photo: string; variant: string; page: string; layer: string; x: number; y: number; width: number; height: number; fit: string; position: [number, number]; revision: string }) =>
+    postJson<{ revision: string; result: { id: string; photo: string; page: string; layer: string } }>("/api/photo/place", body),
   async preview(args: { photo: string; variant: string; edge: number; space: string; overlay: string; uncropped: boolean }): Promise<Shot> {
     const data = await postJson<{ png: string; report: PreviewReport }>("/api/photo/preview", args);
     return { url: `data:image/png;base64,${data.png}`, report: data.report };

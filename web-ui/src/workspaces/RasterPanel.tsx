@@ -1,22 +1,12 @@
 import { Button } from "@/components/ui/button";
-import { usePaint, type RasterTool } from "./rasterStore";
+import { usePaint } from "./rasterStore";
 import { useRasterLayers } from "./RasterStage";
 import { useStudio } from "@/store";
+import { pageOf } from "@/lib/model";
 import { api, postJson, type Doc } from "@/lib/api";
 import { PlanPanel } from "./PlanPanel";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
-const TOOLS: [RasterTool, string][] = [
-  ["brush", "Brush"],
-  ["eraser", "Eraser"],
-  ["clone", "Clone"],
-  ["heal", "Heal"],
-  ["source", "Set clone source"],
-  ["quickmask", "Quick mask"],
-  ["marquee", "Marquee"],
-  ["lasso", "Lasso"],
-  ["wand", "Magic wand"],
-];
 
 function Range({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void }) {
   return (
@@ -30,6 +20,7 @@ function Range({ label, value, min, max, step = 1, onChange }: { label: string; 
 
 export function RasterPanel() {
   const p = usePaint();
+  const { zoom, setZoom, doc } = useStudio();
   const layers = useRasterLayers();
   const layer = layers.find((n) => n.id === p.layerId) ?? layers[0];
 
@@ -42,7 +33,7 @@ export function RasterPanel() {
       let source: Doc = doc;
       if (source.version < 6) source = (await api.migrate(source, 6)).document;
       const id = `paint-${Date.now().toString(36)}`;
-      const body = await postJson<{ document: Doc }>("/api/raster", { document: source, page: pageId, id, action: "add", args: {} });
+      const body = await postJson<{ document: Doc }>("/api/raster", { document: source, page: pageOf(source, pageId)?.id, id, action: "add", args: {} });
       replaceDoc(body.document);
       p.set({ layerId: id, status: "Paint layer added. Pick a tool and paint on the preview." });
       notify("Added a paint layer. Save to keep it.");
@@ -58,8 +49,9 @@ export function RasterPanel() {
       <div className="space-y-2 p-3 text-xs">
         <p className="text-muted-foreground">This page has no paint layer yet. A paint layer holds pixels and is sized to the page.</p>
         <Button size="sm" disabled={p.busy} onClick={() => void addLayer()}>
-          Add paint layer
+          {doc && doc.version < 6 ? "Upgrade and add paint layer" : "Add paint layer"}
         </Button>
+        {doc && doc.version < 6 && <p className="text-muted-foreground">Adding pixels upgrades this project to format v6. Save keeps the upgrade; Undo reverts it.</p>}
         {p.status && <p className="text-muted-foreground">{p.status}</p>}
       </div>
     );
@@ -94,13 +86,6 @@ export function RasterPanel() {
           ))}
         </select>
       </label>
-      <div className="grid grid-cols-3 gap-1">
-        {TOOLS.map(([id, label]) => (
-          <Button key={id} size="sm" variant={tool === id ? "default" : "outline"} aria-pressed={tool === id} onClick={() => p.set({ tool: id })}>
-            {label}
-          </Button>
-        ))}
-      </div>
 
       {paints && (
         <div className="space-y-2">
@@ -147,19 +132,19 @@ export function RasterPanel() {
       )}
 
       <div className="flex flex-wrap items-center gap-1">
-        <Button size="sm" variant="outline" onClick={() => p.set({ zoom: Math.max(0.1, p.zoom / 1.25) })}>
+        <Button size="sm" variant="outline" onClick={() => setZoom(Math.max(0.1, zoom / 1.25))}>
           −
         </Button>
         <span className="tabular-nums">
-          {Math.round(p.zoom * 100)}% / {p.rotate}°
+          {Math.round(zoom * 100)}% / {p.rotate}°
         </span>
-        <Button size="sm" variant="outline" onClick={() => p.set({ zoom: Math.min(8, p.zoom * 1.25) })}>
+        <Button size="sm" variant="outline" onClick={() => setZoom(Math.min(8, zoom * 1.25))}>
           +
         </Button>
         <Button size="sm" variant="outline" onClick={() => p.set({ rotate: (p.rotate + 15) % 360 })}>
           Rotate 15°
         </Button>
-        <Button size="sm" variant="outline" onClick={p.resetView}>
+        <Button size="sm" variant="outline" onClick={() => { p.resetView(); setZoom(1); }}>
           Reset view
         </Button>
         <Button size="sm" variant="outline" onClick={() => void clearSelection()}>
