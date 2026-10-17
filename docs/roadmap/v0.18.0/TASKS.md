@@ -32,16 +32,16 @@ documents and propose edits through the same planner every command uses.
 
 ## Must ship, in order
 
-- [ ] **1. Choose the engine and freeze the API,** with a binary-size budget and
+- [x] **1. Choose the engine and freeze the API,** with a binary-size budget and
   a threat model in `docs/extensions-v1.md`.
-- [ ] **2. Sandbox and limits** with tests for escape attempts and resource
+- [x] **2. Sandbox and limits** with tests for escape attempts and resource
   exhaustion.
-- [ ] **3. Document API:** read, search, plan, apply, dry-run, all through the
+- [x] **3. Document API:** read, search, plan, apply, dry-run, all through the
   shared transaction path.
-- [ ] **4. Manifest, capability prompts, packaging and offline verification.**
-- [ ] **5. CLI:** `extension add|list|run|remove` with JSON results.
-- [ ] **6. Editor:** extension panel and command palette integration.
-- [ ] **7. Examples and conformance tests,** including a hostile-script suite.
+- [x] **4. Manifest, capability prompts, packaging and offline verification.**
+- [x] **5. CLI:** `extension add|list|run|remove` with JSON results.
+- [x] **6. Editor:** extension panel and command palette integration.
+- [x] **7. Examples and conformance tests,** including a hostile-script suite.
 
 ## Explicitly deferred
 
@@ -50,9 +50,11 @@ documents and propose edits through the same planner every command uses.
 
 ## Status
 
-All seven items are implemented on branch `feat/v0.18.0-extensions` (see
-`docs/extensions-v1.md`) with passing local tests on Windows (full suite,
-Clippy and rustfmt clean). Checkboxes stay open until the three-OS CI run
-provides cross-platform evidence. Studio (item 6) has not been exercised in a
-live browser, and a like-for-like binary-size delta against v0.16.1 is still
-to be read from CI's `binary-size` jobs.
+All seven items are implemented (see `docs/extensions-v1.md`). Evidence: the
+full suite, Clippy and rustfmt pass locally on Windows, and the pull request CI
+run (#185) passed the test jobs on Linux, Windows and Apple Silicon macOS, the
+`binary-size` jobs on all three targets, and `browser-core`. The Windows release
+binary is 45,156,864 bytes against the 60 MB budget. The Ctrl/Cmd+K palette and
+the Extensions tab were driven in headless Edge on Windows; other browsers and
+hands-on use are not covered. Marketplace, network-capable extensions and
+native plugins remain deferred.
