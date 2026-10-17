@@ -781,7 +781,11 @@ pub fn merge(raw: &Value, records: &Records, options: &MergeOptions) -> Result<M
         }
         // Stories go in before the next page add, which validates the whole
         // document and would otherwise see dangling story references.
-        out["layout"]["stories"]
+        out["layout"]
+            .as_object_mut()
+            .context("layout object")?
+            .entry("stories")
+            .or_insert_with(|| json!([]))
             .as_array_mut()
             .context("layout.stories must be an array")?
             .append(&mut new_stories);
@@ -1586,7 +1590,11 @@ pub fn run_alt(raw: &mut Value, action: AltAction) -> Result<(Value, bool)> {
                 .position(|p| node_id(p) == id)
                 .context("[internal] added page not found")?;
             raw["pages"][at] = page;
-            raw["layout"]["stories"]
+            raw["layout"]
+                .as_object_mut()
+                .context("layout object")?
+                .entry("stories")
+                .or_insert_with(|| json!([]))
                 .as_array_mut()
                 .context("layout.stories must be an array")?
                 .extend(new_stories);
