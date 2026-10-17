@@ -10,6 +10,8 @@ pub mod book;
 pub mod color;
 pub mod compose;
 pub mod composite;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod design;
 pub mod diff;
 pub mod document;
 pub mod editing;
@@ -81,6 +83,7 @@ pub mod svg_import;
 pub mod svg_paint;
 pub mod tables;
 pub mod text;
+pub mod tokens;
 pub mod transaction;
 pub mod transform;
 pub mod typeset;

@@ -64,3 +64,5 @@ mod v017_interchange;
 mod v017_psd_export;
 #[path = "../v018_extension.rs"]
 mod v018_extension;
+#[path = "../v019_design.rs"]
+mod v019_design;

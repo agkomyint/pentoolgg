@@ -2705,6 +2705,11 @@ enum Command {
     Preset(Box<PresetArgs>),
     /// List, create, edit, and rebind named document design tokens.
     Style(Box<StyleArgs>),
+    /// Inspect design tokens and manage versioned, lockable token libraries.
+    Design {
+        #[command(subcommand)]
+        command: pentool::design::cli::DesignCommand,
+    },
     /// Replace fills or strokes within an explicit scene scope.
     Replace(Box<ReplaceArgs>),
     /// Serialize deterministically as compact or human-readable JSON.
@@ -9853,6 +9858,7 @@ async fn run() -> Result<()> {
             );
             Ok(())
         }
+        Command::Design { command } => pentool::design::cli::run_and_print(command),
         Command::Style(args) => {
             let bytes = fs::read(&args.input)
                 .with_context(|| format!("could not read {}", args.input.display()))?;
