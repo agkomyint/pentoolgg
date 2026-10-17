@@ -2228,6 +2228,7 @@ enum Command {
     /// given; carried IDML data returns unchanged.
     IdmlExport {
         input: PathBuf,
+        /// IDML package to write (`.idml`; the bytes are always an IDML package).
         output: PathBuf,
         /// Write the full export report here (JSON).
         #[arg(long)]
@@ -8730,6 +8731,16 @@ async fn run() -> Result<()> {
             allow_approximation,
             overwrite,
         } => {
+            // The bytes are always an IDML package; a `.zip`/`.pen` name would
+            // mislabel the content, so validate the extension up front.
+            anyhow::ensure!(
+                output
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("idml")),
+                "[invalid-input] the IDML export output must end in .idml, got {}; the file is always an IDML package",
+                output.display()
+            );
             if output.exists() && !overwrite {
                 anyhow::bail!(
                     "[policy-denied] {} already exists; choose another path or pass --overwrite; nothing was written",

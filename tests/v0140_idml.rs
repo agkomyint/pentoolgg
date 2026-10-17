@@ -461,3 +461,21 @@ fn features_without_an_idml_equivalent_fail_unless_approximation_is_allowed() {
     assert_eq!(rect["y"], 20.0);
     assert_eq!(rect["style"]["fill"]["fallback"], "#336699");
 }
+
+#[test]
+fn export_rejects_non_idml_output_names() {
+    let ws = Workspace::new("export-extension");
+    let idml = fixture_idml(&ws);
+    import(&ws, &idml, "doc.pen");
+    // IDML bytes under a `.zip` (or any other) name would mislabel the package.
+    for name in ["pkg.zip", "pkg.pen", "pkg"] {
+        let out = ws.path(name);
+        let error = fails(&["idml-export", &ws.path("doc.pen"), &out]);
+        assert!(error.contains("must end in .idml"), "{name}: {error}");
+        assert!(!Path::new(&out).exists(), "{name} must not be written");
+    }
+    // The check fires before any input read: a missing input with a bad output
+    // extension still reports the extension error.
+    let error = fails(&["idml-export", &ws.path("missing.pen"), &ws.path("pkg.zip")]);
+    assert!(error.contains("must end in .idml"), "{error}");
+}
