@@ -30,13 +30,14 @@ impl Drop for Lock {
     }
 }
 
-fn root(document: &Path) -> Result<PathBuf> {
-    let parent = document.parent().unwrap_or_else(|| Path::new("."));
+/// Filesystem-safe form of a document's file name, shared by the hidden
+/// history and collaboration directories.
+pub fn safe_name(document: &Path) -> Result<String> {
     let name = document
         .file_name()
         .context("document path has no filename")?
         .to_string_lossy();
-    let safe: String = name
+    Ok(name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
@@ -45,8 +46,15 @@ fn root(document: &Path) -> Result<PathBuf> {
                 '_'
             }
         })
-        .collect();
-    Ok(parent.join(".pentool").join("history").join(safe))
+        .collect())
+}
+
+fn root(document: &Path) -> Result<PathBuf> {
+    let parent = document.parent().unwrap_or_else(|| Path::new("."));
+    Ok(parent
+        .join(".pentool")
+        .join("history")
+        .join(safe_name(document)?))
 }
 
 fn lock(root: &Path) -> Result<Lock> {
@@ -117,14 +125,27 @@ pub fn list(document: &Path) -> Result<serde_json::Value> {
     Ok(serde_json::json!({"cursor":manifest.cursor,"entries":manifest.entries}))
 }
 
-fn restore_hash(document: &Path, root: &Path, hash: &str) -> Result<()> {
+fn restore_hash(document: &Path, root: &Path, hash: &str, cause: &str) -> Result<()> {
     let bytes = fs::read(root.join(format!("{hash}.pen")))
         .with_context(|| format!("history revision not found: {hash}"))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
     crate::transaction::validate_value(&value)?;
     let before = fs::read(document)?;
     let before_value: serde_json::Value = serde_json::from_slice(&before)?;
-    crate::editing::atomic_write(document, &bytes)?;
+    let collab = if before == bytes {
+        None
+    } else {
+        crate::collab::begin(document, cause, &before, &bytes)?
+    };
+    if let Err(error) = crate::editing::atomic_write(document, &bytes) {
+        if let Some(pending) = collab {
+            pending.abort();
+        }
+        return Err(error);
+    }
+    if let Some(pending) = collab {
+        pending.commit()?;
+    }
     crate::scene3d::node::invalidate_png_cache_for_document_change(&before_value, &value);
     Ok(())
 }
@@ -142,7 +163,7 @@ pub fn undo(document: &Path) -> Result<serde_json::Value> {
         bail!("document changed outside history; restore an explicit revision instead")
     }
     let hash = manifest.entries[index].before.clone();
-    restore_hash(document, &root, &hash)?;
+    restore_hash(document, &root, &hash, "undo")?;
     manifest.cursor = index;
     save(&root, &manifest)?;
     Ok(serde_json::json!({"ok":true,"revision":hash,"cursor":manifest.cursor}))
@@ -161,7 +182,7 @@ pub fn redo(document: &Path) -> Result<serde_json::Value> {
         bail!("document changed outside history; restore an explicit revision instead")
     }
     let hash = entry.after.clone();
-    restore_hash(document, &root, &hash)?;
+    restore_hash(document, &root, &hash, "redo")?;
     manifest.cursor += 1;
     save(&root, &manifest)?;
     Ok(serde_json::json!({"ok":true,"revision":hash,"cursor":manifest.cursor}))
@@ -170,7 +191,7 @@ pub fn redo(document: &Path) -> Result<serde_json::Value> {
 pub fn restore(document: &Path, hash: &str) -> Result<serde_json::Value> {
     let root = root(document)?;
     let _lock = lock(&root)?;
-    restore_hash(document, &root, hash)?;
+    restore_hash(document, &root, hash, "restore")?;
     Ok(serde_json::json!({"ok":true,"revision":hash}))
 }
 

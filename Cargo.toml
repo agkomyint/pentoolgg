@@ -132,6 +132,10 @@ name = "suite_12"
 path = "tests/suites/suite_12.rs"
 
 [[test]]
+name = "collab_converge"
+path = "tests/collab_converge.rs"
+
+[[test]]
 name = "v017_interchange"
 path = "tests/v017_interchange.rs"
 

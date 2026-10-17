@@ -7,6 +7,7 @@ pub mod asset;
 pub mod benchmark;
 pub mod blend;
 pub mod book;
+pub mod collab;
 pub mod color;
 pub mod comments;
 pub mod compose;

@@ -174,8 +174,23 @@ pub fn commit_bytes(
     let history = if dry_run || before == after {
         None
     } else {
-        let history = crate::history::record(path, operation, &before, after)?;
-        crate::editing::atomic_write(path, after)?;
+        let collab = crate::collab::begin(path, operation, &before, after)?;
+        let written = crate::history::record(path, operation, &before, after).and_then(|history| {
+            crate::editing::atomic_write(path, after)?;
+            Ok(history)
+        });
+        let history = match written {
+            Ok(history) => history,
+            Err(error) => {
+                if let Some(pending) = collab {
+                    pending.abort();
+                }
+                return Err(error);
+            }
+        };
+        if let Some(pending) = collab {
+            pending.commit()?;
+        }
         if value
             .get("version")
             .and_then(Value::as_u64)
