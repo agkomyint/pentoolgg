@@ -1326,13 +1326,22 @@ pub fn export_epub(
     report.insert("unplaced_stories_skipped".into(), json!(unplaced));
     report.insert("overset_stories".into(), json!(overset_total));
     report.insert("bytes".into(), json!(bytes.len()));
-    report.insert(
-        "limits".into(),
-        json!([
+    // Limits must describe the layout actually written: fixed pages carry
+    // rasterized artwork plus positioned real text and drop links entirely,
+    // while reflowable output carries story text only.
+    let limits: Vec<&str> = if options.fixed {
+        vec![
+            "fixed output exports each page as a raster image with positioned real text; vector artwork is rasterized at --scale",
+            "fixed output drops internal page and bookmark links entirely",
+            "EPUBCheck validation is not run by pentool",
+        ]
+    } else {
+        vec![
             "reflowable output carries story text and paragraph styles only; images and frames are not exported",
             "internal page and bookmark links are not rewritten in reflowable output",
-            "EPUBCheck validation is not run by pentool"
-        ]),
-    );
+            "EPUBCheck validation is not run by pentool",
+        ]
+    };
+    report.insert("limits".into(), json!(limits));
     Ok(Value::Object(report))
 }
