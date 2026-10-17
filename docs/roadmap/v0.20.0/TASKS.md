@@ -34,23 +34,23 @@ the single binary, readable `.pen` files and atomic history.
 
 ## Must ship, in order
 
-- [ ] **1. Specify the operation log,** merge rules and conflict reporting in
+- [x] **1. Specify the operation log,** merge rules and conflict reporting in
   `docs/collaboration-v1.md`, with a threat model.
-- [ ] **2. Operation log in the transaction path,** with deterministic replay
+- [x] **2. Operation log in the transaction path,** with deterministic replay
   and a property-based convergence test.
-- [ ] **3. Local-network sync** between instances (`serve --collab`), with
+- [x] **3. Local-network sync** between instances (`serve --collab`), with
   authentication tokens and explicit peers.
 - [ ] **3a. Actor identity and contribution stats:** actor kinds in every
   operation, `pentool stats DOC [--by actor|kind|page] [--json]` reporting
   percent share of work for humans versus agents, a stats panel in the editor,
   and tests that stats are deterministic, survive history compaction and
   cannot be forged by a peer.
-- [ ] **4. Comments, mentions and review states** stored outside the scene.
-- [ ] **5. Presence and cursors,** best-effort and non-persistent.
-- [ ] **6. Permissions** (viewer, commenter, editor) enforced by the server.
+- [x] **4. Comments, mentions and review states** stored outside the scene.
+- [x] **5. Presence and cursors,** best-effort and non-persistent.
+- [x] **6. Permissions** (viewer, commenter, editor) enforced by the server.
 - [ ] **7. Editor:** collaborator list, comments panel, conflict resolution UI.
   Status: collaborator list, comments panel and a read-only conflict viewer exist (`docs/studio.md`, Collaboration); one-click conflict resolution, cursors and a live-browser check are outstanding, so the box stays open.
-- [ ] **8. Evidence:** convergence fuzzing, hostile-peer tests, and recovery
+- [x] **8. Evidence:** convergence fuzzing, hostile-peer tests, and recovery
   tests for crash during sync.
 
 ## Explicitly deferred
