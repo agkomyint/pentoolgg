@@ -1969,6 +1969,14 @@ pub fn bake(
     let encoded = encoded.into_inner();
     let info = decode_source(&encoded)?;
     let operations = node_operations(&node).to_vec();
+    // Only enabled operations are flattened into the pixels; disabled ones are
+    // dropped without effect, and the report must not conflate the two.
+    let applied: Vec<String> = operations
+        .iter()
+        .filter(|op| op.get("enabled").and_then(Value::as_bool).unwrap_or(true))
+        .filter_map(|op| op["id"].as_str().map(str::to_owned))
+        .collect();
+    let dropped_disabled = operations.len() - applied.len();
     let report = serde_json::json!({
         "image": id,
         "source": digest,
@@ -1977,7 +1985,9 @@ pub fn bake(
         "pixel_width": info.pixel_width,
         "pixel_height": info.pixel_height,
         "byte_length": info.byte_length,
-        "removed_operations": operations.len(),
+        "removed_operations": applied.len(),
+        "applied_operations": applied,
+        "dropped_disabled_operations": dropped_disabled,
         "crop_applied": node["crop"],
         "metadata": "stripped",
         "committed": commit
