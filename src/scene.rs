@@ -1,12 +1,13 @@
 //! Version 4 ordered scene graph migration and validation.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use kurbo::{Affine, BezPath, Rect, Shape};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const VERSION: u64 = 4;
-pub const LATEST_VERSION: u64 = crate::scene3d::node::BINDINGS_VERSION;
+pub const PAINT_VERSION: u64 = 12;
+pub const LATEST_VERSION: u64 = PAINT_VERSION;
 pub const MAX_DEPTH: usize = 64;
 
 pub fn is_scene_document(raw: &Value) -> bool {
@@ -20,6 +21,7 @@ pub fn is_scene_document(raw: &Value) -> bool {
             | Some(crate::spreads::VERSION)
             | Some(crate::scene3d::node::VERSION)
             | Some(crate::scene3d::node::BINDINGS_VERSION)
+            | Some(PAINT_VERSION)
     )
 }
 
@@ -2009,6 +2011,23 @@ pub fn migrate_to_v5(raw: Value) -> Result<Value> {
     Ok(raw)
 }
 
+/// Explicitly migrate a supported document to v12, which adds gradient paints
+/// to vector shape style slots while preserving all older style fallbacks.
+pub fn migrate_to_v12(raw: Value) -> Result<Value> {
+    if raw.get("version").and_then(Value::as_u64) == Some(PAINT_VERSION) {
+        validate(&raw)?;
+        return Ok(raw);
+    }
+    let mut raw = crate::scene3d::node::migrate_to_v11(raw)?;
+    ensure!(
+        raw.get("version").and_then(Value::as_u64) == Some(crate::scene3d::node::BINDINGS_VERSION),
+        "[unsupported-capability] migration to v12 requires a v11-compatible document"
+    );
+    raw["version"] = json!(PAINT_VERSION);
+    validate(&raw)?;
+    Ok(raw)
+}
+
 fn fallback(value: Value) -> Value {
     json!({"fallback":value})
 }
@@ -2806,6 +2825,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
                 | crate::scene3d::node::BINDINGS_VERSION
+                | PAINT_VERSION
         )
     {
         bail!("not a supported Pentool scene document")
@@ -2870,6 +2890,7 @@ pub fn validate(raw: &Value) -> Result<()> {
                 .context("v4 layer has no nodes")?
             {
                 validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)?;
+                crate::svg_paint::validate_tree(raw, node)?;
             }
         }
         fn check_instances(node: &Value, components: &HashSet<&str>) -> Result<()> {
@@ -2915,6 +2936,7 @@ pub fn validate(raw: &Value) -> Result<()> {
             {
                 validate_node(node, 0, &mut ids, image_assets.as_ref(), compositing)
                     .with_context(|| format!("parent {parent} item is invalid"))?;
+                crate::svg_paint::validate_tree(raw, node)?;
             }
         }
     }

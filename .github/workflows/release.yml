@@ -130,6 +130,17 @@ jobs:
           "$BIN" page import-smoke.pen add assets --name Assets --width 800 --height 600
           "$BIN" --page assets import import-smoke.pen examples/eye.pen --prefix eye --at 40 40
           "$BIN" --page assets search import-smoke.pen eye --limit 2
+      - name: Smoke test design interchange import and PSD export
+        shell: bash
+        run: |
+          cp docs/fixtures/v4-scene.pen interchange-source.pen
+          "$BIN" new interchange-target.pen --width 320 --height 240
+          "$BIN" import interchange-target.pen docs/fixtures/v017-interchange-smoke.svg --prefix svg-smoke --report svg-import-report.json
+          "$BIN" export interchange-source.pen interchange-smoke.pdf
+          "$BIN" import interchange-target.pen interchange-smoke.pdf --prefix pdf-smoke --report pdf-import-report.json
+          "$BIN" export interchange-source.pen interchange-smoke.psd --report psd-export-report.json
+          "$BIN" import interchange-target.pen interchange-smoke.psd --prefix psd-smoke --report psd-import-report.json
+          "$BIN" import interchange-target.pen docs/fixtures/figma-weather-now-v15.fig --report fig-import-report.json
       - name: Smoke test page layout and IDML
         shell: bash
         run: |
@@ -188,6 +199,6 @@ jobs:
         run: cd artifacts && sha256sum *.zip *.tar.gz > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           generate_release_notes: true
           files: artifacts/*

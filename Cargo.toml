@@ -1,10 +1,10 @@
 [package]
 name = "pentool"
-version = "0.16.1"
+version = "0.17.1"
 edition = "2021"
-# Integration tests are grouped into 12 suites under tests/suites/ so a full
-# run links 12 test binaries instead of one per file (123). Add new test
-# files as modules in a suite file, not as new top-level tests/*.rs targets.
+# Legacy integration tests are grouped into 12 suites under tests/suites/.
+# Milestone-specific integration suites are declared explicitly below so CI
+# executes their dedicated format and release coverage.
 autotests = false
 rust-version = "1.85"
 description = "A single-binary, agent-friendly vector pen tool"
@@ -129,3 +129,11 @@ path = "tests/suites/suite_11.rs"
 [[test]]
 name = "suite_12"
 path = "tests/suites/suite_12.rs"
+
+[[test]]
+name = "v017_interchange"
+path = "tests/v017_interchange.rs"
+
+[[test]]
+name = "v017_psd_export"
+path = "tests/v017_psd_export.rs"

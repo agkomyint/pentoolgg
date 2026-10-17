@@ -313,8 +313,16 @@ struct ImportRequest {
     document: serde_json::Value,
     source: serde_json::Value,
     options: crate::import::ImportOptions,
+    format: Option<String>,
+    source_name: Option<String>,
 }
 async fn import_command(Json(body): Json<ImportRequest>) -> Response {
+    if let Some(format) = body.format.clone() {
+        return match plan_design_import(body, &format) {
+            Ok(result) => Json(result).into_response(),
+            Err(error) => problem(error),
+        };
+    }
     match crate::import::compose(body.document, body.source, &body.options) {
         Ok(result) => {
             Json(serde_json::json!({"document":result.document,"summary":result.summary}))
@@ -322,6 +330,44 @@ async fn import_command(Json(body): Json<ImportRequest>) -> Response {
         }
         Err(error) => problem(error),
     }
+}
+
+fn plan_design_import(body: ImportRequest, format: &str) -> Result<serde_json::Value> {
+    use base64::Engine;
+    let encoded = body
+        .source
+        .as_str()
+        .context("[invalid-input] design source must be base64-encoded bytes")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .context("[malformed-resource] design source is not valid base64")?;
+    const MAX_STUDIO_IMPORT_BYTES: usize = 32 * 1024 * 1024;
+    anyhow::ensure!(
+        bytes.len() <= MAX_STUDIO_IMPORT_BYTES,
+        "[limit-exceeded] Studio design imports are limited to {MAX_STUDIO_IMPORT_BYTES} bytes"
+    );
+    let source = body.source_name.as_deref().unwrap_or("imported-design");
+    let imported = crate::interchange::import_design(format, &bytes, source)?;
+    let mut report = imported.report;
+    let prefix = body.options.prefix.as_deref().unwrap_or_else(|| {
+        std::path::Path::new(source)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("import")
+    });
+    let (document, summary) = crate::interchange::append_imported_document(
+        &body.document,
+        &imported.document,
+        body.options.destination_page.as_deref(),
+        prefix,
+        &mut report,
+    )?;
+    Ok(serde_json::json!({
+        "document": document,
+        "summary": summary,
+        "report": report,
+        "local": true
+    }))
 }
 async fn object_command(Json(body): Json<ObjectRequest>) -> Response {
     let result = (|| -> Result<serde_json::Value> {
@@ -1115,7 +1161,11 @@ struct Scene3dFoldRequest {
 fn plan_scene3d_fold(request: &Scene3dFoldRequest) -> Result<serde_json::Value> {
     use serde_json::json;
     anyhow::ensure!(
-        request.document.get("version").and_then(serde_json::Value::as_u64) == Some(11),
+        request
+            .document
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            == Some(11),
         "[unsupported-version] package folding needs document format v11; upgrade the document first"
     );
     anyhow::ensure!(
@@ -2064,7 +2114,9 @@ fn plan_scene3d_import(
     use base64::Engine as _;
     let format = body.format.to_ascii_lowercase();
     if !matches!(format.as_str(), "glb" | "gltf" | "obj") {
-        bail!("[unsupported-capability] model format `{format}` is unsupported; use .glb, .gltf or .obj");
+        bail!(
+            "[unsupported-capability] model format `{format}` is unsupported; use .glb, .gltf or .obj"
+        );
     }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&body.data)
@@ -2248,7 +2300,9 @@ fn plan_scene3d_uv_preview(
             serde_json::json!({"kind":"product_form","id":form_id}),
         )
     } else {
-        anyhow::bail!("[unsupported-capability] UV workspace supports imported models and parametric product forms")
+        anyhow::bail!(
+            "[unsupported-capability] UV workspace supports imported models and parametric product forms"
+        )
     };
     let primitive = model.primitives.get(request.primitive).with_context(|| {
         format!(
@@ -2338,7 +2392,9 @@ fn plan_scene3d_uv_model_preview(
                 })?,
         )
     } else {
-        anyhow::bail!("[unsupported-capability] UV model preview supports imported models and parametric product forms")
+        anyhow::bail!(
+            "[unsupported-capability] UV model preview supports imported models and parametric product forms"
+        )
     };
     let primitive = model.primitives.get(request.primitive).with_context(|| {
         format!(
@@ -2484,7 +2540,9 @@ fn plan_scene3d_uv_face_pick(
             .with_context(|| format!("[missing-resource] dieline `{dieline_id}` is missing"))?;
         crate::scene3d::pack::generate(dieline)?
     } else {
-        anyhow::bail!("[unsupported-capability] face picking supports imported models, product forms, and packaging dielines")
+        anyhow::bail!(
+            "[unsupported-capability] face picking supports imported models, product forms, and packaging dielines"
+        )
     };
     if let Some(primitive) = request.primitive {
         model
@@ -2705,7 +2763,9 @@ fn plan_scene3d_uv_pack(
             form_id.to_owned(),
         )
     } else {
-        anyhow::bail!("[unsupported-capability] UV packing supports imported models and parametric product forms")
+        anyhow::bail!(
+            "[unsupported-capability] UV packing supports imported models and parametric product forms"
+        )
     };
     let primitive = model.primitives.get(request.primitive).with_context(|| {
         format!(
@@ -4053,6 +4113,68 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn browser_design_import_is_local_namespaced_and_reports_fidelity() {
+        use base64::Engine;
+        let document = crate::scene::new_document(100, 80);
+        let request = super::ImportRequest {
+            document: document.clone(),
+            source: serde_json::Value::String(
+                base64::engine::general_purpose::STANDARD.encode(
+                    br#"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><rect id="box" width="10" height="8"/></svg>"#,
+                ),
+            ),
+            options: crate::import::ImportOptions {
+                destination_page: Some("page-1".into()),
+                source_page: None,
+                prefix: Some("local".into()),
+                x: 0.0,
+                y: 0.0,
+                scale: 1.0,
+                rotation: 0.0,
+                expand_canvas: false,
+            },
+            format: Some("svg".into()),
+            source_name: Some("local.svg".into()),
+        };
+        let result = super::plan_design_import(request, "svg").unwrap();
+        assert_eq!(result["local"], true);
+        assert_eq!(result["report"]["format"], "svg");
+        assert_eq!(result["summary"]["layer"], "local-import");
+        crate::scene::validate(&result["document"]).unwrap();
+        assert_eq!(document["pages"][0]["layers"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn browser_design_import_refuses_active_svg_without_mutating_document() {
+        use base64::Engine;
+        let document = crate::scene::new_document(100, 80);
+        let request = super::ImportRequest {
+            document: document.clone(),
+            source: serde_json::Value::String(
+                base64::engine::general_purpose::STANDARD
+                    .encode(br#"<svg xmlns="http://www.w3.org/2000/svg"><script>x</script></svg>"#),
+            ),
+            options: crate::import::ImportOptions {
+                destination_page: Some("page-1".into()),
+                source_page: None,
+                prefix: Some("local".into()),
+                x: 0.0,
+                y: 0.0,
+                scale: 1.0,
+                rotation: 0.0,
+                expand_canvas: false,
+            },
+            format: Some("svg".into()),
+            source_name: Some("active.svg".into()),
+        };
+        assert!(super::plan_design_import(request, "svg")
+            .unwrap_err()
+            .to_string()
+            .contains("active SVG element"));
+        assert_eq!(document["pages"][0]["layers"].as_array().unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn packaging_bundle_api_returns_the_complete_print_zip() {
         use std::io::Read as _;
@@ -5916,7 +6038,7 @@ async fn layout_command(State(state): State<Shared>, Json(body): Json<LayoutRequ
         let result = match body.op {
             LayoutOp::Overview => {
                 return crate::layout_preflight::overview(&raw)
-                    .map(|r| serde_json::json!({"result": r}))
+                    .map(|r| serde_json::json!({"result": r}));
             }
             LayoutOp::Preflight {
                 bleed,

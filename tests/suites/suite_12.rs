@@ -56,3 +56,9 @@ mod v0160_packaging;
 
 #[path = "../v0160_uv.rs"]
 mod v0160_uv;
+
+#[path = "../v017_interchange.rs"]
+mod v017_interchange;
+
+#[path = "../v017_psd_export.rs"]
+mod v017_psd_export;

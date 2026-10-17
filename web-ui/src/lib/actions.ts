@@ -1,7 +1,7 @@
 // Editor operations. Structural edits are local JSON edits that the Rust server
 // validates on every render and on save; heavy work (images, import, fonts,
 // scene batches) always goes through the shared Rust endpoints.
-import { api, postJson, type Doc, type SceneNode } from "@/lib/api";
+import { api, postJson, type Doc, type FidelityReport, type SceneNode } from "@/lib/api";
 import {
   addToLayer,
   affinePath,
@@ -385,6 +385,69 @@ export async function importPen(
     state().notify(`${Object.keys(result.summary.layers).length} layer(s) imported.`);
   } catch (error) {
     fail(error, "Import failed.");
+  }
+}
+
+export async function importDesignFile(
+  file: File,
+  prefix = "",
+): Promise<FidelityReport | undefined> {
+  const { doc, pageId } = state();
+  if (!doc) return;
+  if (file.size > 32 * 1024 * 1024) {
+    state().notify("Design imports are limited to 32 MiB in Studio.", true);
+    return;
+  }
+  const suffix = file.name.toLowerCase();
+  let format: "svg" | "pdf" | "psd" | "sketch" | "figma";
+  if (suffix.endsWith(".svg")) format = "svg";
+  else if (suffix.endsWith(".pdf")) format = "pdf";
+  else if (suffix.endsWith(".psd")) format = "psd";
+  else if (suffix.endsWith(".sketch")) format = "sketch";
+  else if (suffix.endsWith(".fig")) format = "figma";
+  else if (suffix.endsWith(".figma.json") || suffix.endsWith(".json")) {
+    let exported: unknown;
+    try {
+      exported = JSON.parse(await file.text());
+    } catch {
+      state().notify("This JSON file is not a readable Figma export.", true);
+      return;
+    }
+    const document = (exported as { document?: { type?: string } } | null)?.document;
+    const rootType = (exported as { type?: string } | null)?.type;
+    if (document?.type !== "DOCUMENT" && rootType !== "DOCUMENT") {
+      state().notify("Choose a Figma REST JSON export (DOCUMENT tree).", true);
+      return;
+    }
+    format = "figma";
+  } else {
+    state().notify("Studio supports SVG, PDF, PSD, Sketch archives, Figma .fig v15 files, and Figma JSON imports.", true);
+    return;
+  }
+  try {
+    const result = await postJson<{ document: Doc; summary: unknown; report: FidelityReport }>("/api/import", {
+      document: doc,
+      source: await fileToBase64(file),
+      source_name: file.name,
+      format,
+      options: {
+        destination_page: pageId,
+        source_page: null,
+        prefix: prefix || null,
+        x: 0,
+        y: 0,
+        scale: 1,
+        rotation: 0,
+        expand_canvas: false,
+      },
+    });
+    state().replaceDoc(result.document);
+    const { exact, approximated, dropped } = result.report.counts;
+    state().notify(`Imported ${file.name}: ${exact} exact, ${approximated} approximated, ${dropped} dropped.`);
+    return result.report;
+  } catch (error) {
+    fail(error, "Could not import this design.");
+    return;
   }
 }
 

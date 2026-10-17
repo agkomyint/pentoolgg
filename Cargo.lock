@@ -1466,7 +1466,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pentool"
-version = "0.16.1"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1506,7 +1506,7 @@ dependencies = [
 
 [[package]]
 name = "pentool-wasm"
-version = "0.16.1"
+version = "0.17.1"
 dependencies = [
  "pentool",
  "serde_json",
