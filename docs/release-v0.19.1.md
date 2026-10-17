@@ -18,6 +18,9 @@ and preserves the existing CLI while making Studio workflows more coherent.
 - Fix 12 user-reported issues merged into the release, including section-list
   pagination, layout handling, raster inspection, export error details,
   insertion validation, and consistent mutation summaries.
+- Harden IDML import against compressed and deeply nested XML payloads, bound
+  layout frame extents, and tighten raster, paint-bundle, book, and packaging
+  edge cases with regression coverage.
 
 The complete scope and acceptance criteria are in
 [`roadmap/v0.19.1/TASKS.md`](roadmap/v0.19.1/TASKS.md).
