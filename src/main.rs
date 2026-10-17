@@ -26,8 +26,46 @@ struct Cli {
     /// Emit stable machine-readable errors.
     #[arg(long, global = true)]
     json: bool,
+    /// Actor kind recorded in the collaboration log: human (default) or agent.
+    #[arg(long, global = true, value_name = "KIND")]
+    actor_kind: Option<String>,
+    /// Stable actor handle recorded in the collaboration log (required for agents).
+    #[arg(long, global = true, value_name = "ID")]
+    actor_id: Option<String>,
+    /// Display name recorded in the collaboration log.
+    #[arg(long, global = true, value_name = "NAME")]
+    actor_name: Option<String>,
+    /// Human the agent acts for (required for agents); recorded in the collaboration log.
+    #[arg(long, global = true, value_name = "HUMAN")]
+    directed_by: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum CollabAction {
+    /// Start recording operations for a v4 document (writes only under .pentool/collab).
+    Init { input: PathBuf },
+    /// List recorded operations, paginated.
+    Log {
+        input: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Only operations by this actor id.
+        #[arg(long)]
+        actor: Option<String>,
+    },
+    /// Rebuild the document from the log and report conflicts; never modifies DOC.
+    Replay {
+        input: PathBuf,
+        /// Write the replayed document to this file.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Verify the hash chain, operation validity and replay.
+    Verify { input: PathBuf },
 }
 
 #[derive(Args)]
@@ -2735,6 +2773,11 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Collaboration operation log: init, log, replay, verify.
+    Collab {
+        #[command(subcommand)]
+        action: CollabAction,
+    },
     /// Restore the preceding document revision.
     Undo { input: PathBuf },
     /// Reapply the next undone document revision.
@@ -4024,6 +4067,12 @@ async fn run() -> Result<()> {
         Err(error) => return Err(anyhow::anyhow!(error.to_string())),
     };
     let _json_output = cli.json;
+    pentool::collab::set_actor_flags(pentool::collab::ActorSpec {
+        kind: cli.actor_kind.clone(),
+        id: cli.actor_id.clone(),
+        name: cli.actor_name.clone(),
+        directed_by: cli.directed_by.clone(),
+    });
     let selected_page = cli.page.as_deref();
     match cli.command.unwrap_or(Command::Serve {
         input: None,
@@ -10121,6 +10170,23 @@ async fn run() -> Result<()> {
                     anyhow::bail!("unexpected document path after {target}")
                 }
                 history::list(Path::new(&target))?
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            Ok(())
+        }
+        Command::Collab { action } => {
+            let result = match action {
+                CollabAction::Init { input } => pentool::collab::init(&input)?,
+                CollabAction::Log {
+                    input,
+                    offset,
+                    limit,
+                    actor,
+                } => pentool::collab::log_page(&input, offset, limit, actor.as_deref())?,
+                CollabAction::Replay { input, out } => {
+                    pentool::collab::replay_report(&input, out.as_deref())?
+                }
+                CollabAction::Verify { input } => pentool::collab::verify_report(&input)?,
             };
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())

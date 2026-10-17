@@ -926,6 +926,32 @@ Retain the token from loading or the last successful save. Legacy `base` request
 remain supported, but revision tokens avoid browser number-conversion conflicts.
 Rendering APIs also work independently of a shared document.
 
+## Collaboration operation log (v0.20, in development)
+
+Collaboration is opt in per document. `collab init` starts a hash-chained,
+append-only operation log under `.pentool/collab/`; from then on every
+mutation made through the shared transaction path (CLI commands, `batch`,
+`undo`/`redo`/`restore`) is also recorded as intent-level operations stamped
+with an actor. Without `collab init`, nothing changes and no files are added.
+Replay rebuilds the document from the log; any delivery order of the same
+operations converges to the same bytes, and conflicts are reported by name
+(`overwritten-edit`, `edit-on-deleted`, `duplicate-id`, `reparent-cycle`,
+`parent-deleted`, `locked`, `limit-exceeded`).
+
+```sh
+pentool collab init artwork.pen
+pentool batch artwork.pen ops.json --actor-kind agent --actor-id design-bot --directed-by alice
+pentool collab log artwork.pen --limit 20
+pentool collab verify artwork.pen
+pentool collab replay artwork.pen --out replayed.pen
+```
+
+The default actor is a human taken from the OS user. Agents pass the global
+`--actor-kind agent --actor-id ID --directed-by HUMAN [--actor-name NAME]`
+flags or the `PENTOOL_ACTOR_*` environment variables. `collab log` is paginated
+(`matches`, `returned`, `offset`, `limit`, `has_more`; `--actor ID` filters).
+`collab replay` never modifies the document. See `docs/collaboration-v1.md`.
+
 ## Stroke edges (v0.2.0)
 
 New CLI/browser paths use flat caps and sharp corners by default. Existing paths

@@ -688,6 +688,41 @@ added with phase 2; `AGENTS.md` roadmap section updated when each phase ships;
 version chosen at release time under the versioning policy (collaboration is a
 backward-compatible MINOR feature).
 
+## 13a. Phase 2 implementation notes (operation log)
+
+What shipped in `src/collab/` for roadmap item 2, and where it differs from the
+sections above. Later phases close these gaps.
+
+- **Op kinds.** `set-property`, `create`, `delete`, `move` are native. A fifth
+  kind, `scene`, carries a scene batch (`payload.operations`) and is expanded at
+  replay by running `scene::apply_batch_at` and diffing the result into native
+  operations, so there is one mutation vocabulary. Targets are object ids;
+  `payload.level` (`d` document, `p` page, `l` layer, `n` node) selects the
+  namespace, since layer and node ids are only unique per level and page.
+- **Local recording.** The transaction hook replays the log, adds a
+  `act_external` catch-up entry if the document was edited outside the
+  transaction path, derives native operations for the new document, and
+  requires the replayed result to equal the written document; otherwise the
+  mutation fails with `[collab-divergence]` and the document is not modified.
+- **Files.** `genesis.pen`, `log.jsonl`, `head`, `actors.json`, `peer`, `lock`,
+  and a transient `append.tmp` (write-ahead stage, recovered by revision).
+  There is no `summary.json`, `pending.jsonl` or `conflicts.jsonl`: conflicts and
+  pending operations are derived by replay, which is a pure function of the
+  operation set.
+- **Actors.** The id is `act_` plus a digest of `kind:handle`; Ed25519 keys and
+  `sig` verification arrive with the actor and stats phase. There is no
+  `collab` block in the `.pen` file yet.
+- **Sibling order.** Fractional keys order siblings; exact key ties are broken by
+  `(key, creation HLC, id)` rather than a peer suffix.
+- **Extra codes.** Conflicts also use `parent-deleted`, `duplicate-id` and
+  `limit-exceeded`; rejection-only codes are `invalid-op`, `unknown-target`,
+  `migration-blocked` and `unsupported-op`.
+- **Limits.** 100,000 operations per log (no compaction yet), 10,000 operations
+  per local mutation, 256 KiB per operation, 256 actors, group depth 64. Only
+  version 4 documents can be recorded; migration is not a collaborative operation.
+- **Not yet enforced.** `base` staleness checks, the clock-skew check at the
+  local hook (the check exists in `hlc.rs`), claims, permissions and sync.
+
 ## 14. Open questions for review
 
 1. **Transport.** Is plain HTTP plus SSE enough for v1, or do we want WebSocket
