@@ -64,3 +64,28 @@ fn export_rejects_page_combined_with_all_pages() {
         "unexpected error: {message}"
     );
 }
+
+#[test]
+fn export_write_failure_names_the_requested_path() {
+    let ws = Workspace::new("missing-dir");
+    let doc = ws.path("doc.pen");
+    fs::copy("docs/fixtures/v4-scene.pen", &doc).unwrap();
+    let out = ws.path("nodir/out.png");
+    let result = run(&["export", &doc, &out]);
+    assert!(!result.status.success(), "export should fail");
+    let message = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
+    );
+    assert!(
+        message.contains("could not write") && message.contains(&out),
+        "error must name the requested output path: {message}"
+    );
+    assert!(
+        !message.contains(".tmp"),
+        "error must not leak the staging filename: {message}"
+    );
+    // The failed export leaves no stray files behind.
+    assert!(fs::read_dir(&ws.0).unwrap().count() == 1);
+}
