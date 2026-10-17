@@ -139,6 +139,20 @@ fn sections_number_pages_and_page_operations_report_renumbering() {
     assert_eq!(list["pages"][3]["previous"], "1");
     assert_eq!(list["pages"][3]["next"], "3");
 
+    // Every emitted array obeys the pagination window: a window past the end
+    // returns no pages AND no sections (issue #163).
+    let past = ok(&["section", &doc, "list", "--offset", "10", "--limit", "5"]);
+    assert_eq!(past["pages"].as_array().unwrap().len(), 0);
+    assert!(past["sections"].as_array().unwrap().is_empty());
+    assert_eq!(past["returned"], 0);
+    assert_eq!(past["has_more"], false);
+    let narrow = ok(&["section", &doc, "list", "--limit", "1"]);
+    assert_eq!(narrow["sections"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        narrow["has_more"], true,
+        "one page at a time must report more"
+    );
+
     // A page inserted into the body shifts every later label by one.
     let added = ok(&["page", &doc, "add", "extra", "--after", "p3"]);
     assert_eq!(added["reflow"]["pages_added"], json!(["extra"]));
