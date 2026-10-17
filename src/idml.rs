@@ -132,6 +132,12 @@ fn read_package(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
             declared <= MAX_PART_BYTES,
             "[limit-exceeded] archive entry {name:?} is {declared} bytes; the limit is {MAX_PART_BYTES}"
         );
+        // Refuse a bomb from the central directory before inflating a byte.
+        let compressed = entry.compressed_size().max(1);
+        ensure!(
+            declared <= (1 << 20) || declared / compressed <= MAX_RATIO,
+            "[limit-exceeded] archive entry {name:?} has a compression ratio above {MAX_RATIO}:1"
+        );
         let wanted = name == "mimetype" || name.to_ascii_lowercase().ends_with(".xml");
         let mut data = Vec::new();
         let mut limited = (&mut entry).take(MAX_PART_BYTES + 1);
@@ -154,11 +160,6 @@ fn read_package(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
         ensure!(
             total <= MAX_UNCOMPRESSED,
             "[limit-exceeded] IDML archive expands past {MAX_UNCOMPRESSED} bytes"
-        );
-        let compressed = entry.compressed_size().max(1);
-        ensure!(
-            declared <= (1 << 20) || declared / compressed <= MAX_RATIO,
-            "[limit-exceeded] archive entry {name:?} has a compression ratio above {MAX_RATIO}:1"
         );
         if wanted {
             let text = String::from_utf8(data).map_err(|_| {
@@ -190,11 +191,73 @@ pub(crate) fn check_entry_name(name: &str) -> Result<()> {
 
 // ------------------------------------------------------------ xml
 
+/// Count element nesting with a flat scan (comments, CDATA, processing
+/// instructions and quoted attribute values skipped) so hostile depth is refused
+/// before the recursive XML parser can exhaust the stack.
+fn check_nesting(text: &str, part: &str) -> Result<()> {
+    let bytes = text.as_bytes();
+    let find = |from: usize, needle: &[u8]| -> Option<usize> {
+        bytes[from..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map(|p| from + p + needle.len())
+    };
+    let mut depth = 0usize;
+    let mut i = 0usize;
+    while let Some(offset) = bytes[i..].iter().position(|&b| b == b'<') {
+        i += offset;
+        let rest = &bytes[i..];
+        if rest.starts_with(b"<!--") {
+            i = find(i + 4, b"-->").unwrap_or(bytes.len());
+        } else if rest.starts_with(b"<![CDATA[") {
+            i = find(i + 9, b"]]>").unwrap_or(bytes.len());
+        } else if rest.starts_with(b"<?") {
+            i = find(i + 2, b"?>").unwrap_or(bytes.len());
+        } else if rest.starts_with(b"<!") {
+            i = find(i + 2, b">").unwrap_or(bytes.len());
+        } else if rest.starts_with(b"</") {
+            depth = depth.saturating_sub(1);
+            i = find(i + 2, b">").unwrap_or(bytes.len());
+        } else {
+            let mut quote = 0u8;
+            let mut j = i + 1;
+            while j < bytes.len() {
+                let b = bytes[j];
+                if quote != 0 {
+                    if b == quote {
+                        quote = 0;
+                    }
+                } else if b == b'"' || b == b'\'' {
+                    quote = b;
+                } else if b == b'>' {
+                    break;
+                }
+                j += 1;
+            }
+            let self_closing = j > i + 1 && j <= bytes.len() && bytes.get(j - 1) == Some(&b'/');
+            if !self_closing {
+                depth += 1;
+                ensure!(
+                    depth <= MAX_XML_DEPTH,
+                    "[limit-exceeded] {part}: XML nesting {depth} exceeds the limit of {MAX_XML_DEPTH}"
+                );
+            }
+            i = j + 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn parse<'a>(text: &'a str, part: &str) -> Result<Document<'a>> {
     ensure!(
         !text.contains("<!DOCTYPE") && !text.contains("<!ENTITY"),
         "[unsafe-input] {part}: DTDs and entity declarations are refused"
     );
+    // The parser recurses per nesting level, so depth is bounded before it runs.
+    check_nesting(text, part)?;
     let options = ParsingOptions {
         allow_dtd: false,
         nodes_limit: MAX_XML_NODES,
