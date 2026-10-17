@@ -49,6 +49,10 @@ The CI release-binary budget is 60 MB. Like-for-like Windows x64 release builds
 | with `wasmi` and the extension host | 43,572,224 |
 | Delta | +1,528,832 (+3.6%) |
 
+On the merged v0.18.0 tree (v0.17.1 plus extensions, version 0.18.0) the same
+Windows x64 release build is **45,156,864 bytes**, still under the budget. No
+v0.17.1 baseline was built, so the 0.17 share of that growth is not separated.
+
 The second figure was measured before the Studio routes and panel were added;
 those add little to the Rust binary (the embedded `studio.html` grew by a few
 KB). CI's `binary-size` jobs will report the Linux and macOS figures.
