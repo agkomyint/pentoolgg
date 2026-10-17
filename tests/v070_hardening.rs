@@ -603,3 +603,36 @@ fn cache_records_and_packages_reject_every_mutation() {
     }
     assert!(rejected > 3);
 }
+
+#[test]
+fn idempotent_image_op_toggles_report_an_unchanged_document() {
+    let ws = Workspace::new("noop-toggle");
+    let doc = new_document(&ws, "small.png", &png(32));
+    let d = doc.to_str().unwrap().to_owned();
+    ok(&["image", "op", "add", &d, "hero", "blur", "--radius", "2"]);
+    let first = ok(&["image", "op", "disable", &d, "hero", "blur-1"]);
+    assert_eq!(first["change"]["changed"], true, "{first}");
+    // Toggling an operation to the state it already has is a no-op: the
+    // response must say so instead of reporting a bare success (issue #176).
+    let again = ok(&["image", "op", "disable", &d, "hero", "blur-1"]);
+    assert_eq!(again["change"]["changed"], false, "{again}");
+    assert!(
+        again["change"]["note"]
+            .as_str()
+            .unwrap()
+            .contains("identical"),
+        "{again}"
+    );
+    assert_eq!(again["change"]["history"], Value::Null);
+    let enabled = ok(&["image", "op", "enable", &d, "hero", "blur-1"]);
+    assert_eq!(enabled["change"]["changed"], true, "{enabled}");
+    let enabled_again = ok(&["image", "op", "enable", &d, "hero", "blur-1"]);
+    assert_eq!(enabled_again["change"]["changed"], false, "{enabled_again}");
+    assert!(
+        enabled_again["change"]["note"]
+            .as_str()
+            .unwrap()
+            .contains("identical"),
+        "{enabled_again}"
+    );
+}
