@@ -20,21 +20,23 @@ pub struct ChangeSummary {
     pub bytes_after: usize,
     pub backup: Option<PathBuf>,
     pub history: Option<PathBuf>,
+    /// False when the command left the document semantically unchanged, so a
+    /// no-op is never mistaken for a successful mutation.
+    pub changed: bool,
+    /// Why the document is unchanged, when it is (emitted only then).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
+
+/// Note attached to every unchanged commit; serialized through
+/// `ChangeSummary` so all emitters report no-ops consistently.
+const NOOP_NOTE: &str = "the document is byte-identical after this command: every requested value already matched, or the option does not apply to the selected page";
 
 impl ChangeSummary {
     /// Machine-readable summary with an explicit `changed` flag; an unchanged
     /// document also carries a `note` so a no-op is never mistaken for success.
     pub fn to_value(&self) -> Value {
-        let mut value = serde_json::to_value(self).unwrap_or(Value::Null);
-        let changed = self.revision_before != self.revision_after;
-        value["changed"] = Value::Bool(changed);
-        if !changed {
-            value["note"] = Value::String(
-                "the document is byte-identical after this command: every requested value already matched, or the option does not apply to the selected page".into(),
-            );
-        }
-        value
+        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
@@ -134,6 +136,8 @@ pub fn commit_value(
             bytes_after: before.len(),
             backup: None,
             history: None,
+            changed: false,
+            note: Some(NOOP_NOTE.into()),
         });
     }
     commit_bytes(
@@ -186,6 +190,7 @@ pub fn commit_bytes(
         }
         Some(history)
     };
+    let changed = before != after;
     Ok(ChangeSummary {
         ok: true,
         operation: operation.into(),
@@ -197,6 +202,12 @@ pub fn commit_bytes(
         bytes_after: after.len(),
         backup: None,
         history,
+        changed,
+        note: if changed {
+            None
+        } else {
+            Some(NOOP_NOTE.into())
+        },
     })
 }
 
