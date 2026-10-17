@@ -11,6 +11,12 @@ pub mod hlc;
 pub mod log;
 pub mod merge;
 pub mod op;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod perm;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sync;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod token;
 
 use anyhow::{bail, Context, Result};
 use op::{Actor, Draft, Op};
@@ -33,6 +39,15 @@ pub struct ActorSpec {
 }
 
 static FLAGS: Mutex<Option<ActorSpec>> = Mutex::new(None);
+/// Actor of the request being served by `serve --collab`: set by the request
+/// guard from the authenticated token, so a client can never pick its own.
+static REQUEST_ACTOR: Mutex<Option<(Actor, Option<Actor>)>> = Mutex::new(None);
+
+pub fn set_request_actor(actor: Option<(Actor, Option<Actor>)>) {
+    if let Ok(mut guard) = REQUEST_ACTOR.lock() {
+        *guard = actor;
+    }
+}
 
 pub fn set_actor_flags(spec: ActorSpec) {
     if let Ok(mut guard) = FLAGS.lock() {
@@ -58,6 +73,9 @@ fn os_user() -> String {
 /// The actor performing this process's mutations: CLI flags, then
 /// `PENTOOL_ACTOR_*` environment, then the local OS user as a human.
 pub fn current_actor() -> Result<(Actor, Option<Actor>)> {
+    if let Some(actor) = REQUEST_ACTOR.lock().ok().and_then(|g| g.clone()) {
+        return Ok(actor);
+    }
     let flags = FLAGS
         .lock()
         .ok()
@@ -117,7 +135,7 @@ pub fn current_actor() -> Result<(Actor, Option<Actor>)> {
     }
 }
 
-fn external_actor() -> Actor {
+pub(crate) fn external_actor() -> Actor {
     Actor {
         id: EXTERNAL_ACTOR.into(),
         kind: "human".into(),
@@ -157,7 +175,7 @@ fn require_v4(value: &Value, what: &str) -> Result<()> {
     Ok(())
 }
 
-fn build_ops(
+pub(crate) fn build_ops(
     drafts: Vec<Draft>,
     state: &mut merge::Replayer,
     clock: &mut hlc::Clock,
@@ -255,6 +273,8 @@ pub fn begin(
     build_ops(
         drafts, &mut state, &mut clock, &actor.id, &base, operation, &mut ops,
     )?;
+    #[cfg(not(target_arch = "wasm32"))]
+    sync::check_claims(&dir, &actor, ops.iter().filter(|op| op.actor == actor.id))?;
     if state.materialize() != after_value {
         bail!(
             "[collab-divergence] {operation}: the change could not be recorded as operations; the document was not modified"
@@ -279,7 +299,7 @@ pub fn begin(
 
 // ------------------------------------------------------------------- CLI
 
-fn doc_dir(document: &Path) -> Result<std::path::PathBuf> {
+pub(crate) fn doc_dir(document: &Path) -> Result<std::path::PathBuf> {
     let dir = log::dir(document)?;
     if !log::enabled(&dir) {
         bail!(

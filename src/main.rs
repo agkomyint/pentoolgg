@@ -66,6 +66,88 @@ enum CollabAction {
     },
     /// Verify the hash chain, operation validity and replay.
     Verify { input: PathBuf },
+    /// Issue, list and revoke access tokens (owner only; secrets are shown once).
+    Token {
+        #[command(subcommand)]
+        action: CollabTokenAction,
+    },
+    /// Register, list and remove sync peers.
+    Peer {
+        #[command(subcommand)]
+        action: CollabPeerAction,
+    },
+    /// Pull and push missing operations with a registered peer (idempotent, resumable).
+    Sync {
+        input: PathBuf,
+        /// Registered peer name or URL.
+        #[arg(long)]
+        peer: String,
+        /// Access token; defaults to the PENTOOL_COLLAB_TOKEN environment variable.
+        #[arg(long)]
+        token: Option<String>,
+        /// Allow plain HTTP to a non-loopback peer on a trusted network.
+        #[arg(long)]
+        allow_insecure_lan: bool,
+    },
+    /// Create a new local copy of a peer's document and pull its history.
+    Join {
+        /// New document path (must not exist).
+        input: PathBuf,
+        #[arg(long)]
+        peer: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        token: Option<String>,
+        #[arg(long)]
+        allow_insecure_lan: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollabTokenAction {
+    /// Create a token for the actor named by --actor-kind/--actor-id/--actor-name/--directed-by.
+    Create {
+        input: PathBuf,
+        /// viewer, commenter, editor or owner.
+        #[arg(long)]
+        role: String,
+        /// Label shown in `token list`.
+        #[arg(long)]
+        name: String,
+        /// Lifetime such as 30m, 12h or 7d.
+        #[arg(long)]
+        expires: Option<String>,
+    },
+    /// List tokens (never their secrets).
+    List { input: PathBuf },
+    /// Revoke a token by id; the effect is immediate.
+    Revoke { input: PathBuf, id: String },
+    /// Change a token's role.
+    SetRole {
+        input: PathBuf,
+        id: String,
+        #[arg(long)]
+        role: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollabPeerAction {
+    /// Register a peer URL such as http://192.168.1.20:4711.
+    Add {
+        input: PathBuf,
+        url: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    List {
+        input: PathBuf,
+    },
+    Remove {
+        input: PathBuf,
+        peer: String,
+    },
 }
 
 #[derive(Args)]
@@ -2705,6 +2787,12 @@ enum Command {
         /// Render every photo preview instead of using `.pentool/cache/photo/`.
         #[arg(long)]
         no_cache: bool,
+        /// Serve the collaboration API (/api/collab/*) with token roles enforced on every route.
+        #[arg(long)]
+        collab: bool,
+        /// Accept a plain-HTTP bind on a non-loopback --host (requires tokens).
+        #[arg(long)]
+        allow_insecure_lan: bool,
     },
     /// Create an empty .pen document.
     New {
@@ -3553,6 +3641,18 @@ fn run_photo_merge(
     Ok(())
 }
 
+/// `--token`, or `PENTOOL_COLLAB_TOKEN` so the secret stays out of shell history.
+fn collab_token(flag: Option<String>) -> Result<String> {
+    flag.or_else(|| std::env::var("PENTOOL_COLLAB_TOKEN").ok())
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "[unauthenticated] pass --token or set PENTOOL_COLLAB_TOKEN to the secret shown by `collab token create`"
+            )
+        })
+}
+
 fn main() {
     if let Err(error) = cli_main() {
         eprintln!("Error: {error:#}");
@@ -4203,6 +4303,8 @@ async fn run() -> Result<()> {
         host: "127.0.0.1".into(),
         port: 4711,
         no_cache: false,
+        collab: false,
+        allow_insecure_lan: false,
     }) {
         Command::Inspect {
             action:
@@ -7396,7 +7498,18 @@ async fn run() -> Result<()> {
             port,
             input,
             no_cache,
-        } => server::serve(&host, port, input, no_cache).await,
+            collab,
+            allow_insecure_lan,
+        } => {
+            let options = collab.then(|| server::CollabOptions {
+                limits: pentool::collab::sync::Limits::default(),
+                allow_insecure_lan,
+            });
+            if options.is_some() && input.is_none() {
+                bail!("[invalid-input] --collab needs a document: pentool serve DOC --collab");
+            }
+            server::serve_with(&host, port, input, no_cache, options).await
+        }
         Command::Page {
             input,
             action,
@@ -10406,6 +10519,76 @@ async fn run() -> Result<()> {
                     pentool::collab::replay_report(&input, out.as_deref())?
                 }
                 CollabAction::Verify { input } => pentool::collab::verify_report(&input)?,
+                CollabAction::Token { action } => match action {
+                    CollabTokenAction::Create {
+                        input,
+                        role,
+                        name,
+                        expires,
+                    } => {
+                        let (actor, _) = pentool::collab::current_actor()?;
+                        pentool::collab::sync::token_create(
+                            &input,
+                            &role,
+                            &name,
+                            expires.as_deref(),
+                            actor,
+                        )?
+                    }
+                    CollabTokenAction::List { input } => pentool::collab::sync::token_list(&input)?,
+                    CollabTokenAction::Revoke { input, id } => {
+                        pentool::collab::sync::token_revoke(&input, &id)?
+                    }
+                    CollabTokenAction::SetRole { input, id, role } => {
+                        pentool::collab::sync::token_set_role(&input, &id, &role)?
+                    }
+                },
+                CollabAction::Peer { action } => match action {
+                    CollabPeerAction::Add { input, url, name } => pentool::collab::sync::peer_add(
+                        &input,
+                        &url,
+                        name.as_deref(),
+                        pentool::collab::sync::Limits::default().max_peers,
+                    )?,
+                    CollabPeerAction::List { input } => pentool::collab::sync::peer_list(&input)?,
+                    CollabPeerAction::Remove { input, peer } => {
+                        pentool::collab::sync::peer_remove(&input, &peer)?
+                    }
+                },
+                CollabAction::Sync {
+                    input,
+                    peer,
+                    token,
+                    allow_insecure_lan,
+                } => {
+                    tokio::task::spawn_blocking(move || {
+                        pentool::collab::sync::sync_with_peer(
+                            &input,
+                            &peer,
+                            &collab_token(token)?,
+                            allow_insecure_lan,
+                        )
+                    })
+                    .await??
+                }
+                CollabAction::Join {
+                    input,
+                    peer,
+                    name,
+                    token,
+                    allow_insecure_lan,
+                } => {
+                    tokio::task::spawn_blocking(move || {
+                        pentool::collab::sync::join(
+                            &input,
+                            &peer,
+                            name.as_deref(),
+                            &collab_token(token)?,
+                            allow_insecure_lan,
+                        )
+                    })
+                    .await??
+                }
             };
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())

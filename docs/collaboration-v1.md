@@ -723,6 +723,48 @@ sections above. Later phases close these gaps.
 - **Not yet enforced.** `base` staleness checks, the clock-skew check at the
   local hook (the check exists in `hlc.rs`), claims, permissions and sync.
 
+## 13b. Phase 3 implementation notes (sync, tokens, roles)
+
+`src/collab/{sync,token,perm}.rs`; tests in `tests/collab_sync.rs`. Deviations
+from sections 8 to 10:
+
+- **Transport.** Plain HTTP plus SSE (`GET /api/collab/events`, one `head`
+  event per new log head). No WebSocket. TLS is not terminated by Pentool;
+  a non-loopback bind needs an active token and `--allow-insecure-lan`.
+- **Routes.** `GET session|genesis|events|ops`, `POST ops|claim|release`, and
+  owner-only `GET|POST tokens`, `POST tokens/revoke|role`. Pages of `ops` are
+  cursor based on the log sequence (`since`, `next`) and bounded by count and
+  bytes. `POST ops` returns `accepted`, `duplicate`, `rejected` (named codes
+  such as `actor-mismatch`, `clock-skew`, `unknown-actor`, `locked`,
+  `invalid-op`), `pending`, `merge_rejected` and `conflicts`.
+- **Reconcile.** A pull batch and a push batch are each one write-ahead unit
+  (log staging, document + history commit, log finalize). A pull page moves the
+  peer cursor (`peers.json`) only after it is durable. Relayed operations are
+  stored on pull but only a peer's own operations are pushed.
+- **Tokens.** `ptc_<id>_<64 hex>`; hash `sha256("pentool-collab-token-v1:" +
+  secret)` in `tokens.json` (0600 on unix), compared in constant time over all
+  records. The actor is fixed at creation from the `--actor-*` flags.
+- **Roles.** `perm::ROUTES` classifies every route; an unclassified route or
+  method is denied, and a test scans `server.rs` and `sync.rs` for registrations.
+  Read-only POST routes (renders, analysis) are viewer-level; extension run and
+  registry install are owner-only. Mutations by token holders are attributed to
+  the token's actor through a request-scoped override guarded by a mutex.
+  Comment authorship is not yet derived from the token (item 4 follow-up).
+- **Local owner.** A tokenless request is the owner only when the server is
+  bound to loopback, the peer address and `Host` are loopback and no forwarding
+  header is present.
+- **Claims.** Stored in `claims.json`; the transaction hook rejects local
+  edits that touch another actor's claim (humans may override an agent's claim).
+  TTL default 10 min (ceiling 1 h), 256 claims (ceiling 2,048), 64 targets each.
+- **Peers.** `peers.json`, at most 16 (ceiling 64); URLs are `http(s)://host[:port][/prefix]`
+  with no credentials, query, fragment, dot segments or escapes.
+- **Limits.** Batch 500 ops / 4 MiB, 50 ops per second per token, 4 event
+  streams per token and 64 in total, pending 1,000. Not yet enforced: pending
+  age expiry and compaction.
+- **Presence and UI.** Not part of this phase: item 5 can add its routes to
+  `perm::ROUTES` (viewer-level) and reuse `Ctx` and the SSE slot limiter; item 7
+  reads `GET /api/collab/session` for `role` and `may`.
+
 ## 14. Open questions for review
 
 1. **Transport.** Is plain HTTP plus SSE enough for v1, or do we want WebSocket

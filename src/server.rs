@@ -50,15 +50,16 @@ async fn core_wasm() -> Response {
     }
 }
 
-pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool) -> Result<()> {
+fn build_app(
+    file: Option<PathBuf>,
+    no_cache: bool,
+    collab_ctx: Option<Arc<crate::collab::sync::Ctx>>,
+) -> Result<Router> {
     if let Some(path) = &file {
         let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
         crate::transaction::validate_value(&value)?;
     }
-    let address: SocketAddr = format!("{host}:{port}")
-        .parse()
-        .context("invalid host or port")?;
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/", get(|| async { Html(STUDIO) }))
         .route("/studio", get(|| async { Html(STUDIO) }))
         .route("/core/pentool_core.wasm", get(core_wasm))
@@ -178,7 +179,17 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/asset", get(asset_document))
         .route("/api/registry/search", get(registry_search))
         .route("/api/registry/install", post(registry_install))
-        .route("/fonts/:name", get(bundled_font))
+        .route("/fonts/:name", get(bundled_font));
+    if let Some(ctx) = collab_ctx {
+        app = app
+            .merge(crate::collab::sync::routes(&ctx.limits))
+            .layer(axum::middleware::from_fn_with_state(
+                ctx.clone(),
+                crate::collab::perm::guard,
+            ))
+            .layer(axum::Extension(ctx));
+    }
+    let app = app
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(Shared {
             file,
@@ -187,9 +198,61 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
             previews: Arc::new(Mutex::new(std::collections::HashMap::new())),
             no_cache,
         });
-    println!("Pentool listening on http://{address}");
+    Ok(app)
+}
+
+/// Options for `serve --collab`.
+pub struct CollabOptions {
+    pub limits: crate::collab::sync::Limits,
+    pub allow_insecure_lan: bool,
+}
+
+pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool) -> Result<()> {
+    serve_with(host, port, file, no_cache, None).await
+}
+
+pub async fn serve_with(
+    host: &str,
+    port: u16,
+    file: Option<PathBuf>,
+    no_cache: bool,
+    collab: Option<CollabOptions>,
+) -> Result<()> {
+    let address: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .context("invalid host or port")?;
+    if let (Some(options), Some(path)) = (&collab, &file) {
+        crate::collab::sync::check_bind(path, host, options.allow_insecure_lan)?;
+    }
     let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, app).await?;
+    println!("Pentool listening on http://{address}");
+    serve_listener(listener, file, no_cache, collab).await
+}
+
+/// Serve on an already-bound listener (used by tests that need port 0).
+pub async fn serve_listener(
+    listener: tokio::net::TcpListener,
+    file: Option<PathBuf>,
+    no_cache: bool,
+    collab: Option<CollabOptions>,
+) -> Result<()> {
+    let loopback = listener.local_addr()?.ip().is_loopback();
+    let ctx = match collab {
+        Some(options) => {
+            let Some(path) = &file else {
+                bail!("[invalid-input] --collab needs a document: pentool serve DOC --collab");
+            };
+            let ctx = crate::collab::sync::Ctx::new(path, options.limits, loopback)?;
+            Some(Arc::new(ctx))
+        }
+        None => None,
+    };
+    let app = build_app(file, no_cache, ctx)?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

@@ -974,6 +974,40 @@ flags or the `PENTOOL_ACTOR_*` environment variables. `collab log` is paginated
 (`matches`, `returned`, `offset`, `limit`, `has_more`; `--actor ID` filters).
 `collab replay` never modifies the document. See `docs/collaboration-v1.md`.
 
+### Sync, tokens and roles
+
+`pentool serve DOC --collab` adds `/api/collab/*` (plain HTTP plus SSE, no new
+dependency) and enforces roles on every route. Roles are `viewer`, `commenter`,
+`editor` and `owner`; only the owner issues or revokes tokens and changes roles.
+The server binds to loopback; a non-loopback `--host` is refused until a token
+exists and `--allow-insecure-lan` accepts plain HTTP on a trusted network. The
+host's own loopback browser acts as owner; anything else needs a token in an
+`Authorization: Bearer` header. Tokens are random 256-bit secrets shown once;
+only a SHA-256 hash, the role, actor identity and expiry are stored (under
+`.pentool/collab/`, never in the `.pen`).
+
+```sh
+# owner
+pentool collab init artwork.pen
+pentool --actor-id bob collab token create artwork.pen --role editor --name bob-laptop --expires 7d
+pentool serve artwork.pen --collab
+
+# collaborator (token from PENTOOL_COLLAB_TOKEN or --token)
+pentool collab join copy.pen --peer http://127.0.0.1:4711 --token ptc_...
+pentool --actor-id bob batch copy.pen ops.json        # work offline
+pentool collab peer list copy.pen
+pentool collab sync copy.pen --peer http://127.0.0.1:4711 --token ptc_...
+
+# owner housekeeping
+pentool collab token list artwork.pen
+pentool collab token revoke artwork.pen TOKEN_ID
+```
+
+`collab sync` pulls the operations it lacks, then pushes its own; it is
+idempotent, resumable after an interruption and never changes the document when
+a step fails. The server derives each operation's actor from the token and
+rejects operations by anyone else.
+
 ## Stroke edges (v0.2.0)
 
 New CLI/browser paths use flat caps and sharp corners by default. Existing paths
