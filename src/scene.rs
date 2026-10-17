@@ -1777,15 +1777,20 @@ pub fn apply_batch_at(
                     }
                     result
                 }
+                #[cfg(not(target_arch = "wasm32"))]
                 "set-property" => {
                     let id = resolve("id")?;
                     crate::design::template::batch_set_property(&mut candidate, page, document, &id, operation)?
                 }
+                #[cfg(not(target_arch = "wasm32"))]
                 "bind-token" => {
                     let id = resolve("id")?;
                     crate::design::template::batch_bind_token(&mut candidate, page, &id, operation)?
                 }
+                #[cfg(not(target_arch = "wasm32"))]
                 "set-token" => crate::design::template::batch_set_token(&mut candidate, operation)?,
+                #[cfg(target_arch = "wasm32")]
+                "set-property" | "bind-token" | "set-token" => bail!("design batch operations are not available in the browser core"),
                 other if crate::composite::is_document(&candidate) => crate::composite::batch_operation(&mut candidate,page,document,other,operation,&resolve)?,
                 other => bail!("unsupported v4 batch operation: {other}"),
             };
