@@ -556,6 +556,26 @@ fn story_ref<'a>(raw: &'a Value, id: &str) -> Option<&'a Value> {
     layout_list(raw, "stories").iter().find(|s| id_of(s) == id)
 }
 
+/// Validate that the insertion place exists before target resolution, so a bad
+/// source story/paragraph is reported first (matching note-add and
+/// bookmark-add); the destination is only worth fixing once the run can be
+/// inserted at all.
+fn check_place(raw: &Value, place: &Place) -> Result<()> {
+    let story = raw
+        .pointer("/layout/stories")
+        .and_then(Value::as_array)
+        .and_then(|stories| stories.iter().find(|s| id_of(s) == place.story))
+        .with_context(|| format!("[missing-resource] story not found: {}", place.story))?;
+    let count = list(story, "paragraphs").len();
+    ensure!(
+        place.paragraph < count,
+        "[missing-resource] story {} has {count} paragraphs; paragraph {} does not exist",
+        place.story,
+        place.paragraph
+    );
+    Ok(())
+}
+
 fn insert_run(raw: &mut Value, place: &Place, run: Value) -> Result<()> {
     require_v9(raw)?;
     let story = raw
@@ -2605,6 +2625,7 @@ pub fn run(raw: &mut Value, action: DocAction, ctx: &Context) -> Result<(Value, 
             );
             let text = check_text(&text, "link text")?;
             ensure!(!text.is_empty(), "[invalid-input] link text is empty");
+            check_place(raw, &place)?;
             let mut record = json!({"id": id});
             if let Some(url) = &url {
                 check_url(url)?;
@@ -2659,6 +2680,7 @@ pub fn run(raw: &mut Value, action: DocAction, ctx: &Context) -> Result<(Value, 
         } => {
             check_id("cross-reference", &id)?;
             one_of(&format, "cross-reference format", XREF_FORMATS)?;
+            check_place(raw, &place)?;
             let target = target_object(raw, &target)?;
             let mut record = json!({"id": id, "target": target, "format": format});
             if format == "custom" {
