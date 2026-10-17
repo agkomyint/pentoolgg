@@ -594,6 +594,14 @@ pentool design template fill post.pen --values values.json --output launch.pen -
 pentool design template fill post.pen --values values.json --output launch.pen --if-revision <sha256>
 ```
 
+Fill many rows at once (JSON array or CSV, at most 10,000 rows; one output per row,
+all rows validated before anything is written, existing outputs never overwritten):
+
+```sh
+pentool design template fill post.pen --data rows.csv --output-dir ./cards --dry-run
+pentool design template fill post.pen --data rows.csv --output-dir ./cards
+```
+
 `values.json` is `{"headline": "Launch day", "accent": "color.brand"}`. Missing
 parameters use their defaults. Every problem (unknown name, constraint failure,
 missing required value, locked or missing target) is reported at once as

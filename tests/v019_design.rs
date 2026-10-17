@@ -1978,3 +1978,237 @@ fn library_export_writes_the_package_tokens() {
         String::from_utf8_lossy(&w3c.stderr)
     );
 }
+
+fn out_files(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .map(|it| {
+            it.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+#[test]
+fn template_fill_data_json_and_csv_rows() {
+    let ws = Workspace::new("tdata");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let before = fs::read(&t).unwrap();
+    let rows = ws.path("rows.json");
+    write(
+        &rows,
+        &json!([
+            {"headline":"One","bar_width":40},
+            {"headline":"Two","show_badge":true},
+            {}
+        ]),
+    );
+    let (rows_s, dir) = (text(&rows), ws.s("out"));
+    let base = [
+        "design",
+        "template",
+        "fill",
+        &tpl,
+        "--data",
+        &rows_s,
+        "--output-dir",
+        &dir,
+    ];
+    let mut dry_args = base.to_vec();
+    dry_args.push("--dry-run");
+    let dry = ok(&ws, &dry_args);
+    assert!(!ws.path("out").exists(), "dry run wrote output");
+    let commit = ok(&ws, &base);
+    let (mut l, mut r) = (dry.clone(), commit.clone());
+    l["dry_run"] = json!(null);
+    r["dry_run"] = json!(null);
+    assert_eq!(l, r, "dry run and commit disagree");
+    assert_eq!(commit["rows"], 3);
+    assert_eq!(
+        out_files(&ws.path("out")),
+        ["post-00001.pen", "post-00002.pen", "post-00003.pen"]
+    );
+    let first = read(&ws.path("out").join("post-00001.pen"));
+    assert_eq!(first["pages"][0]["layers"][0]["nodes"][0]["content"], "One");
+    assert_eq!(first["pages"][0]["layers"][0]["nodes"][1]["width"], 40.0);
+    let second = read(&ws.path("out").join("post-00002.pen"));
+    assert_eq!(second["pages"][0]["layers"][0]["nodes"][2]["visible"], true);
+    assert_eq!(fs::read(&t).unwrap(), before, "template was modified");
+
+    // Re-running the identical fill is a no-op; different content never overwrites.
+    let again = ok(&ws, &base);
+    assert_eq!(again["would_change"], false);
+    write(&rows, &json!([{"headline":"Changed"}]));
+    let error = err(&ws, &base);
+    assert_eq!(error["code"], "conflict");
+    assert_eq!(out_files(&ws.path("out")).len(), 3);
+
+    // CSV: header of parameter names, cells coerced by type, empty = default.
+    let csv = ws.path("rows.csv");
+    fs::write(
+        &csv,
+        "headline,bar_width,show_badge\n\"Hello, world\",25,true\nPlain,,\n",
+    )
+    .unwrap();
+    let (csv_s, dir2) = (text(&csv), ws.s("out2"));
+    let report = ok(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--data",
+            &csv_s,
+            "--output-dir",
+            &dir2,
+            "--limit",
+            "1",
+        ],
+    );
+    assert_eq!(report["rows"], 2);
+    assert_eq!(report["returned"], 1);
+    assert_eq!(report["has_more"], true);
+    let one = read(&ws.path("out2").join("post-00001.pen"));
+    assert_eq!(
+        one["pages"][0]["layers"][0]["nodes"][0]["content"],
+        "Hello, world"
+    );
+    assert_eq!(one["pages"][0]["layers"][0]["nodes"][1]["width"], 25.0);
+    assert_eq!(one["pages"][0]["layers"][0]["nodes"][2]["visible"], true);
+}
+
+#[test]
+fn template_fill_data_validates_every_row_before_writing() {
+    let ws = Workspace::new("tdatabad");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let rows = ws.path("rows.json");
+    write(
+        &rows,
+        &json!([
+            {"headline":"fine"},
+            {"headline":"this headline is far too long"},
+            {"bar_width":9000, "nope":1}
+        ]),
+    );
+    let (rows_s, dir) = (text(&rows), ws.s("out"));
+    let error = err(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--data",
+            &rows_s,
+            "--output-dir",
+            &dir,
+        ],
+    );
+    assert_eq!(error["code"], "invalid-input");
+    let message = error["message"].as_str().unwrap();
+    for needle in [
+        "row 2: headline",
+        "row 3: bar_width",
+        "row 3: nope: unknown",
+    ] {
+        assert!(message.contains(needle), "missing {needle:?} in {message}");
+    }
+    assert!(!ws.path("out").exists(), "a bad row must write nothing");
+
+    // Bad CSV cell.
+    let csv = ws.path("bad.csv");
+    fs::write(&csv, "headline,bar_width\nA,wide\n").unwrap();
+    let csv_s = text(&csv);
+    let error = err(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--data",
+            &csv_s,
+            "--output-dir",
+            &dir,
+        ],
+    );
+    assert!(error["message"]
+        .as_str()
+        .unwrap()
+        .contains("row 1: bar_width"));
+    assert!(!ws.path("out").exists());
+
+    // Mixing the single-fill flags with --data is rejected.
+    let v = values(&ws, json!({}));
+    let out = ws.s("o.pen");
+    assert!(!run(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--data",
+            &rows_s,
+            "--output-dir",
+            &dir,
+            "--values",
+            &v,
+            "--output",
+            &out,
+        ],
+    )
+    .status
+    .success());
+}
+
+#[test]
+fn template_fill_data_enforces_the_row_limit() {
+    let ws = Workspace::new("tdatalimit");
+    let t = template(&ws);
+    let tpl = text(&t);
+    let rows = ws.path("rows.json");
+    write(&rows, &Value::Array(vec![json!({}); 10_001]));
+    let (rows_s, dir) = (text(&rows), ws.s("out"));
+    let error = err(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--data",
+            &rows_s,
+            "--output-dir",
+            &dir,
+            "--dry-run",
+        ],
+    );
+    assert_eq!(error["code"], "limit-exceeded");
+    assert!(!ws.path("out").exists());
+    // Exactly at the limit is accepted (dry run).
+    write(&rows, &Value::Array(vec![json!({}); 10_000]));
+    let report = ok(
+        &ws,
+        &[
+            "design",
+            "template",
+            "fill",
+            &tpl,
+            "--data",
+            &rows_s,
+            "--output-dir",
+            &dir,
+            "--dry-run",
+            "--limit",
+            "2",
+        ],
+    );
+    assert_eq!(report["rows"], 10_000);
+    assert_eq!(report["returned"], 2);
+}

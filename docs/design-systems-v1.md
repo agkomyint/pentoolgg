@@ -434,8 +434,18 @@ A template is an ordinary `.pen` document (any supported version) plus a
   embed it as an image asset.
 - `design template list DIR` lists `*.pen` files in a directory that carry a
   `design.template` (sorted by file name, paginated, <= 5,000 files scanned).
-- Not in this slice: `--data` multi-row batch fill, templates inside library
-  packages (`design_library.templates`), `--in-place`.
+- `design template fill --data ROWS --output-dir DIR` fills many rows: ROWS is a
+  JSON array of `{parameter: value}` objects or a `.csv` whose header names the
+  parameters (cells are coerced by parameter type; an empty cell uses the
+  default). At most 10,000 rows and 64 MiB (`limit-exceeded`). Every row is
+  validated first and all problems are listed as `row N: ...`; nothing is
+  written unless every row is valid. Output is `<template-stem>-NNNNN.pen` in
+  DIR (created if needed). An existing file with different content is a
+  `conflict` (never overwritten; identical content is a no-op). Dry run and
+  commit share the planner; a write failure removes the files that run wrote.
+  `--data` excludes `--values`/`--output`; the template is never modified.
+- Not in this slice: templates inside library packages
+  (`design_library.templates`), `--in-place`.
 
 ## 8. File-format impact
 

@@ -3582,8 +3582,10 @@ async fn design_template_fill(
         let result = crate::design::cli::run(DesignCommand::Template {
             action: TemplateAction::Fill {
                 input,
-                values: values_path.clone(),
-                output,
+                values: Some(values_path.clone()),
+                output: Some(output),
+                data: None,
+                output_dir: None,
                 page: body.page,
                 dry_run: body.dry_run,
                 if_revision: Some(pinned),

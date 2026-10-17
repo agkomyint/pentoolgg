@@ -95,10 +95,16 @@ pub enum TemplateAction {
     Fill {
         input: PathBuf,
         /// JSON object of {parameter: value}.
-        #[arg(long)]
-        values: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long, required_unless_present = "data", conflicts_with = "data")]
+        values: Option<PathBuf>,
+        #[arg(long, required_unless_present = "data", conflicts_with = "data")]
+        output: Option<PathBuf>,
+        /// Rows to fill (JSON array of objects, or .csv with a header of parameter names); max 10,000.
+        #[arg(long, requires = "output_dir")]
+        data: Option<PathBuf>,
+        /// Directory receiving one <template>-NNNNN.pen per row (never overwrites).
+        #[arg(long, requires = "data")]
+        output_dir: Option<PathBuf>,
         #[arg(long)]
         page: Option<String>,
         #[arg(long)]
@@ -714,6 +720,8 @@ fn template_action(action: TemplateAction) -> Result<Value> {
             input,
             values,
             output,
+            data,
+            output_dir,
             page,
             dry_run,
             if_revision,
@@ -721,8 +729,10 @@ fn template_action(action: TemplateAction) -> Result<Value> {
             limit,
         } => template::fill(&template::FillOptions {
             input: &input,
-            values: &values,
-            output: &output,
+            values: values.as_deref(),
+            output: output.as_deref(),
+            data: data.as_deref(),
+            output_dir: output_dir.as_deref(),
             page: page.as_deref(),
             dry_run,
             if_revision: if_revision.as_deref(),
