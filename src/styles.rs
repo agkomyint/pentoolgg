@@ -1197,8 +1197,8 @@ pub fn run_style(raw: &mut Value, action: StyleAction) -> Result<(Value, bool)> 
             if let Some(k) = &kind {
                 check_kind(k)?;
             }
-            let bytes =
-                std::fs::read(&from).with_context(|| format!("[not-found] cannot read {from}"))?;
+            let bytes = std::fs::read(&from)
+                .with_context(|| format!("[missing-resource] cannot read {from}"))?;
             let other: Value = serde_json::from_slice(&bytes)
                 .with_context(|| format!("[invalid-input] {from} is not a .pen document"))?;
             require_v9(&other).with_context(|| {

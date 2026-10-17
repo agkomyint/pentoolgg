@@ -1851,7 +1851,7 @@ pub fn run(raw: &mut Value, action: TableAction) -> Result<(Value, bool)> {
                 }
             };
             let meta = std::fs::metadata(&file)
-                .with_context(|| format!("[not-found] cannot read {}", file.display()))?;
+                .with_context(|| format!("[missing-resource] cannot read {}", file.display()))?;
             ensure!(
                 meta.len() as usize <= MAX_IMPORT_BYTES,
                 "[limit-exceeded] {} is {} bytes; the import limit is {MAX_IMPORT_BYTES}",
@@ -1859,7 +1859,7 @@ pub fn run(raw: &mut Value, action: TableAction) -> Result<(Value, bool)> {
                 meta.len()
             );
             let bytes = std::fs::read(&file)
-                .with_context(|| format!("[not-found] cannot read {}", file.display()))?;
+                .with_context(|| format!("[missing-resource] cannot read {}", file.display()))?;
             let text = String::from_utf8(bytes).map_err(|_| {
                 anyhow::anyhow!("[invalid-input] {} is not valid UTF-8", file.display())
             })?;

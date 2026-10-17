@@ -7432,7 +7432,8 @@ async fn run() -> Result<()> {
                 fields.push((frame.to_string(), field.to_string()));
             }
             let format = pentool::merge::data_format(&data, format.as_deref())?;
-            let bytes = pentool::resource::read_bounded(&data, pentool::merge::MAX_DATA_BYTES)?;
+            let bytes = pentool::resource::read_bounded(&data, pentool::merge::MAX_DATA_BYTES)
+                .with_context(|| format!("[missing-resource] cannot read {}", data.display()))?;
             let records = pentool::merge::parse_records(&bytes, &format, delimiter)?;
             let template: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(&input).with_context(|| {
@@ -8702,7 +8703,10 @@ async fn run() -> Result<()> {
                 )
             }
             let bytes =
-                pentool::resource::read_bounded(&input, pentool::idml::MAX_ARCHIVE_BYTES as usize)?;
+                pentool::resource::read_bounded(&input, pentool::idml::MAX_ARCHIVE_BYTES as usize)
+                    .with_context(|| {
+                        format!("[missing-resource] cannot read {}", input.display())
+                    })?;
             let imported = pentool::idml::import(&bytes, &input.display().to_string())?;
             let pretty = serde_json::to_vec_pretty(&imported.report)?;
             if let Some(path) = &report {
@@ -8747,10 +8751,11 @@ async fn run() -> Result<()> {
                     output.display()
                 )
             }
-            let raw: serde_json::Value = serde_json::from_slice(&pentool::resource::read_bounded(
-                &input,
-                256 * 1024 * 1024,
-            )?)
+            let raw: serde_json::Value = serde_json::from_slice(
+                &pentool::resource::read_bounded(&input, 256 * 1024 * 1024).with_context(|| {
+                    format!("[missing-resource] cannot read {}", input.display())
+                })?,
+            )
             .with_context(|| format!("{} is not a Pentool document", input.display()))?;
             transaction::validate_value(&raw)?;
             let exported = pentool::idml_export::export(
