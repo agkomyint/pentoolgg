@@ -376,6 +376,73 @@ fn cross_references_resolve_and_broken_targets_are_reported() {
 }
 
 #[test]
+fn xref_and_link_add_validate_the_source_story_before_the_target() {
+    let ws = Workspace::new("order");
+    let doc = book(&ws);
+    // Both ends bad: the source story is the shared precondition, so it must
+    // be reported first (fixing the destination would only reveal a second
+    // failure). Mirrors note-add/bookmark-add, and issue #170.
+    let xref = fails(&[
+        "layout-doc",
+        &doc,
+        "xref-add",
+        "x1",
+        "--story",
+        "nope",
+        "--paragraph",
+        "99",
+        "--target-page",
+        "missing",
+    ]);
+    assert!(xref.contains("story not found: nope"), "{xref}");
+    assert!(!xref.contains("page not found"), "{xref}");
+    let para = fails(&[
+        "layout-doc",
+        &doc,
+        "xref-add",
+        "x2",
+        "--story",
+        "s",
+        "--paragraph",
+        "99",
+        "--target-page",
+        "missing",
+    ]);
+    assert!(para.contains("paragraph 99 does not exist"), "{para}");
+    assert!(!para.contains("page not found"), "{para}");
+    let link = fails(&[
+        "layout-doc",
+        &doc,
+        "link-add",
+        "l1",
+        "--story",
+        "nope",
+        "--paragraph",
+        "0",
+        "--page",
+        "missing",
+        "--text",
+        "x",
+    ]);
+    assert!(link.contains("story not found: nope"), "{link}");
+    assert!(!link.contains("page not found"), "{link}");
+    // With a valid source, the destination error still surfaces.
+    let target = fails(&[
+        "layout-doc",
+        &doc,
+        "xref-add",
+        "x3",
+        "--story",
+        "s",
+        "--paragraph",
+        "0",
+        "--target-page",
+        "missing",
+    ]);
+    assert!(target.contains("page not found"), "{target}");
+}
+
+#[test]
 fn links_refuse_unsafe_schemes_and_keep_text_when_removed() {
     let ws = Workspace::new("links");
     let doc = book(&ws);
