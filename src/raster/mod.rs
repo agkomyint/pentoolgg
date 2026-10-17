@@ -1407,9 +1407,11 @@ pub fn collect_garbage(raw: &mut Value) -> usize {
 }
 
 fn find_raster_mut<'a>(raw: &'a mut Value, page: Option<&str>, id: &str) -> Option<&'a mut Value> {
+    // Only raster-kind nodes are addressable here: a vector node with the same
+    // ID must surface as not-found, not as a malformed raster.
     fn walk<'a>(nodes: &'a mut [Value], id: &str) -> Option<&'a mut Value> {
         for node in nodes {
-            if node["id"] == id {
+            if node["id"] == id && is_raster(node) {
                 return Some(node);
             }
             if let Some(found) = node
