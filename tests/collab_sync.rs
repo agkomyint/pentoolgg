@@ -513,7 +513,7 @@ fn permission_matrix_is_enforced_on_every_route() {
     for (name, role) in roles {
         let secret = token(&a, name, &format!("user-{name}"), &[]);
         for (method, path) in all_routes() {
-            if path == "/api/collab/events" {
+            if path == "/api/collab/events" || path == "/api/collab/presence/events" {
                 continue;
             }
             let Some(Need::Role(need)) = classify(&method, &path) else {

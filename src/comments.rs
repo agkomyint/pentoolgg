@@ -327,12 +327,12 @@ fn collect_ids(value: &Value, into: &mut HashSet<String>) {
 
 /// Page ids and, per page, every object id. Documents without a `pages` array
 /// (legacy v1-v3) have a single implicit page `page-1`.
-struct Ids {
+pub(crate) struct Ids {
     pages: Vec<(String, HashSet<String>)>,
 }
 
 impl Ids {
-    fn read(document: &Path) -> Result<Ids> {
+    pub(crate) fn read(document: &Path) -> Result<Ids> {
         let bytes = fs::read(document)
             .with_context(|| format!("[not-found] could not read {}", document.display()))?;
         let value: Value = serde_json::from_slice(&bytes)
@@ -365,11 +365,11 @@ impl Ids {
         Ok(Ids { pages })
     }
 
-    fn has_page(&self, page: &str) -> bool {
+    pub(crate) fn has_page(&self, page: &str) -> bool {
         self.pages.iter().any(|(id, _)| id == page)
     }
 
-    fn has_object(&self, page: Option<&str>, object: &str) -> bool {
+    pub(crate) fn has_object(&self, page: Option<&str>, object: &str) -> bool {
         self.pages
             .iter()
             .filter(|(id, _)| page.is_none_or(|p| p == id))

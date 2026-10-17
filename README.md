@@ -1008,6 +1008,15 @@ idempotent, resumable after an interruption and never changes the document when
 a step fails. The server derives each operation's actor from the token and
 rejects operations by anyone else.
 
+Presence (who is connected, their page, selection and cursor) is best-effort and
+held in memory only: it is never written to the document, history or log, and
+expires about 15 seconds after a participant's last update.
+
+```sh
+pentool collab presence copy.pen --peer http://127.0.0.1:4711 --token ptc_...
+pentool collab presence copy.pen --peer http://127.0.0.1:4711 --token ptc_... --json
+```
+
 ## Stroke edges (v0.2.0)
 
 New CLI/browser paths use flat caps and sharp corners by default. Existing paths

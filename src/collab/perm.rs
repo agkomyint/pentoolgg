@@ -147,6 +147,8 @@ static ROUTES: &[Entry] = &[
     e("/api/collab/session", VIEW, NONE),
     e("/api/collab/genesis", VIEW, NONE),
     e("/api/collab/events", VIEW, NONE),
+    e("/api/collab/presence", VIEW, COMMENT),
+    e("/api/collab/presence/events", VIEW, NONE),
     e("/api/collab/ops", VIEW, EDIT),
     e("/api/collab/claim", NONE, EDIT),
     e("/api/collab/release", NONE, EDIT),
