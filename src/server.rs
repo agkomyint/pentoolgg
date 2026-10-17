@@ -153,6 +153,12 @@ pub async fn serve(host: &str, port: u16, file: Option<PathBuf>, no_cache: bool)
         .route("/api/render/svg", post(render_svg))
         .route("/api/document", get(get_document).put(put_document))
         .route("/api/scene", post(scene_command))
+        .route("/api/design/tokens", get(design_tokens))
+        .route("/api/design/library/status", get(design_library_status))
+        .route("/api/design/audit", get(design_audit))
+        .route("/api/design/templates", get(design_templates))
+        .route("/api/design/template/check", get(design_template_check))
+        .route("/api/design/template/fill", post(design_template_fill))
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/run", post(extensions_run))
         .route("/api/history", get(history_list))
@@ -3304,6 +3310,297 @@ async fn composite_dependencies(State(state): State<Shared>) -> Response {
         Err(error) => problem(error),
     }
 }
+// ---- Design systems (`/api/design/*`) -------------------------------------
+// Every route builds the same `DesignCommand` the CLI parses and runs it through
+// `design::cli::run`, so Studio and the CLI share one implementation.
+
+// DesignError is a structured error built only on failure paths (see src/design/mod.rs).
+type DesignResult<T> = std::result::Result<T, crate::tokens::DesignError>;
+
+fn design_problem(error: crate::tokens::DesignError) -> Response {
+    (StatusCode::BAD_REQUEST, Json(error.to_json())).into_response()
+}
+
+#[allow(clippy::result_large_err)]
+fn design_invalid(message: impl Into<String>) -> crate::tokens::DesignError {
+    crate::tokens::DesignError::new("invalid-input", message)
+}
+
+/// A project-relative path: no absolute paths, drive prefixes or `..`.
+#[allow(clippy::result_large_err)]
+fn project_relative(root: &std::path::Path, rel: &str) -> DesignResult<PathBuf> {
+    use std::path::Component;
+    let path = std::path::Path::new(rel);
+    let safe = !rel.is_empty()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    if !safe {
+        return Err(design_invalid(format!(
+            "path {rel:?} must be relative to the served project and stay inside it"
+        ))
+        .action("use a plain relative path without `..`"));
+    }
+    Ok(root.join(path))
+}
+
+#[allow(clippy::result_large_err)]
+async fn design_read(
+    state: Shared,
+    build: impl FnOnce(PathBuf, &std::path::Path) -> DesignResult<crate::design::cli::DesignCommand>
+        + Send
+        + 'static,
+) -> Response {
+    let Some(file) = state.file.clone() else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let root = state.project_root.clone();
+    let gate = state.gate.clone();
+    let work = move || -> DesignResult<serde_json::Value> {
+        let _guard = gate
+            .lock()
+            .map_err(|_| crate::tokens::DesignError::new("internal", "document lock failed"))?;
+        crate::design::cli::run(build(file, &root)?)
+    };
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(error)) => design_problem(error),
+        Err(error) => problem(anyhow::anyhow!("design task failed: {error}")),
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DesignTokenQuery {
+    #[serde(rename = "type")]
+    token_type: Option<String>,
+    source: Option<String>,
+    #[serde(default)]
+    resolve: bool,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+#[allow(clippy::result_large_err)]
+async fn design_tokens(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<DesignTokenQuery>,
+) -> Response {
+    use crate::design::cli::{DesignCommand, TokenAction};
+    design_read(state, move |file, _| {
+        Ok(DesignCommand::Token {
+            action: TokenAction::List {
+                input: file,
+                token_type: q.token_type,
+                source: q.source,
+                resolve: q.resolve,
+                offset: q.offset,
+                limit: q.limit,
+            },
+        })
+    })
+    .await
+}
+
+#[allow(clippy::result_large_err)]
+async fn design_library_status(State(state): State<Shared>) -> Response {
+    use crate::design::cli::{DesignCommand, LibraryAction};
+    design_read(state, |file, root| {
+        Ok(DesignCommand::Library {
+            action: LibraryAction::Status {
+                input: file,
+                project: Some(root.to_path_buf()),
+            },
+        })
+    })
+    .await
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DesignAuditQuery {
+    page: Option<String>,
+    #[serde(default)]
+    all_pages: bool,
+    rules: Option<String>,
+    library: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    #[serde(default)]
+    fix_plan: bool,
+    #[serde(default)]
+    fix_nearest: bool,
+}
+
+/// Read-only: the audit never writes; applying a fix plan goes through `/api/scene`.
+#[allow(clippy::result_large_err)]
+async fn design_audit(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<DesignAuditQuery>,
+) -> Response {
+    use crate::design::cli::DesignCommand;
+    design_read(state, move |file, _| {
+        Ok(DesignCommand::Audit {
+            input: file,
+            page: q.page,
+            all_pages: q.all_pages,
+            rules: q.rules,
+            library: q.library,
+            offset: q.offset,
+            limit: q.limit,
+            fix_plan: q.fix_plan,
+            fix_nearest: q.fix_nearest,
+            fail_on: None,
+        })
+    })
+    .await
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DesignTemplateQuery {
+    /// Project-relative directory (templates) or file (check); default `.` / the shared document.
+    path: Option<String>,
+    page: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+#[allow(clippy::result_large_err)]
+async fn design_templates(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<DesignTemplateQuery>,
+) -> Response {
+    use crate::design::cli::{DesignCommand, TemplateAction};
+    design_read(state, move |_, root| {
+        let dir = match q.path.as_deref() {
+            None | Some("") | Some(".") => root.to_path_buf(),
+            Some(rel) => project_relative(root, rel)?,
+        };
+        Ok(DesignCommand::Template {
+            action: TemplateAction::List {
+                dir,
+                offset: q.offset,
+                limit: q.limit,
+            },
+        })
+    })
+    .await
+}
+
+#[allow(clippy::result_large_err)]
+async fn design_template_check(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<DesignTemplateQuery>,
+) -> Response {
+    use crate::design::cli::{DesignCommand, TemplateAction};
+    design_read(state, move |file, root| {
+        let input = match q.path.as_deref() {
+            None | Some("") => file,
+            Some(rel) => project_relative(root, rel)?,
+        };
+        Ok(DesignCommand::Template {
+            action: TemplateAction::Check {
+                input,
+                page: q.page,
+            },
+        })
+    })
+    .await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DesignFillRequest {
+    /// Project-relative template file; default: the shared document.
+    template: Option<String>,
+    values: serde_json::Map<String, serde_json::Value>,
+    /// Project-relative `.pen` file to create; never the template itself.
+    output: String,
+    page: Option<String>,
+    /// Studio revision (GET /api/document) for the shared document, or the
+    /// file's byte revision for another template. Required.
+    revision: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+/// Fills a template into a new document with `design template fill`. The
+/// template is only read; the revision guard ties the plan to the bytes the
+/// user saw, and dry run and commit share one planner.
+#[allow(clippy::result_large_err)]
+async fn design_template_fill(
+    State(state): State<Shared>,
+    Json(body): Json<DesignFillRequest>,
+) -> Response {
+    use crate::design::cli::{DesignCommand, TemplateAction};
+    let Some(shared) = state.file.clone() else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let root = state.project_root.clone();
+    let gate = state.gate.clone();
+    let work = move || -> DesignResult<serde_json::Value> {
+        let _guard = gate
+            .lock()
+            .map_err(|_| crate::tokens::DesignError::new("internal", "document lock failed"))?;
+        let output = project_relative(&root, &body.output)?;
+        if output.extension().is_none_or(|e| e != "pen") {
+            return Err(design_invalid("output must be a .pen file"));
+        }
+        let input = match body.template.as_deref() {
+            None | Some("") => shared.clone(),
+            Some(rel) => project_relative(&root, rel)?,
+        };
+        let pinned = if input == shared {
+            let bytes = std::fs::read(&input)
+                .map_err(|e| design_invalid(format!("could not read {}: {e}", input.display())))?;
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| design_invalid(format!("template is not valid JSON: {e}")))?;
+            require_revision(body.revision.as_deref(), &raw).map_err(|e| {
+                crate::tokens::DesignError::new("conflict", format!("{e:#}"))
+                    .action("reload the document and plan again")
+            })?;
+            crate::transaction::revision(&bytes)
+        } else {
+            body.revision.clone().ok_or_else(|| {
+                crate::tokens::DesignError::new("conflict", "revision is required")
+                    .action("send the template's revision from the template listing")
+            })?
+        };
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let values_path = std::env::temp_dir().join(format!(
+            "pentool-design-values-{}-{nonce}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &values_path,
+            serde_json::to_vec(&body.values).unwrap_or_default(),
+        )
+        .map_err(|e| design_invalid(format!("could not stage values: {e}")))?;
+        let result = crate::design::cli::run(DesignCommand::Template {
+            action: TemplateAction::Fill {
+                input,
+                values: values_path.clone(),
+                output,
+                page: body.page,
+                dry_run: body.dry_run,
+                if_revision: Some(pinned),
+                offset: body.offset,
+                limit: body.limit,
+            },
+        });
+        let _ = std::fs::remove_file(&values_path);
+        result
+    };
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(error)) => design_problem(error),
+        Err(error) => problem(anyhow::anyhow!("design task failed: {error}")),
+    }
+}
+
 /// Installed extensions of the served project, with the capabilities each was approved for.
 async fn extensions_list(State(state): State<Shared>) -> Response {
     match crate::extension::store::list(&state.project_root) {

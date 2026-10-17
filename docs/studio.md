@@ -87,6 +87,26 @@ revision, one undoable step). Installing and approving capabilities stay CLI
 actions (`pentool extension add --approve`). Running is disabled while local
 edits are unsaved. Not yet exercised in a live browser. See `docs/extensions-v1.md`.
 
+### Design systems (0.19)
+
+The Systems workspace has four tabs over the served document: Tokens (type filter,
+resolved swatch, local/clean/override state, dependent counts, pagination),
+Libraries (document, `pentool.lock` and installed package state), Templates (the
+templates in the served folder, a parameter form built from `design template
+check`, Preview and Fill) and Audit (findings by severity, near-match toggle and
+"Apply fix plan"). Every view calls `/api/design/*`, which builds the same command
+the CLI parses and runs it through `design::cli::run`: `GET /api/design/tokens`,
+`/library/status`, `/audit`, `/templates`, `/template/check`, and
+`POST /api/design/template/fill`. Errors keep the structured
+`{error:{code,message,action}}` shape. Fill requires the document `revision`
+(a missing or stale one is refused before any write), writes only a new
+project-relative `.pen` file and never modifies the template; paths with `..` or
+absolute paths are rejected. "Apply fix plan" sends the audit's operations to the
+existing `/api/scene` route (revision guard, one undoable transaction). Library
+install/update, brand apply, token editing and template thumbnails are not in Studio
+yet (CLI only). The HTTP routes are covered by tests; the panel itself was built
+and type-checked but not exercised in a live browser.
+
 ### Paint plan authoring (0.13)
 
 The Paint workspace's "Plan passes" section authors an ordered paint plan: path or

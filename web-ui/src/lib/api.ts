@@ -43,7 +43,11 @@ async function check(response: Response): Promise<Response> {
   let message = `${response.status} ${response.statusText}`;
   try {
     const body = await response.json();
-    if (body?.error) message = String(body.error);
+    if (typeof body?.error === "string") message = body.error;
+    else if (body?.error?.message) {
+      // Structured design error: {code, message, action?}.
+      message = `${body.error.message}${body.error.action ? ` (${body.error.action})` : ""}`;
+    }
   } catch {
     // non-JSON error body
   }

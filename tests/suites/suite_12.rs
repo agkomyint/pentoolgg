@@ -66,3 +66,5 @@ mod v017_psd_export;
 mod v018_extension;
 #[path = "../v019_design.rs"]
 mod v019_design;
+#[path = "../v019_design_ui.rs"]
+mod v019_design_ui;

@@ -14,6 +14,7 @@ import { DesignPanel } from "@/workspaces/DesignPanel";
 import { CompositePanel, ImagePanel, SceneConsole } from "@/workspaces/OperationsPanel";
 import { PrintPanel } from "@/workspaces/PrintPanel";
 import { LayoutPanel } from "@/workspaces/LayoutPanel";
+import { DesignSystemsPanel } from "@/workspaces/DesignSystemsPanel";
 import { ExtensionsPanel, ExtensionPalette } from "@/workspaces/ExtensionsPanel";
 import { Planned } from "@/workspaces/Planned";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
@@ -92,6 +93,8 @@ function WorkspaceBody() {
       );
     case "extensions":
       return <ExtensionsPanel />;
+    case "systems":
+      return <DesignSystemsPanel />;
     default:
       return (
         <div className="p-2">

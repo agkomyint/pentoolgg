@@ -771,3 +771,20 @@ differs from section 9.
 - Not done: `tree/search --resolve` and `validate --strict` (no top-level
   `validate` command exists; the audit reports the same unresolved/invalid
   conditions).
+
+## Implementation notes: Studio (item 7, v0.19.0)
+
+- `GET /api/design/tokens|library/status|audit|templates|template/check` and
+  `POST /api/design/template/fill` in `src/server.rs` construct the same
+  `DesignCommand` values the CLI uses and call `design::cli::run`; nothing is
+  reimplemented. Reads run under the document gate.
+- Fill takes `{template?, values, output, page?, revision, dry_run?}`. For the
+  shared document the Studio revision is checked with `require_revision` and the
+  file's byte revision is then pinned as `--if-revision`; another project file
+  needs its byte revision. `output` must be a relative `.pen` path inside the
+  served project; `..`, absolute paths and the template itself are refused.
+- Audit stays read-only. Applying its fix plan reuses `POST /api/scene`.
+- Scope cut: the Studio panel is read/preview plus fill and fix-plan apply. Token
+  editing, library install/update/diff, thumbnails and conflict resolution are
+  not in the panel; the sketch above remains the target for those.
+- Not tested in a live browser; `web/studio.html` is rebuilt with `bun run build`.
