@@ -127,3 +127,56 @@ fn pdf_has_real_text_links_and_outline_and_epub_has_navigation() {
     .unwrap();
     assert!(story.contains("<h1 id=\"p0\"") && story.contains("href=\"https://example.com\""));
 }
+
+#[test]
+fn layout_export_validates_format_and_input_before_the_overwrite_guard() {
+    let dir = scratch();
+    let out = dir.as_path().join("out.pdf");
+    std::fs::write(&out, b"x").unwrap();
+    let run = |args: &[&str]| -> (bool, String) {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_pentool"))
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout),
+            ),
+        )
+    };
+    let missing = dir.as_path().join("NOSUCH.pen");
+    let missing = missing.to_str().unwrap().to_string();
+    let output = out.to_str().unwrap().to_string();
+
+    // A bad --format is the load-bearing error even when the output exists.
+    let (ok, msg) = run(&["layout-export", &missing, &output, "--format", "bogus"]);
+    assert!(!ok);
+    assert!(msg.contains("--format must be pdf or epub"), "{msg}");
+    // An unreadable input must beat the overwrite guard.
+    let (ok, msg) = run(&["layout-export", &missing, &output]);
+    assert!(!ok);
+    assert!(msg.contains("could not read"), "{msg}");
+    assert!(!msg.contains("output-exists"), "{msg}");
+
+    let doc = document(400.0);
+    let path = write(dir.as_path(), "doc.pen", &doc);
+    let input = path.to_str().unwrap().to_string();
+    // A readable input keeps the overwrite guard.
+    let (ok, msg) = run(&["layout-export", &input, &output]);
+    assert!(!ok);
+    assert!(msg.contains("output-exists"), "{msg}");
+    // --fixed with pdf is a flag-combination error, also ahead of the guard.
+    let (ok, msg) = run(&[
+        "layout-export",
+        &input,
+        &output,
+        "--fixed",
+        "--format",
+        "pdf",
+    ]);
+    assert!(!ok);
+    assert!(msg.contains("--fixed applies to EPUB output only"), "{msg}");
+}

@@ -576,18 +576,24 @@ pub fn run_layout_export(
             .unwrap_or("pdf")
             .to_ascii_lowercase()
     });
+    // Input-side validation first: a bad --format or an unreadable input is the
+    // load-bearing failure and must not be masked by the overwrite guard.
+    anyhow::ensure!(
+        matches!(format.as_str(), "pdf" | "epub"),
+        "[invalid-input] --format must be pdf or epub, not {format}"
+    );
+    anyhow::ensure!(
+        !fixed || format == "epub",
+        "[invalid-input] --fixed applies to EPUB output only"
+    );
+    let raw = read(input)?;
     anyhow::ensure!(
         overwrite || !out.exists(),
         "[output-exists] {} exists; pass --overwrite",
         out.display()
     );
-    let raw = read(input)?;
     let result = match format.as_str() {
         "pdf" => {
-            anyhow::ensure!(
-                !fixed,
-                "[invalid-input] --fixed applies to EPUB output only"
-            );
             let mut options = crate::publish::PdfOptions::default();
             if let Some(s) = scale {
                 options.scale = s;
