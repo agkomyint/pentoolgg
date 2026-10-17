@@ -68,10 +68,11 @@ pentool export DOC out.psd --layers
 - Live sync with Figma/Sketch cloud services, plugins that call vendor SDKs, and
   proprietary prototype or interaction data.
 
-## Implementation status (in progress)
+## Implementation status
 
-The current working implementation is a partial foundation, not a completed
-0.17.0 milestone: bounded fidelity reports, static SVG import, Sketch ZIP page
+The v0.17.0 feature implementation is shipped as v0.17.1 after a release
+workflow smoke test exposed a legacy-export compatibility bug. The milestone
+includes bounded fidelity reports, static SVG import, Sketch ZIP page
 and symbol snapshots, saved Figma REST JSON import with component snapshots and
 one-time fixed-size auto-layout placement (including wrapped rows), bounded classic-xref and uncompressed-object xref-stream PDF import, and a
 bounded PSD v1 raster-layer import are implemented. Binary Figma `.fig` import
@@ -156,8 +157,7 @@ round trips cover Figma and Sketch imports, while SVG gradients and symbols, PDF
 paths, and PSD embedded raster assets have export/re-import coverage. The current
 SVG conformance corpus is deterministic and covers representative supported and
 hostile cases. The scope decision above makes the fidelity guide the testable
-format contract for this release. Local Windows verification and the full
-Linux/Windows/macOS CI matrix, including hostile archive coverage, WASM smoke,
-Studio bundle consistency, and release-size builds, passed on code commit
-`22cfe758`. The final commit must also pass the same CI workflow on its exact
-SHA before it is tagged.
+format contract for this release. The original v0.17.0 tag passed CI, but its
+release workflow failed when the CLI fidelity report rejected v1/v2 documents
+that store layers at the document root. v0.17.1 fixes that compatibility path;
+its exact commit must pass CI and release smoke tests before publication.

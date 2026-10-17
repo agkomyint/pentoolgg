@@ -327,14 +327,19 @@ pub fn export_fidelity_report_for(
     flattened: bool,
 ) -> Result<FidelityReport> {
     let mut report = FidelityReportBuilder::new(format, source);
-    let pages = document
-        .get("pages")
+    // Legacy v1/v2 documents keep their single page's layers at the document
+    // root. Treat that representation as the implicit page the renderer sees.
+    let legacy_layers = document
+        .get("layers")
         .and_then(Value::as_array)
-        .context("export source has no pages")?;
-    for page in pages {
-        let page_id = page.get("id").and_then(Value::as_str).unwrap_or("page");
+        .filter(|_| document.get("pages").and_then(Value::as_array).is_none());
+    let pages = document.get("pages").and_then(Value::as_array);
+    if pages.is_none() && legacy_layers.is_none() {
+        anyhow::bail!("export source has no pages or legacy layers");
+    }
+    let mut record_page = |page_id: &str, layers: &[Value]| -> Result<()> {
         if page_ids.is_some_and(|ids| !ids.iter().any(|id| id == page_id)) {
-            continue;
+            return Ok(());
         }
         report.record(
             page_id,
@@ -343,10 +348,6 @@ pub fn export_fidelity_report_for(
             "page dimensions and export order retained",
             None,
         );
-        let layers = page
-            .get("layers")
-            .and_then(Value::as_array)
-            .context("export page has no layers")?;
         for layer in layers {
             let layer_visible = layer.get("visible").and_then(Value::as_bool) != Some(false);
             let nodes = layer
@@ -367,6 +368,19 @@ pub fn export_fidelity_report_for(
                 record_export_node(text, format, flattened, layer_visible, &mut report)?;
             }
         }
+        Ok(())
+    };
+    if let Some(pages) = pages {
+        for page in pages {
+            let page_id = page.get("id").and_then(Value::as_str).unwrap_or("page");
+            let layers = page
+                .get("layers")
+                .and_then(Value::as_array)
+                .context("export page has no layers")?;
+            record_page(page_id, layers)?;
+        }
+    } else if let Some(layers) = legacy_layers {
+        record_page("page-1", layers)?;
     }
     Ok(report.finish())
 }
@@ -1039,6 +1053,31 @@ mod tests {
             .iter()
             .filter(|item| item.feature != "page")
             .all(|item| { item.status == FidelityStatus::Approximated }));
+    }
+
+    #[test]
+    fn export_fidelity_report_accepts_legacy_root_layers() {
+        let document = json!({
+            "format": "pentool",
+            "version": 2,
+            "canvas": {"width": 100, "height": 80, "background": "#fff"},
+            "layers": [{
+                "id": "layer-1",
+                "visible": true,
+                "paths": [{"id": "legacy-path", "d": "M 0 0 L 10 10", "fill": "none"}],
+                "texts": []
+            }]
+        });
+
+        let report = export_fidelity_report_for(&document, "png", "legacy.pen", None, true)
+            .expect("legacy root-layer documents should have export reports");
+
+        assert_eq!(report.counts.exact, 1);
+        assert_eq!(report.counts.approximated, 1);
+        assert!(report
+            .items
+            .iter()
+            .any(|item| item.source_id == "legacy-path"));
     }
 
     #[test]

@@ -10352,14 +10352,18 @@ async fn run() -> Result<()> {
             let report_page_ids = if all_pages || export_format == "pdf" {
                 None
             } else {
-                let pages = source_document
+                source_document
                     .get("pages")
                     .and_then(serde_json::Value::as_array)
-                    .context("export source has no pages")?;
-                let page_id = selected_page
-                    .or_else(|| pages.first()?.get("id").and_then(serde_json::Value::as_str))
-                    .context("export source page has no ID")?;
-                Some(vec![page_id.to_owned()])
+                    .map(|pages| {
+                        selected_page
+                            .or_else(|| {
+                                pages.first()?.get("id").and_then(serde_json::Value::as_str)
+                            })
+                            .context("export source page has no ID")
+                            .map(|page_id| vec![page_id.to_owned()])
+                    })
+                    .transpose()?
             };
             let rasterized_export = export_format == "png"
                 || export_format == "psd"
