@@ -1035,3 +1035,27 @@ fn hero_like(doc: &Path, id: &str) -> Value {
         .unwrap()
         .clone()
 }
+
+#[test]
+fn bake_does_not_count_disabled_operations_as_removed() {
+    let ws = Workspace::new("bake-disabled");
+    let (doc, _) = setup(&ws);
+    let d = doc.to_str().unwrap();
+    ok(&["image", "op", "add", d, "hero", "blur", "--radius", "2"]);
+    ok(&["image", "op", "add", d, "hero", "grayscale"]);
+    ok(&["image", "op", "disable", d, "hero", "grayscale-2"]);
+    let report = ok(&["image", "bake", d, "hero"]);
+    let result = &report["result"];
+    // Only the enabled blur was flattened; the disabled grayscale is dropped
+    // without effect and must be reported separately, not as removed (issue #174).
+    assert_eq!(result["removed_operations"], 1);
+    assert_eq!(result["applied_operations"], json!(["blur-1"]));
+    assert_eq!(result["dropped_disabled_operations"], 1);
+    // Pixels must equal the blur-only control bake.
+    let ws2 = Workspace::new("bake-disabled-control");
+    let (doc2, _) = setup(&ws2);
+    let d2 = doc2.to_str().unwrap();
+    ok(&["image", "op", "add", d2, "hero", "blur", "--radius", "2"]);
+    let control = ok(&["image", "bake", d2, "hero"]);
+    assert_eq!(result["result"], control["result"]["result"]);
+}
