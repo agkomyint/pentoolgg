@@ -4,7 +4,7 @@ use super::{
     library::{self, DiffOptions},
     page_args, paginate,
     plan::{self, Options},
-    template,
+    template, token_file,
 };
 use crate::{
     package, tokens as tok,
@@ -150,6 +150,38 @@ pub enum TokenAction {
     },
     /// Follow one token through its aliases using only the document.
     Resolve { input: PathBuf, token: String },
+    /// Import a native or W3C token file into a document (dry run or commit).
+    Import {
+        input: PathBuf,
+        /// Token file (`pentool.tokens` JSON or W3C design tokens).
+        file: PathBuf,
+        /// Force the file format (default: detected).
+        #[arg(long, value_parser = ["native", "w3c"])]
+        format: Option<String>,
+        /// What to do when a token exists locally with a different value.
+        #[arg(long, default_value = "fail", value_parser = ["fail", "skip", "overwrite"])]
+        on_collision: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        if_revision: Option<String>,
+        #[arg(long)]
+        offset: Option<usize>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Export a document's tokens as a native or W3C token file.
+    Export {
+        input: PathBuf,
+        #[arg(long, default_value = "native", value_parser = ["native", "w3c"])]
+        format: String,
+        /// Write here instead of stdout.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Omit tokens that cannot be represented and list them.
+        #[arg(long)]
+        skip_unmappable: bool,
+    },
 }
 
 #[derive(Args)]
@@ -202,6 +234,20 @@ pub enum LibraryAction {
     /// Verify a library package offline (hashes, schema, tokens).
     Verify {
         package: PathBuf,
+        #[command(flatten)]
+        signing: Signing,
+    },
+    /// Export a library package's tokens as a native or W3C token file.
+    Export {
+        package: PathBuf,
+        #[arg(long, default_value = "native", value_parser = ["native", "w3c"])]
+        format: String,
+        /// Write here instead of stdout.
+        #[arg(long)]
+        output: Option<PathBuf>,
+        /// Omit tokens that cannot be represented and list them.
+        #[arg(long)]
+        skip_unmappable: bool,
         #[command(flatten)]
         signing: Signing,
     },
@@ -271,7 +317,7 @@ fn invalid(message: impl Into<String>) -> DesignError {
     DesignError::new("invalid-input", message)
 }
 
-fn read_document(path: &Path) -> Result<(Vec<u8>, Value)> {
+pub(super) fn read_document(path: &Path) -> Result<(Vec<u8>, Value)> {
     let bytes =
         fs::read(path).map_err(|e| invalid(format!("could not read {}: {e}", path.display())))?;
     let raw: Value = serde_json::from_slice(&bytes)
@@ -298,6 +344,12 @@ fn operation_name(command: &DesignCommand) -> &'static str {
         DesignCommand::Token {
             action: TokenAction::Resolve { .. },
         } => "design token resolve",
+        DesignCommand::Token {
+            action: TokenAction::Import { .. },
+        } => "design token import",
+        DesignCommand::Token {
+            action: TokenAction::Export { .. },
+        } => "design token export",
         DesignCommand::Template { action } => match action {
             TemplateAction::Check { .. } => "design template check",
             TemplateAction::List { .. } => "design template list",
@@ -313,6 +365,7 @@ fn operation_name(command: &DesignCommand) -> &'static str {
             LibraryAction::Pack { .. } => "design library pack",
             LibraryAction::Verify { .. } => "design library verify",
             LibraryAction::Inspect { .. } => "design library inspect",
+            LibraryAction::Export { .. } => "design library export",
             LibraryAction::Install { .. } => "design library install",
             LibraryAction::Update { .. } => "design library update",
             LibraryAction::Status { .. } => "design library status",
@@ -456,6 +509,39 @@ fn token(action: TokenAction) -> Result<Value> {
             out["tokens"] = json!(page);
             Ok(out)
         }
+        TokenAction::Import {
+            input,
+            file,
+            format,
+            on_collision,
+            dry_run,
+            if_revision,
+            offset,
+            limit,
+        } => token_file::import(&token_file::ImportOptions {
+            input: &input,
+            file: &file,
+            format: format
+                .as_deref()
+                .map(token_file::Format::parse)
+                .transpose()?,
+            mode: token_file::Collision::parse(&on_collision)?,
+            dry_run,
+            if_revision: if_revision.as_deref(),
+            offset,
+            limit,
+        }),
+        TokenAction::Export {
+            input,
+            format,
+            output,
+            skip_unmappable,
+        } => token_file::export_document(
+            &input,
+            token_file::Format::parse(&format)?,
+            output.as_deref(),
+            skip_unmappable,
+        ),
         TokenAction::Resolve { input, token } => {
             let (_, raw) = read_document(&input)?;
             let styles = raw.get("styles").cloned().unwrap_or_else(|| json!({}));
@@ -497,6 +583,24 @@ fn library_action(action: LibraryAction) -> Result<Value> {
                 signing.public_key.as_deref(),
             )?;
             Ok(library::summary(&library::load_package(&package)?))
+        }
+        LibraryAction::Export {
+            package,
+            format,
+            output,
+            skip_unmappable,
+            signing,
+        } => {
+            library::check_signature(
+                &package,
+                signing.signature.as_deref(),
+                signing.public_key.as_deref(),
+            )?;
+            let snapshot = library::load_package(&package)?;
+            let format = token_file::Format::parse(&format)?;
+            let (file, skipped) = token_file::render(&snapshot.tokens, format, skip_unmappable)?;
+            let exported = snapshot.tokens.len() - skipped.len();
+            token_file::emit(file, format, exported, skipped, output.as_deref())
         }
         LibraryAction::Inspect { package } => {
             let snapshot = library::load_package(&package)?;

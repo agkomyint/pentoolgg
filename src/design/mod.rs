@@ -8,6 +8,7 @@ pub mod cli;
 pub mod library;
 pub mod plan;
 pub mod template;
+pub mod token_file;
 
 use crate::tokens::DesignError;
 use serde_json::{json, Value};

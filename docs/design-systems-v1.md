@@ -788,3 +788,49 @@ differs from section 9.
   editing, library install/update/diff, thumbnails and conflict resolution are
   not in the panel; the sketch above remains the target for those.
 - Not tested in a live browser; `web/studio.html` is rebuilt with `bun run build`.
+
+## Implementation notes: token files (item 8, v0.19.0)
+
+Implemented in `src/design/token_file.rs`; `src/main.rs` only routes. Where this
+differs from section 10, this section is normative.
+
+- Commands: `design token import DOC FILE [--format native|w3c] [--on-collision
+  fail|skip|overwrite] [--dry-run] [--if-revision SHA] [--offset --limit]`,
+  `design token export DOC [--format native|w3c] [--output FILE] [--skip-unmappable]`
+  and `design library export PKG [same flags] [--signature --public-key]`. Without
+  `--output`, export prints the file itself (the exact bytes a file would hold).
+- Format detection: a JSON object with numeric `schema` and object `tokens` is
+  native; anything else is W3C. `--format` overrides detection.
+- Import validates the whole file with the library validator (ID grammar, strict
+  value schemas, alias closure inside the file, same-type aliases, cycles, 5,000
+  tokens, 16 KiB values, 16 MiB file) and then the merged document (count limit,
+  cycles, alias depth) before anything is written. Dry run and commit use one
+  planner; the dry-run report equals the commit report except `dry_run` and
+  `change`. A commit that would change nothing leaves the file untouched.
+- Collisions: a token whose local type or value differs from the incoming one is a
+  conflict. `fail` (default) reports every conflict (`conflicts[]`, and `local` /
+  `incoming` on the paginated `tokens` rows) and refuses to write (`conflict`
+  error); `skip` keeps local tokens and lists them in `skipped`; `overwrite`
+  replaces type/value (and description when the file has one) and keeps every other
+  key of the record, including `source`, so a library-tracked token becomes a
+  visible local override. Identical tokens are `unchanged`. Descriptions never
+  cause a conflict.
+- Report keys: `format on_collision dry_run would_change blocked counts{added,
+  unchanged,overwritten,skipped,conflicts} imported[] skipped[] conflicts[] writes[]
+  change matches returned offset limit has_more tokens[]`.
+- Export is deterministic: sorted IDs, 2-space indent, trailing newline. Native
+  export of a document refuses legacy IDs (`invalid-token-id`) and `stroke`
+  tokens; `--skip-unmappable` omits and lists them. W3C export additionally
+  refuses spot/ICC color objects, `none`, two-value radius, `italic`/`axes`
+  typography, spacing/radius outside the `space|spacing|size` / `radius` groups,
+  and a token that is also a group prefix; aliases to skipped tokens are skipped
+  too. Dimensions are written as `"<n>px"`; shadows are always arrays.
+- W3C import also supports group-level `$type` inheritance and untyped aliases
+  (type taken from the target). Rejected with `unsupported-token-construct` and a
+  JSON pointer in `error.path`: `$extensions`, `$deprecated`, `$root`, group
+  `$description`, any other `$` key, non-px units, object dimensions, unsupported
+  types, standalone `fontFamily`/`fontWeight`, color objects, unitless
+  `lineHeight`, font fallback lists, aliases inside composite members, inset
+  shadows, and dimensions outside the mapped groups.
+- Deviation: `--keep-extensions` is not implemented; `$extensions` is always
+  rejected rather than stored.

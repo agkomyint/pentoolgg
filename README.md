@@ -630,6 +630,27 @@ The batch operations `{"type":"bind-token","id":"hero","property":"fill","token"
 and `{"type":"set-token","name":"space.md","token_type":"spacing","value":16}` are
 available to any batch file.
 
+### Token files (import and export)
+
+Tokens move in and out of a document as a native `pentool.tokens` JSON file
+(`{"schema":1,"tokens":{"color.accent":{"type":"color","value":"#F59E0B"}}}`) or as
+the strict one-to-one subset of W3C design tokens (`$type`/`$value`). Import is
+validated in full before any write, uses the same planner for `--dry-run` and
+commit, and never overwrites a differing local token unless `--on-collision
+overwrite` is given (default `fail` reports every conflict). Unsupported W3C
+features (`$extensions`, `rem`, gradients, color objects, ...) are rejected with
+`unsupported-token-construct` and a JSON pointer, never approximated.
+
+```sh
+pentool design token export doc.pen --output tokens.json
+pentool design token export doc.pen --format w3c --output tokens.w3c.json
+pentool design token import other.pen tokens.json --dry-run
+pentool design token import other.pen tokens.json --on-collision skip
+pentool design library export brand-1.0.0.penpkg --format w3c --skip-unmappable --output brand.w3c.json
+```
+
+See `docs/design-systems-v1.md` section 10 and "Implementation notes: token files".
+
 ## Open design libraries and packages (v0.5–v0.6)
 
 Reusable assets remain ordinary editable `.pen` documents. Save a document, page,

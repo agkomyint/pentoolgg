@@ -31,34 +31,9 @@ fn invalid(message: impl Into<String>) -> DesignError {
     DesignError::new("invalid-input", message)
 }
 
-/// Parse and strictly validate a `design_library` block of an asset document.
-/// Returns `None` when the document has no block.
-pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
-    let Some(block) = doc.get("design_library") else {
-        return Ok(None);
-    };
-    let object = block
-        .as_object()
-        .ok_or_else(|| invalid("design_library must be an object"))?;
-    if object.get("schema").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid("design_library.schema must be 1").action("set \"schema\": 1"));
-    }
-    let name = object
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("design_library.name is required"))?;
-    asset::validate_id(name).map_err(|e| invalid(format!("design_library.name: {e}")))?;
-    let version = object
-        .get("version")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("design_library.version is required"))?;
-    semver::Version::parse(version)
-        .map_err(|_| invalid("design_library.version must use semantic versioning"))?;
-    let raw_tokens = match object.get("tokens") {
-        None => Map::new(),
-        Some(Value::Object(map)) => map.clone(),
-        Some(_) => return Err(invalid("design_library.tokens must be an object")),
-    };
+/// Strictly validate a library-style token map (IDs, types, values, alias
+/// closure, cycles, limits). Shared by library blocks and token-file import.
+pub fn parse_tokens(raw_tokens: &Map<String, Value>) -> Result<BTreeMap<String, LibToken>> {
     if raw_tokens.len() > tokens::MAX_TOKENS {
         return Err(DesignError::new(
             "limit-exceeded",
@@ -72,7 +47,7 @@ pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
     }
     let mut out = BTreeMap::new();
     let mut store = Map::new();
-    for (id, record) in &raw_tokens {
+    for (id, record) in raw_tokens {
         if !tokens::valid_library_id(id) {
             return Err(DesignError::new(
                 "invalid-token-id",
@@ -168,6 +143,38 @@ pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
         }
     }
     tokens::check_write(&store, None)?;
+    Ok(out)
+}
+
+/// Parse and strictly validate a `design_library` block of an asset document.
+/// Returns `None` when the document has no block.
+pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
+    let Some(block) = doc.get("design_library") else {
+        return Ok(None);
+    };
+    let object = block
+        .as_object()
+        .ok_or_else(|| invalid("design_library must be an object"))?;
+    if object.get("schema").and_then(Value::as_u64) != Some(1) {
+        return Err(invalid("design_library.schema must be 1").action("set \"schema\": 1"));
+    }
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("design_library.name is required"))?;
+    asset::validate_id(name).map_err(|e| invalid(format!("design_library.name: {e}")))?;
+    let version = object
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid("design_library.version is required"))?;
+    semver::Version::parse(version)
+        .map_err(|_| invalid("design_library.version must use semantic versioning"))?;
+    let raw_tokens = match object.get("tokens") {
+        None => Map::new(),
+        Some(Value::Object(map)) => map.clone(),
+        Some(_) => return Err(invalid("design_library.tokens must be an object")),
+    };
+    let out = parse_tokens(&raw_tokens)?;
     let brand = match object.get("brand") {
         None => None,
         Some(brand) => {

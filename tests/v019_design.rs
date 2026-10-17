@@ -1541,3 +1541,440 @@ fn bind_token_and_set_token_batch_ops_respect_locks_and_validity() {
         json!({"ref":"color.cta","fallback":"#2563eb"})
     );
 }
+
+// ---------------------------------------------------------------- item 8 --
+
+fn native_tokens() -> Value {
+    json!({"schema":1,"tokens":{
+        "color.accent":{"type":"color","value":"#F59E0B","description":"CTA"},
+        "color.cta":{"type":"color","value":{"ref":"color.accent"}},
+        "radius.card":{"type":"radius","value":8},
+        "shadow.raised":{"type":"shadow","value":[
+            {"dx":0,"dy":2,"blur":8,"spread":0,"color":"#00000033"}]},
+        "space.md":{"type":"spacing","value":16},
+        "space.tight":{"type":"spacing","value":0.5},
+        "type.body":{"type":"typography",
+            "value":{"font":"Inter","size":16,"weight":400,"leading":24,"tracking":-0.25}}
+    }})
+}
+
+fn new_doc(ws: &Workspace, name: &str) -> PathBuf {
+    let path = ws.path(name);
+    quiet(ws, &["new", &text(&path)]);
+    path
+}
+
+fn export_text(ws: &Workspace, doc: &Path, format: &str) -> String {
+    let out = run(
+        ws,
+        &["design", "token", "export", &text(doc), "--format", format],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+fn import_args<'a>(doc: &'a str, file: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec!["design", "token", "import", doc, file];
+    args.extend_from_slice(extra);
+    args
+}
+
+#[test]
+fn token_file_native_roundtrip_is_lossless_and_dry_run_matches_commit() {
+    let ws = Workspace::new("tf-native");
+    let file = ws.path("tokens.json");
+    // The deterministic export form: sorted IDs, 2-space indent, trailing newline.
+    let canonical = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&native_tokens()).unwrap()
+    );
+    fs::write(&file, &canonical).unwrap();
+    let doc = new_doc(&ws, "a.pen");
+    let (d, f) = (text(&doc), text(&file));
+    let before = fs::read(&doc).unwrap();
+    let dry = ok(&ws, &import_args(&d, &f, &["--dry-run"]));
+    assert_eq!(dry["dry_run"], true);
+    assert_eq!(dry["would_change"], true);
+    assert_eq!(dry["counts"]["added"], 7);
+    assert_eq!(fs::read(&doc).unwrap(), before, "dry run writes nothing");
+    let real = ok(&ws, &import_args(&d, &f, &[]));
+    for key in [
+        "counts",
+        "imported",
+        "skipped",
+        "writes",
+        "tokens",
+        "conflicts",
+    ] {
+        assert_eq!(dry[key], real[key], "{key}");
+    }
+    assert_ne!(fs::read(&doc).unwrap(), before);
+    assert_eq!(export_text(&ws, &doc, "native"), canonical);
+    // Re-import is a no-op that does not touch the file.
+    let again_before = fs::read(&doc).unwrap();
+    let again = ok(&ws, &import_args(&d, &f, &[]));
+    assert_eq!(again["would_change"], false);
+    assert_eq!(again["counts"]["unchanged"], 7);
+    assert_eq!(fs::read(&doc).unwrap(), again_before);
+    // --output writes the same bytes.
+    let out = ws.path("out.json");
+    let report = ok(
+        &ws,
+        &["design", "token", "export", &d, "--output", &text(&out)],
+    );
+    assert_eq!(report["tokens"], 7);
+    assert_eq!(fs::read_to_string(&out).unwrap(), canonical);
+    // Undo restores the pre-import bytes.
+    let doc2 = new_doc(&ws, "b.pen");
+    let original = fs::read(&doc2).unwrap();
+    quiet(&ws, &import_args(&text(&doc2), &f, &[]));
+    quiet(&ws, &["undo", &text(&doc2)]);
+    assert_eq!(fs::read(&doc2).unwrap(), original);
+}
+
+#[test]
+fn token_import_never_overwrites_local_tokens_silently() {
+    let ws = Workspace::new("tf-conflict");
+    let doc = new_doc(&ws, "a.pen");
+    let d = text(&doc);
+    let local = ws.path("local.json");
+    write(
+        &local,
+        &json!({"schema":1,"tokens":{
+            "color.accent":{"type":"color","value":"#111111"}}}),
+    );
+    quiet(&ws, &import_args(&d, &text(&local), &[]));
+    let file = ws.path("tokens.json");
+    write(&file, &native_tokens());
+    let f = text(&file);
+    let before = fs::read(&doc).unwrap();
+    // Default fail: structured conflict error, bytes unchanged.
+    let error = err(&ws, &import_args(&d, &f, &[]));
+    assert_eq!(error["code"], "conflict");
+    assert!(error["message"].as_str().unwrap().contains("color.accent"));
+    assert_eq!(fs::read(&doc).unwrap(), before);
+    // The dry run reports the conflict (values on both sides) without failing.
+    let dry = ok(&ws, &import_args(&d, &f, &["--dry-run"]));
+    assert_eq!(dry["blocked"], true);
+    assert_eq!(dry["writes"], json!([]));
+    assert_eq!(dry["conflicts"][0]["token"], "color.accent");
+    let row = dry["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["token"] == "color.accent")
+        .unwrap();
+    assert_eq!(row["local"]["value"], "#111111");
+    assert_eq!(row["incoming"]["value"], "#F59E0B");
+    // skip keeps the local value and imports the rest.
+    let skipped = ok(&ws, &import_args(&d, &f, &["--on-collision", "skip"]));
+    assert_eq!(skipped["skipped"], json!(["color.accent"]));
+    assert_eq!(read(&doc)["styles"]["color.accent"]["value"], "#111111");
+    assert_eq!(read(&doc)["styles"]["space.md"]["value"], 16);
+    // overwrite replaces and reports it.
+    let over = ok(&ws, &import_args(&d, &f, &["--on-collision", "overwrite"]));
+    assert_eq!(over["counts"]["overwritten"], 1);
+    assert_eq!(read(&doc)["styles"]["color.accent"]["value"], "#F59E0B");
+    // A stale revision guard is refused.
+    let stale = err(&ws, &import_args(&d, &f, &["--if-revision", "sha256:nope"]));
+    assert_eq!(stale["code"], "conflict");
+}
+
+#[test]
+fn token_import_validates_before_any_write() {
+    let ws = Workspace::new("tf-invalid");
+    let doc = new_doc(&ws, "a.pen");
+    let (d, f) = (text(&doc), ws.s("bad.json"));
+    let file = ws.path("bad.json");
+    let before = fs::read(&doc).unwrap();
+    let cases = [
+        (
+            json!({"schema":1,"tokens":{
+                "color.a":{"type":"color","value":{"ref":"color.b"}},
+                "color.b":{"type":"color","value":{"ref":"color.a"}}}}),
+            "token-cycle",
+        ),
+        (
+            json!({"schema":1,"tokens":{"Color.Bad":{"type":"color","value":"#fff"}}}),
+            "invalid-token-id",
+        ),
+        (
+            json!({"schema":1,"tokens":{"color.a":{"type":"color","value":"not-a-color"}}}),
+            "invalid-token-value",
+        ),
+        (
+            json!({"schema":1,"tokens":{
+                "color.a":{"type":"color","value":"#fff"},
+                "space.a":{"type":"spacing","value":{"ref":"color.a"}}}}),
+            "token-type-mismatch",
+        ),
+        (
+            json!({"schema":1,"tokens":{"color.a":{"type":"color","value":{"ref":"color.zzz"}}}}),
+            "unknown-token",
+        ),
+        (json!({"schema":2,"tokens":{}}), "invalid-input"),
+    ];
+    for (body, code) in cases {
+        write(&file, &body);
+        let error = err(&ws, &import_args(&d, &f, &[]));
+        assert_eq!(error["code"], code, "{body}");
+        assert_eq!(fs::read(&doc).unwrap(), before, "{code} leaves bytes");
+    }
+    // Token count limit.
+    let mut many = serde_json::Map::new();
+    for index in 0..5_001 {
+        many.insert(
+            format!("space.s{index}"),
+            json!({"type":"spacing","value":1}),
+        );
+    }
+    write(&file, &json!({"schema":1,"tokens":many}));
+    let error = err(&ws, &import_args(&d, &f, &[]));
+    assert_eq!(error["code"], "limit-exceeded");
+    // The document limit counts existing tokens too.
+    let mut fits = serde_json::Map::new();
+    for index in 0..4_000 {
+        fits.insert(
+            format!("space.s{index}"),
+            json!({"type":"spacing","value":1}),
+        );
+    }
+    write(&file, &json!({"schema":1,"tokens":fits}));
+    quiet(&ws, &import_args(&d, &f, &[]));
+    let after = fs::read(&doc).unwrap();
+    let mut more = serde_json::Map::new();
+    for index in 0..1_001 {
+        more.insert(
+            format!("radius.r{index}"),
+            json!({"type":"radius","value":1}),
+        );
+    }
+    write(&file, &json!({"schema":1,"tokens":more}));
+    let error = err(&ws, &import_args(&d, &f, &[]));
+    assert_eq!(error["code"], "limit-exceeded");
+    assert_eq!(fs::read(&doc).unwrap(), after);
+}
+
+#[test]
+fn w3c_roundtrip_subset() {
+    let ws = Workspace::new("tf-w3c");
+    let native = ws.path("native.json");
+    write(&native, &native_tokens());
+    let a = new_doc(&ws, "a.pen");
+    quiet(&ws, &import_args(&text(&a), &text(&native), &[]));
+    let w3c = export_text(&ws, &a, "w3c");
+    let parsed: Value = serde_json::from_str(&w3c).unwrap();
+    assert_eq!(parsed["color"]["accent"]["$type"], "color");
+    assert_eq!(parsed["color"]["cta"]["$value"], "{color.accent}");
+    assert_eq!(parsed["space"]["md"]["$value"], "16px");
+    assert_eq!(parsed["space"]["tight"]["$value"], "0.5px");
+    assert_eq!(parsed["type"]["body"]["$value"]["fontFamily"], "Inter");
+    assert_eq!(parsed["type"]["body"]["$value"]["letterSpacing"], "-0.25px");
+    assert_eq!(parsed["shadow"]["raised"]["$value"][0]["offsetY"], "2px");
+    assert_eq!(parsed["color"]["accent"]["$description"], "CTA");
+    // w3c -> native -> w3c is byte-identical, and the native result matches.
+    let file = ws.path("tokens.w3c.json");
+    fs::write(&file, &w3c).unwrap();
+    let b = new_doc(&ws, "b.pen");
+    let dry = ok(&ws, &import_args(&text(&b), &text(&file), &["--dry-run"]));
+    assert_eq!(dry["format"], "w3c");
+    quiet(&ws, &import_args(&text(&b), &text(&file), &[]));
+    assert_eq!(export_text(&ws, &b, "w3c"), w3c);
+    assert_eq!(
+        export_text(&ws, &b, "native"),
+        export_text(&ws, &a, "native")
+    );
+    // --format w3c forces the format.
+    let c = new_doc(&ws, "c.pen");
+    quiet(
+        &ws,
+        &import_args(&text(&c), &text(&file), &["--format", "w3c"]),
+    );
+}
+
+#[test]
+fn w3c_rejections() {
+    let ws = Workspace::new("tf-reject");
+    let doc = new_doc(&ws, "a.pen");
+    let (d, f) = (text(&doc), ws.s("t.json"));
+    let file = ws.path("t.json");
+    let before = fs::read(&doc).unwrap();
+    let cases: Vec<(Value, &str)> = vec![
+        (
+            json!({"color":{"a":{"$type":"color","$value":"#fff","$extensions":{"x":1}}}}),
+            "/color/a/$extensions",
+        ),
+        (
+            json!({"color":{"a":{"$type":"color","$value":"#fff","$deprecated":true}}}),
+            "/color/a/$deprecated",
+        ),
+        (
+            json!({"color":{"$root":{"$type":"color","$value":"#fff"}}}),
+            "/color/$root",
+        ),
+        (
+            json!({"space":{"a":{"$type":"dimension","$value":"1rem"}}}),
+            "/space/a/$value",
+        ),
+        (
+            json!({"space":{"a":{"$type":"dimension","$value":{"value":1,"unit":"px"}}}}),
+            "/space/a/$value",
+        ),
+        (
+            json!({"dur":{"a":{"$type":"duration","$value":"100ms"}}}),
+            "/dur/a",
+        ),
+        (
+            json!({"grad":{"a":{"$type":"gradient","$value":[]}}}),
+            "/grad/a",
+        ),
+        (
+            json!({"color":{"a":{"$type":"color",
+                "$value":{"colorSpace":"display-p3","components":[1,0,0]}}}}),
+            "/color/a/$value",
+        ),
+        (
+            json!({"type":{"a":{"$type":"typography","$value":{
+                "fontFamily":"Inter","fontSize":"16px","lineHeight":1.5}}}}),
+            "/type/a/$value/lineHeight",
+        ),
+        (
+            json!({"type":{"a":{"$type":"typography","$value":{
+                "fontFamily":["Inter","Arial"],"fontSize":"16px"}}}}),
+            "/type/a/$value/fontFamily",
+        ),
+        (
+            json!({"type":{"a":{"$type":"typography","$value":{
+                "fontFamily":"Inter","fontSize":"{space.md}"}}}}),
+            "/type/a/$value/fontSize",
+        ),
+        (
+            json!({"shadow":{"a":{"$type":"shadow","$value":{
+                "offsetX":"0px","offsetY":"1px","blur":"2px","spread":"0px",
+                "color":"#000","inset":true}}}}),
+            "/shadow/a/$value/inset",
+        ),
+        (
+            json!({"font":{"a":{"$type":"fontFamily","$value":"Inter"}}}),
+            "/font/a",
+        ),
+        (
+            json!({"misc":{"a":{"$type":"dimension","$value":"4px"}}}),
+            "/misc/a",
+        ),
+        (
+            json!({"color":{"a":{"$type":"color","$value":"#fff","$ref":"#/x"}}}),
+            "/color/a/$ref",
+        ),
+    ];
+    for (body, pointer) in cases {
+        write(&file, &body);
+        let error = err(&ws, &import_args(&d, &f, &["--format", "w3c"]));
+        assert_eq!(error["code"], "unsupported-token-construct", "{body}");
+        assert_eq!(error["path"], pointer, "{body}");
+        assert_eq!(fs::read(&doc).unwrap(), before);
+    }
+}
+
+#[test]
+fn token_export_refuses_or_lists_what_does_not_map() {
+    let ws = Workspace::new("tf-unmappable");
+    let doc = new_doc(&ws, "a.pen");
+    let mut value = read(&doc);
+    value["styles"] = json!({
+        "color.ok": {"type":"color","value":"#112233"},
+        "color.alias": {"type":"color","value":{"ref":"color.none"}},
+        "color.none": {"type":"color","value":"none"},
+        "radius.pair": {"type":"radius","value":[2,3]},
+        "gap.x": {"type":"spacing","value":4},
+        "Legacy Name": {"type":"color","value":"#000000"},
+    });
+    write(&doc, &value);
+    // Native export rejects the legacy ID.
+    let error = err(&ws, &["design", "token", "export", &text(&doc)]);
+    assert_eq!(error["code"], "invalid-token-id");
+    let out = ws.path("out.json");
+    let report = ok(
+        &ws,
+        &[
+            "design",
+            "token",
+            "export",
+            &text(&doc),
+            "--format",
+            "w3c",
+            "--skip-unmappable",
+            "--output",
+            &text(&out),
+        ],
+    );
+    assert_eq!(report["tokens"], 1);
+    let skipped: Vec<&str> = report["skipped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["token"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![
+            "Legacy Name",
+            "color.alias",
+            "color.none",
+            "gap.x",
+            "radius.pair"
+        ]
+    );
+    assert_eq!(read(&out)["color"]["ok"]["$value"], "#112233");
+}
+
+#[test]
+fn library_export_writes_the_package_tokens() {
+    let ws = Workspace::new("tf-library");
+    let package = library(&ws, "1.0.0", base_tokens());
+    let out = ws.path("lib.json");
+    let report = ok(
+        &ws,
+        &[
+            "design",
+            "library",
+            "export",
+            &text(&package),
+            "--output",
+            &text(&out),
+        ],
+    );
+    assert_eq!(report["tokens"], 23);
+    let exported = read(&out);
+    assert_eq!(exported["schema"], 1);
+    assert_eq!(exported["tokens"]["color.accent"]["value"], "#f59e0b");
+    assert_eq!(
+        exported["tokens"]["color.cta"]["value"],
+        json!({"ref":"color.accent"})
+    );
+    // The exported file imports into a document.
+    let doc = new_doc(&ws, "a.pen");
+    quiet(&ws, &import_args(&text(&doc), &text(&out), &[]));
+    assert_eq!(read(&doc)["styles"].as_object().unwrap().len(), 23);
+    // The library's tokens include a 20-color ramp, so W3C export maps them too.
+    let w3c = run(
+        &ws,
+        &[
+            "design",
+            "library",
+            "export",
+            &text(&package),
+            "--format",
+            "w3c",
+        ],
+    );
+    assert!(
+        w3c.status.success(),
+        "{}",
+        String::from_utf8_lossy(&w3c.stderr)
+    );
+}
