@@ -1777,6 +1777,20 @@ pub fn apply_batch_at(
                     }
                     result
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                "set-property" => {
+                    let id = resolve("id")?;
+                    crate::design::template::batch_set_property(&mut candidate, page, document, &id, operation)?
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                "bind-token" => {
+                    let id = resolve("id")?;
+                    crate::design::template::batch_bind_token(&mut candidate, page, &id, operation)?
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                "set-token" => crate::design::template::batch_set_token(&mut candidate, operation)?,
+                #[cfg(target_arch = "wasm32")]
+                "set-property" | "bind-token" | "set-token" => bail!("design batch operations are not available in the browser core"),
                 other if crate::composite::is_document(&candidate) => crate::composite::batch_operation(&mut candidate,page,document,other,operation,&resolve)?,
                 other => bail!("unsupported v4 batch operation: {other}"),
             };
@@ -3019,45 +3033,39 @@ pub(crate) fn with_resolved_tokens(raw: &Value) -> Result<Value> {
 }
 
 fn resolve_style_fallbacks(value: &mut Value, styles: &Value) -> Result<()> {
-    fn token(styles: &Value, name: &str, stack: &mut Vec<String>) -> Result<Value> {
-        if stack.iter().any(|item| item == name) {
-            bail!("style alias cycle: {} -> {name}", stack.join(" -> "))
-        }
-        let value = styles
-            .get(name)
-            .with_context(|| format!("missing style token: {name}"))?
-            .get("value")
-            .cloned()
-            .context("style token value is missing")?;
-        if let Some(next) = value.get("ref").and_then(Value::as_str) {
-            stack.push(name.into());
-            let resolved = token(styles, next, stack);
-            stack.pop();
-            resolved
-        } else {
-            Ok(value)
-        }
-    }
-    match value {
-        Value::Object(object) => {
-            if let Some(reference) = object.get("ref").and_then(Value::as_str).map(str::to_owned) {
-                if let Ok(resolved) = token(styles, &reference, &mut Vec::new()) {
-                    object.insert("fallback".into(), resolved);
+    fn visit(value: &mut Value, styles: &Value, cache: &mut HashMap<String, Option<Value>>) {
+        match value {
+            Value::Object(object) => {
+                if let Some(reference) = object.get("ref").and_then(Value::as_str) {
+                    // Unresolved or invalid tokens keep the literal fallback.
+                    let resolved = cache
+                        .entry(reference.to_owned())
+                        .or_insert_with(|| {
+                            let resolution = crate::tokens::resolve(styles, reference);
+                            resolution
+                                .value
+                                .filter(|_| resolution.status == crate::tokens::Status::Resolved)
+                        })
+                        .clone();
+                    if let Some(resolved) = resolved {
+                        object.insert("fallback".into(), resolved);
+                    }
+                }
+                for (key, child) in object {
+                    if key != "styles" {
+                        visit(child, styles, cache);
+                    }
                 }
             }
-            for (key, child) in object {
-                if key != "styles" {
-                    resolve_style_fallbacks(child, styles)?;
+            Value::Array(values) => {
+                for child in values {
+                    visit(child, styles, cache);
                 }
             }
+            _ => {}
         }
-        Value::Array(values) => {
-            for child in values {
-                resolve_style_fallbacks(child, styles)?;
-            }
-        }
-        _ => {}
     }
+    visit(value, styles, &mut HashMap::new());
     Ok(())
 }
 

@@ -18,16 +18,16 @@ that documents reference, update and audit.
 
 ## Must ship, in order
 
-- [ ] **1. Specify token and library schema,** resolution order and override
+- [x] **1. Specify token and library schema,** resolution order and override
   semantics in `docs/design-systems-v1.md`.
-- [ ] **2. Token resolution** in the shared scene path with cycle rejection.
-- [ ] **3. Library packages,** locks, update planning and diff reports.
-- [ ] **4. Brand kit:** colors, type, logos, ink references and usage rules.
-- [ ] **5. Template parameters and fill command,** with validation and limits.
+- [x] **2. Token resolution** in the shared scene path with cycle rejection.
+- [x] **3. Library packages,** locks, update planning and diff reports.
+- [x] **4. Brand kit:** colors, type, logos, ink references and usage rules.
+- [x] **5. Template parameters and fill command,** with validation and limits.
 - [ ] **6. Audit command:** find off-token colors, fonts and spacing, with fixes
   proposed as a plan.
 - [ ] **7. Editor:** token panel, library browser, template gallery.
-- [ ] **8. Import/export of token files** (a documented JSON format, and
+- [x] **8. Import/export of token files** (a documented JSON format, and
   W3C design tokens where it maps exactly).
 
 ## Acceptance targets
@@ -38,3 +38,17 @@ that documents reference, update and audit.
 ## Explicitly deferred
 
 - Cloud-hosted shared libraries and permissioned design-system registries.
+
+## Evidence (v0.19.0)
+
+CI run 39030789006 on PR #202 passed on Linux, Windows and Apple Silicon macOS
+(tests, browser-core, binary-size, policy, studio-build). Items 1-5 and 8 are ticked.
+
+Left unticked on purpose:
+
+- **6. Audit:** color, font, radius, reference and brand-rule checks and `--fix-plan`
+  are done; spacing audits are not (nodes have no gap/padding property), and
+  `tree/search --resolve` and `validate --strict` are not built.
+- **7. Editor:** token, library-status, template and audit views exist and the HTTP
+  routes are tested, but the panel was not exercised in a browser and has no token
+  editing, library install/update/diff or conflict resolution.

@@ -54,8 +54,15 @@ pub fn apply(
                     }
                 }
             }
+            // Editing a vendored token keeps its provenance so the edit stays a
+            // tracked local override of the library value.
+            let source = raw["styles"][name].get("source").cloned();
             raw["styles"][name] = json!({"type":kind,"value":parsed});
+            if let Some(source) = source {
+                raw["styles"][name]["source"] = source;
+            }
             validate_aliases(&raw["styles"])?;
+            crate::tokens::check_write(&raw["styles"], Some(&[name.to_owned()]))?;
             Ok(json!({"style":name,"type":kind,"value":parse_value(value)}))
         }
         Operation::Usage => {
@@ -112,28 +119,7 @@ pub fn apply(
 }
 
 pub(crate) fn validate_aliases(styles: &Value) -> Result<()> {
-    fn visit(styles: &Value, name: &str, stack: &mut Vec<String>) -> Result<()> {
-        if stack.iter().any(|item| item == name) {
-            bail!("style alias cycle: {} -> {name}", stack.join(" -> "))
-        }
-        let Some(next) = styles
-            .get(name)
-            .and_then(|token| token.get("value"))
-            .and_then(|value| value.get("ref"))
-            .and_then(Value::as_str)
-        else {
-            return Ok(());
-        };
-        stack.push(name.into());
-        let result = visit(styles, next, stack);
-        stack.pop();
-        result
-    }
-    if let Some(object) = styles.as_object() {
-        for name in object.keys() {
-            visit(styles, name, &mut Vec::new())?
-        }
-    }
+    crate::tokens::validate_cycles(styles)?;
     Ok(())
 }
 
@@ -171,7 +157,7 @@ fn usage(raw: &Value, name: &str) -> Vec<String> {
     out.dedup();
     out
 }
-fn rewrite_refs(value: &mut Value, from: &str, to: Option<&str>, detach: bool) -> usize {
+pub(crate) fn rewrite_refs(value: &mut Value, from: &str, to: Option<&str>, detach: bool) -> usize {
     fn visit(value: &mut Value, from: &str, to: Option<&str>, detach: bool, count: &mut usize) {
         match value {
             Value::Object(object) => {

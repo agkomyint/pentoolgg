@@ -559,6 +559,112 @@ SHA-256 digest. Export fails before replacing an existing output when a source i
 missing, changed, unsafe, malformed, or over its resource limit. Portable SVG
 embeds normalized pixels; PNG and PDF use the same verified image pipeline.
 
+## Design systems and brand kits (v0.19)
+
+`pentool design` inspects tokens, packs token libraries as `.penpkg` files and
+vendors them into documents (`docs/design-systems-v1.md`). A library may carry a
+brand kit in `design_library.brand`: named colors and type (by token ID), logo
+asset references with usage limits, spot-ink and ICC profile references, and
+advisory usage rules. No `.pen` format bump.
+
+```sh
+pentool design library init ./brand-lib acme/brand
+pentool design library pack ./brand-lib brand-1.0.0.penpkg
+pentool design brand apply brand-1.0.0.penpkg doc.pen --dry-run
+pentool design brand apply brand-1.0.0.penpkg doc.pen
+pentool design brand show doc.pen
+```
+
+`brand apply` vendors only the tokens the kit names (plus alias targets) and sets
+`design.brand` in one transaction. A different local brand kit is a `conflict`,
+never overwritten. `pack` refuses ICC profiles whose redistribution is
+`restricted` or `unknown` unless `--allow-restricted-local` is given.
+
+A library can also ship templates: add template documents (with `asset` metadata) under
+`assets/` and list them in the library block as
+`"templates": {"social/post": "assets/social-post.pen"}`. `pack` checks every listed
+template with `design template check`; the template's hash is covered by the package
+manifest, and `inspect`/`verify`/`pack` report `templates` and `template_names`.
+
+### Templates
+
+A template is an ordinary v4+ `.pen` document with a `design.template`
+declaration of typed parameters (`text number bool color token asset`), each
+mapped to `{object, property}` targets. `fill` writes a new document and never
+touches the template.
+
+```sh
+pentool design template check post.pen
+pentool design template list ./templates --limit 20
+pentool design template fill post.pen --values values.json --output launch.pen --dry-run
+pentool design template fill post.pen --values values.json --output launch.pen --if-revision <sha256>
+```
+
+Fill many rows at once (JSON array or CSV, at most 10,000 rows; one output per row,
+all rows validated before anything is written, existing outputs never overwritten):
+
+```sh
+pentool design template fill post.pen --data rows.csv --output-dir ./cards --dry-run
+pentool design template fill post.pen --data rows.csv --output-dir ./cards
+```
+
+`values.json` is `{"headline": "Launch day", "accent": "color.brand"}`. Missing
+parameters use their defaults. Every problem (unknown name, constraint failure,
+missing required value, locked or missing target) is reported at once as
+`invalid-input`, and a failed fill writes nothing. The `changes` list is paginated
+with `--offset/--limit` (`matches returned offset limit has_more`).
+
+### Audit and fix plans
+
+`design audit` is read-only: it compares literal paint, text and corner values with
+the document's own tokens, reports unresolved or invalid token references, and
+evaluates the brand kit's usage rules (`contrast`, `forbidden_pairs`, `logo`,
+`fonts`).
+
+```sh
+pentool design audit doc.pen --limit 50
+pentool design audit doc.pen --all-pages --rules color,refs --offset 50
+pentool design audit doc.pen --fix-plan > audit.json
+pentool design audit doc.pen --fail-on error      # exit status 3 when errors exist
+```
+
+Findings are sorted in document order and paginated (`matches returned offset
+limit has_more`; default `--limit 50`, max 500; `summary` counts the whole result).
+`--fix-plan` adds `plan.operations`, plain `bind-token` batch operations for the
+exact matches on the returned page (`--fix-nearest` adds deltaE <= 2 matches);
+locked nodes are listed under `plan.skipped`. Apply a plan with the existing batch
+command (use `--page` for the plan's `page`):
+
+```sh
+pentool batch doc.pen ops.json --dry-run     # ops.json is the plan.operations array
+pentool batch doc.pen ops.json
+```
+
+The batch operations `{"type":"bind-token","id":"hero","property":"fill","token":"color.accent"}`
+and `{"type":"set-token","name":"space.md","token_type":"spacing","value":16}` are
+available to any batch file.
+
+### Token files (import and export)
+
+Tokens move in and out of a document as a native `pentool.tokens` JSON file
+(`{"schema":1,"tokens":{"color.accent":{"type":"color","value":"#F59E0B"}}}`) or as
+the strict one-to-one subset of W3C design tokens (`$type`/`$value`). Import is
+validated in full before any write, uses the same planner for `--dry-run` and
+commit, and never overwrites a differing local token unless `--on-collision
+overwrite` is given (default `fail` reports every conflict). Unsupported W3C
+features (`$extensions`, `rem`, gradients, color objects, ...) are rejected with
+`unsupported-token-construct` and a JSON pointer, never approximated.
+
+```sh
+pentool design token export doc.pen --output tokens.json
+pentool design token export doc.pen --format w3c --output tokens.w3c.json
+pentool design token import other.pen tokens.json --dry-run
+pentool design token import other.pen tokens.json --on-collision skip
+pentool design library export brand-1.0.0.penpkg --format w3c --skip-unmappable --output brand.w3c.json
+```
+
+See `docs/design-systems-v1.md` section 10 and "Implementation notes: token files".
+
 ## Open design libraries and packages (v0.5–v0.6)
 
 Reusable assets remain ordinary editable `.pen` documents. Save a document, page,
