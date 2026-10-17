@@ -14,7 +14,9 @@ requested.
 Every node has a local affine `transform` in SVG matrix order
 `[a,b,c,d,e,f]`. Its world transform is the parent world transform multiplied by
 its local transform. Bounds are the axis-aligned world-space bounds after this
-composition, including stroke extents. Reordering changes only sibling z-order.
+composition, including stroke extents. Discovery APIs (`tree`, `search`,
+`geometry bounds`) emit measured bounds rounded to 3 decimals, so equivalent
+geometry emits equivalent JSON; document values keep full precision. Reordering changes only sibling z-order.
 Clipping is an optional node reference evaluated in the clipped node's parent
 coordinate space; a clip cannot reference itself or its descendants.
 
