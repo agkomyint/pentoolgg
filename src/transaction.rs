@@ -172,8 +172,10 @@ pub fn commit_bytes(
     } else {
         let history = crate::history::record(path, operation, &before, after)?;
         crate::editing::atomic_write(path, after)?;
-        if value.get("version").and_then(Value::as_u64)
-            == Some(crate::scene3d::node::BINDINGS_VERSION)
+        if value
+            .get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|version| version >= crate::scene3d::node::BINDINGS_VERSION)
         {
             if let Ok(before_value) = serde_json::from_slice::<Value>(&before) {
                 crate::scene3d::node::invalidate_png_cache_for_document_change(
@@ -259,6 +261,7 @@ fn reject_new_violations(before: &[u8], after: &Value) -> Result<()> {
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
                 | crate::scene3d::node::BINDINGS_VERSION
+                | crate::scene::PAINT_VERSION
         )
     ) {
         return Ok(());
@@ -279,7 +282,7 @@ fn reject_new_violations(before: &[u8], after: &Value) -> Result<()> {
 
 pub fn validate_value(value: &Value) -> Result<()> {
     match value.get("version").and_then(Value::as_u64) {
-        Some(crate::scene::VERSION | crate::image::VERSION | crate::composite::VERSION | crate::photo::VERSION | crate::color::VERSION | crate::spreads::VERSION | crate::scene3d::node::VERSION | crate::scene3d::node::BINDINGS_VERSION) => crate::scene::validate(value),
+        Some(crate::scene::VERSION | crate::image::VERSION | crate::composite::VERSION | crate::photo::VERSION | crate::color::VERSION | crate::spreads::VERSION | crate::scene3d::node::VERSION | crate::scene3d::node::BINDINGS_VERSION | crate::scene::PAINT_VERSION) => crate::scene::validate(value),
         Some(1..=3) => {
             let doc: crate::document::Document =
                 serde_json::from_value(value.clone()).context("invalid legacy document")?;

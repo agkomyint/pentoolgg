@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, FilePlus2, FolderOpen, GripVertical, Image as ImageIcon, Plus, Trash2, Type as TypeIcon } from "lucide-react";
-import { api } from "@/lib/api";
+import { Copy, Download, FilePlus2, FolderOpen, GripVertical, Image as ImageIcon, Plus, Trash2, Type as TypeIcon } from "lucide-react";
+import { api, type FidelityReport } from "@/lib/api";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import { ARTWORK_SOURCE_DRAG_TYPE } from "@/lib/artworkDrag";
@@ -9,6 +9,7 @@ import {
   addPage,
   duplicatePage,
   embedFont,
+  importDesignFile,
   importPen,
   insertAsset,
   removePage,
@@ -226,6 +227,8 @@ function Insert() {
   const imageInput = useRef<HTMLInputElement>(null);
   const fontInput = useRef<HTMLInputElement>(null);
   const penInput = useRef<HTMLInputElement>(null);
+  const designInput = useRef<HTMLInputElement>(null);
+  const [fidelity, setFidelity] = useState<FidelityReport | null>(null);
   const [opts, setOpts] = useState({ x: 0, y: 0, scale: 1, rotation: 0, prefix: "", expand: false });
   const [families, setFamilies] = useState<string[]>([]);
   useEffect(() => {
@@ -248,6 +251,9 @@ function Insert() {
         </Button>
         <Button variant="outline" size="sm" onClick={() => penInput.current?.click()}>
           <FolderOpen size={12} /> Import .pen...
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => designInput.current?.click()}>
+          <FolderOpen size={12} /> Import SVG / PDF / PSD / Sketch / Figma...
         </Button>
       </div>
       <p className="text-[11px] text-muted-foreground">Tip: paste (Ctrl+V) or drop an image onto the canvas.</p>
@@ -272,6 +278,39 @@ function Insert() {
           notify(error instanceof Error ? error.message : "Import failed.", true);
         }
       }} />
+      <input ref={designInput} hidden type="file" accept=".svg,.pdf,.psd,.sketch,.fig,.figma.json,application/json" onChange={async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (!file) return;
+        setFidelity(null);
+        const report = await importDesignFile(file);
+        if (report) setFidelity(report);
+      }} />
+      {fidelity && <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={() => {
+          const reportFile = new Blob([JSON.stringify(fidelity, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(reportFile);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "pentool-fidelity-report.json";
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        }}>
+          <Download size={12} /> Download report
+        </Button>
+      </div>}
+      {fidelity && <details open className="rounded border bg-card p-2 text-xs">
+        <summary className="cursor-pointer font-medium">Import fidelity report · {fidelity.counts.exact} exact, {fidelity.counts.approximated} approximated, {fidelity.counts.dropped} dropped</summary>
+        <p className="mt-1 text-muted-foreground">Review approximations and dropped features; the imported document is editable.</p>
+        <ul className="mt-2 max-h-48 space-y-1 overflow-auto">
+          {fidelity.items.slice(0, 100).map((item, index) => <li key={`${item.source_id ?? "source"}-${index}`} className="rounded bg-muted/50 p-1.5">
+            <span className="font-medium">{item.status}</span>{item.feature && ` · ${item.feature}`} · <code>{item.source_id}</code> — {item.message}
+            {item.action && <p className="mt-1 text-muted-foreground">Next step: {item.action}</p>}
+          </li>)}
+        </ul>
+        {fidelity.items.length > 100 && <p className="mt-1 text-muted-foreground">{fidelity.items.length - 100} additional details are not shown in this panel.</p>}
+        {fidelity.items_omitted > 0 && <p className="mt-1 text-muted-foreground">{fidelity.items_omitted} additional details omitted from this report.</p>}
+      </details>}
       <details className="text-xs">
         <summary className="cursor-pointer text-muted-foreground">Import placement</summary>
         <div className="mt-1 grid grid-cols-2 gap-2">

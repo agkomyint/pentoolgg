@@ -36,6 +36,8 @@ save, one undo step per edit): select/move/resize, pen (bezier, close, finish),
 rectangle, ellipse, line, text, hand/pan/zoom, delete/duplicate/group/ungroup,
 z-order, layers (visibility, lock, rename, add, delete), pages, canvas size and
 background, paste/drop images (`/api/image/add`), embed fonts, import `.pen`,
+SVG / PDF / PSD / Sketch / Figma REST JSON / supported Figma `.fig` imports with
+an in-panel fidelity report,
 asset library search, property inspector (geometry, fill, stroke, radii, text),
 raw node JSON, a scene-batch console, Images (operations stack), Composite
 (blend, opacity, adjustments, masks, clips; needs format v6), Print (preflight,
@@ -52,7 +54,28 @@ white balance, crop, radial/linear/brush masks, copy/sync, variants, snapshots, 
 navigator) workspaces use the same `/api/photo/*` and `/api/raster` endpoints as before.
 Known limits: hit-testing is bounding-box based; during a drag only the
 selection box moves and the rendered preview updates on release; there is no
-in-browser PDF export (use `pentool export x.pen x.pdf`).
+in-browser PDF export (use `pentool export x.pen x.pdf`). Design interchange is
+currently partial. Active SVG elements, event handlers, foreign namespaces, and
+external references are rejected; unsupported static features are reported as
+dropped, and supported import subsets are listed in
+[`design-interchange-v1.md`](design-interchange-v1.md). Figma auto-layout is
+materialized as fixed positions; only legacy unwrapped Figma `fig-kiwi` v15
+Deflate files and REST JSON are supported. ZIP/Zstandard, FigJam, and other
+`.fig` versions are rejected. PDF import includes classic cross-reference tables,
+plain/Flate xref streams and bounded object-stream references, vector paths,
+simple one-byte `Tj`/`TJ` text runs, permitted embedded TrueType fonts, bounded
+Flate/JPEG images and predictors, page quarter-turn rotation, DeviceCMYK
+approximations, and matching soft/color-key masks; inline images, hybrid or
+incremental xrefs, transparency groups, calibrated color, and other masks remain
+unsupported. PSD import supports bounded raster layers/folders, root-level
+clipping alpha, raster masks with zero, relative-position, and invert flags, and
+a small legacy RGB adjustment subset; other adjustment/effect layers and mask
+layouts remain unsupported. PSD export writes flattened or named full-canvas
+raster layers. Sketch symbols/shared-style fidelity remains limited. Figma component snapshots
+and instance links are retained with materialized fallback artwork. Unique
+`TEXT` component properties named `<layer>#text` are applied to matching fallback
+text nodes; other property types and live override propagation remain
+unsupported. Studio does not expose component override editing.
 
 ### Paint plan authoring (0.13)
 

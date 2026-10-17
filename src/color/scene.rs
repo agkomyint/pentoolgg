@@ -142,7 +142,14 @@ impl Visitor<'_> {
     fn style(&mut self, value: &Value, pointer: &str, owner: &str) -> Result<()> {
         for slot in ["fill", "stroke"] {
             if let Some(value) = value.get(slot) {
-                self.paint(value, &format!("{pointer}/{slot}"), owner, 0)?;
+                let slot_pointer = format!("{pointer}/{slot}");
+                if let Some(fallback) = value.get("fallback").filter(|fallback| {
+                    matches!(fallback["kind"].as_str(), Some("linear" | "radial"))
+                }) {
+                    self.fill(fallback, &format!("{slot_pointer}/fallback"), owner, 0)?;
+                } else {
+                    self.paint(value, &slot_pointer, owner, 0)?;
+                }
             }
         }
         Ok(())

@@ -21,6 +21,21 @@ export type Layer = {
 };
 export type SceneNode = { id: string; kind?: string; name?: string; children?: SceneNode[]; [key: string]: unknown };
 
+export type FidelityReport = {
+  schema_version: number;
+  format: string;
+  source: string;
+  counts: { exact: number; approximated: number; dropped: number };
+  items: {
+    source_id: string;
+    feature: string;
+    status: "exact" | "approximated" | "dropped";
+    message: string;
+    action?: string;
+  }[];
+  items_omitted: number;
+};
+
 export class ApiError extends Error {}
 
 async function check(response: Response): Promise<Response> {

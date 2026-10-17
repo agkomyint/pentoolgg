@@ -4,7 +4,7 @@
 
 [Vector logo](examples/pentoolgg-logo.svg) · [Transparent icon](examples/pentoolgg-icon.png) · [Editable logo](examples/pentoolgg-logo.pen)
 
-Pentool is an open-source, agent-friendly vector editor distributed as **one Rust binary**. It serves a browser canvas, stores editable layered artwork in a readable `.pen` JSON format, exposes rendering APIs, and exports PNG, SVG, or PDF.
+Pentool is an open-source, agent-friendly vector editor distributed as **one Rust binary**. It serves a browser canvas, stores editable layered artwork in a readable `.pen` JSON format, exposes rendering APIs, and exports PNG, SVG, PDF, or flattened and layered PSD.
 
 AI agents can draw through CLI commands; humans can edit the same artwork visually.
 
@@ -647,6 +647,70 @@ pentool --page mobile import design.pen icons.pen \
 Omit `--prefix` to derive one from the source filename, or pass `--no-prefix` to
 require collision-free source IDs. Byte-identical fonts are deduplicated. Import
 copies content; it does not create a live dependency.
+
+### Import static design formats
+
+The design interchange importer accepts bounded static SVG, PDF with classic
+xref tables or plain/FlateDecode xref streams, including bounded type-2 entries
+for non-stream values in plain/FlateDecode object streams,
+(including PDF-compatible Illustrator `.ai` files), bounded PSD layer subsets,
+Sketch archives, saved Figma REST `DOCUMENT` JSON, and legacy unwrapped Figma
+`.fig` v15 subsets. `.ai` export uses the PDF writer and is not a native
+Illustrator export. Imports into v4+ `.pen`
+documents are placed in a separate namespaced layer and return a fidelity report
+(`exact`, `approximated`, and `dropped` counts). Save the detailed report with
+`--report`; unsupported features are reported or rejected rather than silently
+executed. Sketch symbols/shared styles and Figma responsive auto-layout are not
+fully preserved yet. SVG local `<use>` references to primitive shapes and static
+groups and viewBox-backed symbols expand into editable geometry with bounded
+instance transforms; unsupported symbol content remains reported as dropped.
+Sketch maps shared left/center/right text alignment and
+applies uniquely matched string overrides to materialized and master-derived
+text fallbacks; other symbol overrides remain unsupported. Figma component definitions and instance links are retained
+as Pentool component snapshots with visual fallbacks. Unique `TEXT` component
+properties named `<layer>#text` are applied to the matching materialized
+fallback text node; other property types, ambiguous matches, and live override
+propagation remain unsupported. PDF import supports classic cross-reference tables, plain/FlateDecode xref streams, and bounded object-stream scalar/array/dictionary entries, vector paths,
+simple one-byte `Tj`/`TJ` text runs, permitted embedded TrueType fonts, FlateDecode
+RGB/gray and packed 1-bit gray images, FlateDecode DeviceCMYK images, and
+baseline JPEG DeviceRGB/DeviceGray images, plus matching 8-bit DeviceGray
+FlateDecode image soft masks applied as alpha. DeviceCMYK vectors and images use
+a reported simple sRGB approximation. 8-bit DeviceGray/DeviceRGB color-key
+`/Mask` arrays are applied as binary transparency. Calibrated colors, other
+soft-mask variants, object-stream members containing streams, nested object
+streams, inline images, and incremental/hybrid xrefs remain unsupported. PSD import supports raster layers/folders, root-level clipping
+alpha against the preceding base layer, and bounded 8-bit raster masks with
+relative-position and/or invert flags; adjustment/effect layers and other mask layouts are
+unsupported. PSD export writes a flattened composite or named full-canvas raster
+layers with visibility preserved; editable vector structure and profiles are
+not retained. Figma import accepts saved REST JSON and the
+legacy unwrapped `fig-kiwi` v15 Deflate container. ZIP/Zstandard containers,
+FigJam files, and other `.fig` versions are rejected; see the
+[interchange limits](docs/design-interchange-v1.md#native-figma-fig-subset).
+
+```sh
+pentool import artwork.pen icons.svg --report icons-fidelity.json
+pentool import artwork.pen proof.pdf --report proof-fidelity.json
+pentool import artwork.pen layered.psd --report layered-fidelity.json
+pentool import artwork.pen library.sketch --prefix library
+pentool import artwork.pen figma-export.json --format figma
+pentool import artwork.pen design.fig --report fig-fidelity.json
+```
+
+Studio also exposes SVG, PDF, PSD, Sketch, Figma JSON, and supported `.fig` import in the Design panel and
+shows the returned fidelity report. This does not change the existing legacy
+`.pen` composition workflow above.
+
+Exports to PNG, SVG, PDF, and PSD emit bounded fidelity counts in the command's JSON
+result. PSD export defaults to one flattened 8-bit RGBA page. Add `--layers` to
+write one full-canvas raster layer per source layer, preserving layer names and
+visibility. Neither PSD mode retains vector editability or profiles. Pass
+`--report PATH` to save the full per-object report.
+
+```sh
+pentool export design.pen flattened.psd --report psd-fidelity.json
+pentool export design.pen layered.psd --layers
+```
 
 Large searches are paginated for compact agent context:
 

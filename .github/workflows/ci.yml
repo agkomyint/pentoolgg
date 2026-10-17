@@ -6,6 +6,20 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  studio-build:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install locked Studio dependencies
+        working-directory: web-ui
+        run: bun install --frozen-lockfile
+      - name: Typecheck and build embedded Studio UI
+        working-directory: web-ui
+        run: bun run build
+      - name: Require committed Studio bundle to match its source
+        run: git diff --exit-code -- web/studio.html
   test:
     timeout-minutes: 30
     strategy:

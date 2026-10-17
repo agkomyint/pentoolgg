@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pentool.space/schema/design-interchange-v1.json",
+  "title": "Pentool design interchange fidelity report v1",
+  "type": "object",
+  "required": ["schema_version", "format", "source", "counts", "items", "items_omitted"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "format": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "source": { "type": "string", "maxLength": 4096 },
+    "counts": {
+      "type": "object",
+      "required": ["exact", "approximated", "dropped"],
+      "properties": {
+        "exact": { "type": "integer", "minimum": 0 },
+        "approximated": { "type": "integer", "minimum": 0 },
+        "dropped": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "items_omitted": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["source_id", "feature", "status", "message"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "feature": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["exact", "approximated", "dropped"] },
+        "message": { "type": "string", "maxLength": 4096 },
+        "action": { "type": "string", "maxLength": 4096 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

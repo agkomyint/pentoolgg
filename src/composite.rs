@@ -304,6 +304,7 @@ pub fn is_document(raw: &Value) -> bool {
                 | crate::spreads::VERSION
                 | crate::scene3d::node::VERSION
                 | crate::scene3d::node::BINDINGS_VERSION
+                | crate::scene::PAINT_VERSION
         )
     )
 }

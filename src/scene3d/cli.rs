@@ -1422,7 +1422,9 @@ fn require_v10(raw: &Value) -> Result<()> {
 
 fn require_v11(raw: &Value) -> Result<()> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(node::BINDINGS_VERSION),
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|version| version >= node::BINDINGS_VERSION),
         "[unsupported-capability] product forms require document format version 11; run `pentool migrate --target 11` first"
     );
     Ok(())

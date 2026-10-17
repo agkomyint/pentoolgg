@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="12" viewBox="0 0 20 12">
+  <g id="translated" transform="translate(2 1)">
+    <rect id="card" x="1" y="2" width="8" height="6" rx="1" fill="#3157d5"/>
+    <path id="curve" d="M11 8 C12 2 17 2 18 8 Z" fill="#e13a55"/>
+  </g>
+</svg>
