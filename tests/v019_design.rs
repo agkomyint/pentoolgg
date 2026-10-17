@@ -2212,3 +2212,91 @@ fn template_fill_data_enforces_the_row_limit() {
     assert_eq!(report["rows"], 10_000);
     assert_eq!(report["returned"], 2);
 }
+
+/// A library directory whose asset lists one packaged template.
+fn template_library(ws: &Workspace) -> (PathBuf, PathBuf) {
+    let tpl = template(ws);
+    let dir = ws.path("tlib");
+    quiet(
+        ws,
+        &["design", "library", "init", &text(&dir), "acme/brand"],
+    );
+    let mut doc = read(&tpl);
+    doc["asset"] = json!({"schema":1,"id":"acme/post","name":"Post","asset_version":"1.0.0","kind":"template"});
+    write(&dir.join("assets/social-post.pen"), &doc);
+    let lib = dir.join("assets/acme-brand.pen");
+    let mut libdoc = read(&lib);
+    libdoc["design_library"]["templates"] = json!({"social/post":"assets/social-post.pen"});
+    write(&lib, &libdoc);
+    (dir, lib)
+}
+
+#[test]
+fn library_packages_carry_templates_covered_by_the_manifest() {
+    let ws = Workspace::new("ptpl");
+    let (dir, _) = template_library(&ws);
+    let (d, out) = (text(&dir), ws.s("t.penpkg"));
+    let packed = ok(&ws, &["design", "library", "pack", &d, &out]);
+    assert_eq!(packed["templates"], 1);
+    assert_eq!(packed["template_names"], json!(["social/post"]));
+    let verified = ok(&ws, &["design", "library", "verify", &out]);
+    assert_eq!(verified["templates"], 1);
+    let again = ws.s("t2.penpkg");
+    quiet(&ws, &["design", "library", "pack", &d, &again]);
+    assert_eq!(
+        fs::read(&out).unwrap(),
+        fs::read(&again).unwrap(),
+        "packs with templates must be deterministic"
+    );
+    // The template's hash is part of the manifest: tampering changes the package.
+    let changed = ws.path("tlib/assets/social-post.pen");
+    let mut doc = read(&changed);
+    doc["design"]["template"]["version"] = json!("1.0.1");
+    write(&changed, &doc);
+    let third = ws.s("t3.penpkg");
+    quiet(&ws, &["design", "library", "pack", &d, &third]);
+    assert_ne!(fs::read(&out).unwrap(), fs::read(&third).unwrap());
+}
+
+#[test]
+fn library_templates_are_validated_at_pack_time() {
+    let ws = Workspace::new("ptplbad");
+    let (dir, lib) = template_library(&ws);
+    let (d, out) = (text(&dir), ws.s("bad.penpkg"));
+    let set = |value: Value| {
+        let mut doc = read(&lib);
+        doc["design_library"]["templates"] = value;
+        write(&lib, &doc);
+    };
+    for (value, needle) in [
+        (json!({"x":"assets/missing.pen"}), "could not read"),
+        (json!({"x":"../outside.pen"}), "design_library.templates.x"),
+        (json!({"x":"/etc/passwd"}), "design_library.templates.x"),
+        (json!({"x":"assets/acme-brand.pen"}), "no design.template"),
+        (json!({"x":"readme.txt"}), "assets/*.pen"),
+        (json!({"x":5}), "path string"),
+        (json!([]), "must be an object"),
+    ] {
+        set(value);
+        let error = err(&ws, &["design", "library", "pack", &d, &out]);
+        assert!(
+            error["message"].as_str().unwrap().contains(needle),
+            "expected {needle:?}, got {error}"
+        );
+        assert!(
+            !ws.path("bad.penpkg").exists(),
+            "a failed pack wrote output"
+        );
+    }
+    // A template whose declaration is broken is reported with the template name.
+    set(json!({"x":"assets/social-post.pen"}));
+    let tpl = dir.join("assets/social-post.pen");
+    let mut doc = read(&tpl);
+    doc["design"]["template"]["parameters"]["headline"]["targets"][0]["object"] = json!("nope");
+    write(&tpl, &doc);
+    let error = err(&ws, &["design", "library", "pack", &d, &out]);
+    assert!(error["message"]
+        .as_str()
+        .unwrap()
+        .contains("template \"x\""));
+}

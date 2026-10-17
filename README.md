@@ -580,6 +580,12 @@ pentool design brand show doc.pen
 never overwritten. `pack` refuses ICC profiles whose redistribution is
 `restricted` or `unknown` unless `--allow-restricted-local` is given.
 
+A library can also ship templates: add template documents (with `asset` metadata) under
+`assets/` and list them in the library block as
+`"templates": {"social/post": "assets/social-post.pen"}`. `pack` checks every listed
+template with `design template check`; the template's hash is covered by the package
+manifest, and `inspect`/`verify`/`pack` report `templates` and `template_names`.
+
 ### Templates
 
 A template is an ordinary v4+ `.pen` document with a `design.template`

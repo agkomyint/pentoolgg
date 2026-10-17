@@ -444,8 +444,14 @@ A template is an ordinary `.pen` document (any supported version) plus a
   `conflict` (never overwritten; identical content is a no-op). Dry run and
   commit share the planner; a write failure removes the files that run wrote.
   `--data` excludes `--values`/`--output`; the template is never modified.
-- Not in this slice: templates inside library packages
-  (`design_library.templates`), `--in-place`.
+- Templates inside library packages: `design_library.templates` maps a name
+  (asset-ID syntax, at most 500) to a forward-slash `assets/*.pen` path of a
+  template asset in the same package. `pack` fully checks each template with the
+  `design template check` parser (named in the error); `verify`/`inspect` check
+  that the path is a manifest asset (so its hash is covered by the package
+  hash) and has a structurally valid `design.template`. Reports gain
+  `templates` (count) and `template_names`. No package schema change.
+- Not in this slice: `--in-place`.
 
 ## 8. File-format impact
 

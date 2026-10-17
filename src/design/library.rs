@@ -25,6 +25,8 @@ pub struct Snapshot {
     pub package_hash: String,
     pub tokens: BTreeMap<String, LibToken>,
     pub brand: Option<Value>,
+    /// Template gallery: name -> package path of a template asset.
+    pub templates: BTreeMap<String, String>,
 }
 
 fn invalid(message: impl Into<String>) -> DesignError {
@@ -146,6 +148,75 @@ pub fn parse_tokens(raw_tokens: &Map<String, Value>) -> Result<BTreeMap<String, 
     Ok(out)
 }
 
+/// Most templates a library package may list.
+pub const MAX_PACKAGE_TEMPLATES: usize = 500;
+
+/// Validate `design_library.templates`: name -> package-relative path of a
+/// template asset (`assets/*.pen`). Content is checked at pack and verify time.
+fn parse_templates(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let map = value
+        .as_object()
+        .ok_or_else(|| invalid("design_library.templates must be an object of name -> path"))?;
+    if map.len() > MAX_PACKAGE_TEMPLATES {
+        return Err(DesignError::new(
+            "limit-exceeded",
+            format!(
+                "design_library.templates lists {} templates; the limit is {MAX_PACKAGE_TEMPLATES}",
+                map.len()
+            ),
+        ));
+    }
+    let mut out = BTreeMap::new();
+    for (name, path) in map {
+        asset::validate_id(name)
+            .map_err(|e| invalid(format!("design_library.templates {name:?}: {e}")))?;
+        let path = path.as_str().ok_or_else(|| {
+            invalid(format!(
+                "design_library.templates.{name} must be a path string"
+            ))
+        })?;
+        crate::resource::safe_relative_path(Path::new(path)).map_err(|e| {
+            invalid(format!("design_library.templates.{name}: {e:#}"))
+                .action("use a relative path inside the package")
+        })?;
+        if !path.starts_with("assets/") || !path.ends_with(".pen") || path.contains('\\') {
+            return Err(invalid(format!(
+                "design_library.templates.{name}: {path:?} must be a forward-slash assets/*.pen path"
+            )));
+        }
+        out.insert(name.clone(), path.to_owned());
+    }
+    Ok(out)
+}
+
+/// Structural check of a packaged template document (full parameter checking
+/// happens at pack time, where the package files are on disk).
+fn check_packaged_template(name: &str, doc: &Value) -> Result<()> {
+    let block = doc
+        .get("design")
+        .and_then(|d| d.get("template"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            invalid(format!(
+                "template {name:?} has no design.template declaration"
+            ))
+        })?;
+    let declared = block.get("name").and_then(Value::as_str).unwrap_or("");
+    if block.get("schema").and_then(Value::as_u64) != Some(1)
+        || declared.is_empty()
+        || !block.get("parameters").is_some_and(Value::is_object)
+    {
+        return Err(invalid(format!(
+            "template {name:?} has an invalid design.template block"
+        ))
+        .action("run `pentool design template check` on the template document"));
+    }
+    Ok(())
+}
+
 /// Parse and strictly validate a `design_library` block of an asset document.
 /// Returns `None` when the document has no block.
 pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
@@ -175,6 +246,7 @@ pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
         Some(_) => return Err(invalid("design_library.tokens must be an object")),
     };
     let out = parse_tokens(&raw_tokens)?;
+    let templates = parse_templates(object.get("templates"))?;
     let brand = match object.get("brand") {
         None => None,
         Some(brand) => {
@@ -189,6 +261,7 @@ pub fn parse_block(doc: &Value) -> Result<Option<Snapshot>> {
         package_hash: String::new(),
         tokens: out,
         brand,
+        templates,
     }))
 }
 
@@ -247,6 +320,22 @@ pub fn load_package(path: &Path) -> Result<Snapshot> {
         ))
         .action("make design_library.name/version equal the package manifest"));
     }
+    for (name, path) in &snapshot.templates {
+        let Some(entry) = manifest.assets.values().find(|a| &a.path == path) else {
+            return Err(invalid(format!(
+                "template {name:?} points to {path}, which is not an asset of package {}",
+                manifest.name
+            ))
+            .action("list only assets/*.pen files of the package in design_library.templates"));
+        };
+        let mut data = Vec::new();
+        zip.by_name(&entry.path)
+            .map_err(|e| map_package_error(e.into()))?
+            .read_to_end(&mut data)
+            .map_err(|e| map_package_error(e.into()))?;
+        let doc: Value = serde_json::from_slice(&data).map_err(|e| invalid(e.to_string()))?;
+        check_packaged_template(name, &doc)?;
+    }
     snapshot.package_hash = package_hash;
     Ok(snapshot)
 }
@@ -258,7 +347,8 @@ pub fn summary(snapshot: &Snapshot) -> Value {
         "name": snapshot.name,
         "version": snapshot.version,
         "tokens": snapshot.tokens.len(),
-        "templates": 0,
+        "templates": snapshot.templates.len(),
+        "template_names": snapshot.templates.keys().collect::<Vec<_>>(),
         "brand": snapshot.brand.is_some(),
         "warnings": [],
     })
@@ -539,6 +629,19 @@ pub fn pack(
             block.name, block.version, manifest.name, manifest.version
         ))
         .action("make design_library.name/version equal the package manifest"));
+    }
+    for (name, rel) in &block.templates {
+        let file = dir.join(rel);
+        let raw: Value = serde_json::from_slice(&fs::read(&file).map_err(|e| {
+            invalid(format!("template {name:?}: could not read {rel}: {e}"))
+                .action("create the template asset or remove it from design_library.templates")
+        })?)
+        .map_err(|e| invalid(format!("template {name:?}: {rel} is not valid JSON: {e}")))?;
+        let parent = file.parent().unwrap_or(dir);
+        super::template::parse(&raw, None, parent).map_err(|mut e| {
+            e.message = format!("template {name:?} ({rel}): {}", e.message);
+            e
+        })?;
     }
     if let Some(brand) = &block.brand {
         let restricted = super::brand::restricted_profiles(brand);
