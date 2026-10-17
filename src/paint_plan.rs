@@ -42,10 +42,10 @@ pub struct PlanArgs {
     /// Plan and report without writing.
     #[arg(long)]
     pub dry_run: bool,
-    /// Refuse unless the document is still at this revision.
+    /// Refuse unless the document is still at this revision; required to commit (use commit.if_revision from --dry-run).
     #[arg(long)]
     pub if_revision: Option<String>,
-    /// Refuse unless the canonical plan hashes to this value.
+    /// Refuse unless the plan hash matches; required to commit (use commit.plan_hash from --dry-run).
     #[arg(long)]
     pub expect_plan_hash: Option<String>,
 }
@@ -471,6 +471,16 @@ pub fn run(args: PlanArgs, selected_page: Option<&str>) -> Result<()> {
         if_revision,
         expect_plan_hash,
     } = args;
+    if !dry_run {
+        ensure!(
+            if_revision.is_some(),
+            "[invalid-input] committing a paint plan requires --if-revision from a dry run"
+        );
+        ensure!(
+            expect_plan_hash.is_some(),
+            "[invalid-input] committing a paint plan requires --expect-plan-hash from a dry run"
+        );
+    }
     ensure!(
         std::fs::metadata(&plan)
             .with_context(|| format!("[missing-resource] cannot read {}", plan.display()))?

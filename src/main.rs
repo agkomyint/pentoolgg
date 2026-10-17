@@ -2225,7 +2225,7 @@ enum Command {
     },
     /// Export a document as an InDesign Markup (IDML) package. Features with no
     /// exact IDML equivalent fail the export unless --allow-approximation is
-    /// given; carried IDML data returns unchanged.
+    /// given; carried IDML data returns unchanged. OUTPUT must end in .idml.
     IdmlExport {
         input: PathBuf,
         /// IDML package to write (`.idml`; the bytes are always an IDML package).
@@ -7367,7 +7367,15 @@ async fn run() -> Result<()> {
             language,
             overwrite,
         } => pentool::layout_cli::run_layout_export(
-            &input, &out, format, fixed, scale, title, language, overwrite,
+            &input,
+            &out,
+            format,
+            fixed,
+            scale,
+            title,
+            language,
+            overwrite,
+            selected_page,
         ),
         Command::LayoutPreflight {
             input,

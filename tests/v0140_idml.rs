@@ -421,6 +421,10 @@ fn export_is_deterministic_and_has_a_stored_mimetype_first() {
     let ws = Workspace::new("export-determinism");
     let idml = fixture_idml(&ws);
     import(&ws, &idml, "doc.pen");
+    let mislabeled = ws.path("output.zip");
+    let error = fails(&["idml-export", &ws.path("doc.pen"), &mislabeled]);
+    assert!(error.contains("[invalid-input]"), "{error}");
+    assert!(!Path::new(&mislabeled).exists());
     let (a, _) = export(&ws, &ws.path("doc.pen"), "a.idml", &[]);
     let (b, _) = export(&ws, &ws.path("doc.pen"), "b.idml", &[]);
     let bytes = std::fs::read(&a).unwrap();

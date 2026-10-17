@@ -581,3 +581,14 @@ fn trim_on_empty_layer_suggests_painting_instead_of_clear() {
         "must not suggest no-op clear: {message}"
     );
 }
+
+#[test]
+fn raster_info_reports_vector_nodes_as_not_found() {
+    let mut raw = document();
+    raw["pages"][0]["layers"][0]["nodes"] = json!([{
+        "kind": "rect", "id": "shape1", "x": 0.0, "y": 0.0,
+        "width": 20.0, "height": 10.0
+    }]);
+    let error = raster::info(&raw, None, "shape1").unwrap_err().to_string();
+    assert!(error.contains("[not-found]"), "{error}");
+}

@@ -21,6 +21,8 @@ pub const MAX_THREAD: usize = 4096;
 pub const MAX_PARAGRAPHS: usize = 100_000;
 pub const MAX_RUNS_PER_PARAGRAPH: usize = 10_000;
 pub const MAX_STORY_CHARS: usize = 5_000_000;
+/// Frame position and size bound (layout-v1 threat model: hostile dimensions).
+pub const MAX_FRAME_EXTENT: f64 = 1_000_000.0;
 pub const DEFAULT_MAX_PAGES: usize = 100;
 const SUMMARY_OVERSET_LIMIT: usize = 20;
 const MAX_PAGES: usize = crate::spreads::MAX_PAGES;
@@ -193,10 +195,20 @@ pub fn validate_frame_node(o: &Map<String, Value>) -> Result<()> {
     let kind = o.get("kind").and_then(Value::as_str).unwrap_or_default();
     let ctx = |what: &str| format!("{kind} {id}: {what}");
     for key in ["x", "y"] {
-        finite(o.get(key), &ctx(key), f64::MIN)?;
+        let v = finite(o.get(key), &ctx(key), f64::MIN)?;
+        ensure!(
+            v.abs() <= MAX_FRAME_EXTENT,
+            "[limit-exceeded] {}",
+            ctx(&format!("{key} {v} is outside +/-{MAX_FRAME_EXTENT} units"))
+        );
     }
     for key in ["width", "height"] {
-        finite(o.get(key), &ctx(key), 0.0)?;
+        let v = finite(o.get(key), &ctx(key), 0.0)?;
+        ensure!(
+            v <= MAX_FRAME_EXTENT,
+            "[limit-exceeded] {}",
+            ctx(&format!("{key} {v} exceeds {MAX_FRAME_EXTENT} units"))
+        );
     }
     if kind == "graphic-frame" {
         return one_of(o.get("fit"), &ctx("fit"), &FIT);

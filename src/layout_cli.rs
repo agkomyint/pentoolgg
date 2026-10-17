@@ -569,6 +569,7 @@ pub fn run_layout_export(
     title: Option<String>,
     language: Option<String>,
     overwrite: bool,
+    selected_page: Option<&str>,
 ) -> Result<()> {
     let format = format.unwrap_or_else(|| {
         out.extension()
@@ -576,18 +577,37 @@ pub fn run_layout_export(
             .unwrap_or("pdf")
             .to_ascii_lowercase()
     });
+    let raw = read(input)?;
+    anyhow::ensure!(
+        matches!(format.as_str(), "pdf" | "epub"),
+        "[invalid-input] --format must be pdf or epub, not {format}"
+    );
+    anyhow::ensure!(
+        format != "pdf" || !fixed,
+        "[invalid-input] --fixed applies to EPUB output only"
+    );
+    if let Some(page_id) = selected_page {
+        anyhow::ensure!(
+            raw.get("pages")
+                .and_then(Value::as_array)
+                .is_some_and(|pages| {
+                    pages
+                        .iter()
+                        .any(|page| page.get("id").and_then(Value::as_str) == Some(page_id))
+                }),
+            "[missing-resource] page {page_id} not found"
+        );
+        bail!(
+            "[invalid-input] layout-export publishes the full composed document and does not support --page"
+        );
+    }
     anyhow::ensure!(
         overwrite || !out.exists(),
         "[output-exists] {} exists; pass --overwrite",
         out.display()
     );
-    let raw = read(input)?;
     let result = match format.as_str() {
         "pdf" => {
-            anyhow::ensure!(
-                !fixed,
-                "[invalid-input] --fixed applies to EPUB output only"
-            );
             let mut options = crate::publish::PdfOptions::default();
             if let Some(s) = scale {
                 options.scale = s;
@@ -605,7 +625,7 @@ pub fn run_layout_export(
             };
             crate::publish::export_epub(&[(&raw, input)], out, &options)?
         }
-        other => anyhow::bail!("[invalid-input] --format must be pdf or epub, not {other}"),
+        _ => unreachable!("format checked above"),
     };
     println!("{result}");
     Ok(())

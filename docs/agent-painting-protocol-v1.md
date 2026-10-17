@@ -325,8 +325,9 @@ action result. Exceeding a limit, any failing pass, a stale `--if-revision` or a
 mismatched `--expect-plan-hash` (`[plan-changed]`) leaves the document
 byte-for-byte unchanged. Success is one transaction and one history entry, so one
 `undo` removes the whole plan. The dry-run result equals the commit result;
-`plan_hash` covers the canonical plan and `commit.if_revision` is the revision a
-commit must pass back.
+`plan_hash` covers the canonical plan. A real commit must pass both
+`commit.if_revision` and `commit.plan_hash` back as `--if-revision` and
+`--expect-plan-hash`; omitting either guard is rejected.
 
 ## Bundles, templates, diff and packages (engine 1 implementation)
 

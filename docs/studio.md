@@ -15,11 +15,24 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
   to `/api/render/png` when local rendering is unavailable. Raster edits still
   commit through `/api/raster`; the browser only draws the in-progress stroke.
   Release builds embed the renderer built for `wasm32-unknown-unknown`.
+- One application bar holds file actions, a workspace selector, page selection,
+  active drawing/brush settings, save, and export. The left rail keeps vector,
+  paint, and retouch tools together. The right dock has Properties, Tools, and
+  Assets above a separate layer tree, so selecting an object keeps layers visible.
+  Both the dock width and layer area can be resized with a pointer or arrow keys.
+- Visited canvas stages remain mounted. Hidden stages pause their global shortcuts
+  and preview requests; Design retains its viewport, and Design/Paint share zoom
+  and page framing. They still have separate interaction surfaces. An unchanged
+  document snapshot can reuse a bounded preview cache; editing creates a new
+  snapshot. This cache does not change exported pixels or the saved format.
 - Workspaces map to the roadmap (`web-ui/src/lib/workspaces.ts`): Design,
   Images (0.7), Composite (0.8), Photo (0.11), Print (0.12), Paint (0.13),
   Layout (0.14), 3D (0.15). A workspace whose format or CLI is
   not implemented says so and lists what the roadmap promises; it has no
   controls that cannot work.
+- Serving an existing project opens its editor directly. A bare server opens a
+  welcome screen with continue, `.pen` open, and common canvas presets. The Home control returns there without closing the current
+  document; choosing a preset creates a canvas at that pixel size.
 
 ## Develop
 
@@ -41,20 +54,31 @@ an in-panel fidelity report,
 asset library search, property inspector (geometry, fill, stroke, radii, text),
 raw node JSON, a scene-batch console, Images (operations stack), Composite
 (blend, opacity, adjustments, masks, clips; needs format v6), Print (preflight,
-plates, soft proof), New/Open/Save (shared file or `.pen` download), PNG/SVG
-export, dark mode.
+plates, soft proof), New/Open/Save (shared file or `.pen` download), current-page
+PNG/SVG export, document PDF/EPUB export, dark mode.
+
+The welcome screen, grouped workflow navigation, contextual Design modes, Paint
+tool rail, and tabbed inspector make the existing capabilities easier to find
+within one project. Photo, raster painting, and 3D retain specialized stages
+where their tools need a different interaction surface. This redesign does
+not change `.pen` object structure or turn CLI-only operations into UI actions.
 
 Print preflight also lists every placed 3D mockup's rendered pixel dimensions
 and effective X/Y PPI. Selecting a resolution row selects that mockup on the
 page; below-threshold rows also appear as ordinary actionable preflight issues.
 
-Photo (catalog grid, loupe, compare, culling keys, histogram and clipping overlays, develop sliders,
+Photo (DNG, JPEG and PNG import from the Photo workflow into a shared `pentool serve PROJECT.pen`
+document, up to 64 MiB per file; JPEG/PNG use the rendered-image editing path, while camera white balance,
+camera profiles and RAW-specific controls require DNG; catalog grid,
+loupe, compare, culling keys, histogram and clipping overlays, develop sliders,
 white balance, crop, radial/linear/brush masks, copy/sync, variants, snapshots, keywords) and Paint
 (raster brush, eraser, clone, heal, quick mask, marquee/lasso/wand selections, rulers, guides, snap,
 navigator) workspaces use the same `/api/photo/*` and `/api/raster` endpoints as before.
 Known limits: hit-testing is bounding-box based; during a drag only the
-selection box moves and the rendered preview updates on release; there is no
-in-browser PDF export (use `pentool export x.pen x.pdf`). Design interchange is
+selection box moves and the rendered preview updates on release. The PDF
+workflow exports tagged book/layout PDFs; use `pentool export x.pen x.pdf` for
+the direct vector document exporter. Larger DNG sources can
+be imported with `pentool raw add`. Design interchange is
 currently partial. Active SVG elements, event handlers, foreign namespaces, and
 external references are rejected; unsupported static features are reported as
 dropped, and supported import subsets are listed in
@@ -126,18 +150,19 @@ comes from `POST /api/paint/media` and sets `brush.media`. Plans appear as
 normal editable passes, not a chat surface, and the panel states that every pass is
 generated work and which warnings are measured versus heuristic.
 
-## Design system and shell (0.14)
+## Design system and shell
 
-Studio is dark-first and dense, arranged like a pro raster/vector suite:
+Studio uses a compact neutral editor theme with one application bar, a left
+creative tool rail, the central canvas, and a resizable inspector/layers dock.
+Properties follow the selected object. With nothing selected, they show document
+settings. Tools contains the active task's controls; Assets contains import and
+library actions. B selects Brush, E selects Eraser, and V returns from Paint to
+vector selection. These shortcuts leave text fields and specialized photo/3D
+keyboard interactions alone.
 
-- **Application bar**: file actions, undo/redo, and a centered module switcher
-  (Design, Images, Composite, Photo, Print, Paint, Layout, 3D) in the manner of
-  Lightroom modules.
-- **Options bar**: document name, page select, format and upgrade.
-- **Toolbox** (left) and **canvas** (center); Photo and Paint swap in their own stage.
-- **Dock** (right): stacked collapsible panels (Properties, Layers, and the
-  active module's panel). Open/closed state is remembered per panel.
-- **Status bar**: tool hint, zoom, page n of m, format version.
+Use the panel toggle in the header to collapse the dock. On narrow screens it
+opens as an overlay; extra file actions move into the compact menu. Tool feedback,
+errors, zoom, and page position appear in a single status bar.
 
 Tokens live in `web-ui/src/index.css` as oklch custom properties (`background`,
 `card`, `input`, `muted`, `border`, `primary`, `accent`, `destructive`,

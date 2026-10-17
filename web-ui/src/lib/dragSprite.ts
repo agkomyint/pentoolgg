@@ -23,6 +23,17 @@ function only(list: SceneNode[], id: string): SceneNode[] {
 
 function rebuild(doc: Doc, pageId: string | undefined, edit: (list: SceneNode[]) => SceneNode[], transparent: boolean): Doc {
   const target = pageOf(doc, pageId);
+  if (!Array.isArray(doc.pages) && target) {
+    const layers = (target.layers ?? []).map((layer) => {
+      const next: Holder & Record<string, unknown> = { ...layer };
+      for (const key of ["nodes", "paths", "texts"] as const) {
+        const list = layer[key];
+        if (Array.isArray(list)) next[key] = edit(list);
+      }
+      return next;
+    });
+    return { ...doc, layers, canvas: transparent ? { ...target.canvas, background: "none" } : target.canvas };
+  }
   const pages = (doc.pages ?? []).map((page) => {
     if (page !== target) return page;
     const layers = (page.layers ?? []).map((layer) => {

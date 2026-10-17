@@ -222,7 +222,9 @@ export function removeLayer(id: string): void {
   state().edit("Remove layer", (draft) => {
     const page = pageOf(draft, pageId);
     if (!page?.layers || page.layers.length <= 1) return;
-    page.layers = page.layers.filter((l) => l.id !== id);
+    const layers = page.layers.filter((l) => l.id !== id);
+    if (Array.isArray(draft.pages)) page.layers = layers;
+    else draft.layers = layers;
   });
   state().select(null);
 }
@@ -296,7 +298,9 @@ export function resizeCanvas(width: number, height: number, background?: string)
   state().edit("Canvas", (draft) => {
     const page = pageOf(draft, pageId);
     if (!page) return;
-    page.canvas = { ...(page.canvas ?? {}), width: Math.max(1, Math.min(16384, Math.round(width))), height: Math.max(1, Math.min(16384, Math.round(height))), ...(background ? { background } : {}) } as never;
+    const canvas = { ...(page.canvas ?? {}), width: Math.max(1, Math.min(16384, Math.round(width))), height: Math.max(1, Math.min(16384, Math.round(height))), ...(background ? { background } : {}) };
+    if (Array.isArray(draft.pages)) page.canvas = canvas as never;
+    else draft.canvas = canvas;
   });
 }
 
@@ -502,7 +506,7 @@ export async function exportAs(kind: "png" | "svg"): Promise<void> {
   if (!doc) return;
   try {
     const q = new URLSearchParams();
-    if (pageId) q.set("page", pageId);
+    if (pageId && isScene(doc)) q.set("page", pageId);
     const r = await fetch(`/api/render/${kind}?${q}`, {
       method: "POST",
       headers: { "content-type": "application/json" },

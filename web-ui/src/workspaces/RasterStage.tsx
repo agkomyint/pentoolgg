@@ -100,8 +100,8 @@ function transformedDabs(
   ctx.restore();
 }
 
-export function RasterStage() {
-  const { doc, pageId, replaceDoc } = useStudio();
+export function RasterStage({ active = true }: { active?: boolean } = {}) {
+  const { doc, pageId, replaceDoc, zoom } = useStudio();
   const layers = useRasterLayers();
   const paint = usePaint();
   const layer = layers.find((n) => n.id === paint.layerId) ?? layers[0];
@@ -112,6 +112,16 @@ export function RasterStage() {
   const overlay = useRef<HTMLCanvasElement>(null);
   const navigator = useRef<HTMLCanvasElement>(null);
   const generation = useRef(0);
+  const [viewport, setViewport] = useState({ width: 800, height: 600 });
+  useEffect(() => {
+    const element = stage.current;
+    if (!active || !element) return;
+    const measure = () => { if (element.clientWidth > 0 && element.clientHeight > 0) setViewport({ width: element.clientWidth, height: element.clientHeight }); };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [active, layer?.id]);
   const [loaded, setLoaded] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
 
@@ -132,7 +142,7 @@ export function RasterStage() {
 
   // The preview is a proxy of the page rendered by the Rust engine.
   useEffect(() => {
-    if (!doc || !layer) return;
+    if (!active || !doc || !layer) return;
     const mine = ++generation.current;
     void api
       .renderPng(doc as Doc, pageId, 1024)
@@ -145,7 +155,7 @@ export function RasterStage() {
         });
       })
       .catch((e) => usePaint.getState().set({ status: e instanceof Error ? e.message : "Preview failed." }));
-  }, [doc, pageId, layer?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doc, pageId, layer?.id, active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const geometry = useCallback(() => {
     const img = image.current;
@@ -285,7 +295,8 @@ export function RasterStage() {
     if (!nav || !nctx) return;
     nctx.clearRect(0, 0, nav.width, nav.height);
     if (!img?.naturalWidth || !box || !frame) return;
-    const { zoom, panX, panY } = usePaint.getState();
+    const { panX, panY } = usePaint.getState();
+    const { zoom } = useStudio.getState();
     const scale = Math.min(nav.width / img.naturalWidth, nav.height / img.naturalHeight);
     const w = img.naturalWidth * scale;
     const h = img.naturalHeight * scale;
@@ -310,7 +321,7 @@ export function RasterStage() {
     }
     draw();
     drawNavigator();
-  }, [loaded, draw, drawNavigator, paint.rulers, paint.guides, paint.tool, paint.size, paint.zoom, paint.rotate, paint.panX, paint.panY, layer?.id]);
+  }, [loaded, draw, drawNavigator, paint.rulers, paint.guides, paint.tool, paint.size, zoom, paint.rotate, paint.panX, paint.panY, layer?.id, viewport.width, viewport.height]);
 
   // Client point -> layer pixel, through zoom and rotation. Layout size (not the
   // rotated bounding box) gives the scale.
@@ -318,7 +329,8 @@ export function RasterStage() {
     const g = geometry();
     const el = overlay.current;
     if (!g || !el || !el.offsetWidth) return null;
-    const { zoom, rotate } = usePaint.getState();
+    const { rotate } = usePaint.getState();
+    const { zoom } = useStudio.getState();
     const rect = el.getBoundingClientRect();
     const a = (rotate * Math.PI) / 180;
     const dx = event.clientX - (rect.left + rect.width / 2);
@@ -363,6 +375,7 @@ export function RasterStage() {
       if (!current.doc || !layer) return;
       try {
         const body = await postJson<{ document: Doc }>("/api/raster", { document: current.doc, page: current.pageId, id: layer.id, action, args });
+        if (useStudio.getState().doc !== current.doc) throw new Error("The project changed while this edit was processing. Try the edit again.");
         replaceDoc(body.document);
         usePaint.getState().set({ status: `${action}: done. Save .pen to keep it; Undo restores the previous state.` });
       } catch (e) {
@@ -463,10 +476,13 @@ export function RasterStage() {
     const u = (event.clientX - rect.left) / rect.width - 0.5;
     const v = (event.clientY - rect.top) / rect.height - 0.5;
     const frame = view.current;
-    const { zoom } = usePaint.getState();
+    const { zoom } = useStudio.getState();
     // Center the clicked spot: pan opposite to its offset from the page center.
     usePaint.getState().set({ panX: -u * (frame?.offsetWidth ?? 0) * zoom, panY: -v * (frame?.offsetHeight ?? 0) * zoom });
   };
+
+  const canvas = pageOf(doc, pageId)?.canvas ?? { width: 1200, height: 800 };
+  const fit = Math.max(0.02, Math.min((viewport.width - 64) / canvas.width, (viewport.height - 64) / canvas.height, 4));
 
   if (!layer) {
     return (
@@ -480,8 +496,8 @@ export function RasterStage() {
       <div ref={stage} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4" aria-busy={paint.busy}>
         <div
           ref={view}
-          className="relative inline-block max-h-full max-w-full"
-          style={{ transform: `translate(${paint.panX}px, ${paint.panY}px) rotate(${paint.rotate}deg) scale(${paint.zoom})` }}
+          className="relative inline-block shrink-0"
+          style={{ width: canvas.width * fit, height: canvas.height * fit, transform: `translate(${paint.panX}px, ${paint.panY}px) rotate(${paint.rotate}deg) scale(${zoom})` }}
         >
           {url && (
             <img
@@ -489,7 +505,7 @@ export function RasterStage() {
               src={url}
               alt="Raster page preview"
               draggable={false}
-              className="block max-h-[calc(100vh-8rem)] max-w-full"
+              className="block h-full w-full"
               onLoad={() => {
                 live.current.pending = live.current.pending.filter((q) => !(q.done && urlGen.current >= q.gen));
                 setLoaded((n) => n + 1);
@@ -518,9 +534,7 @@ export function RasterStage() {
         onPointerDown={centerOn}
         className="absolute bottom-3 right-3 rounded border bg-card shadow"
       />
-      <p role="status" className="shrink-0 border-t bg-card px-3 py-1 text-xs text-muted-foreground">
-        {paint.status} Strokes are sent to the Rust engine on release; outlines are overlays only.
-      </p>
+
     </main>
   );
 }

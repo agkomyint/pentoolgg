@@ -263,6 +263,65 @@ fn add_camera_light_and_export_render_the_model() {
 }
 
 #[test]
+fn per_node_scene3d_edits_respect_locked_host_layer() {
+    let dir = scratch();
+    let doc = base(&dir);
+    let model = dir.join("tet.obj");
+    std::fs::write(&model, TETRA).unwrap();
+    let d = doc.to_str().unwrap();
+    let added = pentool(&[
+        "scene3d",
+        d,
+        "add",
+        "hero",
+        "--model",
+        model.to_str().unwrap(),
+        "--layer",
+        "l",
+    ]);
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let locked = pentool(&["layer", d, "set", "l", "--locked", "true"]);
+    assert!(
+        locked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&locked.stderr)
+    );
+    let before = std::fs::read(&doc).unwrap();
+
+    for args in [
+        vec!["camera", "hero", "--azimuth", "30"],
+        vec!["frame", "hero"],
+        vec!["set", "hero", "--exposure-ev", "1.5"],
+        vec!["environment", "hero", "--sky", "#ffffff"],
+        vec![
+            "light",
+            "hero",
+            "add",
+            "--kind",
+            "directional",
+            "--direction",
+            "1,2,3",
+        ],
+    ] {
+        let mut command = vec!["scene3d", d];
+        command.extend(args);
+        let out = pentool(&command);
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{command:?} unexpectedly succeeded");
+        assert!(error.contains("[locked]"), "{command:?}: {error}");
+        assert_eq!(
+            std::fs::read(&doc).unwrap(),
+            before,
+            "{command:?} changed the file"
+        );
+    }
+}
+
+#[test]
 fn dry_run_and_bad_input_leave_the_file_untouched() {
     let dir = scratch();
     let doc = base(&dir);

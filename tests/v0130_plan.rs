@@ -83,7 +83,17 @@ fn dry_run_and_commit_report_the_same_plan() {
     let before = fs::read(&doc).unwrap();
     let dry = ok(&["paint-plan", &doc, &file, "--dry-run"]);
     assert_eq!(before, fs::read(&doc).unwrap());
-    let done = ok(&["paint-plan", &doc, &file]);
+    let revision = dry["commit"]["if_revision"].as_str().unwrap();
+    let hash = dry["commit"]["plan_hash"].as_str().unwrap();
+    let done = ok(&[
+        "paint-plan",
+        &doc,
+        &file,
+        "--if-revision",
+        revision,
+        "--expect-plan-hash",
+        hash,
+    ]);
     assert_ne!(before, fs::read(&doc).unwrap());
     assert_eq!(dry["result"], done["result"]);
     assert_eq!(done["dry_run"], false);
@@ -106,11 +116,30 @@ fn plans_are_deterministic_and_undo_is_one_step() {
     let a = ws.document();
     let original = fs::read(&a).unwrap();
     let file = ws.plan("plan.json", &plan());
-    let first = ok(&["paint-plan", &a, &file]);
+    let dry = ok(&["paint-plan", &a, &file, "--dry-run"]);
+    let revision = dry["commit"]["if_revision"].as_str().unwrap();
+    let hash = dry["commit"]["plan_hash"].as_str().unwrap();
+    let first = ok(&[
+        "paint-plan",
+        &a,
+        &file,
+        "--if-revision",
+        revision,
+        "--expect-plan-hash",
+        hash,
+    ]);
     // Identical plan on an identical document yields identical pixels.
     let b = ws.0.join("b.pen").to_string_lossy().into_owned();
     fs::write(&b, &original).unwrap();
-    let second = ok(&["paint-plan", &b, &file]);
+    let second = ok(&[
+        "paint-plan",
+        &b,
+        &file,
+        "--if-revision",
+        revision,
+        "--expect-plan-hash",
+        hash,
+    ]);
     assert_eq!(first["result"], second["result"]);
     // One undo restores the pre-plan document for both passes.
     ok(&["undo", &a]);
@@ -123,20 +152,43 @@ fn stale_revision_and_plan_hash_leave_the_document_unchanged() {
     let doc = ws.document();
     let file = ws.plan("plan.json", &plan());
     let before = fs::read(&doc).unwrap();
-    let err = fails(&["paint-plan", &doc, &file, "--if-revision", "deadbeef"]);
+    let err = fails(&["paint-plan", &doc, &file]);
+    assert!(err.contains("requires --if-revision"), "{err}");
+    let dry = ok(&["paint-plan", &doc, &file, "--dry-run"]);
+    let revision = dry["commit"]["if_revision"].as_str().unwrap();
+    let hash = dry["commit"]["plan_hash"].as_str().unwrap();
+    let err = fails(&["paint-plan", &doc, &file, "--if-revision", revision]);
+    assert!(err.contains("requires --expect-plan-hash"), "{err}");
+    let err = fails(&[
+        "paint-plan",
+        &doc,
+        &file,
+        "--if-revision",
+        "deadbeef",
+        "--expect-plan-hash",
+        hash,
+    ]);
     assert!(err.to_lowercase().contains("revision"), "{err}");
     let err = fails(&[
         "paint-plan",
         &doc,
         &file,
+        "--if-revision",
+        revision,
         "--expect-plan-hash",
         &format!("sha256:{}", "0".repeat(64)),
     ]);
     assert!(err.contains("plan-changed"), "{err}");
     assert_eq!(before, fs::read(&doc).unwrap());
-    let dry = ok(&["paint-plan", &doc, &file, "--dry-run"]);
-    let hash = dry["result"]["plan_hash"].as_str().unwrap();
-    ok(&["paint-plan", &doc, &file, "--expect-plan-hash", hash]);
+    ok(&[
+        "paint-plan",
+        &doc,
+        &file,
+        "--if-revision",
+        revision,
+        "--expect-plan-hash",
+        hash,
+    ]);
 }
 
 #[test]
@@ -147,7 +199,7 @@ fn a_failing_pass_is_atomic_and_named() {
     bad["passes"][1]["target"] = json!("no-such-layer");
     let file = ws.plan("bad.json", &bad);
     let before = fs::read(&doc).unwrap();
-    let err = fails(&["paint-plan", &doc, &file]);
+    let err = fails(&["paint-plan", &doc, &file, "--dry-run"]);
     assert!(
         err.contains("bar") && err.contains("nothing was written"),
         "{err}"
@@ -181,7 +233,7 @@ fn limits_and_malformed_plans_are_rejected() {
         ("empty", empty, "needs 1-"),
     ] {
         let file = ws.plan(&format!("{name}.json"), &value);
-        let err = fails(&["paint-plan", &doc, &file]);
+        let err = fails(&["paint-plan", &doc, &file, "--dry-run"]);
         assert!(err.contains(needle), "{name}: {err}");
         assert_eq!(before, fs::read(&doc).unwrap(), "{name}");
     }

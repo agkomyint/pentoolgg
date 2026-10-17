@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { GROUPS, SLIDERS, getPath, type Develop, type PreviewReport } from "@/lib/photo";
+import { GROUPS, SLIDERS, getPath, photoApi, type Develop, type PreviewReport } from "@/lib/photo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { usePhoto } from "./photoStore";
+import { useStudio } from "@/store";
+import { pageOf } from "@/lib/model";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
 
@@ -96,6 +98,11 @@ function Slider({ label, min, max, step, value, onCommit, onReset }: { label: st
 
 export function PhotoPanel() {
   const s = usePhoto();
+  const studio = useStudio();
+  const page = pageOf(studio.doc, studio.pageId);
+  const canvas = page?.canvas as { width: number; height: number } | undefined;
+  const layer = page?.layers?.find((candidate) => !candidate.locked && candidate.visible !== false);
+  const importInput = useRef<HTMLInputElement>(null);
   const develop: Develop = s.developOf();
   const [temperature, setTemperature] = useState(5500);
   const [tint, setTint] = useState(0);
@@ -113,6 +120,7 @@ export function PhotoPanel() {
   }, [s.detail, s.variant]);
 
   const photo = s.current;
+  const isRaw = s.detail?.kind !== "rendered";
   const variant = s.variant;
   const dev = (extra: Record<string, unknown>, message: string) => {
     if (!photo) return;
@@ -124,7 +132,57 @@ export function PhotoPanel() {
   const local: { id: string; name?: string; enabled?: boolean; params?: { exposure?: number }; mask: { components: { kind: string }[] } }[] = develop.local ?? [];
   const crop: number[] | undefined = develop.crop?.rect;
 
-  if (!photo) return <p className="p-3 text-sm text-muted-foreground">Select a photo in the grid. Add DNGs with <code>pentool raw add</code>.</p>;
+  const placeOnCanvas = () => {
+    if (!photo || !studio.shared || !page || !canvas || !layer || !s.revision) {
+      s.set({ status: "Open a served project and select an unlocked page layer before placing this photo." });
+      return;
+    }
+    const sourceWidth = Math.max(1, s.detail?.width ?? 1);
+    const sourceHeight = Math.max(1, s.detail?.height ?? 1);
+    const scale = Math.min((canvas.width * 0.8) / sourceWidth, (canvas.height * 0.8) / sourceHeight);
+    const width = Math.max(1, sourceWidth * scale);
+    const height = Math.max(1, sourceHeight * scale);
+    void s.run(async () => {
+      const result = await photoApi.place({
+        photo,
+        variant,
+        page: page.id,
+        layer: layer.id,
+        x: (canvas.width - width) / 2,
+        y: (canvas.height - height) / 2,
+        width,
+        height,
+        fit: "contain",
+        position: [0.5, 0.5],
+        revision: s.revision!,
+      });
+      await useStudio.getState().load();
+      const state = useStudio.getState();
+      state.setWorkspace("design");
+      state.setPage(page.id);
+      state.select(result.result.id);
+      s.set({ status: `Placed ${photo} on ${page.name ?? page.id}.` });
+    });
+  };
+
+  const importControl = <>
+    <input ref={importInput} className="sr-only" type="file" accept=".dng,.DNG,.jpg,.jpeg,.png,image/jpeg,image/png,image/x-adobe-dng" multiple disabled={s.busy} aria-label="Choose photo files"
+      onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void s.importFiles(files); }} />
+    <Button variant="outline" className="min-h-10" disabled={s.busy || studio.busy || !studio.shared} aria-busy={s.busy} title={!studio.shared ? "Serve a .pen project file to use the RAW catalog." : undefined} onClick={() => importInput.current?.click()}>
+      {s.busy ? "Importing…" : "Import photos"}
+    </Button>
+  </>;
+
+  if (!photo) return <div className="space-y-3 p-3" aria-busy={s.busy}>
+    {importControl}
+    {!studio.shared && <p role="note" className="rounded border border-warning/30 bg-warning/5 p-2 text-xs">RAW catalog changes need a shared project. Save your .pen file, then open it with <code>pentool serve PROJECT.pen</code>.</p>}
+    <div className="rounded-md border border-dashed p-3">
+      <h3 className="text-sm font-semibold">Build a photo shoot</h3>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Import camera RAW (DNG), JPEG or PNG photos. JPEG and PNG edits stay adjustable in the Photo workspace, and originals are embedded in this project.</p>
+      <p className="mt-2 text-[11px] text-muted-foreground">Studio imports up to 64 MiB per file. DNG unlocks camera white balance, camera profiles and RAW controls.</p>
+    </div>
+    {s.status && <p role="status" className="break-words text-xs text-muted-foreground">{s.status}</p>}
+  </div>;
 
   const replaceLocal = (id: string, change: (a: (typeof local)[number]) => Partial<(typeof local)[number]>) =>
     dev({ set: { local: local.map((a) => (a.id === id ? { ...a, ...change(a) } : a)) } }, "Mask updated.");
@@ -172,6 +230,14 @@ export function PhotoPanel() {
 
   return (
     <div className="space-y-0 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border bg-muted/20 p-2">
+        <div className="min-w-0"><p className="font-medium">Photo library</p><p className="truncate text-[11px] text-muted-foreground">{s.count || "Import a photo shoot to begin"}</p></div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="outline" className="min-h-10" disabled={s.busy || studio.busy || !studio.shared || !canvas || !layer} title={!studio.shared ? "Serve a .pen project file to place from the RAW catalog." : undefined} onClick={placeOnCanvas}>Place on page</Button>
+          {importControl}
+        </div>
+      </div>
+      {s.status && <p role="status" className="mb-2 break-words rounded border bg-muted/20 p-2 text-[11px] text-muted-foreground">{s.status}</p>}
       <div className="grid grid-cols-2 gap-2 pb-2">
         <label className="space-y-1">
           <span className="text-muted-foreground">Variant</span>
@@ -221,14 +287,14 @@ export function PhotoPanel() {
         <Button size="sm" variant="outline" onClick={() => void s.run(() => s.undo())}>
           Undo
         </Button>
-        <Button size="sm" variant="outline" onClick={() => dev({ auto_tone: true }, "Auto tone applied.")}>
+        {isRaw && <Button size="sm" variant="outline" onClick={() => dev({ auto_tone: true }, "Auto tone applied.")}>
           Auto tone
-        </Button>
+        </Button>}
       </div>
 
       <Histogram report={s.report} />
 
-      <Section title="White balance" open>
+      {isRaw && <Section title="White balance" open>
         <div className="flex flex-wrap gap-1">
           <Button size="sm" variant="outline" onClick={() => dev({ white_balance: { mode: "as-shot" } }, "White balance as shot.")}>
             As shot
@@ -250,11 +316,11 @@ export function PhotoPanel() {
         <Button size="sm" variant="outline" onClick={() => dev({ white_balance: { mode: "temperature", temperature, tint } }, "White balance set.")}>
           Apply
         </Button>
-      </Section>
+      </Section>}
 
-      {SLIDERS.map(([title, sliders]) => (
+      {SLIDERS.filter(([title]) => isRaw || title !== "Geometry").map(([title, sliders]) => (
         <Section key={title} title={title} open={title === "Tone"}>
-          {sliders.map(([path, label, min, max, step]) => (
+          {sliders.filter(([path]) => isRaw || path !== "presence.dehaze").map(([path, label, min, max, step]) => (
             <Slider
               key={`${photo}/${variant}/${path}`}
               label={label}
@@ -300,7 +366,7 @@ export function PhotoPanel() {
         </div>
       </Section>
 
-      <Section title="Local adjustments">
+      {isRaw && <Section title="Local adjustments">
         <label className="grid grid-cols-[84px_1fr_44px] items-center gap-2">
           <span>New exposure</span>
           <input type="range" min={-4} max={4} step={0.05} value={s.maskExposure} onChange={(e) => s.set({ maskExposure: Number(e.target.value) })} />
@@ -361,7 +427,7 @@ export function PhotoPanel() {
             </div>
           </div>
         ))}
-      </Section>
+      </Section>}
 
       <Section title="Copy / sync">
         <div className="flex items-center gap-2">
