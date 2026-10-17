@@ -1,6 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 *.sh text eol=lf
+web-ui/index.html text eol=lf
 examples/raster-paint-showcase.pen -text
 # Photography conformance fixtures are pinned by SHA-256 in photo-conformance.json.
 docs/fixtures/photo-* -text
