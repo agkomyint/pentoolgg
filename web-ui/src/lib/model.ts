@@ -303,36 +303,105 @@ export function pageBounds(found: Found): Rect | null {
   return local ? transformRect(local, found.world) : null;
 }
 
-/** Top-most visible, unlocked node under a page point, depth first. */
-export function hitTest(page: Page | undefined, x: number, y: number): Found | null {
+let probe: CanvasRenderingContext2D | null | undefined;
+function probeContext(): CanvasRenderingContext2D | null {
+  if (probe === undefined) probe = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
+  return probe;
+}
+
+/**
+ * Whether a page point lands on a leaf's painted geometry, within `tol` page
+ * units: ellipses by their equation, lines and unfilled paths by their stroke,
+ * filled paths by their fill. Other kinds use their box.
+ */
+function hitsShape(node: SceneNode, layer: Layer, world: Matrix, x: number, y: number, tol: number): boolean {
+  const kind = nodeKind(node, layer);
+  const m = multiply(world, nodeMatrix(node));
+  const inv = invert(m);
+  if (!inv) return false;
+  const [lx, ly] = apply(inv, x, y);
+  const t = tol / Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]) || 1);
+  const num = (key: string) => Number(node[key] ?? 0);
+  const width = Number(getStyle(node, "stroke_width") ?? 1);
+  if (kind === "ellipse") {
+    const rx = num("radius_x") + t;
+    const ry = num("radius_y") + t;
+    return rx > 0 && ry > 0 && ((lx - num("cx")) / rx) ** 2 + ((ly - num("cy")) / ry) ** 2 <= 1;
+  }
+  if (kind === "line") {
+    const [x1, y1, x2, y2] = [num("x1"), num("y1"), num("x2"), num("y2")];
+    const len = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+    const k = len ? Math.max(0, Math.min(1, ((lx - x1) * (x2 - x1) + (ly - y1) * (y2 - y1)) / len)) : 0;
+    return Math.hypot(lx - (x1 + k * (x2 - x1)), ly - (y1 + k * (y2 - y1))) <= Math.max(width / 2, t);
+  }
+  if (kind === "path" && typeof node.d === "string") {
+    const ctx = probeContext();
+    if (ctx && typeof Path2D !== "undefined") {
+      const shape = new Path2D(node.d);
+      const fill = getStyle(node, "fill");
+      if (fill !== "none" && fill !== undefined && ctx.isPointInPath(shape, lx, ly, node.fill_rule === "evenodd" ? "evenodd" : "nonzero")) return true;
+      ctx.lineWidth = Math.max(getStyle(node, "stroke") === "none" ? 0 : width, t * 2);
+      return ctx.isPointInStroke(shape, lx, ly);
+    }
+  }
+  const box = localBounds(kind === "text" && node.kind === undefined ? Object.assign({}, node, { kind: "text" }) : node, layer);
+  if (!box) return false;
+  // `localBounds` already includes the node transform, so test in the parent space.
+  const pinv = invert(world);
+  if (!pinv) return false;
+  const [px, py] = apply(pinv, x, y);
+  return px >= box.x - t && px <= box.x + box.width + t && py >= box.y - t && py <= box.y + box.height + t;
+}
+
+/**
+ * Top-most visible, unlocked leaf under a page point and the groups holding
+ * it, outermost first: `[topGroup, ..., leaf]`. `tol` is in page units.
+ */
+export function hitChain(page: Page | undefined, x: number, y: number, tol = 2): Found[] | null {
   if (!page) return null;
-  let best: Found | null = null;
-  const visit = (list: SceneNode[], layer: Layer, parent: SceneNode | null, world: Matrix) => {
+  let best: Found[] | null = null;
+  const visit = (list: SceneNode[], layer: Layer, parent: SceneNode | null, world: Matrix, chain: Found[]) => {
     for (const node of list) {
       if (node.visible === false) continue;
-      const kids = children(node);
-      if (kids.length) visit(kids, layer, node, multiply(world, nodeMatrix(node)));
-      if (kind(node) === "group") continue;
       const found: Found = { node, layer, siblings: list, parent, world };
-      const b = pageBounds(found);
-      if (b && x >= b.x - 2 && x <= b.x + b.width + 2 && y >= b.y - 2 && y <= b.y + b.height + 2) best = found;
+      const kids = children(node);
+      if (kids.length) visit(kids, layer, node, multiply(world, nodeMatrix(node)), [...chain, found]);
+      if (node.kind === "group") continue;
+      if (hitsShape(node, layer, world, x, y, tol)) best = [...chain, found];
     }
   };
-  const kind = (n: SceneNode) => (typeof n.kind === "string" ? n.kind : "path");
   for (const layer of page.layers ?? []) {
     if (layer.visible === false || layer.locked) continue;
-    if (Array.isArray(layer.nodes)) visit(layer.nodes, layer, null, IDENTITY);
+    if (Array.isArray(layer.nodes)) visit(layer.nodes, layer, null, IDENTITY, []);
     else {
       for (const key of ["paths", "texts"] as const) {
-        for (const node of layer[key] ?? []) {
-          const found: Found = { node, layer, siblings: layer[key]!, parent: null, world: IDENTITY };
-          const b = pageBounds({ ...found, node: key === "texts" ? Object.assign({}, node, { kind: "text" }) : node });
-          if (b && x >= b.x - 2 && x <= b.x + b.width + 2 && y >= b.y - 2 && y <= b.y + b.height + 2) best = found;
+        const list = layer[key] ?? [];
+        for (const node of list) {
+          if (hitsShape(node, layer, IDENTITY, x, y, tol)) best = [{ node, layer, siblings: list, parent: null, world: IDENTITY }];
         }
       }
     }
   }
   return best;
+}
+
+/** Top-most visible, unlocked leaf under a page point. */
+export function hitTest(page: Page | undefined, x: number, y: number, tol = 2): Found | null {
+  return hitChain(page, x, y, tol)?.at(-1) ?? null;
+}
+
+/**
+ * The object a click picks from a hit chain, as in Figma: the outermost group,
+ * or one level inside the group that holds the current selection; `deep`
+ * (Ctrl/Cmd) takes the leaf.
+ */
+export function pickFromChain(chain: Found[], selected: string | null, deep: boolean): Found {
+  if (deep) return chain.at(-1)!;
+  const at = chain.findIndex((f) => f.node.id === selected);
+  if (at >= 0) return chain[at]!;
+  // A sibling of the selection, or anything inside the selected object's parent group.
+  const sel = selected ? chain.find((f) => f.parent?.id !== undefined && children(f.parent).some((c) => c.id === selected)) : undefined;
+  return sel ?? chain[0]!;
 }
 
 /** Top-level objects on visible, unlocked layers whose page bounds touch a rectangle (drag selection). */

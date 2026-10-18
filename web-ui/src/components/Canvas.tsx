@@ -27,7 +27,9 @@ import {
 import {
   apply,
   findNode,
-  hitTest,
+  hitChain,
+  nodeKind,
+  pickFromChain,
   isScene,
   multiply,
   nodeMatrix,
@@ -116,6 +118,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const [ghost, setGhost] = useState<Rect | null>(null);
   const [live, setLive] = useState<Matrix | null>(null);
   const [marquee, setMarquee] = useState<Rect | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const drag = useRef<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const scrollPosition = useRef({ left: 0, top: 0 });
@@ -425,7 +428,8 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         clearSprite();
         return;
       }
-      const hit = hitTest(page, p.x, p.y);
+      const chain = hitChain(page, p.x, p.y, 4 / scale);
+      const hit = chain ? pickFromChain(chain, useStudio.getState().selectedId, e.ctrlKey || e.metaKey) : null;
       // Shift-click adds or removes an object without starting a move.
       if (e.shiftKey && hit) {
         s.select(hit.node.id, "toggle");
@@ -478,6 +482,11 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     const p = toPage(e);
     if (!d) {
       if (tool === "pen" && draft.length) setHover(p);
+      if (tool === "select") {
+        const chain = hitChain(page, p.x, p.y, 4 / scale);
+        const next = chain ? pickFromChain(chain, useStudio.getState().selectedId, e.ctrlKey || e.metaKey).node.id : null;
+        if (next !== hoverId) setHoverId(next);
+      }
       return;
     }
     if (d.mode === "marquee") {
@@ -782,8 +791,15 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   setGhost(null);
                   setMarquee(null);
                 }}
-                onDoubleClick={() => {
+                onPointerLeave={() => setHoverId(null)}
+                onDoubleClick={(e) => {
                   if (tool === "pen") finishPen(false);
+                  if (tool !== "select") return;
+                  // Double-click steps into the group under the pointer.
+                  const p = toPage(e);
+                  const chain = hitChain(page, p.x, p.y, 4 / scale);
+                  const at = chain?.findIndex((f) => f.node.id === useStudio.getState().selectedId) ?? -1;
+                  if (chain && at >= 0 && at < chain.length - 1) s.select(chain[at + 1]!.node.id);
                 }}
               >
                 <LayoutOverlay px={px} />
@@ -799,6 +815,17 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   const b = f ? pageBounds(f) : null;
                   return b && <rect key={id} {...b} transform={live ? `matrix(${live.join(" ")})` : undefined} fill="none" stroke="#2563eb" strokeWidth={px} strokeOpacity={0.6} pointerEvents="none" />;
                 })}
+                {tool === "select" && !drag.current && hoverId && !selectedIds.includes(hoverId) && (() => {
+                  const f = findNode(page, hoverId);
+                  if (!f) return null;
+                  const m = multiply(f.world, nodeMatrix(f.node));
+                  const k = nodeKind(f.node, f.layer);
+                  const outline = { fill: "none", stroke: "#2563eb", strokeWidth: 1.5, vectorEffect: "non-scaling-stroke" as const, pointerEvents: "none" as const };
+                  if (k === "path" && typeof f.node.d === "string") return <path d={f.node.d} transform={`matrix(${m.join(" ")})`} {...outline} />;
+                  if (k === "ellipse") return <ellipse cx={Number(f.node.cx ?? 0)} cy={Number(f.node.cy ?? 0)} rx={Number(f.node.radius_x ?? 0)} ry={Number(f.node.radius_y ?? 0)} transform={`matrix(${m.join(" ")})`} {...outline} />;
+                  const b = pageBounds(f);
+                  return b && <rect {...b} {...outline} />;
+                })()}
                 {marquee && (
                   <rect {...marquee} fill="#2563eb" fillOpacity={0.08} stroke="#2563eb" strokeWidth={px} pointerEvents="none" />
                 )}
