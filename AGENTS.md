@@ -40,80 +40,77 @@ Search the implementation and tests before designing a new abstraction. Extend
 the shared scene, transaction, history, rendering, and validation paths instead of
 creating a parallel model for one command.
 
-## Roadmap awareness
+## Current phase: stabilization (0.20.x)
 
-Roadmap documents describe intended work; they do not prove that a feature is
-implemented. Confirm behavior in code and tests.
+All roadmap milestones through v0.20.0 have shipped. The product is
+feature-complete for now. The job is to make what exists correct, tested,
+documented and maintainable, and to ship the result as patch releases
+(`0.20.1`, `0.20.2`, ...).
 
-The current planned sequence is:
+In scope:
 
-1. `docs/roadmap/v0.6.24/TASKS.md`: trustworthy component updates and overrides;
-2. `docs/roadmap/v0.7.0/TASKS.md`: raster images and non-destructive image editing;
-3. `docs/roadmap/v0.8.0/TASKS.md`: professional compositing;
-4. `docs/roadmap/v0.9.0/TASKS.md`: BYOK image models;
-5. `docs/roadmap/v0.10.0/TASKS.md`: pixel editing and retouching;
-6. `docs/roadmap/v0.11.0/TASKS.md`: photography and RAW development;
-7. `docs/roadmap/v0.12.0/TASKS.md`: color management and print production;
-8. `docs/roadmap/v0.13.0/TASKS.md`: agent-directed realistic painting;
-9. `docs/roadmap/v0.14.0/TASKS.md`: professional page layout at InDesign
-   parity, `.penbook` books, and IDML interchange;
-10. `docs/roadmap/v0.15.0/TASKS.md`: static 3D objects (import, light, render);
-11. `docs/roadmap/v0.16.0/TASKS.md`: 3D in layouts and mockups;
-12. `docs/roadmap/v0.17.0/TASKS.md`: design interchange (SVG, PDF, PSD, Figma,
-    Sketch);
-13. `docs/roadmap/v0.18.0/TASKS.md`: scripting and extension API;
-14. `docs/roadmap/v0.19.0/TASKS.md`: design systems, brand kits, templates;
-15. `docs/roadmap/v0.20.0/TASKS.md`: collaboration, with human and agent
-    contribution stats;
+- bug fixes with a regression test each;
+- finishing roadmap items that are shipped but not fully ticked (see
+  "Open roadmap debt" below) and ticking a box only when implementation, tests,
+  docs and cross-platform evidence all exist;
+- behavior-preserving refactors (splitting oversized files, removing duplication);
+- test reliability, docs/help accuracy, and performance regressions.
 
-Product focus is vector, images, painting, layout and static 3D. Time-based
-media (keyframe animation, video, audio) is out of scope and has no roadmap;
-its former plans were removed. Do not add video or
-audio dependencies or timeline features without an explicit new decision.
+Out of scope until the maintainer says otherwise:
+
+- new features, commands, flags, `.pen` fields, or dependencies;
+- anything listed under "Explicitly deferred" in a roadmap file;
+- time-based media (keyframe animation, video, audio), which has no roadmap.
+
+A fix that needs a format or CLI change is not a patch. Stop and ask.
+
+### Open roadmap debt (v0.20.0)
+
+Verify against code and tests before working on these; they may have moved.
+
+- Item 3a: `pentool collab compact` and the test that stats survive compaction.
+- Item 7: one-click conflict resolution and presence cursors in Studio, and a
+  live-browser check of the Collab workspace.
+- Known collaboration gaps in `docs/release-v0.20.0.md`: no Ed25519 operation
+  signing, no stale-base rejection for agents.
+
+Closing the first two finishes a promised item and counts as stabilization.
+Signing and stale-base rejection are new capability: ask first.
+
+### Roadmap documents
+
+Files in `docs/roadmap/` describe planned work; they do not prove a feature is
+implemented. Confirm behavior in code and tests. Earlier roadmaps are historical
+requirements and regression context: preserve every invariant and acceptance
+target, and use them to audit shipped behavior. Mark a checkbox complete only
+after implementation, tests, documentation, and required cross-platform evidence
+exist.
 
 GPU work uses `wgpu` as an optional `gpu` Cargo feature. The deterministic CPU
 renderer stays normative; goldens and digests come only from the CPU path.
 
-`docs/roadmap/architecture/TASKS.md` is a cross-cutting milestone (shared core
-crate that also compiles to WASM, `/api/v1` with `serve --no-ui`, live canvas
-and brush). Its first task is a measured WASM spike; do not start the crate
-split or the live canvas before that decision record exists. `pentool serve`
-is the authoritative backend and Studio (`web-ui/`) is the only browser UI; the
-earlier Classic editor was retired.
+`pentool serve` is the authoritative backend and Studio (`web-ui/`) is the only
+browser UI. `docs/roadmap/architecture/TASKS.md` records the shared-core/WASM
+plan; do not start a crate split without its decision record.
 
-v0.7.1 shipped as the bug-fix release for v0.7.0 (`docs/roadmap/v0.7.0/bug.md`).
-Roadmap folder numbers are planned milestones, not reserved release numbers; the
-actual version is chosen at release time under the versioning policy below.
-
-Earlier roadmap files are historical requirements and useful regression context.
-When implementing roadmap work:
-
-- follow its stated order when one task depends on another;
-- preserve every invariant and acceptance target, not merely the example command;
-- do not silently implement an item listed as out of scope;
-- mark a checkbox complete only after implementation, tests, documentation, and
-  required cross-platform evidence exist;
-- update roadmap text when a deliberate design decision changes its contract;
-- never bump a version just because a roadmap filename mentions that version.
-
-If code, public documentation, schema, and roadmap disagree, stop and resolve the
-contract explicitly. The schema and released behavior take precedence over an
-unimplemented proposal.
+If code, public documentation, schema, and roadmap disagree, precedence is:
+released behavior and tests, then the schema, then public docs, then the roadmap.
+Fix the lower source to match the higher one and record the decision in the
+commit message. Stop and ask only when a fix would change released behavior.
 
 ## Versioning policy
 
 Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
 
-- PATCH (`0.8.0` -> `0.8.1`): bug fixes and documentation only. No new features,
-  no format or CLI changes beyond fixing documented behavior.
-- MINOR (`0.8.x` -> `0.9.0`): new backward-compatible features. While the version
-  is below 1.0, a minor release may also carry a documented, migrated break.
+- PATCH (`0.20.0` -> `0.20.1`): bug fixes, refactors without behavior change, and
+  documentation only. No new features, no format or CLI changes beyond fixing
+  documented behavior. This is the only kind of release in the stabilization phase.
+- MINOR (`0.20.x` -> `0.21.0`): new backward-compatible features. While the
+  version is below 1.0, a minor release may also carry a documented, migrated break.
 - MAJOR (`0.x` -> `1.0.0`): declared stable `.pen` format and CLI.
-- Feature roadmaps use minor numbers; patch numbers are reserved for fixes so an
-  urgent fix never collides with planned work.
 - Fixes for a released version are made from its tag and shipped as the next patch.
-- Roadmap folder names are plans. If a fix release or reordering changes the
-  sequence, renumber the roadmap in the same change that ships the release.
+- Batch several verified fixes into one patch release; do not cut a release per
+  commit, because each release costs a full three-OS CI run.
 
 ## Repository map
 
@@ -141,12 +138,47 @@ Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
 
 1. Inspect `git status` and preserve unrelated user changes.
 2. Reproduce a bug before changing code. Add a regression test that demonstrates
-   the actual failure mode.
+   the actual failure mode, and watch it fail before the fix.
 3. Make the smallest coherent change in the shared implementation path.
 4. Test malformed input, limits, pagination, filters, nested groups, pages, locks,
    and transaction rollback when relevant.
 5. Update public docs, schema, fixtures, and CLI help when the contract changes.
 6. Run the same checks used by CI before committing.
+
+### Bug-fix recipe
+
+1. Find the owner in the feature map below; read that module and its tests.
+2. Reproduce with the smallest CLI command or test, using a temp directory.
+3. Write the failing test, fix it, run only that test file.
+4. If the fix changes a public JSON shape, error code, or `.pen` field, stop: that
+   is not a patch.
+5. Add a line to the notes for the next patch (`docs/release-v0.X.Y.md`).
+6. Commit with an imperative message (`fix: ...`, `refactor: ...`, `test: ...`).
+
+### Feature map
+
+| Area | Code | Tests |
+| --- | --- | --- |
+| Scene graph, tree/search | `src/scene.rs`, `src/agent.rs` | `tests/suites/`, `docs/fixtures/` |
+| Transactions, history | `src/transaction.rs`, `src/history.rs`, `src/stale.rs` | `tests/suites/` |
+| Rendering, text, PDF | `src/render.rs`, `src/text.rs`, `src/pdf.rs`, `src/fonts.rs` | goldens in `tests/`, `examples/` |
+| Collaboration | `src/collab/*` (op, log, merge, sync, perm, token, stats, presence), `src/comments.rs` | `tests/collab_*.rs`, `tests/comments.rs` |
+| Studio UI | `web-ui/src/`, built to `web/studio.html` | `bun run typecheck`, embed checks in `tests/` |
+| Server | `src/server.rs` | route scan in `tests/collab_sync.rs` |
+
+Rules that bite:
+
+- Every new or changed HTTP route must be classified in `perm::ROUTES`; the
+  `every_route_is_classified` test fails otherwise.
+- `web/studio.html` is generated. Never edit it by hand: change `web-ui/` and run
+  `bun run build`, then commit both.
+- Converged collaboration peers may differ in `collab.head` and `collab.seq`
+  (chain positions are peer-local). Compare documents with those removed, never
+  by raw bytes.
+- Compare collaboration revisions with `collab::content_revision`, not
+  `transaction::revision`, because the embedded `collab` block is derived data.
+
+### Verification
 
 Verification is tiered; do not run the full suite during iteration.
 
@@ -167,10 +199,17 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets --locked
 ```
 
-The full suite and the 3-OS CI matrix are the authority for merge/release,
-not for iteration. Local builds use `rust-lld` on Windows MSVC
-(`.cargo/config.toml`) and line-only debuginfo (`[profile.dev]` in
-`Cargo.toml`); release artifacts keep the `release` profile unchanged.
+The full suite takes over ten minutes locally and the 3-OS CI matrix about
+twenty. They are the authority for merge/release, not for iteration. Local
+builds use `rust-lld` on Windows MSVC (`.cargo/config.toml`) and line-only
+debuginfo (`[profile.dev]` in `Cargo.toml`); release artifacts keep the `release`
+profile unchanged.
+
+Timing-sensitive tests: the `collab_sync` and `collab_evidence` suites start real
+servers and can fail with `[peer-unreachable] ... deadline has elapsed` when other
+builds are running. Re-run alone or with `-- --test-threads=2` before treating it
+as a regression. If a test is flaky on its own, fix its timing assumptions; do not
+weaken the assertion.
 
 For release-sensitive changes also run:
 
@@ -183,6 +222,22 @@ cargo run --release --locked -- search docs/fixtures/v4-scene.pen semantic --kin
 Run relevant export smoke tests when touching rendering, text, geometry, import,
 document formats, or packaging. If local Rust and GitHub's current stable toolchain
 differ, investigate hosted failures rather than weakening `-D warnings` globally.
+
+### Parallel agents
+
+Give each agent its own git worktree and a disjoint set of files. Files that
+conflict on nearly every merge are the `[[test]]` entries in `Cargo.toml`,
+`README.md` sections, the command enums in `src/main.rs`, `perm::ROUTES`, and
+`web/studio.html`. Agents must not edit `web/studio.html`; the integrator rebuilds
+it once after merging. Merge by keeping both sides, then re-run the touched test
+files before committing the merge.
+
+### Refactoring
+
+Refactors must not change behavior or output bytes. Prefer splitting oversized
+files (`src/main.rs`, `src/collab/sync.rs`) along existing seams, and move code in
+a separate commit from any edit to it. Run the full gate for any refactor that
+touches more than one module.
 
 ## `.pen` compatibility rules
 
