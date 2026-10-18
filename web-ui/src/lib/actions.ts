@@ -179,6 +179,58 @@ export function ungroupSelected(): void {
   state().select(null);
 }
 
+/**
+ * Move an object above or below another one in the layers list, into a group,
+ * or to the top of a layer. Scene objects may change layer or group; their
+ * parent transforms are baked in so nothing moves on the page. Legacy objects
+ * only reorder within their own list.
+ */
+export function moveInStack(id: string, target: { node: string; where: "above" | "below" | "into" } | { layer: string }): void {
+  const { doc, pageId } = state();
+  const page = pageOf(doc, pageId);
+  const from = findNode(page, id);
+  if (!doc || !page || !from) return;
+  const scene = isScene(doc);
+  const to = "node" in target ? findNode(page, target.node) : null;
+  const layer = "layer" in target ? page.layers?.find((l) => l.id === target.layer) : to?.layer;
+  if (!layer || ("node" in target && !to) || (to && to.node === from.node)) return;
+  if (from.layer.locked || layer.locked) {
+    state().notify("That layer is locked. Unlock it to rearrange its objects.", true);
+    return;
+  }
+  // A group cannot go inside itself.
+  for (let f = to; f?.parent; f = findNode(page, f.parent.id)) {
+    if (f.parent === from.node) return;
+  }
+  if (to && "node" in target && target.where === "into" && to.node.kind !== "group") return;
+  const sameList = to && "node" in target && target.where !== "into" ? to.siblings === from.siblings : false;
+  if (!scene && !sameList) {
+    state().notify("Legacy (v1-v3) objects can only be reordered within their layer. Upgrade the format to move them between layers.", true);
+    return;
+  }
+  state().edit("Reorder", (draft) => {
+    const p = pageOf(draft, pageId);
+    const src = findNode(p, id);
+    if (!src) return;
+    const dst = "node" in target ? findNode(p, target.node) : null;
+    const dstLayer = "layer" in target ? p?.layers?.find((l) => l.id === target.layer) : dst?.layer;
+    if (!dstLayer) return;
+    const into = dst && "node" in target && target.where === "into";
+    const list = into ? children(dst.node) : dst ? dst.siblings : (dstLayer.nodes ?? []);
+    const world = into ? multiply(dst.world, nodeMatrix(dst.node)) : dst ? dst.world : ([1, 0, 0, 1, 0, 0] as Matrix);
+    src.siblings.splice(src.siblings.indexOf(src.node), 1);
+    // Keep the painted position when the parent transform changes.
+    if (scene && (src.parent || into || dst?.parent)) {
+      const back = invert(world);
+      if (back) src.node.transform = multiply(back, multiply(src.world, nodeMatrix(src.node)));
+    }
+    if (!dst || into) list.push(src.node);
+    else list.splice(list.indexOf(dst.node) + ("node" in target && target.where === "above" ? 1 : 0), 0, src.node);
+    if (into && !Array.isArray(dst.node.children)) dst.node.children = list;
+    if (!dst && !Array.isArray(dstLayer.nodes)) dstLayer.nodes = list;
+  });
+}
+
 export function renameNode(id: string, name: string): void {
   const { pageId } = state();
   state().edit("Rename", (draft) => {

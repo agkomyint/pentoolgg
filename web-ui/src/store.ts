@@ -22,6 +22,9 @@ type State = {
   selectedId: string | null;
   /** Every selected object; `selectedId` is the primary (last picked) one. */
   selectedIds: string[];
+  /** Object under the pointer on the canvas or in the layers list. */
+  hoverId: string | null;
+  setHover: (id: string | null) => void;
   /** Stable panel ID shared by the packaging stage and its inspector. */
   selectedPackagePanel: string | null;
   setSelectedPackagePanel: (id: string | null) => void;
@@ -124,6 +127,8 @@ export const useStudio = create<State>((set, get) => {
     selectedIds: [],
     selectedPackagePanel: null,
     setSelectedPackagePanel: (selectedPackagePanel) => set({ selectedPackagePanel }),
+    hoverId: null,
+    setHover: (hoverId) => { if (get().hoverId !== hoverId) set({ hoverId }); },
     tool: "select",
     look: { fill: "#6d28d9", stroke: "#111827", strokeWidth: 3 },
     workspaceId: "design",

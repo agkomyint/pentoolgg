@@ -160,7 +160,8 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const [ghost, setGhost] = useState<Rect | null>(null);
   const [live, setLive] = useState<Matrix | null>(null);
   const [marquee, setMarquee] = useState<Rect | null>(null);
-  const [hoverId, setHoverId] = useState<string | null>(null);
+  const hoverId = useStudio((st) => st.hoverId);
+  const setHoverId = useStudio((st) => st.setHover);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   // Last clipboard write, for the context menu's Paste (reading the system clipboard needs permission).
@@ -925,7 +926,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   if (!f) return null;
                   const m = multiply(f.world, nodeMatrix(f.node));
                   const k = nodeKind(f.node, f.layer);
-                  const outline = { fill: "none", stroke: "#2563eb", strokeWidth: 1.5, vectorEffect: "non-scaling-stroke" as const, pointerEvents: "none" as const };
+                  const outline = { fill: "none", stroke: "#2563eb", strokeWidth: 1.5, vectorEffect: "non-scaling-stroke" as const, pointerEvents: "none" as const, "data-hover": hoverId };
                   if (k === "path" && typeof f.node.d === "string") return <path d={f.node.d} transform={`matrix(${m.join(" ")})`} {...outline} />;
                   if (k === "ellipse") return <ellipse cx={Number(f.node.cx ?? 0)} cy={Number(f.node.cy ?? 0)} rx={Number(f.node.radius_x ?? 0)} ry={Number(f.node.radius_y ?? 0)} transform={`matrix(${m.join(" ")})`} {...outline} />;
                   const b = pageBounds(f);
