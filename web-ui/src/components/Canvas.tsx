@@ -18,6 +18,8 @@ import {
   transformNodesPage,
   duplicateSelectionBy,
   selectionRoots,
+  copySelectionText,
+  pasteSelectionText,
   deleteSelected,
   duplicateSelected,
   groupSelected,
@@ -158,6 +160,9 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // Last clipboard write, for the context menu's Paste (reading the system clipboard needs permission).
+  const lastCopy = useRef<string | null>(null);
   const drag = useRef<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const scrollPosition = useRef({ left: 0, top: 0 });
@@ -708,6 +713,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         e.preventDefault();
         finishPen(false);
       } else if (e.key === "Escape") {
+        setMenu(null);
         setDraft([]);
         setHover(null);
         setGhost(null);
@@ -750,6 +756,11 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       if (!active || e.defaultPrevented) return;
       const t = e.target as HTMLElement | null;
       if (t && /input|select|textarea/i.test(t.tagName)) return;
+      const marked = e.clipboardData?.getData("text/plain") ?? "";
+      if (pasteSelectionText(marked)) {
+        e.preventDefault();
+        return;
+      }
       const items = Array.from(e.clipboardData?.items ?? []);
       const image = items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
       const file = image?.getAsFile();
@@ -767,8 +778,29 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         });
       }
     };
+    // Copy and cut put the selected objects on the clipboard as marked JSON.
+    const onCopy = (e: ClipboardEvent, cut: boolean) => {
+      if (!active || e.defaultPrevented || useStudio.getState().paintMode) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (/input|select|textarea/i.test(t.tagName) || t.isContentEditable)) return;
+      if (window.getSelection()?.toString()) return;
+      const text = copySelectionText();
+      if (!text) return;
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", text);
+      lastCopy.current = text;
+      if (cut) deleteSelected();
+    };
+    const copy = (e: ClipboardEvent) => onCopy(e, false);
+    const cut = (e: ClipboardEvent) => onCopy(e, true);
     window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
+    window.addEventListener("copy", copy);
+    window.addEventListener("cut", cut);
+    return () => {
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("copy", copy);
+      window.removeEventListener("cut", cut);
+    };
   }, [canvas.width, canvas.height, active]);
 
   const onDrop = (e: React.DragEvent) => {
@@ -846,6 +878,16 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   setMarquee(null);
                 }}
                 onPointerLeave={() => setHoverId(null)}
+                onContextMenu={(e) => {
+                  if (tool !== "select") return;
+                  e.preventDefault();
+                  const p = toPage(e);
+                  const chain = hitChain(page, p.x, p.y, 4 / scale);
+                  const hit = chain ? pickFromChain(chain, useStudio.getState().selectedId, e.ctrlKey || e.metaKey) : null;
+                  if (!hit) s.select(null);
+                  else if (!useStudio.getState().selectedIds.includes(hit.node.id)) s.select(hit.node.id);
+                  setMenu({ x: e.clientX, y: e.clientY });
+                }}
                 onDoubleClick={(e) => {
                   if (tool === "pen") finishPen(false);
                   if (tool !== "select") return;
@@ -1003,6 +1045,57 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
           {found.layer.locked ? "Unlock artwork to drag" : "Drag selected art to UV"}
         </button>
       )}
+      {menu && (() => {
+        const st = useStudio.getState();
+        const any = st.selectedIds.length > 0;
+        const many = selectionRoots().length > 1;
+        const group = found?.node.kind === "group";
+        const clip = (cut: boolean) => {
+          const text = copySelectionText();
+          if (!text) return;
+          lastCopy.current = text;
+          void navigator.clipboard?.writeText(text).catch(() => undefined);
+          if (cut) deleteSelected();
+        };
+        const items: ({ label: string; keys?: string; run: () => void; disabled?: boolean; danger?: boolean } | "-")[] = [
+          { label: "Cut", keys: "Ctrl+X", run: () => clip(true), disabled: !any },
+          { label: "Copy", keys: "Ctrl+C", run: () => clip(false), disabled: !any },
+          { label: "Paste", keys: "Ctrl+V", run: () => lastCopy.current && pasteSelectionText(lastCopy.current), disabled: !lastCopy.current },
+          { label: "Duplicate", keys: "Ctrl+D", run: duplicateSelected, disabled: !any },
+          { label: "Delete", keys: "Del", run: deleteSelected, disabled: !any, danger: true },
+          "-",
+          { label: "Bring to front", keys: "Ctrl+Shift+]", run: () => reorderSelected("front"), disabled: !any || many },
+          { label: "Bring forward", keys: "Ctrl+]", run: () => reorderSelected("forward"), disabled: !any || many },
+          { label: "Send backward", keys: "Ctrl+[", run: () => reorderSelected("backward"), disabled: !any || many },
+          { label: "Send to back", keys: "Ctrl+Shift+[", run: () => reorderSelected("back"), disabled: !any || many },
+          "-",
+          { label: "Group", keys: "Ctrl+G", run: groupSelected, disabled: !any || !isScene(doc) },
+          { label: "Ungroup", keys: "Ctrl+Shift+G", run: ungroupSelected, disabled: !group || many },
+          "-",
+          { label: "Select all", keys: "Ctrl+A", run: () => s.selectMany(topLevelIn(page, { x: -1e9, y: -1e9, width: 2e9, height: 2e9 })) },
+          { label: "Zoom to selection", keys: "Shift+2", run: zoomToSelection, disabled: !any },
+          { label: "Fit page", keys: "Shift+1", run: zoomToFit },
+        ];
+        return (
+          <>
+            <div className="fixed inset-0 z-40" onPointerDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+            <div role="menu" aria-label="Canvas actions" className="fixed z-50 grid min-w-56 gap-0.5 rounded-md border bg-card p-1 text-xs shadow-lg"
+              style={{ left: Math.min(menu.x, window.innerWidth - 240), top: Math.min(menu.y, window.innerHeight - 440) }}
+              onKeyDown={(e) => e.key === "Escape" && setMenu(null)}>
+              {items.map((item, i) => item === "-"
+                ? <div key={i} role="separator" className="my-0.5 h-px bg-border" />
+                : (
+                  <button key={item.label} type="button" role="menuitem" disabled={item.disabled} autoFocus={i === 0}
+                    className={`flex items-center justify-between gap-4 rounded px-2 py-1.5 text-left hover:bg-accent disabled:opacity-40 ${item.danger ? "text-destructive" : ""}`}
+                    onClick={() => { setMenu(null); item.run(); }}>
+                    <span>{item.label}</span>
+                    {item.keys && <kbd className="text-[10px] text-muted-foreground">{item.keys}</kbd>}
+                  </button>
+                ))}
+            </div>
+          </>
+        );
+      })()}
       {view.kind === "image" && (
         <div className="absolute left-3 top-3 rounded-md border bg-card px-2 py-1 text-xs">{view.label}</div>
       )}

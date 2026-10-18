@@ -680,7 +680,80 @@ export function duplicateSelectionBy(dx: number, dy: number): void {
   state().selectMany(made);
 }
 
-export type Align = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hspace" | "vspace";
+/** Prefix that marks Studio objects on the system clipboard. */
+export const CLIPBOARD_MARK = "pentool-objects:";
+type ClipEntry = { node: SceneNode; bucket: "nodes" | "paths" | "texts" };
+let pasteCount = 0;
+
+/**
+ * Clipboard text for the selection: the root objects with their parent group
+ * transforms baked in, so a paste lands where the copy was.
+ */
+export function copySelectionText(): string | null {
+  const { doc, pageId } = state();
+  const page = pageOf(doc, pageId);
+  const entries: ClipEntry[] = [];
+  for (const id of selectionRoots()) {
+    const found = findNode(page, id);
+    if (!found) continue;
+    const node = clone(found.node);
+    if (found.parent) node.transform = multiply(found.world, nodeMatrix(found.node));
+    entries.push({ node, bucket: !isScene(doc) && nodeKind(found.node, found.layer) === "text" ? "texts" : !isScene(doc) ? "paths" : "nodes" });
+  }
+  if (!entries.length) return null;
+  pasteCount = 0;
+  return CLIPBOARD_MARK + JSON.stringify({ scene: isScene(doc), entries });
+}
+
+/** Add clipboard objects to the current layer with fresh IDs and select them. */
+export function pasteSelectionText(text: string): boolean {
+  if (!text.startsWith(CLIPBOARD_MARK)) return false;
+  const { doc, pageId, layerId } = state();
+  if (!doc) return true;
+  let data: { scene: boolean; entries: ClipEntry[] };
+  try {
+    data = JSON.parse(text.slice(CLIPBOARD_MARK.length));
+  } catch {
+    state().notify("The clipboard holds damaged Studio objects.", true);
+    return true;
+  }
+  if (data.scene !== isScene(doc)) {
+    state().notify("Objects copied from a legacy (v1-v3) document cannot be pasted into a scene document, or the reverse.", true);
+    return true;
+  }
+  const layer = currentLayer(doc, pageId, layerId);
+  if (!layer || layer.locked || layer.visible === false) {
+    state().notify("Choose a visible, unlocked layer to paste into.", true);
+    return true;
+  }
+  // Each repeated paste of the same copy steps further, so copies stay visible.
+  const offset = 16 * ++pasteCount;
+  const made: string[] = [];
+  state().edit("Paste", (draft) => {
+    const target = currentLayer(draft, pageId, layerId)!;
+    const seen = collectIds(draft);
+    const scene = isScene(draft);
+    for (const { node, bucket } of data.entries) {
+      const copy = clone(node);
+      const reassign = (n: SceneNode) => {
+        let next = uid("copy");
+        while (seen.has(next)) next = uid("copy");
+        seen.add(next);
+        n.id = next;
+        children(n).forEach(reassign);
+      };
+      reassign(copy);
+      addToLayer(target, copy, bucket);
+      const list = Array.isArray(target.nodes) ? target.nodes : target[bucket === "texts" ? "texts" : "paths"]!;
+      moveFound(copy, { node: copy, layer: target, siblings: list, parent: null, world: [1, 0, 0, 1, 0, 0] }, scene, offset, offset);
+      made.push(copy.id);
+    }
+  });
+  state().selectMany(made);
+  return true;
+}
+
+export type Align ="left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hspace" | "vspace";
 
 /** Align to the selection's bounds (or the page for one object); distribute needs three. */
 export function alignSelected(how: Align): void {
