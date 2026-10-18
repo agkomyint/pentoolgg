@@ -295,7 +295,7 @@ export function Properties() {
           <Field label="Content">
             <textarea
               className={`${input} h-20 py-1`}
-              key={`${node.id}-content`}
+              key={`${node.id}-content-${String(node.content ?? "")}`}
               defaultValue={String(node.content ?? "")}
               onBlur={(e) => e.target.value !== node.content && edit((n) => void (n.content = e.target.value))}
             />
@@ -305,7 +305,7 @@ export function Properties() {
               className={input}
               list="studio-fonts"
               defaultValue={String(node.font_family ?? "")}
-              key={`${node.id}-ff`}
+              key={`${node.id}-ff-${String(node.font_family ?? "")}`}
               onBlur={(e) => e.target.value && e.target.value !== node.font_family && edit((n) => void (n.font_family = e.target.value))}
             />
           </Field>

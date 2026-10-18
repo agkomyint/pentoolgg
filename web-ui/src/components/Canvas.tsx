@@ -164,6 +164,8 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const setHoverId = useStudio((st) => st.setHover);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // Text being edited in place; `fresh` text that ends up empty is removed.
+  const [textEdit, setTextEdit] = useState<{ id: string; fresh: boolean } | null>(null);
   // Last clipboard write, for the context menu's Paste (reading the system clipboard needs permission).
   const lastCopy = useRef<string | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -518,7 +520,10 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     }
     if (tool === "text") {
       const id = addObject("text", { at: p });
-      if (id) s.setTool("select");
+      if (id) {
+        s.setTool("select");
+        setTextEdit({ id, fresh: true });
+      }
       return;
     }
     if (tool === "pen") {
@@ -722,6 +727,9 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       if (e.key === "Enter" && draft.length) {
         e.preventDefault();
         finishPen(false);
+      } else if (e.key === "Enter" && found && nodeKind(found.node, found.layer) === "text" && !found.layer.locked && useStudio.getState().selectedIds.length === 1) {
+        e.preventDefault();
+        setTextEdit({ id: found.node.id, fresh: false });
       } else if (e.key === "Escape") {
         setMenu(null);
         setDraft([]);
@@ -871,13 +879,70 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   draggable={false}
                 />
               )}
+              {textEdit && (() => {
+                const f = findNode(page, textEdit.id);
+                const b = f ? pageBounds(f) : null;
+                if (!f || !b) return null;
+                const n = f.node;
+                const m = multiply(f.world, nodeMatrix(n));
+                const k = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
+                const size = Number(n.font_size ?? 16) * k * scale;
+                const fill = typeof n.fill === "string" ? n.fill : (n.style as { fill?: { fallback?: unknown } } | undefined)?.fill?.fallback;
+                const finish = (value: string) => {
+                  setTextEdit(null);
+                  if (!value.trim() && textEdit.fresh) {
+                    s.select(textEdit.id);
+                    deleteSelected();
+                  } else if (value !== String(n.content ?? "")) updateNode(textEdit.id, (node) => void (node.content = value));
+                };
+                return (
+                  <textarea
+                    key={textEdit.id}
+                    autoFocus
+                    aria-label="Edit text"
+                    defaultValue={String(n.content ?? "")}
+                    spellCheck={false}
+                    onFocus={(e) => e.currentTarget.select()}
+                    onBlur={(e) => finish(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      // Esc or Ctrl+Enter ends editing and keeps the text, like Figma.
+                      if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    className="absolute z-10 resize-none overflow-hidden whitespace-pre rounded-sm border-0 p-0 outline outline-2 outline-[#2563eb]"
+                    style={{
+                      left: b.x * scale,
+                      top: b.y * scale,
+                      minWidth: Math.max(b.width * scale, size),
+                      minHeight: b.height * scale,
+                      fieldSizing: "content",
+                      fontSize: size,
+                      lineHeight: Number(n.line_height ?? 1.2),
+                      fontFamily: `"${String(n.font_family ?? "sans-serif")}", system-ui, sans-serif`,
+                      fontWeight: Number(n.font_weight ?? 400),
+                      fontStyle: n.italic ? "italic" : undefined,
+                      letterSpacing: Number(n.letter_spacing ?? 0) * k * scale || undefined,
+                      textAlign: (String(n.align ?? "left") as "left" | "center" | "right"),
+                      color: typeof fill === "string" ? fill : "#000",
+                      background: "rgba(255,255,255,0.92)",
+                    } as React.CSSProperties}
+                  />
+                );
+              })()}
               <svg
                 ref={svg}
                 viewBox={`0 0 ${canvas.width} ${canvas.height}`}
                 className="absolute inset-0 h-full w-full touch-none"
                 style={{ cursor, pointerEvents: paintMode ? "none" : undefined }}
                 onMouseDown={(e) => e.preventDefault()}
-                onPointerDown={onPointerDown}
+                onPointerDown={(e) => {
+                  // The overlay keeps focus on mouse down, so end text editing explicitly.
+                  if (textEdit) (document.activeElement as HTMLElement | null)?.blur();
+                  onPointerDown(e);
+                }}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={() => {
@@ -905,7 +970,9 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   const p = toPage(e);
                   const chain = hitChain(page, p.x, p.y, 4 / scale);
                   const at = chain?.findIndex((f) => f.node.id === useStudio.getState().selectedId) ?? -1;
+                  const leaf = chain?.at(-1);
                   if (chain && at >= 0 && at < chain.length - 1) s.select(chain[at + 1]!.node.id);
+                  else if (leaf && at === chain!.length - 1 && nodeKind(leaf.node, leaf.layer) === "text" && !leaf.layer.locked) setTextEdit({ id: leaf.node.id, fresh: false });
                 }}
               >
                 <LayoutOverlay px={px} />
