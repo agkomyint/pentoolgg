@@ -13,9 +13,11 @@ import { useLayout } from "@/workspaces/layout/layoutStore";
 import {
   addObject,
   addImage,
-  moveNodeBy,
+  moveNodesBy,
   updateNode,
-  transformNodePage,
+  transformNodesPage,
+  duplicateSelectionBy,
+  selectionRoots,
   deleteSelected,
   duplicateSelected,
   groupSelected,
@@ -32,6 +34,8 @@ import {
   pageBounds,
   pageOf,
   penPathData,
+  topLevelIn,
+  unite,
   type Matrix,
   type PenPoint,
   type Rect,
@@ -42,8 +46,9 @@ type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
 type Drag =
-  | { mode: "move"; start: Point; id: string }
-  | { mode: "resize"; start: Point; id: string; handle: Handle; box: Rect }
+  | { mode: "move"; start: Point; ids: string[] }
+  | { mode: "resize"; start: Point; ids: string[]; handle: Handle; box: Rect }
+  | { mode: "marquee"; start: Point; additive: boolean }
   | { mode: "create"; start: Point }
   | { mode: "pen"; index: number; start: Point };
 
@@ -110,6 +115,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const [hover, setHover] = useState<Point | null>(null);
   const [ghost, setGhost] = useState<Rect | null>(null);
   const [live, setLive] = useState<Matrix | null>(null);
+  const [marquee, setMarquee] = useState<Rect | null>(null);
   const drag = useRef<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const scrollPosition = useRef({ left: 0, top: 0 });
@@ -151,6 +157,18 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   }, [scale, active, setScale]);
   const found = useMemo(() => findNode(page, selectedId), [page, selectedId]);
   const selectedBox = useMemo(() => (found ? pageBounds(found) : null), [found]);
+  const selectedIds = s.selectedIds;
+  // Handles wrap every selected object; `selectedBox` stays the primary object's box.
+  const selectionBox = useMemo(() => {
+    if (selectedIds.length < 2) return selectedBox;
+    let union: Rect | null = null;
+    for (const id of selectedIds) {
+      const f = findNode(page, id);
+      const b = f ? pageBounds(f) : null;
+      if (b) union = unite(union, b);
+    }
+    return union;
+  }, [selectedIds, selectedBox, page]);
   const selectedPackagePanel = s.selectedPackagePanel;
   const selectedDielineNode = s.workspaceId === "3d" && found?.node.kind === "scene3d" && typeof found.node.dieline === "string" ? found.node : null;
 
@@ -359,8 +377,8 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     if (tool !== "pen" && draft.length) finishPen(false);
   }, [tool, draft.length, finishPen]);
 
-  const commitMove = moveNodeBy;
-  const commitResize = transformNodePage;
+  const commitMove = moveNodesBy;
+  const commitResize = transformNodesPage;
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (beginPan(e)) return;
@@ -402,8 +420,8 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     svg.current!.setPointerCapture(e.pointerId);
     if (tool === "select") {
       const handle = target.dataset.handle as Handle | undefined;
-      if (handle && found && selectedBox) {
-        drag.current = { mode: "resize", start: p, id: found.node.id, handle, box: selectedBox };
+      if (handle && found && selectionBox) {
+        drag.current = { mode: "resize", start: p, ids: selectionRoots(), handle, box: selectionBox };
         clearSprite();
         return;
       }
@@ -413,15 +431,19 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         s.select(hit.node.id, "toggle");
         return;
       }
-      s.select(hit ? hit.node.id : null);
+      // Pressing on an already selected object drags the whole selection.
+      if (!hit || !useStudio.getState().selectedIds.includes(hit.node.id)) s.select(hit ? hit.node.id : null);
       const hitPanelId = hit?.node.dieline_panel_id ?? hit?.node.dieline_panel_label;
       if (typeof hitPanelId === "string") {
         useStudio.getState().setSelectedPackagePanel(hitPanelId);
       }
       if (hit) {
-        drag.current = { mode: "move", start: p, id: hit.node.id };
+        const ids = selectionRoots();
+        drag.current = { mode: "move", start: p, ids };
         clearSprite();
-        startSprite(hit.node.id);
+        if (ids.length === 1) startSprite(ids[0]!);
+      } else {
+        drag.current = { mode: "marquee", start: p, additive: e.shiftKey };
       }
       return;
     }
@@ -458,8 +480,17 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       if (tool === "pen" && draft.length) setHover(p);
       return;
     }
-    if (d.mode === "move") {
-      setLive([1, 0, 0, 1, p.x - d.start.x, p.y - d.start.y]);
+    if (d.mode === "marquee") {
+      setMarquee({ x: Math.min(p.x, d.start.x), y: Math.min(p.y, d.start.y), width: Math.abs(p.x - d.start.x), height: Math.abs(p.y - d.start.y) });
+    } else if (d.mode === "move") {
+      let dx = p.x - d.start.x;
+      let dy = p.y - d.start.y;
+      // Shift keeps the move on one axis.
+      if (e.shiftKey) {
+        if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
+      setLive([1, 0, 0, 1, dx, dy]);
     } else if (d.mode === "resize") {
       const nb = resizedBox(d.box, d.handle, p, e.shiftKey);
       const sx = d.box.width ? nb.width / d.box.width : 1;
@@ -498,20 +529,37 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     }
     if (!d) return;
     const p = toPage(e);
-    if (d.mode === "move") {
-      const dx = p.x - d.start.x;
-      const dy = p.y - d.start.y;
+    if (d.mode === "marquee") {
+      const r = marquee;
+      setMarquee(null);
+      if (!r || (r.width * scale < 3 && r.height * scale < 3)) {
+        if (!d.additive) s.select(null);
+        return;
+      }
+      const touched = topLevelIn(page, r);
+      const current = useStudio.getState().selectedIds;
+      s.selectMany(d.additive ? [...current, ...touched.filter((id) => !current.includes(id))] : touched);
+    } else if (d.mode === "move") {
+      const dx = live ? live[4] : 0;
+      const dy = live ? live[5] : 0;
       setLive(null);
       if (Math.hypot(dx, dy) * scale >= 2) {
-        setRest({ x: dx, y: dy });
-        commitMove(d.id, dx, dy);
+        // Alt+drag leaves the originals and moves copies, as in Figma and Illustrator.
+        if (e.altKey) {
+          clearSprite();
+          duplicateSelectionBy(dx, dy);
+        } else {
+          if (d.ids.length === 1) setRest({ x: dx, y: dy });
+          else clearSprite();
+          commitMove(d.ids, dx, dy);
+        }
       } else {
         clearSprite();
       }
     } else if (d.mode === "resize") {
       const m = live;
       setLive(null);
-      if (m) commitResize(d.id, m);
+      if (m) commitResize(d.ids, m);
     } else if (d.mode === "create") {
       const r = ghost;
       setGhost(null);
@@ -612,7 +660,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        commitMove(selectedId, dx, dy);
+        commitMove(selectionRoots(), dx, dy);
       } else if (!e.altKey && !e.shiftKey) {
         const map: Record<string, Parameters<typeof s.setTool>[0]> = { v: "select", p: "pen", r: "rect", o: "ellipse", l: "line", t: "text", h: "hand" };
         const paint: Record<string, RasterTool> = { b: "brush", e: "eraser", m: "marquee", w: "wand", s: "clone", j: "heal", q: "quickmask" };
@@ -671,12 +719,12 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const src = view.kind === "image" ? view.url : url;
   const px = 1 / scale;
   const liveBox = useMemo(() => {
-    if (!selectedBox) return null;
-    if (!live) return selectedBox;
-    const [x0, y0] = apply(live, selectedBox.x, selectedBox.y);
-    const [x1, y1] = apply(live, selectedBox.x + selectedBox.width, selectedBox.y + selectedBox.height);
+    if (!selectionBox) return null;
+    if (!live) return selectionBox;
+    const [x0, y0] = apply(live, selectionBox.x, selectionBox.y);
+    const [x1, y1] = apply(live, selectionBox.x + selectionBox.width, selectionBox.y + selectionBox.height);
     return { x: Math.min(x0, x1), y: Math.min(y0, y1), width: Math.abs(x1 - x0), height: Math.abs(y1 - y0) };
-  }, [selectedBox, live]);
+  }, [selectionBox, live]);
   const cursor = tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
   const look = s.look;
 
@@ -732,6 +780,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   clearSprite();
                   setLive(null);
                   setGhost(null);
+                  setMarquee(null);
                 }}
                 onDoubleClick={() => {
                   if (tool === "pen") finishPen(false);
@@ -745,11 +794,14 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                     <image href={`data:image/png;base64,${faceHighlight.png}`} x={0} y={0} width={Number(found.node.width)} height={Number(found.node.height)} preserveAspectRatio="none" />
                   </g>;
                 })()}
-                {tool === "select" && s.selectedIds.length > 1 && s.selectedIds.map((id) => {
-                  const f = id === selectedId ? null : findNode(page, id);
+                {tool === "select" && selectedIds.length > 1 && selectedIds.map((id) => {
+                  const f = findNode(page, id);
                   const b = f ? pageBounds(f) : null;
-                  return b && <rect key={id} {...b} fill="none" stroke="#2563eb" strokeWidth={px} pointerEvents="none" />;
+                  return b && <rect key={id} {...b} transform={live ? `matrix(${live.join(" ")})` : undefined} fill="none" stroke="#2563eb" strokeWidth={px} strokeOpacity={0.6} pointerEvents="none" />;
                 })}
+                {marquee && (
+                  <rect {...marquee} fill="#2563eb" fillOpacity={0.08} stroke="#2563eb" strokeWidth={px} pointerEvents="none" />
+                )}
                 {liveBox && tool === "select" && (
                   <g>
                     <rect {...liveBox} fill="none" stroke="#2563eb" strokeWidth={px * 1.5} pointerEvents="none" />

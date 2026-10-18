@@ -335,6 +335,28 @@ export function hitTest(page: Page | undefined, x: number, y: number): Found | n
   return best;
 }
 
+/** Top-level objects on visible, unlocked layers whose page bounds touch a rectangle (drag selection). */
+export function topLevelIn(page: Page | undefined, r: Rect): string[] {
+  const ids: string[] = [];
+  const touches = (b: Rect | null) => !!b && b.x <= r.x + r.width && b.x + b.width >= r.x && b.y <= r.y + r.height && b.y + b.height >= r.y;
+  for (const layer of page?.layers ?? []) {
+    if (layer.visible === false || layer.locked) continue;
+    if (Array.isArray(layer.nodes)) {
+      for (const node of layer.nodes) {
+        if (node.visible !== false && touches(pageBounds({ node, layer, siblings: layer.nodes, parent: null, world: IDENTITY }))) ids.push(node.id);
+      }
+    } else {
+      for (const key of ["paths", "texts"] as const) {
+        for (const node of layer[key] ?? []) {
+          const shape = key === "texts" ? Object.assign({}, node, { kind: "text" }) : node;
+          if (touches(pageBounds({ node: shape, layer, siblings: layer[key]!, parent: null, world: IDENTITY }))) ids.push(node.id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
 // ---- path construction ----
 
 export type PenPoint = { x: number; y: number; in?: { x: number; y: number }; out?: { x: number; y: number } };

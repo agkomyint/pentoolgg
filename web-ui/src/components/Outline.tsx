@@ -10,9 +10,10 @@ import { Button } from "@/components/ui/button";
 import { ARTWORK_SOURCE_DRAG_TYPE } from "@/lib/artworkDrag";
 
 function Row({ node, depth, layerId, locked }: { node: SceneNode; depth: number; layerId: string; locked: boolean }) {
-  const { selectedId, select, doc, pageId } = useStudio();
+  const { selectedIds, select, doc, pageId } = useStudio();
+  const chosen = selectedIds.includes(node.id);
   const [open, setOpen] = useState(depth < 1);
-  const pick = () => { select(node.id); if (node.kind === "raster") usePaint.getState().set({ layerId: node.id }); };
+  const pick = (toggle = false) => { select(node.id, toggle ? "toggle" : "replace"); if (node.kind === "raster") usePaint.getState().set({ layerId: node.id }); };
   const kids = children(node);
   const layer = pageOf(doc, pageId)?.layers?.find((l) => l.id === layerId);
   const kind = nodeKind(node, layer);
@@ -21,11 +22,11 @@ function Row({ node, depth, layerId, locked }: { node: SceneNode; depth: number;
       <div
         className={cn(
           "flex cursor-default items-center gap-1 rounded px-1 py-0.5 hover:bg-accent",
-          selectedId === node.id && "bg-accent font-medium",
+          chosen && "bg-accent font-medium",
           locked && "opacity-60",
         )}
         style={{ paddingLeft: depth * 12 + 4 }}
-        onClick={pick}
+        onClick={(event) => pick(event.shiftKey || event.ctrlKey || event.metaKey)}
       >
         {kids.length > 0 ? (
           <button
@@ -40,7 +41,7 @@ function Row({ node, depth, layerId, locked }: { node: SceneNode; depth: number;
         ) : (
           <span className="w-3" />
         )}
-        <button type="button" className="min-w-0 flex-1 truncate text-left" aria-pressed={selectedId === node.id} onClick={(event) => { event.stopPropagation(); pick(); }}>{typeof node.name === "string" && node.name ? node.name : node.id}</button>
+        <button type="button" className="min-w-0 flex-1 truncate text-left" aria-pressed={chosen} onClick={(event) => { event.stopPropagation(); pick(event.shiftKey || event.ctrlKey || event.metaKey); }}>{typeof node.name === "string" && node.name ? node.name : node.id}</button>
         <button
           type="button"
           draggable

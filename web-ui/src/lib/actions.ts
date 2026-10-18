@@ -18,8 +18,10 @@ import {
   layerNodes,
   makeNode,
   nodeKind,
+  pageBounds as pageBoundsOf,
   pageOf,
   uid,
+  unite,
   type Found,
   type Tool,
 } from "@/lib/model";
@@ -80,6 +82,7 @@ export function deleteSelected(): void {
 export function duplicateSelected(): void {
   const { selectedId, pageId, doc } = state();
   if (!selectedId || !doc) return;
+  if (selectionRoots().length > 1) return duplicateSelectionBy(16, 16);
   const next = freshId(doc, "copy");
   state().edit("Duplicate", (draft) => {
     const found = findNode(pageOf(draft, pageId), selectedId);
@@ -131,11 +134,22 @@ export function groupSelected(): void {
     return;
   }
   const id = freshId(doc, "group");
+  const ids = selectionRoots();
+  // Grouping keeps stacking order, so every member must share one parent list.
+  const page = pageOf(doc, pageId);
+  const lists = new Set(ids.map((x) => findNode(page, x)?.siblings));
+  if (lists.size > 1) {
+    state().notify("Objects in different layers or groups cannot be grouped together. Select siblings.", true);
+    return;
+  }
   state().edit("Group", (draft) => {
-    const found = findNode(pageOf(draft, pageId), selectedId);
-    if (!found || found.layer.locked) return;
-    const index = found.siblings.indexOf(found.node);
-    found.siblings.splice(index, 1, { kind: "group", id, transform: [1, 0, 0, 1, 0, 0], children: [found.node] });
+    const found = ids.map((x) => findNode(pageOf(draft, pageId), x)).filter((f): f is Found => !!f && !f.layer.locked);
+    const list = found[0]?.siblings;
+    if (!list) return;
+    const members = list.filter((n) => found.some((f) => f.node === n));
+    const top = list.indexOf(members.at(-1)!);
+    list.splice(top, 1, { kind: "group", id, transform: [1, 0, 0, 1, 0, 0], children: members });
+    for (const m of members.slice(0, -1)) list.splice(list.indexOf(m), 1);
   });
   state().select(id);
 }
@@ -545,46 +559,175 @@ export function nodeLabel(node: SceneNode, layer?: Parameters<typeof nodeKind>[1
   return `${kind} ${typeof node.name === "string" ? node.name : node.id}`;
 }
 
+function moveFound(node: SceneNode, f: Found, scene: boolean, dx: number, dy: number): void {
+  const kind = nodeKind(node, f.layer);
+  if (!scene && !Array.isArray(node.transform) && kind === "path" && typeof node.d === "string") {
+    node.d = affinePath(node.d, [1, 0, 0, 1, dx, dy]);
+    return;
+  }
+  if (!scene && kind === "text" && !Array.isArray(node.transform)) {
+    node.x = Number(node.x ?? 0) + dx;
+    node.y = Number(node.y ?? 0) + dy;
+    return;
+  }
+  const inv = invert(f.world);
+  const [ox, oy] = inv ? apply(inv, 0, 0) : [0, 0];
+  const [px, py] = inv ? apply(inv, dx, dy) : [dx, dy];
+  const m = nodeMatrix(node);
+  node.transform = [m[0], m[1], m[2], m[3], m[4] + (px - ox), m[5] + (py - oy)];
+}
+
+function transformFound(node: SceneNode, f: Found, scene: boolean, page: Matrix): void {
+  const kind = nodeKind(node, f.layer);
+  const plain = page[1] === 0 && page[2] === 0;
+  if (!scene && !Array.isArray(node.transform) && plain) {
+    if (kind === "path" && typeof node.d === "string") {
+      node.d = affinePath(node.d, page);
+      return;
+    }
+    if (kind === "text") {
+      node.x = Number(node.x ?? 0) * page[0] + page[4];
+      node.y = Number(node.y ?? 0) * page[3] + page[5];
+      node.font_size = Math.max(1, Number(node.font_size ?? 16) * Math.abs(page[3]));
+      return;
+    }
+  }
+  const inv = invert(f.world);
+  if (!inv) return;
+  node.transform = multiply(multiply(inv, multiply(page, f.world)), nodeMatrix(node));
+}
+
+/** Selected IDs without any object whose ancestor group is also selected (so nothing moves twice). */
+export function selectionRoots(): string[] {
+  const { doc, pageId, selectedId, selectedIds } = state();
+  const ids = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+  const page = pageOf(doc, pageId);
+  const inside = new Set<string>();
+  for (const id of ids) {
+    const found = findNode(page, id);
+    if (found) collectChildIds(found.node, inside);
+  }
+  return ids.filter((id) => !inside.has(id));
+}
+
+function collectChildIds(node: SceneNode, into: Set<string>): void {
+  for (const kid of children(node)) {
+    into.add(kid.id);
+    collectChildIds(kid, into);
+  }
+}
+
 /** Move a node by a page-space delta, in whatever representation it uses. */
 export function moveNodeBy(id: string, dx: number, dy: number): void {
-  updateNode(id, (node, f, scene) => {
-    const kind = nodeKind(node, f.layer);
-    if (!scene && !Array.isArray(node.transform) && kind === "path" && typeof node.d === "string") {
-      node.d = affinePath(node.d, [1, 0, 0, 1, dx, dy]);
-      return;
+  moveNodesBy([id], dx, dy);
+}
+
+/** Move several nodes by one page-space delta as a single undo step. */
+export function moveNodesBy(ids: string[], dx: number, dy: number): void {
+  const { pageId } = state();
+  state().edit("Move", (draft) => {
+    const scene = isScene(draft);
+    for (const id of ids) {
+      const found = findNode(pageOf(draft, pageId), id);
+      if (found && !found.layer.locked) moveFound(found.node, found, scene, dx, dy);
     }
-    if (!scene && kind === "text" && !Array.isArray(node.transform)) {
-      node.x = Number(node.x ?? 0) + dx;
-      node.y = Number(node.y ?? 0) + dy;
-      return;
-    }
-    const inv = invert(f.world);
-    const [ox, oy] = inv ? apply(inv, 0, 0) : [0, 0];
-    const [px, py] = inv ? apply(inv, dx, dy) : [dx, dy];
-    const m = nodeMatrix(node);
-    node.transform = [m[0], m[1], m[2], m[3], m[4] + (px - ox), m[5] + (py - oy)];
   });
 }
 
 /** Apply a page-space matrix (scale, rotate, translate) to one node. */
 export function transformNodePage(id: string, page: Matrix): void {
-  updateNode(id, (node, f, scene) => {
-    const kind = nodeKind(node, f.layer);
-    const plain = page[1] === 0 && page[2] === 0;
-    if (!scene && !Array.isArray(node.transform) && plain) {
-      if (kind === "path" && typeof node.d === "string") {
-        node.d = affinePath(node.d, page);
-        return;
-      }
-      if (kind === "text") {
-        node.x = Number(node.x ?? 0) * page[0] + page[4];
-        node.y = Number(node.y ?? 0) * page[3] + page[5];
-        node.font_size = Math.max(1, Number(node.font_size ?? 16) * Math.abs(page[3]));
-        return;
-      }
+  transformNodesPage([id], page);
+}
+
+/** Apply one page-space matrix to several nodes as a single undo step. */
+export function transformNodesPage(ids: string[], page: Matrix): void {
+  const { pageId } = state();
+  state().edit("Transform", (draft) => {
+    const scene = isScene(draft);
+    for (const id of ids) {
+      const found = findNode(pageOf(draft, pageId), id);
+      if (found && !found.layer.locked) transformFound(found.node, found, scene, page);
     }
-    const inv = invert(f.world);
-    if (!inv) return;
-    node.transform = multiply(multiply(inv, multiply(page, f.world)), nodeMatrix(node));
+  });
+}
+
+/** Copy the selection in place, move the copies by a delta, and select them (Alt+drag). */
+export function duplicateSelectionBy(dx: number, dy: number): void {
+  const { doc, pageId } = state();
+  const ids = selectionRoots();
+  if (!doc || !ids.length) return;
+  const made: string[] = [];
+  state().edit("Duplicate", (draft) => {
+    const seen = collectIds(draft);
+    const scene = isScene(draft);
+    for (const id of ids) {
+      const found = findNode(pageOf(draft, pageId), id);
+      if (!found || found.layer.locked) continue;
+      const copy = clone(found.node);
+      const reassign = (node: SceneNode) => {
+        let next = uid("copy");
+        while (seen.has(next)) next = uid("copy");
+        seen.add(next);
+        node.id = next;
+        children(node).forEach(reassign);
+      };
+      reassign(copy);
+      found.siblings.splice(found.siblings.indexOf(found.node) + 1, 0, copy);
+      moveFound(copy, { ...found, node: copy }, scene, dx, dy);
+      made.push(copy.id);
+    }
+  });
+  state().selectMany(made);
+}
+
+export type Align = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hspace" | "vspace";
+
+/** Align to the selection's bounds (or the page for one object); distribute needs three. */
+export function alignSelected(how: Align): void {
+  const { doc, pageId } = state();
+  const page = pageOf(doc, pageId);
+  const items = selectionRoots()
+    .map((id) => findNode(page, id))
+    .map((f) => (f ? { id: f.node.id, box: pageBoundsOf(f) } : null))
+    .filter((x): x is { id: string; box: NonNullable<ReturnType<typeof pageBoundsOf>> } => !!x?.box);
+  if (!page || !items.length) return;
+  const vertical = how === "top" || how === "vcenter" || how === "bottom" || how === "vspace";
+  const deltas = new Map<string, number>();
+  if (how === "hspace" || how === "vspace") {
+    if (items.length < 3) return state().notify("Distribute needs three or more objects.", true);
+    const pos = (b: (typeof items)[number]["box"]) => (vertical ? b.y : b.x);
+    const size = (b: (typeof items)[number]["box"]) => (vertical ? b.height : b.width);
+    const sorted = [...items].sort((a, b) => pos(a.box) - pos(b.box));
+    const first = sorted[0]!.box;
+    const last = sorted.at(-1)!.box;
+    const total = sorted.reduce((sum, item) => sum + size(item.box), 0);
+    const gap = (pos(last) + size(last) - pos(first) - total) / (sorted.length - 1);
+    let at = pos(first);
+    for (const item of sorted) {
+      deltas.set(item.id, at - pos(item.box));
+      at += size(item.box) + gap;
+    }
+  } else {
+    const area = items.length > 1
+      ? items.reduce((u, i) => unite(u, i.box), null as ReturnType<typeof unite> | null)!
+      : { x: 0, y: 0, width: Number(page.canvas?.width ?? 0), height: Number(page.canvas?.height ?? 0) };
+    for (const { id, box } of items) {
+      const d = {
+        left: area.x - box.x,
+        hcenter: area.x + area.width / 2 - (box.x + box.width / 2),
+        right: area.x + area.width - (box.x + box.width),
+        top: area.y - box.y,
+        vcenter: area.y + area.height / 2 - (box.y + box.height / 2),
+        bottom: area.y + area.height - (box.y + box.height),
+      }[how];
+      deltas.set(id, d);
+    }
+  }
+  state().edit("Align", (draft) => {
+    const scene = isScene(draft);
+    for (const [id, d] of deltas) {
+      const found = findNode(pageOf(draft, pageId), id);
+      if (found && !found.layer.locked && d) moveFound(found.node, found, scene, vertical ? 0 : d, vertical ? d : 0);
+    }
   });
 }

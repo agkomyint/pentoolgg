@@ -1,8 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, Copy, Group, Trash2, Ungroup } from "lucide-react";
+import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalSpaceAround,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalSpaceAround,
+  ArrowDown,
+  ArrowUp,
+  ChevronsDown,
+  ChevronsUp,
+  Copy,
+  Group,
+  Trash2,
+  Ungroup,
+} from "lucide-react";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import {
+  alignSelected,
   deleteSelected,
   duplicateSelected,
   groupSelected,
@@ -77,8 +95,40 @@ function Colour({ label, value, onCommit, allowNone }: { label: string; value: u
   );
 }
 
+const ALIGN = [
+  ["left", "Align left", AlignStartVertical],
+  ["hcenter", "Align horizontal centres", AlignCenterVertical],
+  ["right", "Align right", AlignEndVertical],
+  ["top", "Align top", AlignStartHorizontal],
+  ["vcenter", "Align vertical centres", AlignCenterHorizontal],
+  ["bottom", "Align bottom", AlignEndHorizontal],
+  ["hspace", "Distribute horizontally", AlignHorizontalSpaceAround],
+  ["vspace", "Distribute vertically", AlignVerticalSpaceAround],
+] as const;
+
+/** Align and distribute; one object aligns to the page. */
+function AlignBar({ count }: { count: number }) {
+  return (
+    <div className="flex flex-wrap gap-0.5" role="group" aria-label="Align">
+      {ALIGN.map(([how, label, Icon]) => (
+        <Button
+          key={how}
+          variant="ghost"
+          size="icon"
+          aria-label={label}
+          title={count < 2 && !how.endsWith("space") ? `${label} (to page)` : label}
+          disabled={how.endsWith("space") && count < 3}
+          onClick={() => alignSelected(how)}
+        >
+          <Icon size={14} />
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 export function Properties() {
-  const { doc, pageId, selectedId } = useStudio();
+  const { doc, pageId, selectedId, selectedIds } = useStudio();
   const page = pageOf(doc, pageId);
   const found = useMemo(() => findNode(page, selectedId), [page, selectedId]);
   const [json, setJson] = useState("");
@@ -86,7 +136,27 @@ export function Properties() {
   useEffect(() => { if (jsonOpen) setJson(found ? JSON.stringify(found.node, null, 2) : ""); }, [found?.node, jsonOpen]);
 
   if (!doc || !found) {
-    return <p className="text-muted-foreground">Select an object on the canvas or in Layers to edit it.</p>;
+    return <p className="text-muted-foreground">Select an object on the canvas or in Layers to edit it. Shift-click or drag a box to select several.</p>;
+  }
+  if (selectedIds.length > 1) {
+    return (
+      <div className="space-y-3">
+        <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-medium">{selectedIds.length} objects</span>
+        <AlignBar count={selectedIds.length} />
+        <div className="flex flex-wrap gap-1">
+          <Button variant="outline" size="sm" onClick={duplicateSelected}>
+            <Copy size={12} /> Duplicate
+          </Button>
+          <Button variant="outline" size="sm" onClick={deleteSelected}>
+            <Trash2 size={12} /> Delete
+          </Button>
+          <Button variant="outline" size="sm" onClick={groupSelected} disabled={!isScene(doc)}>
+            <Group size={12} /> Group
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">Drag any selected object to move them together; Alt+drag copies.</p>
+      </div>
+    );
   }
   const { node, layer } = found;
   const scene = isScene(doc);
@@ -137,6 +207,8 @@ export function Properties() {
           </Button>
         )}
       </div>
+
+      <AlignBar count={1} />
 
       <Field label="Name">
         <input
