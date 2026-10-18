@@ -33,6 +33,9 @@ CLI, or dependency changes; Studio edits go through the existing server routes.
 - Bursts of previews (page strip, thumbnails, zoom) no longer fail with
   `[limit-exceeded] preview workers busy`: Studio keeps its requests under the
   server's worker limit and retries briefly when the workers are busy.
+- The `examples/v015-glass-crystal` model and material files keep their
+  line endings in Windows checkouts, so the shipped example's pinned SHA-256
+  matches and it exports on Windows.
 
 ## Notes
 

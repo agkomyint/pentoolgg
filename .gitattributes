@@ -7,3 +7,6 @@ examples/raster-paint-showcase.pen -text
 docs/fixtures/photo-* -text
 # Print conformance fixtures and manifest are pinned byte-for-byte.
 docs/fixtures/print-* -text
+# Scene3d model assets are pinned by SHA-256 in the documents that reference them.
+*.obj -text
+*.mtl -text
