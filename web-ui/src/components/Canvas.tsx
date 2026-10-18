@@ -25,6 +25,8 @@ import {
   groupSelected,
   ungroupSelected,
   reorderSelected,
+  selectAllOnPage,
+  canvasView,
 } from "@/lib/actions";
 import {
   apply,
@@ -354,6 +356,17 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     anchor.current = { px: selectedBox.x + selectedBox.width / 2, py: selectedBox.y + selectedBox.height / 2, cx: el.clientWidth / 2, cy: el.clientHeight / 2 };
     useStudio.getState().setZoom(target / fit);
   }, [selectedBox, fit, zoomToFit]);
+  // Let the command palette and menus outside the canvas drive the view.
+  useEffect(() => {
+    if (!active) return;
+    canvasView.fit = zoomToFit;
+    canvasView.actual = zoomToActual;
+    canvasView.selection = zoomToSelection;
+    canvasView.zoomBy = (factor) => zoomAt(useStudio.getState().zoom * factor);
+    return () => {
+      canvasView.fit = canvasView.actual = canvasView.selection = canvasView.zoomBy = undefined;
+    };
+  }, [active, zoomAt, zoomToFit, zoomToActual, zoomToSelection]);
 
   // Ctrl/Cmd+wheel and trackpad pinch zoom at the cursor. React's wheel
   // handler is passive, so the browser would zoom the whole page instead.
@@ -684,12 +697,8 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
             duplicateSelected();
           }
         } else if (key === "a" && !useStudio.getState().paintMode) {
-          // Select every object on visible, unlocked layers of this page.
           e.preventDefault();
-          const ids = (page?.layers ?? [])
-            .filter((l) => l.visible !== false && !l.locked)
-            .flatMap((l) => (Array.isArray(l.nodes) ? l.nodes : [...(l.paths ?? []), ...(l.texts ?? [])]).map((n) => n.id));
-          s.selectMany(ids);
+          selectAllOnPage();
         } else if (key === "g") {
           e.preventDefault();
           if (e.shiftKey) ungroupSelected();
@@ -1072,7 +1081,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
           { label: "Group", keys: "Ctrl+G", run: groupSelected, disabled: !any || !isScene(doc) },
           { label: "Ungroup", keys: "Ctrl+Shift+G", run: ungroupSelected, disabled: !group || many },
           "-",
-          { label: "Select all", keys: "Ctrl+A", run: () => s.selectMany(topLevelIn(page, { x: -1e9, y: -1e9, width: 2e9, height: 2e9 })) },
+          { label: "Select all", keys: "Ctrl+A", run: selectAllOnPage },
           { label: "Zoom to selection", keys: "Shift+2", run: zoomToSelection, disabled: !any },
           { label: "Fit page", keys: "Shift+1", run: zoomToFit },
         ];

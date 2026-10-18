@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Box, Brush, Camera, Download, FilePlus2, FolderOpen, Home, Image, Layers3, MessagesSquare, Moon, Newspaper, Palette, Printer, Puzzle, Redo2, RefreshCw, Save, Shapes, SlidersHorizontal, Sun, Undo2, Users, PanelRightClose, PanelRightOpen, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Box, Brush, Camera, Download, FilePlus2, FolderOpen, Home, Image, Layers3, MessagesSquare, Moon, Newspaper, Search, Keyboard, Palette, Printer, Puzzle, Redo2, RefreshCw, Save, Shapes, SlidersHorizontal, Sun, Undo2, Users, PanelRightClose, PanelRightOpen, MoreHorizontal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LATEST_FORMAT, collectIds, useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,8 @@ import { LayoutPanel } from "@/workspaces/LayoutPanel";
 import { DesignSystemsPanel } from "@/workspaces/DesignSystemsPanel";
 import { StatsPanel } from "@/workspaces/StatsPanel";
 import { CollabPanel } from "@/workspaces/CollabPanel";
-import { ExtensionsPanel, ExtensionPalette } from "@/workspaces/ExtensionsPanel";
+import { ExtensionsPanel } from "@/workspaces/ExtensionsPanel";
+import { CommandPalette, ShortcutSheet } from "@/components/CommandPalette";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
 import { PhotoStage } from "@/workspaces/PhotoStage";
 import { RasterPanel } from "@/workspaces/RasterPanel";
@@ -189,6 +190,8 @@ export default function App() {
   const [mobilePanelsOpen, setMobilePanelsOpen] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [panelsCollapsed, setPanelsCollapsed] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [sheet, setSheet] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
   useEffect(() => {
     const query = window.matchMedia("(max-width: 1023px)");
@@ -209,11 +212,23 @@ export default function App() {
   }, [s.dark]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Ctrl/Cmd+K works everywhere, even while typing in a field.
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSheet(false);
+        setPalette((open) => !open);
+        return;
+      }
       const target = event.target as HTMLElement;
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
       const key = event.key.toLowerCase();
       const state = useStudio.getState();
+      if (event.key === "?" && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        setSheet((open) => !open);
+        return;
+      }
       if (event.ctrlKey || event.metaKey) {
         if (key === "s") {
           event.preventDefault();
@@ -254,6 +269,13 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, []);
 
+  // The palette opens panels the same way the rail does.
+  const openPanel = (id: string) => {
+    if (id === "paint" && isScene(s.doc)) startPainting(usePaint.getState().tool);
+    else s.setWorkspace(id);
+    if (narrow) setMobilePanelsOpen(true);
+    else setPanelsCollapsed(false);
+  };
   const confirmDiscard = () => !s.dirty || window.confirm("Discard unsaved changes?");
   const pages = pagesOf(s.doc);
   const pageIndex = pages.findIndex((p) => p.id === s.pageId);
@@ -300,7 +322,8 @@ export default function App() {
         />
       ) : (
       <div className="studio-shell flex h-full flex-col bg-background text-foreground">
-        <ExtensionPalette />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} openPanel={openPanel} panels={PANELS} />
+        <ShortcutSheet open={sheet} onClose={() => setSheet(false)} />
         <header className="studio-appbar flex h-12 shrink-0 items-center gap-2 border-b bg-card px-2 sm:px-3">
           <Tip label="Start screen">
             <Button variant="ghost" size="icon" className="size-10 shrink-0" aria-label="Start screen" onClick={() => setShowWelcome(true)}>
@@ -325,6 +348,11 @@ export default function App() {
             <Tip label="New document"><Button variant="ghost" size="icon" className="size-9" aria-label="New document" onClick={() => confirmDiscard() && s.newDoc()}><FilePlus2 size={15} /></Button></Tip>
             <Tip label="Open .pen file"><Button variant="ghost" size="icon" className="size-9" aria-label="Open .pen file" onClick={() => openInput.current?.click()}><FolderOpen size={15} /></Button></Tip>
           </div>
+          <Tip label="Search commands (Ctrl+K)">
+            <Button variant="outline" size="sm" className="hidden h-9 gap-2 px-2 text-xs text-muted-foreground lg:inline-flex" aria-label="Search commands" onClick={() => setPalette(true)}>
+              <Search size={14} aria-hidden="true" /><span>Search</span><kbd className="text-[10px]">Ctrl K</kbd>
+            </Button>
+          </Tip>
           <span className="mx-1 hidden h-6 w-px bg-border sm:block" />
           <Tip label="Undo"><Button variant="ghost" size="icon" className="size-9" aria-label="Undo" onClick={s.undo} disabled={!s.past.length}><Undo2 size={15} /></Button></Tip>
           <Tip label="Redo"><Button variant="ghost" size="icon" className="size-9" aria-label="Redo" onClick={s.redo} disabled={!s.future.length}><Redo2 size={15} /></Button></Tip>
@@ -419,6 +447,7 @@ export default function App() {
               {render.last.source === "wasm" ? "wasm" : "server"} {render.last.ms} ms
             </span>
           )}
+          <button type="button" className="hidden shrink-0 items-center gap-1 hover:text-foreground md:inline-flex" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setSheet(true)}><Keyboard size={12} aria-hidden="true" />?</button>
           {stage === "canvas" && <span className="tabular-nums" title="Zoom (Ctrl+0 fits, Ctrl+1 is 100%)">{Math.round(s.scale * 100)}%</span>}
           <span className="tabular-nums">{pages.length ? `Page ${pageIndex + 1} of ${pages.length}` : "No pages"}</span>
         </footer>

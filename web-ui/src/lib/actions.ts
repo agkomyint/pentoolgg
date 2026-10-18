@@ -753,7 +753,7 @@ export function pasteSelectionText(text: string): boolean {
   return true;
 }
 
-export type Align ="left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hspace" | "vspace";
+export type Align = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hspace" | "vspace";
 
 /** Align to the selection's bounds (or the page for one object); distribute needs three. */
 export function alignSelected(how: Align): void {
@@ -804,3 +804,15 @@ export function alignSelected(how: Align): void {
     }
   });
 }
+
+/** Select every object on the visible, unlocked layers of the current page. */
+export function selectAllOnPage(): void {
+  const { doc, pageId } = state();
+  const ids = (pageOf(doc, pageId)?.layers ?? [])
+    .filter((l) => l.visible !== false && !l.locked)
+    .flatMap((l) => (Array.isArray(l.nodes) ? l.nodes : [...(l.paths ?? []), ...(l.texts ?? [])]).map((n) => n.id));
+  state().selectMany(ids);
+}
+
+/** View commands the canvas registers while it is mounted, for menus and the command palette. */
+export const canvasView: { fit?: () => void; actual?: () => void; selection?: () => void; zoomBy?: (factor: number) => void } = {};
