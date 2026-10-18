@@ -293,6 +293,18 @@ export function removePage(id: string): void {
   state().setPage(doc.pages[index === 0 ? 1 : index - 1]!.id);
 }
 
+export function movePage(id: string, index: number): void {
+  const { doc } = state();
+  const from = doc?.pages.findIndex((p) => p.id === id) ?? -1;
+  if (!doc || from < 0) return;
+  const to = Math.max(0, Math.min(doc.pages.length - 1, index));
+  if (to === from) return;
+  state().edit("Move page", (draft) => {
+    const [page] = draft.pages.splice(from, 1);
+    draft.pages.splice(to, 0, page!);
+  });
+}
+
 export function resizeCanvas(width: number, height: number, background?: string): void {
   const { pageId } = state();
   state().edit("Canvas", (draft) => {

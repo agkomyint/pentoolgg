@@ -25,9 +25,14 @@ type State = {
   setSelectedPackagePanel: (id: string | null) => void;
   tool: Tool;
   look: Appearance;
+  /** Right-hand panel; "3d" and "photo" also open their focus stage. */
   workspaceId: string;
+  /** Paint tools act on the main canvas instead of the vector tools. */
+  paintMode: boolean;
   view: CanvasView;
+  /** Zoom as a multiple of "fit page"; `scale` is the resulting display scale (1 = 100%). */
   zoom: number;
+  scale: number;
   dark: boolean;
   busy: boolean;
   message: { text: string; error: boolean } | null;
@@ -53,6 +58,8 @@ type State = {
   setWorkspace: (id: string) => void;
   setView: (view: CanvasView) => void;
   setZoom: (zoom: number) => void;
+  setScale: (scale: number) => void;
+  setPaintMode: (on: boolean) => void;
   toggleDark: () => void;
   notify: (text: string, error?: boolean) => void;
 };
@@ -115,8 +122,10 @@ export const useStudio = create<State>((set, get) => {
     tool: "select",
     look: { fill: "#6d28d9", stroke: "#111827", strokeWidth: 3 },
     workspaceId: "design",
+    paintMode: false,
     view: { kind: "document" },
     zoom: 1,
+    scale: 1,
     dark: initialDark(),
     busy: false,
     message: null,
@@ -247,11 +256,14 @@ export const useStudio = create<State>((set, get) => {
       const found = selectedId && doc ? findNode(pageOf(doc, pageId), selectedId) : null;
       set({ selectedId, ...(found ? { layerId: found.layer.id } : {}) });
     },
-    setTool: (tool) => set({ tool }),
+    // A vector tool leaves painting; the paint options give way to Properties.
+    setTool: (tool) => set({ tool, paintMode: false, ...(get().workspaceId === "paint" ? { workspaceId: "design" } : {}) }),
     setLook: (look) => set({ look: { ...get().look, ...look } }),
-    setWorkspace: (workspaceId) => set({ workspaceId, view: { kind: "document" } }),
+    setWorkspace: (id) => set({ workspaceId: id === "canvas" ? "design" : id, view: { kind: "document" } }),
     setView: (view) => set({ view }),
-    setZoom: (zoom) => set({ zoom: Math.min(8, Math.max(0.1, zoom)) }),
+    setZoom: (zoom) => set({ zoom: Math.min(64, Math.max(0.05, zoom)) }),
+    setScale: (scale) => { if (get().scale !== scale) set({ scale }); },
+    setPaintMode: (paintMode) => set({ paintMode }),
     toggleDark() {
       const dark = !get().dark;
       try {
@@ -261,7 +273,12 @@ export const useStudio = create<State>((set, get) => {
       }
       set({ dark });
     },
-    notify: (text, error = false) => set({ message: { text, error } }),
+    notify: (text, error = false) => {
+      const message = { text, error };
+      set({ message });
+      // Info fades like a toast; an error stays until something replaces it.
+      if (!error) window.setTimeout(() => get().message === message && set({ message: null }), 6000);
+    },
   };
 });
 

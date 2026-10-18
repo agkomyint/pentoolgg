@@ -1,11 +1,12 @@
-import { Brush, Circle, Copy, Crosshair, Eraser, Hand, HeartPulse, Lasso, MousePointer2, PenTool, ScanLine, Slash, Square, Type, Wand2 } from "lucide-react";
-import { Fragment, useEffect } from "react";
+import { Brush, Circle, Copy, Crosshair, Eraser, Hand, HeartPulse, Lasso, MousePointer2, PenTool, ScanLine, Slash, Square, SquareDashed, Type, Wand2 } from "lucide-react";
+import { Fragment } from "react";
 import type { LucideIcon } from "lucide-react";
+import { isScene, type Tool } from "@/lib/model";
 import { useStudio } from "@/store";
-import type { Tool } from "@/lib/model";
 import { Tip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { usePaint, type RasterTool } from "@/workspaces/rasterStore";
+import { startPainting } from "@/workspaces/paintLayer";
 
 const TOOLS: { id: Tool; label: string; key: string; icon: LucideIcon }[] = [
   { id: "select", label: "Select", key: "V", icon: MousePointer2 },
@@ -27,62 +28,46 @@ const HINTS: Record<Tool, string> = {
   hand: "Drag to pan. Ctrl + wheel zooms.",
 };
 
-const PAINT_TOOLS: { id: RasterTool; label: string; icon: LucideIcon }[] = [
-  { id: "brush", label: "Brush", icon: Brush },
-  { id: "eraser", label: "Eraser", icon: Eraser },
-  { id: "clone", label: "Clone", icon: Copy },
-  { id: "heal", label: "Heal", icon: HeartPulse },
+const PAINT_TOOLS: { id: RasterTool; label: string; key?: string; icon: LucideIcon }[] = [
+  { id: "brush", label: "Brush", key: "B", icon: Brush },
+  { id: "eraser", label: "Eraser", key: "E", icon: Eraser },
+  { id: "clone", label: "Clone", key: "S", icon: Copy },
+  { id: "heal", label: "Heal", key: "J", icon: HeartPulse },
   { id: "source", label: "Clone source", icon: Crosshair },
-  { id: "quickmask", label: "Quick mask", icon: ScanLine },
-  { id: "marquee", label: "Marquee", icon: Square },
+  { id: "quickmask", label: "Quick mask", key: "Q", icon: ScanLine },
+  { id: "marquee", label: "Marquee", key: "M", icon: SquareDashed },
   { id: "lasso", label: "Lasso", icon: Lasso },
-  { id: "wand", label: "Magic wand", icon: Wand2 },
+  { id: "wand", label: "Magic wand", key: "W", icon: Wand2 },
 ];
 
+/**
+ * One tool rail for the one canvas: vector tools and paint tools act on the
+ * same page. Choosing a tool from either group switches the canvas between
+ * object editing and painting; focus views (Photo, Packaging) return to it.
+ */
 export function Toolbar() {
-  const { tool, setTool, workspaceId, setWorkspace } = useStudio();
+  const { tool, setTool, workspaceId, setWorkspace, paintMode, doc } = useStudio();
   const paint = usePaint();
-  const isPaint = workspaceId === "paint";
-  const isDrawing = !["paint", "photo", "3d"].includes(workspaceId);
+  const onCanvas = workspaceId !== "photo" && workspaceId !== "3d";
+  const isPaint = paintMode && onCanvas;
   const chooseVector = (next: Tool) => {
-    if (!isDrawing) setWorkspace("design");
+    if (!onCanvas) setWorkspace("design");
     setTool(next);
   };
-  const choosePaint = (next: RasterTool) => {
-    if (!isPaint) setWorkspace("paint");
-    paint.set({ tool: next });
-  };
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || target?.closest("input, textarea, select, [contenteditable=true]") || ["photo", "3d"].includes(workspaceId)) return;
-      const key = event.key.toLowerCase();
-      if (key === "b" || key === "e") {
-        event.preventDefault();
-        useStudio.getState().setWorkspace("paint");
-        usePaint.getState().set({ tool: key === "b" ? "brush" : "eraser" });
-      } else if (key === "v" && workspaceId === "paint") {
-        event.preventDefault();
-        useStudio.getState().setWorkspace("design");
-        useStudio.getState().setTool("select");
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [workspaceId]);
+  const paintable = isScene(doc);
   return <aside className="studio-toolrail" aria-label="Creative tools">
     <div className="studio-toolrail-group" role="toolbar" aria-label="Vector tools" aria-orientation="vertical">
       {TOOLS.map((t) => <Fragment key={t.id}>
         {t.id === "hand" && <span aria-hidden="true" className="studio-toolrail-divider" />}
-        <Tip label={`${t.label} (${t.key})`}><button type="button" aria-label={`${t.label} (${t.key})`} aria-pressed={isDrawing && tool === t.id} onClick={() => chooseVector(t.id)}
-          className={cn("studio-tool-button", isDrawing && tool === t.id && "is-active")}><t.icon size={17} aria-hidden="true" /></button></Tip>
+        <Tip label={`${t.label} (${t.key})`}><button type="button" aria-label={`${t.label} (${t.key})`} aria-pressed={onCanvas && !isPaint && tool === t.id} onClick={() => chooseVector(t.id)}
+          className={cn("studio-tool-button", onCanvas && !isPaint && tool === t.id && "is-active")}><t.icon size={17} aria-hidden="true" /></button></Tip>
       </Fragment>)}
     </div>
     <span aria-hidden="true" className="studio-toolrail-divider" />
     <div className="studio-toolrail-group" role="toolbar" aria-label="Paint and retouch tools" aria-orientation="vertical">
       {PAINT_TOOLS.map((t) => <Fragment key={t.id}>
         {t.id === "marquee" && <span aria-hidden="true" className="studio-toolrail-divider" />}
-        <Tip label={`${t.label}${t.id === "brush" ? " (B)" : t.id === "eraser" ? " (E)" : ""}`}><button type="button" aria-label={t.label} aria-pressed={isPaint && paint.tool === t.id} onClick={() => choosePaint(t.id)}
+        <Tip label={paintable ? `${t.label}${t.key ? ` (${t.key})` : ""}` : "Painting needs a scene document (format v4 or newer)"}><button type="button" aria-label={t.label} aria-pressed={isPaint && paint.tool === t.id} disabled={!paintable} onClick={() => startPainting(t.id)}
           className={cn("studio-tool-button", isPaint && paint.tool === t.id && "is-active")}><t.icon size={17} aria-hidden="true" /></button></Tip>
       </Fragment>)}
     </div>

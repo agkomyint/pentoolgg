@@ -5,6 +5,10 @@ import { dragLayers } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import { LayoutOverlay } from "@/workspaces/layout/LayoutOverlay";
+import { PaintOverlay } from "@/workspaces/PaintOverlay";
+import type { RasterTool } from "@/workspaces/rasterStore";
+import { startPainting } from "@/workspaces/paintLayer";
+import type { Doc } from "@/lib/api";
 import { useLayout } from "@/workspaces/layout/layoutStore";
 import {
   addObject,
@@ -41,8 +45,22 @@ type Drag =
   | { mode: "move"; start: Point; id: string }
   | { mode: "resize"; start: Point; id: string; handle: Handle; box: Rect }
   | { mode: "create"; start: Point }
-  | { mode: "pen"; index: number; start: Point }
-  | { mode: "pan"; x: number; y: number; left: number; top: number };
+  | { mode: "pen"; index: number; start: Point };
+
+/** Preview sizes the server is asked for; bucketing keeps zooming from re-rendering on every step. */
+const PREVIEW_EDGES = [512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192];
+/** Canvas margin: the page sits in a padded box (`p-8`) centred in the scroller. */
+const MARGIN = 32;
+
+function previewEdge(cssEdge: number): number {
+  const want = Math.ceil(cssEdge * (window.devicePixelRatio || 1));
+  return PREVIEW_EDGES.find((edge) => edge >= want) ?? PREVIEW_EDGES.at(-1)!;
+}
+
+/** Offset of the page inside the scroll content for a given scroller and page size. */
+function pageOffset(view: number, size: number): number {
+  return (Math.max(view, size + MARGIN * 2) - size) / 2;
+}
 
 function handlePoint(box: Rect, h: Handle): Point {
   const x = h.includes("w") ? box.x : h.includes("e") ? box.x + box.width : box.x + box.width / 2;
@@ -79,8 +97,13 @@ function resizedBox(box: Rect, h: Handle, p: Point, keepAspect: boolean): Rect {
 /** Interactive page: Rust-rendered preview under an SVG layer for selection and drawing. */
 export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean; active?: boolean } = {}) {
   const s = useStudio();
-  const { doc, preview, pageId, view, zoom, setZoom, notify, tool, selectedId, layerId } = s;
+  const { doc, preview, pageId, view, zoom, notify, tool, selectedId, layerId, paintMode } = s;
   const [url, setUrl] = useState<string | null>(null);
+  // The document behind the image now on screen; paint strokes wait for it.
+  const [rendered, setRendered] = useState<{ url: string; doc: Doc } | null>(null);
+  const [renderedDoc, setRenderedDoc] = useState<Doc | null>(null);
+  // Zoom keeps a page point under a viewport point; applied once the new size is laid out.
+  const anchor = useRef<{ px: number; py: number; cx: number; cy: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [box, setBox] = useState({ w: 800, h: 600 });
   const [draft, setDraft] = useState<PenPoint[]>([]);
@@ -116,8 +139,16 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
     ? doc.pages.map((candidate) => ({ page: candidate, found: findNode(candidate, packageNodeId) })).find((item) => item.found?.node.kind === "scene3d" && item.found.node.dieline === flatDielineId)
     : undefined;
   const canvas = page?.canvas ?? { width: 1200, height: 800 };
-  const fit = Math.min((box.w - 64) / canvas.width, (box.h - 64) / canvas.height, 4);
+  const fit = Math.min((box.w - MARGIN * 2) / canvas.width, (box.h - MARGIN * 2) / canvas.height, 4);
   const scale = Math.max(0.02, fit * zoom);
+  const W = canvas.width * scale;
+  const H = canvas.height * scale;
+  const edge = previewEdge(Math.max(W, H));
+  const lastDoc = useRef<{ doc: Doc | null; page: string | undefined }>({ doc: null, page: undefined });
+  const setScale = s.setScale;
+  useEffect(() => {
+    if (active) setScale(scale);
+  }, [scale, active, setScale]);
   const found = useMemo(() => findNode(page, selectedId), [page, selectedId]);
   const selectedBox = useMemo(() => (found ? pageBounds(found) : null), [found]);
   const selectedPackagePanel = s.selectedPackagePanel;
@@ -181,30 +212,36 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   );
 
   // Rust render, debounced so a drag-heavy session does not queue renders.
-  // Committed edits publish a bounded proxy first, then replace it with the
-  // full preview. This keeps camera and material controls responsive without
-  // changing the native reference renderer used for either pass.
+  // The server renders at the size Studio displays (`edge`), so zooming in
+  // stays sharp. A document edit publishes a quick proxy first and then the
+  // full size; a zoom-only change keeps the current image until the sharper
+  // one arrives.
   useEffect(() => {
     const shown = preview ?? doc;
     if (!active || !shown || view.kind !== "document") return;
     const mine = ++token.current;
+    const zoomOnly = lastDoc.current.doc === shown && lastDoc.current.page === pageId;
+    lastDoc.current = { doc: shown, page: pageId };
     const timer = window.setTimeout(() => {
       setLoading(true);
       const publish = (blob: Blob) => {
         if (mine !== token.current) return false;
+        const next = URL.createObjectURL(blob);
         setUrl((old) => {
-          if (old) URL.revokeObjectURL(old);
-          return URL.createObjectURL(blob);
+          if (old) window.setTimeout(() => URL.revokeObjectURL(old), 1000);
+          return next;
         });
+        setRendered({ url: next, doc: shown });
         if (!drag.current) clearSprite();
         return true;
       };
       const renderPage = isScene(shown) ? pageId : undefined;
+      const first = zoomOnly ? edge : Math.min(edge, preview ? 1024 : 768);
       api
-        .renderPng(shown, renderPage, preview ? 1024 : 768)
+        .renderPng(shown, renderPage, first)
         .then(async (blob) => {
-          if (!publish(blob) || preview) return;
-          publish(await api.renderPng(shown, renderPage, 2048));
+          if (!publish(blob) || preview || first >= edge) return;
+          publish(await api.renderPng(shown, renderPage, edge));
         })
         .catch((error: unknown) => {
           if (mine !== token.current) return;
@@ -213,9 +250,88 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         .finally(() => {
           if (mine === token.current) setLoading(false);
         });
-    }, preview ? 40 : 30);
+    }, zoomOnly ? 140 : preview ? 40 : 30);
     return () => { window.clearTimeout(timer); if (token.current === mine) token.current += 1; };
-  }, [doc, preview, pageId, view.kind, notify, active]);
+  }, [doc, preview, pageId, view.kind, notify, active, edge, clearSprite]);
+
+  // Zoom around a viewport point (cursor, or the centre for buttons and keys).
+  const zoomAt = useCallback((next: number, cx?: number, cy?: number) => {
+    const el = scroller.current;
+    const st = useStudio.getState();
+    if (!el) return st.setZoom(next);
+    const x = cx ?? el.clientWidth / 2;
+    const y = cy ?? el.clientHeight / 2;
+    const current = Math.max(0.02, fit * st.zoom);
+    const px = (el.scrollLeft + x - pageOffset(el.clientWidth, canvas.width * current)) / current;
+    const py = (el.scrollTop + y - pageOffset(el.clientHeight, canvas.height * current)) / current;
+    anchor.current = { px, py, cx: x, cy: y };
+    st.setZoom(next);
+  }, [fit, canvas.width, canvas.height]);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const a = anchor.current;
+    if (!el || !a) return;
+    anchor.current = null;
+    el.scrollLeft = pageOffset(el.clientWidth, W) + a.px * scale - a.cx;
+    el.scrollTop = pageOffset(el.clientHeight, H) + a.py * scale - a.cy;
+    // W and H follow scale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scale]);
+  const zoomToFit = useCallback(() => {
+    anchor.current = null;
+    useStudio.getState().setZoom(1);
+  }, []);
+  const zoomToActual = useCallback(() => zoomAt(1 / fit), [zoomAt, fit]);
+  const zoomToSelection = useCallback(() => {
+    const el = scroller.current;
+    if (!el || !selectedBox || selectedBox.width <= 0 || selectedBox.height <= 0) return zoomToFit();
+    const target = Math.min((el.clientWidth - MARGIN * 2) / selectedBox.width, (el.clientHeight - MARGIN * 2) / selectedBox.height);
+    anchor.current = { px: selectedBox.x + selectedBox.width / 2, py: selectedBox.y + selectedBox.height / 2, cx: el.clientWidth / 2, cy: el.clientHeight / 2 };
+    useStudio.getState().setZoom(target / fit);
+  }, [selectedBox, fit, zoomToFit]);
+
+  // Ctrl/Cmd+wheel and trackpad pinch zoom at the cursor. React's wheel
+  // handler is passive, so the browser would zoom the whole page instead.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !active) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const factor = Math.exp(-Math.max(-200, Math.min(200, delta)) * 0.0015);
+      zoomAt(useStudio.getState().zoom * factor, event.clientX - rect.left, event.clientY - rect.top);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomAt, active]);
+
+  // Panning follows the pointer anywhere on screen, not only over the page.
+  const beginPan = useCallback((e: React.PointerEvent): boolean => {
+    const st = useStudio.getState();
+    const hand = !st.paintMode && st.tool === "hand";
+    if (!(e.button === 1 || (e.button === 0 && (spaceDown.current || hand)))) return false;
+    const el = scroller.current;
+    if (!el) return false;
+    e.preventDefault();
+    const start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+    document.body.style.cursor = "grabbing";
+    const move = (ev: PointerEvent) => {
+      el.scrollLeft = start.left - (ev.clientX - start.x);
+      el.scrollTop = start.top - (ev.clientY - start.y);
+    };
+    const up = () => {
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return true;
+  }, []);
 
   const toPage = useCallback(
     (e: { clientX: number; clientY: number }): Point => {
@@ -247,12 +363,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const commitResize = transformNodePage;
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (e.button === 1 || tool === "hand" || spaceDown.current) {
-      const el = scroller.current!;
-      drag.current = { mode: "pan", x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
-      svg.current!.setPointerCapture(e.pointerId);
-      return;
-    }
+    if (beginPan(e)) return;
     if (e.button !== 0) return;
     const p = toPage(e);
     if (useStudio.getState().workspaceId === "layout" && useLayout.getState().loaded) {
@@ -342,11 +453,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       if (tool === "pen" && draft.length) setHover(p);
       return;
     }
-    if (d.mode === "pan") {
-      const el = scroller.current!;
-      el.scrollLeft = d.left - (e.clientX - d.x);
-      el.scrollTop = d.top - (e.clientY - d.y);
-    } else if (d.mode === "move") {
+    if (d.mode === "move") {
       setLive([1, 0, 0, 1, p.x - d.start.x, p.y - d.start.y]);
     } else if (d.mode === "resize") {
       const nb = resizedBox(d.box, d.handle, p, e.shiftKey);
@@ -430,6 +537,14 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         spaceDown.current = true;
         return;
       }
+      if (ctrl && !e.altKey && ["0", "1", "=", "+", "-"].includes(e.key)) {
+        // Keep the browser from zooming the whole page.
+        e.preventDefault();
+        if (e.key === "0") zoomToFit();
+        else if (e.key === "1") zoomToActual();
+        else zoomAt(useStudio.getState().zoom * (e.key === "-" ? 1 / 1.25 : 1.25));
+        return;
+      }
       if (ctrl) {
         if (key === "z") {
           e.preventDefault();
@@ -442,8 +557,11 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
           e.preventDefault();
           void s.save();
         } else if (key === "d") {
-          e.preventDefault();
-          duplicateSelected();
+          // In paint mode the paint overlay owns Ctrl+D (deselect).
+          if (!useStudio.getState().paintMode) {
+            e.preventDefault();
+            duplicateSelected();
+          }
         } else if (key === "g") {
           e.preventDefault();
           if (e.shiftKey) ungroupSelected();
@@ -457,6 +575,12 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         }
         return;
       }
+      if (e.shiftKey && (e.code === "Digit1" || e.code === "Digit2")) {
+        e.preventDefault();
+        if (e.code === "Digit1") zoomToFit();
+        else zoomToSelection();
+        return;
+      }
       if (e.key === "Enter" && draft.length) {
         e.preventDefault();
         finishPen(false);
@@ -467,7 +591,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         s.select(null);
         s.setTool("select");
       } else if (e.key === "Delete" || e.key === "Backspace") {
-        if (selectedId) {
+        if (selectedId && !useStudio.getState().paintMode) {
           e.preventDefault();
           deleteSelected();
         }
@@ -477,10 +601,12 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         commitMove(selectedId, dx, dy);
-      } else {
+      } else if (!e.altKey && !e.shiftKey) {
         const map: Record<string, Parameters<typeof s.setTool>[0]> = { v: "select", p: "pen", r: "rect", o: "ellipse", l: "line", t: "text", h: "hand" };
+        const paint: Record<string, RasterTool> = { b: "brush", e: "eraser", m: "marquee", w: "wand", s: "clone", j: "heal", q: "quickmask" };
         const next = map[key];
         if (next) s.setTool(next);
+        else if (paint[key] && isScene(useStudio.getState().doc)) startPainting(paint[key]);
       }
     };
     const onUp = (e: KeyboardEvent) => {
@@ -493,7 +619,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       window.removeEventListener("keyup", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s, draft, selectedId, page, active]);
+  }, [s, draft, selectedId, page, active, zoomAt, zoomToFit, zoomToActual, zoomToSelection]);
 
   // Paste: clipboard images become embedded images, text becomes a text object.
   useEffect(() => {
@@ -531,8 +657,6 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   };
 
   const src = view.kind === "image" ? view.url : url;
-  const W = canvas.width * scale;
-  const H = canvas.height * scale;
   const px = 1 / scale;
   const liveBox = useMemo(() => {
     if (!selectedBox) return null;
@@ -552,12 +676,6 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         className="flex-1 select-none overflow-auto [&_img]:pointer-events-none [&_img]:select-none [-webkit-user-drag:none]"
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        onWheel={(e) => {
-          if (e.ctrlKey) {
-            e.preventDefault();
-            setZoom(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-          }
-        }}
       >
         <div className="flex min-h-full min-w-full items-center justify-center p-8">
           {view.kind === "image" ? (
@@ -565,7 +683,15 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
           ) : (
             <div className="relative shrink-0 shadow-lg" style={{ width: W, height: H, background: "#fff" }}>
               {src ? (
-                <img src={sprite ? sprite.backdrop : src} alt="Page preview" className="absolute inset-0 block h-full w-full" draggable={false} />
+                <img
+                  src={sprite ? sprite.backdrop : src}
+                  alt="Page preview"
+                  className="absolute inset-0 block h-full w-full"
+                  draggable={false}
+                  onLoad={(event) => {
+                    if (rendered && event.currentTarget.src === rendered.url) setRenderedDoc(rendered.doc);
+                  }}
+                />
               ) : (
                 <p className="absolute inset-0 grid place-items-center text-muted-foreground">{loading ? "Rendering..." : "No preview yet."}</p>
               )}
@@ -584,7 +710,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                 ref={svg}
                 viewBox={`0 0 ${canvas.width} ${canvas.height}`}
                 className="absolute inset-0 h-full w-full touch-none"
-                style={{ cursor }}
+                style={{ cursor, pointerEvents: paintMode ? "none" : undefined }}
                 onMouseDown={(e) => e.preventDefault()}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
@@ -653,19 +779,24 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   </g>
                 )}
               </svg>
+              {paintMode && isScene(doc) && (
+                <PaintOverlay canvas={canvas} cssWidth={W} cssHeight={H} renderedDoc={renderedDoc} onPanStart={beginPan} />
+              )}
             </div>
           )}
         </div>
       </div>
       <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-md border bg-card p-1 shadow">
-        <Button variant="ghost" size="icon" aria-label="Zoom out" onClick={() => setZoom(zoom / 1.25)}>
+        <Button variant="ghost" size="icon" aria-label="Zoom out" title="Zoom out (Ctrl+-)" onClick={() => zoomAt(zoom / 1.25)}>
           <Minus size={14} />
         </Button>
-        <span className="w-12 text-center text-xs tabular-nums">{Math.round(scale * 100)}%</span>
-        <Button variant="ghost" size="icon" aria-label="Zoom in" onClick={() => setZoom(zoom * 1.25)}>
+        <button type="button" className="w-14 rounded text-center text-xs tabular-nums hover:bg-accent" title="Actual size (Ctrl+1)" aria-label="Zoom to 100%" onClick={zoomToActual}>
+          {scale >= 0.1 ? Math.round(scale * 100) : Math.round(scale * 1000) / 10}%
+        </button>
+        <Button variant="ghost" size="icon" aria-label="Zoom in" title="Zoom in (Ctrl+=)" onClick={() => zoomAt(zoom * 1.25)}>
           <Plus size={14} />
         </Button>
-        <Button variant="ghost" size="icon" aria-label="Fit" onClick={() => setZoom(1)}>
+        <Button variant="ghost" size="icon" aria-label="Fit" title="Fit page (Ctrl+0, Shift+1)" onClick={zoomToFit}>
           <Maximize2 size={14} />
         </Button>
       </div>

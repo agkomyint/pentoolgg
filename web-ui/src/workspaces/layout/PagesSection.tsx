@@ -1,13 +1,10 @@
-import { ArrowLeft, ArrowRight, Copy, FilePlus2, Trash2 } from "lucide-react";
-import { useStudio, collectIds } from "@/store";
-import { Button } from "@/components/ui/button";
-import { Tip } from "@/components/ui/tooltip";
+import { useStudio } from "@/store";
 import { Check, Row, Section } from "@/components/ui/kit";
 import { cn } from "@/lib/utils";
 import { useLayout } from "./layoutStore";
-import { layoutOf, nextId, pageParent } from "./layoutModel";
+import { layoutOf, pageParent } from "./layoutModel";
 
-/** Pages panel: spreads as rows of page chips, parent assignment, page edits. */
+/** Spreads as rows of page chips and parent assignment; page edits live in the page strip. */
 export function PagesSection() {
   const { doc, pageId, setPage } = useStudio();
   const run = useLayout((s) => s.run);
@@ -23,67 +20,17 @@ export function PagesSection() {
   const current = doc.pages[index];
   const parents = layout.parents ?? [];
   const spread = spreads.find((s) => s.pages.includes(pageId ?? ""));
-  const label = (id: string) => doc.pages.find((p) => p.id === id)?.name ?? id;
-  const fresh = () => nextId("page", collectIds(doc));
-
-  const add = async () => {
-    const id = fresh();
-    if (await run({ type: "page-add", id, after: current?.id, parent: pageParent(current) }, "Add page")) setPage(id);
+  const label = (id: string) => {
+    const at = doc.pages.findIndex((p) => p.id === id);
+    const name = doc.pages[at]?.name;
+    return name && name !== id ? name : at >= 0 ? `Page ${at + 1}` : id;
   };
-  const duplicate = async () => {
-    if (!current) return;
-    const id = fresh();
-    if (await run({ type: "page-duplicate", id: current.id, new_id: id }, "Duplicate page")) setPage(id);
-  };
-  const remove = async () => {
-    if (!current || doc.pages.length < 2) return;
-    if (!window.confirm(`Remove ${label(current.id)}? Stories only on this page are kept unplaced.`)) return;
-    const neighbour = doc.pages[index + 1] ?? doc.pages[index - 1];
-    if (await run({ type: "page-remove", id: current.id }, "Remove page") && neighbour) setPage(neighbour.id);
-  };
-  const move = (by: number) => current && void run({ type: "page-move", id: current.id, index: index + by }, "Move page");
-
   return (
     <Section
       id="layout-pages"
       title={`Pages (${doc.pages.length})`}
-      actions={
-        <span className="flex gap-0.5">
-          <Tip label="Add page after this one">
-            <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="Add page" onClick={add}>
-              <FilePlus2 size={13} />
-            </Button>
-          </Tip>
-          <Tip label="Duplicate page">
-            <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="Duplicate page" onClick={duplicate}>
-              <Copy size={13} />
-            </Button>
-          </Tip>
-          <Tip label="Move earlier">
-            <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="Move page earlier" disabled={index < 1} onClick={() => move(-1)}>
-              <ArrowLeft size={13} />
-            </Button>
-          </Tip>
-          <Tip label="Move later">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5"
-              aria-label="Move page later"
-              disabled={index < 0 || index >= doc.pages.length - 1}
-              onClick={() => move(1)}
-            >
-              <ArrowRight size={13} />
-            </Button>
-          </Tip>
-          <Tip label="Remove page">
-            <Button variant="ghost" size="icon" className="h-5 w-5" aria-label="Remove page" disabled={doc.pages.length < 2} onClick={remove}>
-              <Trash2 size={13} />
-            </Button>
-          </Tip>
-        </span>
-      }
     >
+      <p className="mb-1 text-[11px] text-muted-foreground">Add, reorder and delete pages in the page strip below the canvas.</p>
       <div className="max-h-52 space-y-1 overflow-auto" role="listbox" aria-label="Spreads">
         {rows.map((row) => (
           <div key={row.id} className="flex gap-1">

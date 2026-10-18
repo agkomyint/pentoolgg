@@ -15,10 +15,8 @@ type State = {
   mode: string;
   shape: string;
   tolerance: number;
-  zoom: number;
-  rotate: number;
-  panX: number;
-  panY: number;
+  /** Active selection bounds from the engine, in layer pixels [x0, y0, x1, y1]. */
+  selection: number[] | null;
   rulers: boolean;
   snap: boolean;
   grid: number;
@@ -26,10 +24,9 @@ type State = {
   busy: boolean;
   status: string;
   set: (patch: Partial<State>) => void;
-  resetView: () => void;
 };
 
-// View aids (rulers, guides, snapping, zoom) live in the browser only and never
+// View aids (rulers, guides, snapping) live in the browser only and never
 // touch the document; pixels change solely through POST /api/raster.
 export const usePaint = create<State>((set) => ({
   layerId: null,
@@ -43,16 +40,12 @@ export const usePaint = create<State>((set) => ({
   mode: "replace",
   shape: "rect",
   tolerance: 32,
-  zoom: 1,
-  rotate: 0,
-  panX: 0,
-  panY: 0,
+  selection: null,
   rulers: false,
   snap: false,
   grid: 0,
   guides: [],
   busy: false,
-  status: "Pick a tool and paint on the preview.",
+  status: "Pick a tool and paint on the page.",
   set: (patch) => set(patch),
-  resetView: () => set({ zoom: 1, rotate: 0, panX: 0, panY: 0 }),
 }));

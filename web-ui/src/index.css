@@ -234,3 +234,12 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--primary); }
 
 .studio-shell > footer { white-space: nowrap; overflow: hidden; }
 .studio-shell > footer > .tabular-nums { flex-shrink: 0; }
+
+/* One canvas: stage column (focus bar, stage, page strip), dock, then the panel rail. */
+.studio-stage-column { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.studio-focusbar { display: flex; flex: 0 0 auto; align-items: center; gap: .75rem; min-height: 2.5rem; padding: 0 .5rem; border-bottom: 1px solid var(--border); background: var(--card); white-space: nowrap; overflow: hidden; }
+.studio-pagestrip { display: flex; flex: 0 0 auto; height: 92px; border-top: 1px solid var(--border); background: var(--card); }
+.studio-panelrail { display: flex; width: 3rem; flex: 0 0 3rem; flex-direction: column; align-items: center; gap: .15rem; overflow-y: auto; border-left: 1px solid var(--border); background: var(--card); padding: .4rem .15rem; }
+.studio-panelrail .studio-tool-button { width: 2.5rem; height: 2.5rem; }
+@media (max-width: 767px) { .studio-pagestrip { height: 80px; } .studio-focusbar > span:last-child { display: none; } }
+@media (max-width: 1023px) { #mobile-panels.studio-dock { top: 0; bottom: 0; right: 3rem; z-index: 20; box-shadow: -8px 0 24px oklch(0 0 0 / 18%); } }

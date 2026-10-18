@@ -69,34 +69,12 @@ function Row({ node, depth, layerId, locked }: { node: SceneNode; depth: number;
 }
 
 export function Outline() {
-  const { doc, pageId, layerId, setLayer, setPage } = useStudio();
+  const { doc, pageId, layerId, setLayer } = useStudio();
   const page = pageOf(doc, pageId);
   if (!page) return <p className="text-muted-foreground">No page loaded.</p>;
   const layers = [...(page.layers ?? [])].reverse();
   return (
     <div className="space-y-2">
-      {(doc?.pages?.length ?? 0) > 0 && <section aria-label="Page artwork sources" className="space-y-1">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Pages · drag to mockup</h3>
-        <ul className="space-y-0.5">
-          {doc?.pages?.map((page) => <li key={page.id} className="flex min-w-0 items-center gap-1 rounded px-1 py-0.5">
-            <button type="button" className="min-w-0 flex-1 truncate rounded px-1 text-left text-xs hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" onClick={() => setPage(page.id)}>
-              {page.name ?? page.id}
-            </button>
-            <button
-              type="button"
-              draggable
-              aria-label={`Drag page ${page.name ?? page.id} as artwork`}
-              title="Drag onto a mockup artwork slot"
-              className="grid size-7 shrink-0 cursor-grab place-items-center rounded text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:cursor-grabbing"
-              onClick={(event) => { event.stopPropagation(); setPage(page.id); }}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "copy";
-                event.dataTransfer.setData(ARTWORK_SOURCE_DRAG_TYPE, JSON.stringify({ kind: "page", page: page.id }));
-              }}
-            ><GripVertical size={14} aria-hidden="true" /></button>
-          </li>)}
-        </ul>
-      </section>}
       <div className="flex items-center justify-between">
         <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Layers</h3>
         <Button variant="ghost" size="icon" aria-label="Add layer" onClick={addLayer}>

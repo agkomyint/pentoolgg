@@ -15,21 +15,31 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
   to `/api/render/png` when local rendering is unavailable. Raster edits still
   commit through `/api/raster`; the browser only draws the in-progress stroke.
   Release builds embed the renderer built for `wasm32-unknown-unknown`.
-- One application bar holds file actions, a workspace selector, page selection,
-  active drawing/brush settings, save, and export. The left rail keeps vector,
-  paint, and retouch tools together. The right dock has Properties, Tools, and
-  Assets above a separate layer tree, so selecting an object keeps layers visible.
-  Both the dock width and layer area can be resized with a pointer or arrow keys.
-- Visited canvas stages remain mounted. Hidden stages pause their global shortcuts
-  and preview requests; Design retains its viewport, and Design/Paint share zoom
-  and page framing. They still have separate interaction surfaces. An unchanged
-  document snapshot can reuse a bounded preview cache; editing creates a new
-  snapshot. This cache does not change exported pixels or the saved format.
-- Workspaces map to the roadmap (`web-ui/src/lib/workspaces.ts`): Design,
-  Images (0.7), Composite (0.8), Photo (0.11), Print (0.12), Paint (0.13),
-  Layout (0.14), 3D (0.15). A workspace whose format or CLI is
-  not implemented says so and lists what the roadmap promises; it has no
-  controls that cannot work.
+- One editor, one canvas. The application bar holds file actions, the active
+  drawing or brush settings, save, and export. The left rail keeps vector, paint,
+  and retouch tools together; picking a paint tool paints directly on the design
+  canvas (no separate paint stage). The right-hand panel rail switches the dock
+  between Properties, Insert and assets, Images, Composite, Paint, Layout, Print,
+  Design systems, Collaboration, Stats, and Extensions. Only Photo and Packaging
+  and 3D replace the canvas with a focus view, which has a "Back to canvas" bar.
+  The dock keeps a separate layer tree below the panel; its width and the layer
+  area can be resized with a pointer or arrow keys.
+- Pages live in one place: the page strip under the canvas. Click a thumbnail to
+  open the page; use "+" to add a page after the current one; drag to reorder;
+  double-click or F2 renames; Delete removes (undoable); Alt+Left/Right moves;
+  right-click offers add, duplicate, rename, move, and delete. Thumbnails can
+  still be dragged onto a mockup artwork slot. Format v9+ documents use the
+  layout engine's page operations so stories and spreads stay consistent.
+- Zoom: Ctrl/Cmd+wheel or pinch zooms at the pointer, the wheel pans, middle
+  drag, Space+drag, or the hand tool pans. Ctrl+0 fits the page, Ctrl+1 or the
+  percentage button shows 100%, Ctrl+= / Ctrl+- step, Shift+1 fits and Shift+2
+  zooms to the selection. Previews are requested at the displayed size times the
+  device pixel ratio (up to 8192 px on the long edge, and above 1:1 when zoomed
+  in), so zoomed artwork and images stay sharp. A coarse proxy appears first
+  after an edit. Preview sizing never changes exported pixels.
+- Visited focus views remain mounted. Hidden views pause their global shortcuts
+  and preview requests. An unchanged document snapshot can reuse a bounded
+  preview cache; editing creates a new snapshot.
 - Serving an existing project opens its editor directly. A bare server opens a
   welcome screen with continue, `.pen` open, and common canvas presets. The Home control returns there without closing the current
   document; choosing a preset creates a canvas at that pixel size.
@@ -57,11 +67,10 @@ raw node JSON, a scene-batch console, Images (operations stack), Composite
 plates, soft proof), New/Open/Save (shared file or `.pen` download), current-page
 PNG/SVG export, document PDF/EPUB export, dark mode.
 
-The welcome screen, grouped workflow navigation, contextual Design modes, Paint
-tool rail, and tabbed inspector make the existing capabilities easier to find
-within one project. Photo, raster painting, and 3D retain specialized stages
-where their tools need a different interaction surface. This redesign does
-not change `.pen` object structure or turn CLI-only operations into UI actions.
+The welcome screen, panel rail, page strip, and on-canvas painting make the
+existing capabilities easier to find within one project. Photo and 3D keep focus
+views because their tools need a different interaction surface. This redesign
+does not change `.pen` object structure or turn CLI-only operations into UI actions.
 
 Print preflight also lists every placed 3D mockup's rendered pixel dimensions
 and effective X/Y PPI. Selecting a resolution row selects that mockup on the
@@ -72,8 +81,8 @@ document, up to 64 MiB per file; JPEG/PNG use the rendered-image editing path, w
 camera profiles and RAW-specific controls require DNG; catalog grid,
 loupe, compare, culling keys, histogram and clipping overlays, develop sliders,
 white balance, crop, radial/linear/brush masks, copy/sync, variants, snapshots, keywords) and Paint
-(raster brush, eraser, clone, heal, quick mask, marquee/lasso/wand selections, rulers, guides, snap,
-navigator) workspaces use the same `/api/photo/*` and `/api/raster` endpoints as before.
+(raster brush, eraser, clone, heal, quick mask, marquee/lasso/wand selections, rulers, guides, snap)
+tools use the same `/api/photo/*` and `/api/raster` endpoints as before.
 Known limits: hit-testing is bounding-box based; during a drag only the
 selection box moves and the rendered preview updates on release. The PDF
 workflow exports tagged book/layout PDFs; use `pentool export x.pen x.pdf` for
@@ -176,16 +185,24 @@ generated work and which warnings are measured versus heuristic.
 ## Design system and shell
 
 Studio uses a compact neutral editor theme with one application bar, a left
-creative tool rail, the central canvas, and a resizable inspector/layers dock.
-Properties follow the selected object. With nothing selected, they show document
-settings. Tools contains the active task's controls; Assets contains import and
-library actions. B selects Brush, E selects Eraser, and V returns from Paint to
-vector selection. These shortcuts leave text fields and specialized photo/3D
-keyboard interactions alone.
+creative tool rail, the central canvas with its page strip, a resizable
+inspector/layers dock, and a panel rail at the right edge. Properties follow the
+selected object; with nothing selected they show page and document settings.
+Insert and assets contains import and library actions.
 
-Use the panel toggle in the header to collapse the dock. On narrow screens it
-opens as an overlay; extra file actions move into the compact menu. Tool feedback,
-errors, zoom, and page position appear in a single status bar.
+Painting happens on the design canvas. B (brush), E (eraser), S (clone), J
+(heal), Q (quick mask), M (marquee), and W (wand) pick a paint tool; V or any
+vector tool returns to vector editing. Alt-click sets the clone or heal source;
+`[` and `]` change the brush size; Ctrl+D clears the raster selection. The first
+stroke on a page without a raster layer adds one. Strokes stay visible as a
+preview until the server-rendered result replaces them; with a selection active the
+preview is clipped to it, as the committed stroke is. These shortcuts leave
+text fields and specialized photo/3D keyboard interactions alone.
+
+Click the active rail icon (or use the panel toggle in the header) to collapse
+the dock. On narrow screens it opens as an overlay; extra file actions move into
+the compact menu. Tool feedback, errors, zoom, and page position appear in a
+single status bar.
 
 Tokens live in `web-ui/src/index.css` as oklch custom properties (`background`,
 `card`, `input`, `muted`, `border`, `primary`, `accent`, `destructive`,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Box, Brush, Camera, Download, FilePlus2, FolderOpen, Home, Image, Layers3, Moon, Newspaper, PenTool, Printer, Puzzle, Redo2, RefreshCw, Save, Sun, Undo2, PanelRightClose, PanelRightOpen, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Box, Brush, Camera, Download, FilePlus2, FolderOpen, Home, Image, Layers3, MessagesSquare, Moon, Newspaper, Palette, Printer, Puzzle, Redo2, RefreshCw, Save, Shapes, SlidersHorizontal, Sun, Undo2, Users, PanelRightClose, PanelRightOpen, MoreHorizontal } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { LATEST_FORMAT, collectIds, useStudio } from "@/store";
-import { workspaces } from "@/lib/workspaces";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tip, TooltipProvider } from "@/components/ui/tooltip";
@@ -9,7 +9,8 @@ import { Canvas } from "@/components/Canvas";
 import { Outline } from "@/components/Outline";
 import { Properties } from "@/components/Properties";
 import { Toolbar } from "@/components/Toolbar";
-import { DesignPanel, DocumentSettings, DesignAssets } from "@/workspaces/DesignPanel";
+import { DocumentSettings, DesignAssets } from "@/workspaces/DesignPanel";
+import { PageStrip } from "@/components/PageStrip";
 import { CompositePanel, ImagePanel, SceneConsole } from "@/workspaces/OperationsPanel";
 import { PrintPanel } from "@/workspaces/PrintPanel";
 import { LayoutPanel } from "@/workspaces/LayoutPanel";
@@ -17,25 +18,23 @@ import { DesignSystemsPanel } from "@/workspaces/DesignSystemsPanel";
 import { StatsPanel } from "@/workspaces/StatsPanel";
 import { CollabPanel } from "@/workspaces/CollabPanel";
 import { ExtensionsPanel, ExtensionPalette } from "@/workspaces/ExtensionsPanel";
-import { Planned } from "@/workspaces/Planned";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
 import { PhotoStage } from "@/workspaces/PhotoStage";
 import { RasterPanel } from "@/workspaces/RasterPanel";
-import { RasterStage } from "@/workspaces/RasterStage";
 import { ImageAdjust } from "@/workspaces/ImageAdjust";
 import { Scene3dPanel } from "@/workspaces/Scene3dPanel";
 import { UvWorkspaceStage } from "@/workspaces/UvWorkspaceStage";
 import { PackagingWorkspaceStage } from "@/workspaces/PackagingWorkspaceStage";
 import { useLayout } from "@/workspaces/layout/layoutStore";
 import { nextId, pageParent } from "@/workspaces/layout/layoutModel";
-import { findNode, pageOf, pagesOf } from "@/lib/model";
+import { findNode, isScene, pageOf, pagesOf } from "@/lib/model";
 import { exportAs } from "@/lib/actions";
 import { cn } from "@/lib/utils";
 import { layoutOps } from "@/lib/api";
 import { useRenderStats } from "@/lib/wasmCore";
 import { Welcome } from "@/components/Welcome";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePaint } from "@/workspaces/rasterStore";
+import { startPainting } from "@/workspaces/paintLayer";
 
 const HINTS = {
   select: "Click to select, drag to move, drag handles to resize (Shift keeps proportions). Arrow keys nudge.",
@@ -47,32 +46,41 @@ const HINTS = {
   hand: "Drag to pan. Ctrl + wheel zooms.",
 } as const;
 
-const WORKFLOWS = [
-  { id: "design", label: "Design", icon: PenTool, modes: [
-    { id: "design", label: "Canvas", icon: PenTool },
-    { id: "image", label: "Images", icon: Image },
-    { id: "composite", label: "Composite", icon: Layers3 },
-    { id: "paint", label: "Paint", icon: Brush },
-  ] },
-  { id: "photo", label: "Photo", icon: Camera, modes: [{ id: "photo", label: "Photo editing", icon: Camera }] },
-  { id: "layout", label: "Layout", icon: Newspaper, modes: [{ id: "layout", label: "Pages and books", icon: Newspaper }] },
-  { id: "3d", label: "Packaging", icon: Box, modes: [{ id: "3d", label: "3D mockup", icon: Box }] },
-  { id: "print", label: "Print", icon: Printer, modes: [{ id: "print", label: "Preflight and export", icon: Printer }] },
-  { id: "extensions", label: "Extensions", icon: Puzzle, modes: [{ id: "extensions", label: "Extensions", icon: Puzzle }] },
-] as const;
+type Panel = { id: string; label: string; icon: LucideIcon; hint: string; focus?: boolean };
 
-function workflowFor(workspaceId: string) {
-  return WORKFLOWS.find((workflow) => workflow.modes.some((mode) => mode.id === workspaceId)) ?? WORKFLOWS[0]!;
+/**
+ * One editor, one canvas. The rail picks the panel beside the canvas; only
+ * Photo and Packaging/3D replace the canvas with a focus view of their own.
+ */
+const PANELS: Panel[] = [
+  { id: "design", label: "Properties", icon: SlidersHorizontal, hint: "Selection properties, or page and document settings" },
+  { id: "assets", label: "Insert and assets", icon: Shapes, hint: "Images, text, fonts, imports and reusable assets" },
+  { id: "image", label: "Images", icon: Image, hint: "Image adjustments and operations" },
+  { id: "composite", label: "Composite", icon: Layers3, hint: "Blend modes, effects and compositing" },
+  { id: "paint", label: "Paint", icon: Brush, hint: "Brush, retouch and selection options; paints on the canvas" },
+  { id: "layout", label: "Layout", icon: Newspaper, hint: "Stories, frames, spreads, long documents and EPUB" },
+  { id: "print", label: "Print", icon: Printer, hint: "Color roles, preflight, plates and print export" },
+  { id: "systems", label: "Design systems", icon: Palette, hint: "Tokens, libraries, templates and token audit" },
+  { id: "collab", label: "Collaboration", icon: MessagesSquare, hint: "People, comments, reviews and merge conflicts" },
+  { id: "stats", label: "Stats", icon: Users, hint: "Contribution stats from the operation log" },
+  { id: "extensions", label: "Extensions", icon: Puzzle, hint: "Sandboxed WebAssembly extensions" },
+  { id: "photo", label: "Photo", icon: Camera, hint: "Catalog, culling and RAW development (focus view)", focus: true },
+  { id: "3d", label: "Packaging and 3D", icon: Box, hint: "Dielines, folding and 3D mockups (focus view)", focus: true },
+];
+
+function panelFor(id: string): Panel {
+  return PANELS.find((panel) => panel.id === id) ?? PANELS[0]!;
 }
 
 function WorkspaceBody() {
-  const { workspaceId } = useStudio();
-  const workspace = workspaces.find((w) => w.id === workspaceId) ?? workspaces[0]!;
-  switch (workspace.id) {
-    case "design":
+  const { workspaceId, selectedId, doc, pageId } = useStudio();
+  const picked = selectedId ? findNode(pageOf(doc, pageId), selectedId)?.node : null;
+  const selectedImage = picked?.kind === "image" && doc && doc.version >= 5 ? picked : null;
+  switch (workspaceId) {
+    case "assets":
       return (
-        <div className="space-y-4 p-2">
-          <DesignPanel />
+        <div className="space-y-4">
+          <DesignAssets />
           <details className="rounded-md border bg-muted/20 p-2">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Advanced scene console</summary>
             <div className="pt-2"><SceneConsole /></div>
@@ -80,57 +88,29 @@ function WorkspaceBody() {
         </div>
       );
     case "image":
-      return (
-        <div className="p-2">
-          <ImagePanel />
-        </div>
-      );
+      return <ImagePanel />;
     case "composite":
-      return (
-        <div className="p-2">
-          <CompositePanel />
-        </div>
-      );
+      return <CompositePanel />;
     case "print":
-      return (
-        <div className="p-2">
-          <PrintPanel />
-        </div>
-      );
+      return <PrintPanel />;
     case "layout":
-      return <LayoutPanel />;
+      return <div className="-m-3"><LayoutPanel /></div>;
     case "photo":
-      return (
-        <div className="p-2">
-          <PhotoPanel />
-        </div>
-      );
+      return <PhotoPanel />;
     case "paint":
-      return (
-        <div className="p-2">
-          <RasterPanel />
-        </div>
-      );
+      return <RasterPanel />;
     case "3d":
-      return (
-        <div className="p-2">
-          <Scene3dPanel />
-        </div>
-      );
+      return <Scene3dPanel />;
     case "extensions":
-      return <ExtensionsPanel />;
+      return <div className="-m-3"><ExtensionsPanel /></div>;
     case "collab":
-      return <CollabPanel />;
+      return <div className="-m-3"><CollabPanel /></div>;
     case "stats":
-      return <StatsPanel />;
+      return <div className="-m-3"><StatsPanel /></div>;
     case "systems":
-      return <DesignSystemsPanel />;
+      return <div className="-m-3"><DesignSystemsPanel /></div>;
     default:
-      return (
-        <div className="p-2">
-          <Planned workspace={workspace} />
-        </div>
-      );
+      return picked ? <><Properties />{selectedImage && <div className="mt-4 border-t pt-3"><ImageAdjust key={selectedImage.id} node={selectedImage} /></div>}</> : <DocumentSettings />;
   }
 }
 
@@ -143,40 +123,29 @@ function KeepStage({ active, children, label }: { active: boolean; children: Rea
 }
 
 function Dock({ mobileOpen, collapsed, onCollapse }: { mobileOpen: boolean; collapsed: boolean; onCollapse: () => void }) {
-  const { workspaceId, selectedId, doc, pageId } = useStudio();
-  const picked = selectedId ? findNode(pageOf(doc, pageId), selectedId)?.node : null;
-  const selectedImage = picked?.kind === "image" && doc && doc.version >= 5 ? picked : null;
-  const [tab, setTab] = useState("properties");
+  const { workspaceId, selectedId, setWorkspace } = useStudio();
   const [width, setWidth] = useState(320);
   const [layerHeight, setLayerHeight] = useState(280);
   const dock = useRef<HTMLElement>(null);
-  useEffect(() => { setTab(workspaceId === "design" ? "properties" : "tools"); }, [workspaceId]);
-  useEffect(() => { if (selectedId) setTab("properties"); }, [selectedId]);
-  const changeWidth = (value: number) => setWidth(Math.max(260, Math.min(440, value)));
+  const panel = panelFor(workspaceId);
+  // Selecting an object while browsing assets shows its properties.
+  useEffect(() => { if (selectedId && useStudio.getState().workspaceId === "assets") setWorkspace("design"); }, [selectedId, setWorkspace]);
+  const changeWidth = (value: number) => setWidth(Math.max(260, Math.min(480, value)));
   const changeLayers = (value: number) => setLayerHeight(Math.max(120, Math.min((dock.current?.clientHeight ?? 700) - 160, value)));
   return <aside ref={dock} id="mobile-panels" aria-label="Inspector and layers" style={{ width }}
     className={cn("studio-dock", collapsed && "is-collapsed", mobileOpen && "is-mobile-open")}>
-    <div role="separator" tabIndex={0} aria-label="Resize inspector" aria-orientation="vertical" aria-valuemin={260} aria-valuemax={440} aria-valuenow={width}
+    <div role="separator" tabIndex={0} aria-label="Resize inspector" aria-orientation="vertical" aria-valuemin={260} aria-valuemax={480} aria-valuenow={width}
       className="studio-dock-resizer" onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); changeWidth(width + (event.key === "ArrowLeft" ? 16 : -16)); } }}
       onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); }}
       onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) changeWidth((dock.current?.getBoundingClientRect().right ?? window.innerWidth) - event.clientX); }}
       onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
-    <div className="studio-inspector">
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center border-b">
-          <TabsList className="grid flex-1 grid-cols-3 border-0 px-1">
-            <TabsTrigger value="properties">Properties</TabsTrigger>
-            <TabsTrigger value="tools">{workspaceId === "3d" ? "Packaging" : "Tools"}</TabsTrigger>
-            <TabsTrigger value="assets">Assets</TabsTrigger>
-          </TabsList>
-          <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Hide panels" onClick={onCollapse}><PanelRightClose size={14} /></Button>
-        </div>
-        <TabsContent value="properties" className="m-0 min-h-0 flex-1 overflow-y-auto p-3">
-          {picked ? <><Properties />{selectedImage && <div className="mt-4 border-t pt-3"><ImageAdjust key={selectedImage.id} node={selectedImage} /></div>}</> : <DocumentSettings />}
-        </TabsContent>
-        <TabsContent value="tools" className="m-0 min-h-0 flex-1 overflow-y-auto p-2"><WorkspaceBody /></TabsContent>
-        <TabsContent value="assets" className="m-0 min-h-0 flex-1 overflow-y-auto p-3"><DesignAssets /></TabsContent>
-      </Tabs>
+    <div className="studio-inspector flex-col">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b pl-3 pr-1">
+        <panel.icon size={14} aria-hidden="true" className="text-muted-foreground" />
+        <h2 className="min-w-0 flex-1 truncate text-xs font-semibold">{panel.id === "design" && !selectedId ? "Page and document" : panel.label}</h2>
+        <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label="Hide panels" onClick={onCollapse}><PanelRightClose size={14} /></Button>
+      </div>
+      <div role="region" aria-label={panel.label} className="min-h-0 flex-1 overflow-y-auto p-3"><WorkspaceBody /></div>
     </div>
     <div role="separator" tabIndex={0} aria-label="Resize layers" aria-orientation="horizontal" aria-valuemin={120} aria-valuemax={Math.max(120, (dock.current?.clientHeight ?? 700) - 160)} aria-valuenow={layerHeight}
       className="studio-layers-resizer" onKeyDown={(event) => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); changeLayers(layerHeight + (event.key === "ArrowUp" ? 24 : -24)); } }}
@@ -185,6 +154,30 @@ function Dock({ mobileOpen, collapsed, onCollapse }: { mobileOpen: boolean; coll
       onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
     <section aria-label="Document layers" className="studio-layers" style={{ height: layerHeight }}><Outline /></section>
   </aside>;
+}
+
+/** Panel switcher at the window edge, like Photoshop's panel icons or Blender's property tabs. */
+function PanelRail({ open, onOpen, onToggle }: { open: boolean; onOpen: () => void; onToggle: () => void }) {
+  const { workspaceId, setWorkspace, doc } = useStudio();
+  const choose = (panel: Panel) => {
+    if (panel.id === workspaceId && open && !panel.focus) return onToggle();
+    if (panel.id === "paint") {
+      if (isScene(doc)) startPainting(usePaint.getState().tool);
+      else setWorkspace("paint");
+    } else setWorkspace(panel.id);
+    onOpen();
+  };
+  return <nav aria-label="Panels" className="studio-panelrail">
+    {PANELS.map((panel, index) => <div key={panel.id} className="contents">
+      {panel.focus && !PANELS[index - 1]?.focus && <span aria-hidden="true" className="studio-toolrail-divider" />}
+      <Tip label={`${panel.label}: ${panel.hint}`} side="left">
+        <button type="button" aria-label={panel.label} aria-pressed={workspaceId === panel.id && (open || panel.focus)} onClick={() => choose(panel)}
+          className={cn("studio-tool-button", workspaceId === panel.id && (open || panel.focus) && "is-active")}>
+          <panel.icon size={17} aria-hidden="true" />
+        </button>
+      </Tip>
+    </div>)}
+  </nav>;
 }
 
 export default function App() {
@@ -264,10 +257,10 @@ export default function App() {
   const confirmDiscard = () => !s.dirty || window.confirm("Discard unsaved changes?");
   const pages = pagesOf(s.doc);
   const pageIndex = pages.findIndex((p) => p.id === s.pageId);
-  const stage = s.workspaceId === "photo" ? "photo" : s.workspaceId === "paint" ? "paint" : s.workspaceId === "3d" ? "3d" : "canvas";
+  const stage = s.workspaceId === "photo" ? "photo" : s.workspaceId === "3d" ? "3d" : "canvas";
+  const painting = stage === "canvas" && s.paintMode;
   const selectedNode = s.doc ? findNode(pageOf(s.doc, s.pageId), s.selectedId)?.node ?? null : null;
   const hasSelectedDieline = selectedNode?.kind === "scene3d" && typeof selectedNode.dieline === "string";
-  const activeWorkflow = workflowFor(s.workspaceId);
   const downloadLayout = (format: "pdf" | "epub") => {
     exportMenu.current?.removeAttribute("open");
     if (!s.doc) return;
@@ -316,20 +309,12 @@ export default function App() {
           </Tip>
           <div className="studio-brand shrink-0"><strong>Pentool Studio</strong></div>
           {s.version && <Badge className="shrink-0 px-1.5 text-[10px]" title="Pentool version" aria-label={`Pentool version ${s.version}`}>v{s.version}</Badge>}
-          <select aria-label="Workspace" title={activeWorkflow.label} className="studio-header-select" value={s.workspaceId} onChange={(event) => s.setWorkspace(event.target.value)}>
-            {WORKFLOWS.map((workflow) => <optgroup key={workflow.id} label={workflow.label}>
-              {workflow.modes.map((mode) => <option key={mode.id} value={mode.id}>{mode.id === "design" ? "Design" : mode.id === "paint" ? "Paint" : mode.id === "3d" ? "Packaging" : mode.label}</option>)}
-            </optgroup>)}
-          </select>
-          <select aria-label="Page" className="studio-header-select studio-header-page" value={s.pageId ?? ""} onChange={(event) => s.setPage(event.target.value)}>
-            {pages.map((page) => <option key={page.id} value={page.id}>{page.name ?? page.id}</option>)}
-          </select>
-          {stage === "canvas" && s.tool !== "select" && s.tool !== "hand" && <div className="studio-brush-options" aria-label="Drawing options">
+          {stage === "canvas" && !painting && s.tool !== "select" && s.tool !== "hand" && <div className="studio-brush-options" aria-label="Drawing options">
             <label>Fill <input aria-label="New object fill" type="color" value={s.look.fill.startsWith("#") ? s.look.fill : "#000000"} onChange={(event) => s.setLook({ fill: event.target.value })} /></label>
             <label>Stroke <input aria-label="New object stroke" type="color" value={s.look.stroke.startsWith("#") ? s.look.stroke : "#000000"} onChange={(event) => s.setLook({ stroke: event.target.value })} /></label>
             <label>Width <input aria-label="New object stroke width" type="number" min={0} max={1000} value={s.look.strokeWidth} onChange={(event) => s.setLook({ strokeWidth: Math.max(0, Math.min(1000, Number(event.target.value) || 0)) })} /></label>
           </div>}
-          {stage === "paint" && <div className="studio-brush-options" aria-label="Brush options">
+          {painting && <div className="studio-brush-options" aria-label="Brush options">
             <label>Size <input aria-label="Brush size" type="number" min={1} max={200} value={paint.size} onChange={(event) => paint.set({ size: Math.max(1, Math.min(200, Number(event.target.value) || 1)) })} /></label>
             <label>Flow <input aria-label="Brush flow" type="number" min={5} max={100} value={Math.round(paint.flow * 100)} onChange={(event) => paint.set({ flow: Math.max(0.05, Math.min(1, Number(event.target.value) / 100)) })} />%</label>
             <input aria-label="Paint color" type="color" value={paint.color} onChange={(event) => paint.set({ color: event.target.value })} />
@@ -386,20 +371,30 @@ export default function App() {
 
         <div className="studio-editor-body flex min-h-0 flex-1 flex-row">
           <Toolbar />
-          <div className="studio-stage-area">
-            <KeepStage active={stage === "canvas"} label="Design canvas"><Canvas active={stage === "canvas"} /></KeepStage>
-            <KeepStage active={stage === "paint"} label="Paint canvas"><RasterStage active={stage === "paint"} /></KeepStage>
-            <KeepStage active={stage === "photo"} label="Photo development"><PhotoStage active={stage === "photo"} /></KeepStage>
-            <KeepStage active={stage === "3d"} label="Packaging canvas">
-              {hasSelectedDieline ? <PackagingWorkspaceStage active={stage === "3d"} /> : <UvWorkspaceStage active={stage === "3d"} />}
-            </KeepStage>
+          <div className="studio-stage-column">
+            {stage !== "canvas" && <div className="studio-focusbar" role="toolbar" aria-label="Focus view">
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => s.setWorkspace("design")}><ArrowLeft size={14} aria-hidden="true" />Back to canvas</Button>
+              <span className="text-xs font-medium">{stage === "photo" ? "Photo" : "Packaging and 3D"}</span>
+              <span className="min-w-0 truncate text-[11px] text-muted-foreground">{stage === "photo" ? "Develop photos, then place them on a page." : "Fold dielines and preview the 3D mockup. Drag a page from the page strip onto artwork."}</span>
+            </div>}
+            <div className="studio-stage-area">
+              <KeepStage active={stage === "canvas"} label="Design canvas"><Canvas active={stage === "canvas"} /></KeepStage>
+              <KeepStage active={stage === "photo"} label="Photo development"><PhotoStage active={stage === "photo"} /></KeepStage>
+              <KeepStage active={stage === "3d"} label="Packaging canvas">
+                {hasSelectedDieline ? <PackagingWorkspaceStage active={stage === "3d"} /> : <UvWorkspaceStage active={stage === "3d"} />}
+              </KeepStage>
+            </div>
+            {stage !== "photo" && <PageStrip />}
           </div>
           <Dock mobileOpen={mobilePanelsOpen} collapsed={panelsCollapsed} onCollapse={() => { setPanelsCollapsed(true); setMobilePanelsOpen(false); }} />
+          <PanelRail open={narrow ? mobilePanelsOpen : !panelsCollapsed}
+            onOpen={() => { if (narrow) setMobilePanelsOpen(true); else setPanelsCollapsed(false); }}
+            onToggle={() => { if (narrow) setMobilePanelsOpen((value) => !value); else setPanelsCollapsed((value) => !value); }} />
         </div>
 
         {/* Status bar. */}
         <footer className="flex h-6 shrink-0 items-center gap-3 border-t bg-card px-3 text-[11px] text-muted-foreground">
-          <span className="min-w-0 flex-1 truncate">{stage === "canvas" ? HINTS[s.tool] : stage === "paint" ? (paint.busy ? "Applying strokes…" : paint.status) : stage === "3d" ? "Create a package or select a model to place artwork." : ""}</span>
+          <span className="min-w-0 flex-1 truncate">{painting ? (paint.busy ? "Applying strokes…" : paint.status) : stage === "canvas" ? HINTS[s.tool] : stage === "3d" ? "Create a package or select a model to place artwork." : ""}</span>
           {s.message && <span role="status" className={cn("max-w-64 truncate", !s.message.error && "hidden xl:inline", s.message.error && "text-destructive")}>{s.message.text}</span>}
           {s.doc && s.doc.version < LATEST_FORMAT && <button className="shrink-0 text-primary hover:underline" disabled={s.busy} onClick={() => { if (window.confirm(`Upgrade to format v${LATEST_FORMAT}? Save to keep the upgrade; Undo reverts it.`)) void s.upgradeDoc(); }}>Upgrade format</button>}
 
@@ -424,7 +419,7 @@ export default function App() {
               {render.last.source === "wasm" ? "wasm" : "server"} {render.last.ms} ms
             </span>
           )}
-          <span className="tabular-nums">{Math.round(s.zoom * 100)}%</span>
+          {stage === "canvas" && <span className="tabular-nums" title="Zoom (Ctrl+0 fits, Ctrl+1 is 100%)">{Math.round(s.scale * 100)}%</span>}
           <span className="tabular-nums">{pages.length ? `Page ${pageIndex + 1} of ${pages.length}` : "No pages"}</span>
         </footer>
       </div>

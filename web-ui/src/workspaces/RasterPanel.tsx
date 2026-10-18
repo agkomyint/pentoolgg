@@ -1,9 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { usePaint } from "./rasterStore";
-import { useRasterLayers } from "./RasterStage";
+import { useRasterLayers } from "./PaintOverlay";
 import { useStudio } from "@/store";
-import { pageOf } from "@/lib/model";
-import { api, postJson, type Doc } from "@/lib/api";
+import { postJson, type Doc } from "@/lib/api";
+import { addPaintLayer } from "./paintLayer";
 import { PlanPanel } from "./PlanPanel";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
@@ -20,42 +20,18 @@ function Range({ label, value, min, max, step = 1, onChange }: { label: string; 
 
 export function RasterPanel() {
   const p = usePaint();
-  const { zoom, setZoom, doc } = useStudio();
   const layers = useRasterLayers();
   const layer = layers.find((n) => n.id === p.layerId) ?? layers[0];
 
   const addLayer = async () => {
-    const { doc, pageId, replaceDoc, notify } = useStudio.getState();
-    if (!doc || p.busy) return;
+    if (p.busy) return;
     p.set({ busy: true });
     try {
-      // Raster layers need format v6 or newer; upgrade first when the document is older.
-      let source: Doc = doc;
-      if (source.version < 6) source = (await api.migrate(source, 6)).document;
-      const id = `paint-${Date.now().toString(36)}`;
-      const body = await postJson<{ document: Doc }>("/api/raster", { document: source, page: pageOf(source, pageId)?.id, id, action: "add", args: {} });
-      replaceDoc(body.document);
-      p.set({ layerId: id, status: "Paint layer added. Pick a tool and paint on the preview." });
-      notify("Added a paint layer. Save to keep it.");
-    } catch (e) {
-      p.set({ status: e instanceof Error ? e.message : "Could not add a paint layer." });
+      await addPaintLayer();
     } finally {
       p.set({ busy: false });
     }
   };
-
-  if (!layers.length) {
-    return (
-      <div className="space-y-2 p-3 text-xs">
-        <p className="text-muted-foreground">This page has no paint layer yet. A paint layer holds pixels and is sized to the page.</p>
-        <Button size="sm" disabled={p.busy} onClick={() => void addLayer()}>
-          {doc && doc.version < 6 ? "Upgrade and add paint layer" : "Add paint layer"}
-        </Button>
-        {doc && doc.version < 6 && <p className="text-muted-foreground">Adding pixels upgrades this project to format v6. Save keeps the upgrade; Undo reverts it.</p>}
-        {p.status && <p className="text-muted-foreground">{p.status}</p>}
-      </div>
-    );
-  }
   const clearSelection = async () => {
     const { doc, pageId, replaceDoc } = useStudio.getState();
     if (!doc || !layer || p.busy) return;
@@ -63,7 +39,7 @@ export function RasterPanel() {
     try {
       const body = await postJson<{ document: Doc }>("/api/raster", { document: doc, page: pageId, id: layer.id, action: "select-clear", args: {} });
       replaceDoc(body.document);
-      p.set({ status: "select-clear: done." });
+      p.set({ selection: null, status: "Selection cleared." });
     } catch (e) {
       p.set({ status: e instanceof Error ? e.message : "Request rejected." });
     } finally {
@@ -132,25 +108,14 @@ export function RasterPanel() {
       )}
 
       <div className="flex flex-wrap items-center gap-1">
-        <Button size="sm" variant="outline" onClick={() => setZoom(Math.max(0.1, zoom / 1.25))}>
-          −
+        <Button size="sm" variant="outline" disabled={!p.selection} onClick={() => void clearSelection()}>
+          Deselect (Ctrl+D)
         </Button>
-        <span className="tabular-nums">
-          {Math.round(zoom * 100)}% / {p.rotate}°
-        </span>
-        <Button size="sm" variant="outline" onClick={() => setZoom(Math.min(8, zoom * 1.25))}>
-          +
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => p.set({ rotate: (p.rotate + 15) % 360 })}>
-          Rotate 15°
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => { p.resetView(); setZoom(1); }}>
-          Reset view
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => void clearSelection()}>
-          Deselect
+        <Button size="sm" variant="outline" onClick={() => void addLayer()}>
+          New paint layer
         </Button>
       </div>
+      <p className="text-muted-foreground">[ and ] change the brush size. Alt-click with Clone or Heal sets the source. Hold Space or the middle button to pan; Ctrl+wheel zooms.</p>
 
       <div className="space-y-1 border-t pt-2">
         <label className="flex items-center gap-2">
@@ -175,7 +140,7 @@ export function RasterPanel() {
           Clear guides
         </Button>
       </div>
-      <p className="text-muted-foreground">Rulers, guides, snapping and the navigator are view aids kept in the browser only.</p>
+      <p className="text-muted-foreground">Rulers, guides and snapping are view aids kept in the browser only.</p>
       <PlanPanel />
     </div>
   );

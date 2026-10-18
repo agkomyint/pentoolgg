@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { Button } from "@/components/ui/button";
 import { postJson, type Doc } from "@/lib/api";
 import { useStudio } from "@/store";
-import { useRasterLayers } from "./RasterStage";
+import { useRasterLayers } from "./PaintOverlay";
 
 // Editable plan authoring for agent-directed painting. Every pass is plain data
 // that becomes a v0.13.0 paint plan; the preview and the commit are both the
