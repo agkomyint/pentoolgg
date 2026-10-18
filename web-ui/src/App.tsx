@@ -288,6 +288,15 @@ export default function App() {
     if (!s.doc) return;
     void layoutOps.download(s.doc, format).catch((error) => s.notify(error instanceof Error ? error.message : `Could not export ${format.toUpperCase()}.`, true));
   };
+  const openFile = async (file: File) => {
+    if (!confirmDiscard()) return;
+    try {
+      s.openDoc(JSON.parse(await file.text()));
+      setShowWelcome(false);
+    } catch {
+      s.notify("That file is not a valid .pen document.", true);
+    }
+  };
   return (
     <TooltipProvider>
       <input
@@ -295,22 +304,17 @@ export default function App() {
         hidden
         type="file"
         accept=".pen,application/json"
-        onChange={async (e) => {
+        onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = "";
-          if (!file || !confirmDiscard()) return;
-          try {
-            s.openDoc(JSON.parse(await file.text()));
-            setShowWelcome(false);
-          } catch {
-            s.notify("That file is not a valid .pen document.", true);
-          }
+          if (file) void openFile(file);
         }}
       />
       {showWelcome ? (
         <Welcome
           busy={s.busy}
-          hasDocument={Boolean(s.doc)}
+          doc={s.doc}
+          dirty={s.dirty}
           version={s.version}
           onCreate={(width, height) => {
             if (!confirmDiscard()) return;
@@ -318,6 +322,7 @@ export default function App() {
             setShowWelcome(false);
           }}
           onOpen={() => openInput.current?.click()}
+          onOpenFile={(file) => void openFile(file)}
           onContinue={() => setShowWelcome(false)}
         />
       ) : (
