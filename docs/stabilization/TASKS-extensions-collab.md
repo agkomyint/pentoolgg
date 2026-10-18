@@ -4,6 +4,7 @@ Class: PATCH-SAFE (fix in a patch release) or DECISION (needs maintainer decisio
 a stabilization patch). Test file names are proposals.
 
 ## EXT-001 Collab, Stats and Systems workspaces unreachable (P1, PATCH-SAFE)
+- **Status: fixed in 0.20.1.** Studio replaced the workspace selector with a panel rail; Collaboration, Stats and Design systems are rail panels. Verified in a live browser probe (every rail panel opens without errors).
 - Repro: open Studio; the Workspace select (web-ui/src/App.tsx ~319) lists only the `WORKFLOWS` entries.
 - Expected: every workspace in web-ui/src/lib/workspaces.ts with status "available" is selectable.
 - Actual: `collab`, `stats`, `systems` are unreachable; their `WorkspaceBody` cases are dead.
@@ -12,6 +13,7 @@ a stabilization patch). Test file names are proposals.
 - Accept: each available workspace reachable from the selector; rebuilt web/studio.html committed.
 
 ## EXT-002 Comment author forgery (P1, PATCH-SAFE)
+- **Status: fixed in 0.20.1.** Reproduced. With a collab token the comment author comes from the token principal and the body `actor` is ignored; without collab, behavior is unchanged. Test: `tests/collab_presence.rs::comment_author_comes_from_the_token`.
 - Repro: POST a comment to the comments API with an arbitrary `actor {kind,id,name}` under a commenter token.
 - Expected: identity comes from the token, as for collab ops (`identity_comes_from_the_token_and_forgery_is_refused`).
 - Actual: author is the body `actor` (src/comments.rs `actor_from`, `apply`; src/server.rs `comments_apply`).

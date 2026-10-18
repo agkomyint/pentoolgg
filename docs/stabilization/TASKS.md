@@ -26,6 +26,8 @@ before any code. One patch release per wave.
 | EXT-002 | Comment author taken from request body `actor`; derive from the token | TASKS-extensions-collab |
 | RASTER-001 | Gradient stop key `offset` (documented) rejected; only `position` works | TASKS-raster |
 
+Status: all eight fixed in 0.20.1 (`docs/release-v0.20.1.md`); notes per item in the area files.
+
 ## Wave 2, release 0.20.2: P2 patch-safe
 
 CORE-002 (tight bounds ignore stroke), CORE-004 (corrupt preview cache served ok,

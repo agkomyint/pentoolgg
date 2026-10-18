@@ -5,6 +5,7 @@ no format or CLI contract change. Default test home for new regression tests: `t
 unless a better owning file is named.
 
 ## RASTER-001 documented gradient stop key `offset` is rejected
+- **Status: fixed in 0.20.1.** Reproduced. Released behavior and tests use `position`, so per the AGENTS.md precedence the docs and the gradient-overlay hint were corrected to `position`, and a stop with `offset` but no `position` now fails with an error naming the right key (fill, gradient-map, gradient-overlay). No alias added (that would be a new input spelling). Tests: unit `composite::gradient_stop_tests`, `fill::gradient_stop_tests`.
 - Severity: P1. Patch-safe if `offset` is accepted as an alias; docs-only fix needs a maintainer decision (alias is safest).
 - Repro:
   - `pentool new c.pen --width 300 --height 200`

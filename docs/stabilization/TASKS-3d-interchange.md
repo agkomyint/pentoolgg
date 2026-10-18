@@ -7,6 +7,7 @@ suite while iterating; use `cargo test --test <file> --locked <filter>`.
 ## Defects
 
 ### X3D-001 (P1) Shipped example fails to export: render buffer limit
+- **Status: fixed in 0.20.1.** Reproduced. The example now uses `supersample: 2` (fits the 256 MiB budget, limit unchanged); the regenerated snapshot differs only in edge antialiasing (3518 of 1,080,000 px, 98% on silhouette edges). Test: `tests/v0150_scene3d.rs::every_shipped_example_exports`.
 - Repro: `pentool export examples/v015-glass-crystal/glass-crystal.pen out.png`
 - Expected: PNG written. Actual: `[limit-exceeded] render buffers need 393120000 bytes; the limit is 268435456` (supersample 3 at 1200x900; `--scale` does not reduce it). Workaround: `scene3d set crystal --supersample 2`.
 - Suspect: `MAX_RENDER_BUFFER_BYTES` (256 MiB) in `src/scene3d/render.rs` (line ~18, check ~771), added in commit 0420659.
@@ -15,6 +16,7 @@ suite while iterating; use `cargo test --test <file> --locked <filter>`.
 - Patch-safe: yes (lower the example's supersample or reduce buffer cost). Raising the limit needs a maintainer decision.
 
 ### X3D-002 (P1) v11 gates reject v12 documents
+- **Status: fixed in 0.20.1.** Reproduced. All `== Some(11)` gates in `scene3d/{pack,bindings,cli,node}.rs` and `server.rs` accept v11 or newer; messages say "v11 or newer". Test: `tests/v0160_packaging.rs::pack_mutations_accept_v12_documents` (crease, carton, bind on v12, and v11/v12 mockup renders byte-identical). A separate `scene3d batch` v12 case in `v0160_mockup.rs` is still open.
 - Repro: `pentool migrate doc.pen --target 12` on a doc with a carton, then `pack carton`, `pack sleeve`, `pack crease`, `pack bind`, `scene3d batch`.
 - Expected: accepted (v12 is a superset). Actual: `[unsupported-capability] package mockups require document format v11`, "per-crease editing needs document format v11; upgrade the document first" (misleading), "panel artwork requires document format v11", "batch mockup rendering requires document format v11". SVG gradient import silently migrates a destination to v12, after which packaging edits are refused.
 - Suspect: `raw.get("version") ... == Some(11)` in `src/scene3d/pack.rs` (4413, 4806, 4847, 4971, 5119), `bindings.rs` (26, 69, 221, 403, 451), `cli.rs` (1803, 2102), `node.rs` (368, 2377: render-time dependency plan skipped on v12). `require_v11` at `cli.rs:1423` already uses `>=`.
@@ -45,6 +47,7 @@ suite while iterating; use `cargo test --test <file> --locked <filter>`.
 - Patch-safe: yes (test only); never refresh a golden blindly.
 
 ### X3D-006 (P1) CLI import of SVG with a rectangular clip mask fails
+- **Status: fixed in 0.20.1.** Reproduced. `append_imported_document` merges `mask_resources` (dedupe by digest, conflict error, `MAX_MASKS` across the merged document). Test: `tests/v017_interchange.rs::cli_import_of_rectangular_clip_mask_svg_validates`.
 - Repro: `pentool new d.pen; pentool import d.pen docs/fixtures/.../rectangular-clip-mask.svg` (also on v4/v10/v11/v12 destinations).
 - Expected: imported. Actual: `[missing-mask] node "rectangular-clip-mask-svg-masked-e3962bc3" mask resource sha256:488d... missing`.
 - Suspect: `append_imported_document` in `src/interchange.rs` (~601-860) merges `image_assets` and `components` but not `mask_resources`.
@@ -53,6 +56,7 @@ suite while iterating; use `cargo test --test <file> --locked <filter>`.
 - Patch-safe: yes.
 
 ### X3D-007 (P1) `.fig` import cannot be listed with `tree` or `search`
+- **Status: fixed in 0.20.1.** Reproduced. A found node without drawable geometry reports zero-size bounds at its world origin. Tests: `tests/v017_interchange.rs::figma_fig_import_is_searchable_with_tree_and_search`, unit `scene::empty_group_reports_zero_size_bounds_at_its_origin`.
 - Repro: `pentool import w.pen docs/fixtures/figma-weather-now-v15.fig; pentool tree w.pen` (or `search w.pen a`).
 - Expected: compact tree. Actual: `Error: node not found: w-figma-instance-476635-9a1ef8c5a4-f8ac316a` (`--limit 1` works, `--limit 5` fails).
 - Suspect: `node_bounds_on_page` in `src/scene.rs` (~618-782), `local()` returns None for an empty-children group or an instance with an empty fallback group; called from search/tree (~3921).

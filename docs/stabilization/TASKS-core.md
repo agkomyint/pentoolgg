@@ -4,6 +4,7 @@ Source: `audit-core.md`. Repro dir: session scratchpad `audit-core/`. "Patch-saf
 contract change. Run repros with a v3 doc via `pentool new X.pen && pentool migrate X.pen --target 3` where noted.
 
 ## CORE-001 add/import fail on default (v4) documents
+- **Status: fixed in 0.20.1.** Reproduced. Chose the actionable-error branch (no format change in a patch): `add` into a v4+ destination fails with `[unsupported-version]` naming `group promote/instantiate --component` and `migrate --target 3` (`import` already named its alternatives); README states the v3-instance vs v4-component split. Test: `tests/v070_hardening.rs::add_into_a_scene_graph_document_names_the_component_workflow`. Native v4 `add` remains a maintainer decision.
 - Severity: P1. Needs maintainer decision (support v4 natively vs. auto-route to components).
 - Repro: `pentool new d.pen; pentool import d.pen other.pen` -> `[unsupported-version]`; `pentool add d.pen <registered-asset>` -> `document has no canvas`.
 - Expected: works, or fails with a message that names the supported path (`migrate --target 3` or `group promote`/`instantiate`). Actual: `add` message is misleading.
