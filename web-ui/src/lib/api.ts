@@ -144,6 +144,36 @@ export type Scene3dUvPrimitive = {
 // immutable snapshot, page, size and renderer setting; failed renders can retry.
 const previewCache = new WeakMap<Doc, Map<string, Promise<Blob>>>();
 
+// The server runs at most four preview jobs at once and rejects the rest with
+// "[limit-exceeded]". Keep Studio's renders under that, newest first (older
+// ones are usually superseded), and leave a worker free for paint previews.
+const PREVIEW_SLOTS = 3;
+let previewsRunning = 0;
+const previewQueue: (() => void)[] = [];
+async function previewSlot<T>(work: () => Promise<T>): Promise<T> {
+  if (previewsRunning >= PREVIEW_SLOTS) await new Promise<void>((go) => previewQueue.push(go));
+  else previewsRunning++;
+  try {
+    return await work();
+  } finally {
+    const next = previewQueue.pop();
+    if (next) next();
+    else previewsRunning--;
+  }
+}
+
+/** Retry a render while other clients or panels hold the server's workers. */
+async function whileBusy<T>(work: () => Promise<T>): Promise<T> {
+  for (let wait = 100; ; wait = Math.min(wait * 2, 1000)) {
+    try {
+      return await previewSlot(work);
+    } catch (error) {
+      if (wait >= 1000 || !(error instanceof Error) || !error.message.startsWith("[limit-exceeded] preview workers busy")) throw error;
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 export const api = {
   health: () => getJson<{ ok: boolean; version: string }>("/api/health"),
   document: () => getJson<{ revision: string; document: Doc }>("/api/document"),
@@ -166,14 +196,13 @@ export const api = {
       const started = performance.now();
       const q = new URLSearchParams({ max_edge: String(maxEdge) });
       if (page) q.set("page", page);
-      const r = await check(
-        await fetch(`/api/render/png?${q}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(doc),
-        }),
-      );
-      const blob = await r.blob();
+      const body = JSON.stringify(doc);
+      const blob = await whileBusy(async () => {
+        const r = await check(
+          await fetch(`/api/render/png?${q}`, { method: "POST", headers: { "content-type": "application/json" }, body }),
+        );
+        return r.blob();
+      });
       noteServerRender(performance.now() - started);
       return blob;
     })();
