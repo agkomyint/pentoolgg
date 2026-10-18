@@ -981,3 +981,91 @@ fn cli_psd_export_import_round_trip_keeps_embedded_raster_assets_in_pen() {
     ));
     fs::remove_dir_all(root).unwrap();
 }
+
+fn cli_scratch(label: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "pentool-v017-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn pentool_json(args: &[&str]) -> serde_json::Value {
+    let result = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{args:?} failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    serde_json::from_slice(&result.stdout).unwrap()
+}
+
+#[test]
+fn cli_import_of_rectangular_clip_mask_svg_validates() {
+    let root = cli_scratch("svg-mask");
+    let destination = root.join("document.pen");
+    fs::write(
+        &destination,
+        serde_json::to_vec(&scene::new_document(400, 400)).unwrap(),
+    )
+    .unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("docs/fixtures/svg-conformance/rectangular-clip-mask.svg");
+    let doc = destination.to_str().unwrap();
+    pentool_json(&["import", doc, fixture.to_str().unwrap()]);
+    let once: serde_json::Value = serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    scene::validate(&once).unwrap();
+    let masks = once["mask_resources"].as_object().unwrap().len();
+    assert!(masks >= 1);
+    // Repeated import reuses the content-addressed mask resource.
+    pentool_json(&[
+        "import",
+        doc,
+        fixture.to_str().unwrap(),
+        "--prefix",
+        "again",
+    ]);
+    let twice: serde_json::Value =
+        serde_json::from_slice(&fs::read(&destination).unwrap()).unwrap();
+    scene::validate(&twice).unwrap();
+    assert_eq!(twice["mask_resources"].as_object().unwrap().len(), masks);
+    let png = root.join("out.png");
+    pentool_json(&["export", doc, png.to_str().unwrap()]);
+    assert!(fs::metadata(&png).unwrap().len() > 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn figma_fig_import_is_searchable_with_tree_and_search() {
+    let root = cli_scratch("fig-tree");
+    let destination = root.join("w.pen");
+    fs::write(
+        &destination,
+        serde_json::to_vec(&scene::new_document(1200, 800)).unwrap(),
+    )
+    .unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("docs/fixtures/figma-weather-now-v15.fig");
+    let doc = destination.to_str().unwrap();
+    pentool_json(&["import", doc, fixture.to_str().unwrap()]);
+    let tree = pentool_json(&["tree", doc, "--limit", "1000"]);
+    let emitted: usize = tree["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|layer| layer["objects"].as_array().map_or(0, Vec::len))
+        .sum();
+    assert_eq!(tree["returned"].as_u64().unwrap() as usize, emitted);
+    assert!(tree["returned"].as_u64().unwrap() > 5, "{tree}");
+    let search = pentool_json(&["search", doc, "a", "--limit", "1000"]);
+    assert!(search["returned"].as_u64().unwrap() > 0, "{search}");
+    fs::remove_dir_all(root).unwrap();
+}

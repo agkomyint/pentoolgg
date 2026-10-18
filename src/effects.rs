@@ -142,7 +142,7 @@ pub fn validate(raw: &Value, node: &Value) -> Result<()> {
         if kind == "gradient-overlay" {
             if !p.get("fill").is_some_and(Value::is_object) {
                 bail!(
-                    "gradient-overlay requires --params '{{\"fill\":{{\"kind\":\"linear\",\"stops\":[{{\"offset\":0,\"color\":\"#000000\"}},{{\"offset\":1,\"color\":\"#ffffff\"}}]}}}}' (a gradient fill object)"
+                    "gradient-overlay requires --params '{{\"fill\":{{\"kind\":\"linear\",\"stops\":[{{\"position\":0,\"color\":\"#000000\"}},{{\"position\":1,\"color\":\"#ffffff\"}}]}}}}' (a gradient fill object)"
                 )
             }
             let fill = json!({"kind":"fill","id":"effect-fill","x":0,"y":0,"width":raw["pages"][0]["canvas"]["width"],"height":raw["pages"][0]["canvas"]["height"],"fill":p["fill"]});

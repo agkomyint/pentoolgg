@@ -6880,6 +6880,18 @@ async fn run() -> Result<()> {
             dry_run,
             if_revision,
         } => {
+            let destination_bytes = fs::read(&destination)?;
+            let destination_raw: serde_json::Value = serde_json::from_slice(&destination_bytes)?;
+            if let Some(version) = destination_raw
+                .get("version")
+                .and_then(serde_json::Value::as_u64)
+                .filter(|v| *v >= 4)
+            {
+                anyhow::bail!(
+                    "[unsupported-version] add places legacy v1-v3 assets; the destination {} is v{version}. In a v4+ scene, reuse artwork as a component (`pentool group DOC promote GROUP --component NAME`, then `pentool group DOC instantiate GROUP --component NAME --layer LAYER`), or rebuild the destination from a v3 export (`pentool migrate --target 3`).",
+                    destination.display()
+                );
+            }
             let cwd = std::env::current_dir()?;
             let idx = all_indexes(&cwd)?;
             let item = library::resolve(&idx, &spec)?;
@@ -6887,8 +6899,6 @@ async fn run() -> Result<()> {
             let source_raw: serde_json::Value = serde_json::from_slice(&source_bytes)?;
             let manifest =
                 asset::manifest(&source_raw)?.context("indexed asset metadata missing")?;
-            let destination_bytes = fs::read(&destination)?;
-            let destination_raw: serde_json::Value = serde_json::from_slice(&destination_bytes)?;
             let planned_instance_id =
                 matches!(mode, AddMode::Instance).then(|| next_instance_id(&destination_raw));
             let chosen_prefix = prefix.unwrap_or_else(|| {

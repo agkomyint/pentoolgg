@@ -23,8 +23,10 @@ pub fn set_panel_artwork(
     source: Option<&Value>,
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] panel artwork requires document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] panel artwork requires document format v11 or newer"
     );
     let panel = raw
         .get_mut("dielines")
@@ -66,8 +68,10 @@ pub fn set_layout_path_role(
     role: &str,
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] packaging production roles require document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] packaging production roles require document format v11 or newer"
     );
     ensure!(
         matches!(
@@ -218,8 +222,8 @@ pub fn set_layout_path_crease(
     direction: &str,
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] structural packaging creases require document format v11"
+        raw.get("version").and_then(Value::as_u64).is_some_and(|v| v >= 11),
+        "[unsupported-capability] structural packaging creases require document format v11 or newer"
     );
     ensure!(
         !crease_id.trim().is_empty() && crease_id.len() <= 128,
@@ -400,8 +404,10 @@ pub fn set_panel_artwork_transform(
     rotate: f64,
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] panel artwork placement requires document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] panel artwork placement requires document format v11 or newer"
     );
     ensure!(
         scale
@@ -448,8 +454,10 @@ pub fn set_panel_safe_zone(
     inset_mm: f64,
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] panel safe-area guides require document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] panel safe-area guides require document format v11 or newer"
     );
     ensure!(
         inset_mm.is_finite() && inset_mm >= 0.0,

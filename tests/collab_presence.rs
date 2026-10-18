@@ -504,3 +504,28 @@ fn version_only_moves_when_viewers_would_see_a_change() {
     assert!(version > v);
     assert_eq!(view["matches"], json!(0));
 }
+
+/// EXT-002: under a token, a comment's author is the token's actor; a body
+/// `actor` cannot attribute the comment to someone else.
+#[test]
+fn comment_author_comes_from_the_token() {
+    let ws = Workspace::new("comment-author");
+    let doc = setup(&ws);
+    let commenter = token(&doc, "commenter", "carl");
+    let url = start(&doc);
+    let own = actor_id(&url, &commenter);
+    let forged = json!({
+        "action": "add",
+        "body": "looks good",
+        "actor": {"kind": "human", "id": "mallory", "name": "Mallory"}
+    });
+    let (status, reply) = http(
+        "POST",
+        &format!("{url}/api/comments"),
+        Some(&commenter),
+        Some(forged.to_string()),
+    );
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(reply["thread"]["opened_by"]["id"], json!(own), "{reply}");
+    assert_ne!(reply["thread"]["opened_by"]["name"], json!("Mallory"));
+}

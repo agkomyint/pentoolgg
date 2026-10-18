@@ -1225,3 +1225,39 @@ fn spot_light_and_shadows_change_the_render_deterministically() {
     let sum = |p: &Path| png_pixels(p).2.iter().map(|b| *b as u64).sum::<u64>();
     assert!(sum(&on) < sum(&off), "shadows must darken the ground");
 }
+
+/// X3D-001: every shipped example containing a scene3d node must export within
+/// the render-buffer budget (the limit itself stays unchanged).
+#[test]
+fn every_shipped_example_exports() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&examples).unwrap() {
+        let dir = entry.unwrap().path();
+        let Ok(files) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for file in files {
+            let path = file.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("pen") {
+                continue;
+            }
+            if !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("\"scene3d\"")
+            {
+                continue;
+            }
+            let out = scratch().join("example.png");
+            let result = pentool(&["export", path.to_str().unwrap(), out.to_str().unwrap()]);
+            assert!(
+                result.status.success(),
+                "{} does not export: {}",
+                path.display(),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 2, "expected the shipped scene3d examples");
+}

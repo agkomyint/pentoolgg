@@ -746,10 +746,17 @@ fn node_bounds_on_page(page: &Value, id: &str) -> Result<Value> {
         };
         Ok(Some(transform.transform_rect_bbox(rect)))
     }
+    /// A found node without drawable geometry (an empty group, or an instance
+    /// whose fallback is empty) reports zero-size bounds at its world origin
+    /// rather than "node not found".
     fn search(nodes: &[Value], id: &str, parent: Affine) -> Result<Option<Rect>> {
         for node in nodes {
             if node.get("id").and_then(Value::as_str) == Some(id) {
-                return local(node, parent);
+                if let Some(rect) = local(node, parent)? {
+                    return Ok(Some(rect));
+                }
+                let origin = (parent * matrix(node.get("transform"))?) * kurbo::Point::ORIGIN;
+                return Ok(Some(Rect::from_points(origin, origin)));
             }
             let world = parent * matrix(node.get("transform"))?;
             if let Some(children) = node.get("children").and_then(Value::as_array) {
@@ -3364,6 +3371,23 @@ pub(crate) fn validate_node(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_group_reports_zero_size_bounds_at_its_origin() {
+        let page = json!({"canvas":{"width":100,"height":100},"layers":[{"id":"l","nodes":[
+            {"kind":"group","id":"outer","transform":[1,0,0,1,10,20],"children":[
+                {"kind":"group","id":"empty","transform":[1,0,0,1,5,5],"children":[]}]}]}]});
+        let zero = |id: &str, x: f64, y: f64| json!({"id":id,"x":x,"y":y,"width":0.0,"height":0.0,"right":x,"bottom":y});
+        assert_eq!(
+            node_bounds_on_page(&page, "outer").unwrap(),
+            zero("outer", 10.0, 20.0)
+        );
+        assert_eq!(
+            node_bounds_on_page(&page, "empty").unwrap(),
+            zero("empty", 15.0, 25.0)
+        );
+        assert!(node_bounds_on_page(&page, "missing").is_err());
+    }
+
     #[test]
     fn legacy_migration_preserves_order_and_extensions() {
         let raw:Value=serde_json::from_str(r##"{"format":"pentool","version":1,"name":"x","canvas":{"width":10,"height":10,"background":"none"},"layers":[{"id":"l","name":"L","custom":7,"paths":[{"id":"p","d":"M0 0","stroke":"#000","stroke_width":1,"fill":"none","closed":false}],"texts":[]}],"extra":{"x":1}}"##).unwrap();

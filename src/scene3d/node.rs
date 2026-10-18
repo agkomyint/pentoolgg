@@ -365,7 +365,7 @@ fn validate_ground_plane(node: &Map<String, Value>, v11: bool) -> Result<()> {
     };
     ensure!(
         v11,
-        "[unsupported-capability] explicit ground planes require document format v11"
+        "[unsupported-capability] explicit ground planes require document format v11 or newer"
     );
     let ground = value
         .as_object()
@@ -2374,7 +2374,11 @@ fn render_png_report_with_island_selection(
         node,
         raw.get("version").and_then(Value::as_u64).unwrap_or(0) >= BINDINGS_VERSION,
     )?;
-    if raw.get("version").and_then(Value::as_u64) == Some(11) {
+    if raw
+        .get("version")
+        .and_then(Value::as_u64)
+        .is_some_and(|v| v >= 11)
+    {
         // Export uses the same complete-document dependency plan as v11
         // validation, so a direct library render cannot bypass cycle or
         // source-state checks that CLI/server preview already depends on.

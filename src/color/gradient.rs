@@ -4,7 +4,7 @@ use super::{
     icc::Intent,
     value::{Destination, Evaluator, NativeColor},
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -55,10 +55,13 @@ pub(crate) fn sources(fill: &Value, styles: &Value) -> Result<Vec<(f64, NativeCo
     let out: Vec<_> = stops
         .iter()
         .map(|stop| {
+            if stop.get("position").is_none() && stop.get("offset").is_some() {
+                bail!("[invalid-fill] gradient stops use \"position\", not \"offset\"");
+            }
             let position = stop["position"]
                 .as_f64()
                 .filter(|p| (0.0..=1.0).contains(p))
-                .context("[invalid-fill] gradient position must be in 0..1")?;
+                .context("[invalid-fill] gradient stop \"position\" must be a number in 0..1")?;
             Ok((position, color(&stop["color"], styles, 0)?))
         })
         .collect::<Result<_>>()?;

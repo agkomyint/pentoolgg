@@ -67,7 +67,10 @@ output-profile soft-proof image as a PNG; `GET /api/color/gamut` (`page`) return
 pixels), read only, and answer 400 with `error` for unsupported pages or roles.
 
 `POST /api/render/svg` and `/api/render/png` accept optional `page`, `max_edge`
-(v6: 1..4096) and `job` query parameters. The request body must be the complete
+(1..8192) and `job` query parameters. `max_edge` sizes the preview so the
+selected page's longest edge is that many pixels: smaller than the canvas gives
+a proxy, larger gives a sharper zoomed preview, up to 8x the canvas and about 50 million pixels
+in total. Studio requests the size it displays. The request body must be the complete
 document JSON from the `document` field returned by `GET /api/document`, not the
 surrounding response object. It carries the `format` and `version` fields used to
 select the renderer; an empty or partial document answers 400 with an `error`.

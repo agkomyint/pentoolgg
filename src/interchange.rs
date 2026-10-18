@@ -849,6 +849,32 @@ pub fn append_imported_document(
             }
         }
     }
+    // Mask resources are content-addressed, so a repeated import deduplicates.
+    if let Some(imported_masks) = imported.get("mask_resources").and_then(Value::as_object) {
+        let destination_masks = result
+            .as_object_mut()
+            .context("destination must be an object")?
+            .entry("mask_resources")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .context("[invalid-mask] destination mask_resources must be an object")?;
+        for (digest, resource) in imported_masks {
+            if let Some(existing) = destination_masks.get(digest) {
+                ensure!(
+                    existing == resource,
+                    "[invalid-input] imported mask resource {digest:?} conflicts with destination content"
+                );
+            } else {
+                destination_masks.insert(digest.clone(), resource.clone());
+            }
+        }
+        ensure!(
+            destination_masks.len() <= crate::mask::MAX_MASKS,
+            "[limit-exceeded] import would leave {} mask resources; at most {} are allowed",
+            destination_masks.len(),
+            crate::mask::MAX_MASKS
+        );
+    }
     crate::scene::validate(&result).map_err(anyhow::Error::msg)?;
     Ok((
         result,

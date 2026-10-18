@@ -2490,3 +2490,112 @@ fn every_builtin_template_preflights_without_panel_intersections_at_each_fold() 
         }
     }
 }
+
+#[test]
+fn pack_mutations_accept_v12_documents() {
+    let v11: Value =
+        serde_json::from_slice(include_bytes!("../docs/fixtures/v11-product-packaging.pen"))
+            .unwrap();
+    let mut document = pentool::scene::migrate_to_v12(v11).unwrap();
+    assert_eq!(document["version"], 12);
+    pentool::scene3d::pack::set_crease_direction(
+        &mut document,
+        "shirt-carton",
+        "front-right-fold",
+        "valley",
+    )
+    .unwrap();
+    pentool::scene3d::pack::add_tuck_carton(
+        &mut document,
+        "generated-carton",
+        "generated-carton-preview",
+        "mockups",
+        Some("products"),
+        "straight-tuck",
+        120.0,
+        70.0,
+        180.0,
+        0.5,
+        3.0,
+        15.0,
+        [600.0, 100.0, 400.0, 600.0],
+    )
+    .unwrap();
+    assert_eq!(document["version"], 12);
+
+    let dir = scratch();
+    let path = dir.join("v12.pen");
+    std::fs::write(&path, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+    let bind = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args([
+            "scene3d",
+            path.to_str().unwrap(),
+            "pack",
+            "bind",
+            "shirt-carton",
+            "--panel",
+            "front",
+            "--source",
+            "node:artwork:label-name",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["version"], 12);
+
+    // v12 is a superset: the same bound mockup renders the same pixels as on v11.
+    let v11_path = dir.join("v11.pen");
+    std::fs::write(
+        &v11_path,
+        include_bytes!("../docs/fixtures/v11-product-packaging.pen"),
+    )
+    .unwrap();
+    let v12_path = dir.join("v12-plain.pen");
+    let migrated = pentool::scene::migrate_to_v12(
+        serde_json::from_slice(include_bytes!("../docs/fixtures/v11-product-packaging.pen"))
+            .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(&v12_path, serde_json::to_vec_pretty(&migrated).unwrap()).unwrap();
+    let mut pngs = Vec::new();
+    for doc in [&v11_path, &v12_path] {
+        let bound = Command::new(env!("CARGO_BIN_EXE_pentool"))
+            .args([
+                "scene3d",
+                doc.to_str().unwrap(),
+                "pack",
+                "bind",
+                "shirt-carton",
+            ])
+            .args(["--panel", "front", "--source", "node:artwork:label-name"])
+            .output()
+            .unwrap();
+        assert!(
+            bound.status.success(),
+            "{}",
+            String::from_utf8_lossy(&bound.stderr)
+        );
+        let png = doc.with_extension("png");
+        let export = Command::new(env!("CARGO_BIN_EXE_pentool"))
+            .args(["export", doc.to_str().unwrap(), png.to_str().unwrap()])
+            .args(["--page", "products"])
+            .output()
+            .unwrap();
+        assert!(
+            export.status.success(),
+            "{}",
+            String::from_utf8_lossy(&export.stderr)
+        );
+        pngs.push(std::fs::read(&png).unwrap());
+    }
+    assert!(
+        pngs[0] == pngs[1],
+        "v11 and v12 renders of the same mockup differ"
+    );
+    std::fs::remove_dir_all(dir).ok();
+}

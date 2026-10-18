@@ -4410,8 +4410,10 @@ pub fn add_svg_dieline(
     placement: [f64; 4],
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] SVG dielines require document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] SVG dielines require document format v11 or newer"
     );
     ensure!(
         !svg.is_empty() && svg.len() <= MAX_IMPORTED_DIELINE_SVG_BYTES,
@@ -4803,8 +4805,8 @@ pub fn set_crease_angle(
 ) -> Result<Value> {
     crate::scene::validate(raw)?;
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-version] per-crease editing needs document format v11; upgrade the document first"
+        raw.get("version").and_then(Value::as_u64).is_some_and(|v| v >= 11),
+        "[unsupported-version] per-crease editing needs document format v11 or newer; upgrade the document first"
     );
     ensure!(
         angle_deg.is_finite() && (-180.0..=180.0).contains(&angle_deg),
@@ -4844,8 +4846,8 @@ pub fn set_crease_direction(
 ) -> Result<Value> {
     crate::scene::validate(raw)?;
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-version] crease direction editing needs document format v11; upgrade the document first"
+        raw.get("version").and_then(Value::as_u64).is_some_and(|v| v >= 11),
+        "[unsupported-version] crease direction editing needs document format v11 or newer; upgrade the document first"
     );
     ensure!(
         matches!(direction, "mountain" | "valley"),
@@ -4968,8 +4970,8 @@ pub fn set_print_settings(
     crate::scene::validate(&candidate)
         .context("[invalid-input] document must validate before packaging settings")?;
     ensure!(
-        candidate.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-version] packaging print settings need document format v11; upgrade the document first"
+        candidate.get("version").and_then(Value::as_u64).is_some_and(|v| v >= 11),
+        "[unsupported-version] packaging print settings need document format v11 or newer; upgrade the document first"
     );
     ensure!(
         board_mm.is_some()
@@ -5116,8 +5118,10 @@ fn add_generated_dieline(
     mut dieline: Value,
 ) -> Result<Value> {
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] package mockups require document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] package mockups require document format v11 or newer"
     );
     ensure!(
         !dieline_id.trim().is_empty() && !node_id.trim().is_empty(),

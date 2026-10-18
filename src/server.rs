@@ -1082,8 +1082,8 @@ fn plan_scene3d_form(request: &Scene3dFormRequest) -> Result<serde_json::Value> 
             .document
             .get("version")
             .and_then(serde_json::Value::as_u64)
-            == Some(11),
-        "[unsupported-version] product forms need document format v11; upgrade the document first"
+            .is_some_and(|v| v >= 11),
+        "[unsupported-version] product forms need document format v11 or newer; upgrade the document first"
     );
     let mut candidate = request.document.clone();
     let form = match request.action.as_str() {
@@ -1241,8 +1241,8 @@ fn plan_scene3d_fold(request: &Scene3dFoldRequest) -> Result<serde_json::Value> 
             .document
             .get("version")
             .and_then(serde_json::Value::as_u64)
-            == Some(11),
-        "[unsupported-version] package folding needs document format v11; upgrade the document first"
+            .is_some_and(|v| v >= 11),
+        "[unsupported-version] package folding needs document format v11 or newer; upgrade the document first"
     );
     anyhow::ensure!(
         request.fold_state.is_finite() && (0.0..=1.0).contains(&request.fold_state),
@@ -2430,8 +2430,8 @@ fn plan_scene3d_uv_model_preview(
             .document
             .get("version")
             .and_then(serde_json::Value::as_u64)
-            == Some(11),
-        "[unsupported-version] UV model preview requires document format v11"
+            .is_some_and(|v| v >= 11),
+        "[unsupported-version] UV model preview requires document format v11 or newer"
     );
     crate::scene::validate(&request.document)?;
     let page = request.document["pages"]
@@ -2808,8 +2808,8 @@ fn plan_scene3d_uv_pack(
             .document
             .get("version")
             .and_then(serde_json::Value::as_u64)
-            == Some(11),
-        "[unsupported-version] editable UV island packing needs document format v11"
+            .is_some_and(|v| v >= 11),
+        "[unsupported-version] editable UV island packing needs document format v11 or newer"
     );
     crate::scene::validate(&request.document)?;
     let page = request.document["pages"]
@@ -4403,15 +4403,38 @@ async fn comments_list(
 
 async fn comments_apply(
     State(state): State<Shared>,
-    Json(request): Json<serde_json::Value>,
+    principal: Option<axum::Extension<crate::collab::token::Principal>>,
+    Json(mut request): Json<serde_json::Value>,
 ) -> Response {
     let Some(file) = state.file else {
         return (StatusCode::NOT_FOUND, "No shared document").into_response();
     };
+    // Under a collaboration token the author is the token's actor, as for
+    // operations; a body `actor` cannot attribute a comment to someone else.
+    if let Some(axum::Extension(principal)) = principal.filter(|p| p.token.is_some()) {
+        if let Some(object) = request.as_object_mut() {
+            object.insert("actor".into(), comment_actor(&principal.actor));
+        }
+    }
     match crate::comments::apply(&file, &request) {
         Ok(value) => Json(value).into_response(),
         Err(error) => problem(error),
     }
+}
+
+fn comment_actor(actor: &crate::collab::op::Actor) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "kind": actor.kind,
+        "id": actor.id,
+        "name": actor.display_name.as_deref().unwrap_or(&actor.id),
+    });
+    if let Some(model) = &actor.model {
+        value["model"] = serde_json::json!(model);
+    }
+    if let Some(director) = &actor.directed_by {
+        value["directed_by"] = serde_json::json!(director);
+    }
+    value
 }
 
 #[derive(serde::Deserialize)]
@@ -4586,6 +4609,7 @@ async fn composite_job(
         .file
         .clone()
         .unwrap_or_else(|| state.project_root.join("browser.pen"));
+    let preview = query.max_edge.is_some();
     run_job(state, query.job, "export", move || {
         if svg {
             Ok(
@@ -4593,10 +4617,35 @@ async fn composite_job(
                     .into_bytes(),
             )
         } else {
-            crate::composite::png(&value, &document, query.page.as_deref(), scale)
+            composite_png(&value, &document, query.page.as_deref(), scale, preview)
         }
     })
     .await
+}
+
+/// Composite PNG. A sized preview that exceeds the compositing budget is
+/// retried at a smaller scale instead of failing; full-size exports never are.
+fn composite_png(
+    value: &serde_json::Value,
+    document: &std::path::Path,
+    page: Option<&str>,
+    mut scale: f32,
+    preview: bool,
+) -> Result<Vec<u8>> {
+    let mut attempts = 0;
+    loop {
+        match crate::composite::png(value, document, page, scale) {
+            Err(error)
+                if preview
+                    && attempts < PREVIEW_BUDGET_RETRIES
+                    && error.to_string().starts_with("[limit-exceeded]") =>
+            {
+                attempts += 1;
+                scale *= 0.5;
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Run cancellable blocking work under a registered job ID. `/api/composite/cancel`
@@ -4668,9 +4717,8 @@ fn composite_preview_scale(
     page: Option<&str>,
     max_edge: Option<u32>,
 ) -> Result<f32> {
-    let Some(edge) = max_edge else { return Ok(1.0) };
-    if !(1..=4096).contains(&edge) {
-        anyhow::bail!("preview max_edge must be in 1..=4096")
+    if max_edge.is_none() {
+        return Ok(1.0);
     }
     crate::scene::validate(value)?;
     let pages = value["pages"].as_array().unwrap();
@@ -4681,11 +4729,35 @@ fn composite_preview_scale(
             .context("preview page missing")?,
         None => &pages[0],
     };
-    let longest = selected["canvas"]["width"]
-        .as_u64()
-        .unwrap()
-        .max(selected["canvas"]["height"].as_u64().unwrap());
-    Ok((edge as f32 / longest as f32).min(1.0))
+    preview_scale(
+        selected["canvas"]["width"].as_f64().unwrap_or(1.0),
+        selected["canvas"]["height"].as_f64().unwrap_or(1.0),
+        max_edge,
+        1.0 / 16384.0,
+    )
+}
+
+/// Largest preview a client may request, in pixels on the longest edge and in
+/// total pixels. Zoomed Studio views ask for more than the canvas size so
+/// vector edges stay sharp; the budget keeps one preview bounded.
+const PREVIEW_MAX_EDGE: u32 = 8192;
+/// Halvings tried when a sized composite preview exceeds the compositing budget.
+const PREVIEW_BUDGET_RETRIES: u32 = 3;
+const PREVIEW_MAX_PIXELS: f64 = 48.0 * 1024.0 * 1024.0;
+
+/// Scale that makes the longest canvas edge `max_edge` pixels, within the
+/// renderer's 8x limit and the preview pixel budget. `None` is full resolution.
+fn preview_scale(width: f64, height: f64, max_edge: Option<u32>, min: f32) -> Result<f32> {
+    let Some(edge) = max_edge else { return Ok(1.0) };
+    if !(1..=PREVIEW_MAX_EDGE).contains(&edge) {
+        anyhow::bail!("preview max_edge must be in 1..={PREVIEW_MAX_EDGE}")
+    }
+    let (width, height) = (width.max(1.0), height.max(1.0));
+    let mut scale = (f64::from(edge) / width.max(height)).min(8.0);
+    if width * height * scale * scale > PREVIEW_MAX_PIXELS {
+        scale = (PREVIEW_MAX_PIXELS / (width * height)).sqrt();
+    }
+    Ok((scale as f32).max(min))
 }
 
 async fn render_png(
@@ -4714,7 +4786,13 @@ async fn render_png(
                 .clone()
                 .unwrap_or_else(|| state.project_root.join("browser.pen"));
             let scene = image::to_svg(&value, &document, query.page.as_deref())?;
-            return render::scene_to_png(&scene, 1.0);
+            let scale = preview_scale(
+                f64::from(scene.width),
+                f64::from(scene.height),
+                query.max_edge,
+                0.1,
+            )?;
+            return render::scene_to_png(&scene, scale);
         }
         let value = if crate::scene::is_scene_document(&value) {
             crate::scene::flatten_to_v3(&value)?
@@ -4727,7 +4805,13 @@ async fn render_png(
                 return Err(anyhow::Error::msg(error));
             }
         }
-        render::to_png_cached(&doc, 1.0).map(|(bytes, _)| bytes)
+        let scale = preview_scale(
+            f64::from(doc.canvas.width),
+            f64::from(doc.canvas.height),
+            query.max_edge,
+            0.1,
+        )?;
+        render::to_png_cached(&doc, scale).map(|(bytes, _)| bytes)
     })();
     match result {
         Ok(bytes) => binary(bytes, "image/png", "artwork.png"),
@@ -6703,6 +6787,29 @@ mod tests {
                 .unwrap();
         assert_eq!(pixels.dimensions(), (1024, 1));
         assert!(super::composite_preview_scale(&raw, None, Some(0)).is_err());
+        assert!(super::composite_preview_scale(&raw, None, Some(8193)).is_err());
+        // Zoomed previews may exceed the canvas size, within 8x and the pixel budget.
+        assert_eq!(
+            super::preview_scale(1200.0, 800.0, Some(2400), 0.1).unwrap(),
+            2.0
+        );
+        assert_eq!(
+            super::preview_scale(100.0, 100.0, Some(8192), 0.1).unwrap(),
+            8.0
+        );
+        let budget = super::preview_scale(8000.0, 8000.0, Some(8192), 0.1).unwrap();
+        assert!(8000.0 * 8000.0 * f64::from(budget).powi(2) <= super::PREVIEW_MAX_PIXELS * 1.0001);
+        assert_eq!(super::preview_scale(1200.0, 800.0, None, 0.1).unwrap(), 1.0);
+        // The largest zoomed preview of an ordinary page exceeds the compositing
+        // budget; the preview steps down instead of failing, exports do not.
+        let page = crate::composite::migrate(crate::scene::new_document(1200, 800)).unwrap();
+        let path = std::path::Path::new("target/proxy.pen");
+        let big = super::composite_preview_scale(&page, None, Some(8192)).unwrap();
+        assert!(crate::composite::png(&page, path, None, big).is_err());
+        let png = super::composite_png(&page, path, None, big, true).unwrap();
+        let decoded = image::load_from_memory(&png).unwrap();
+        assert!(decoded.width() >= 2048 && decoded.width() < 8192);
+        assert!(super::composite_png(&page, path, None, big, false).is_err());
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         assert!(crate::composite::with_cancel(flag, crate::composite::check_cancelled).is_err());
         crate::composite::check_cancelled().unwrap();

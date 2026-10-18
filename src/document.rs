@@ -38,6 +38,12 @@ struct DocumentWire {
 impl<'de> Deserialize<'de> for Document {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = DocumentWire::deserialize(deserializer)?;
+        if wire.version >= 4 {
+            return Err(serde::de::Error::custom(format!(
+                "[unsupported-version] format v{} is a scene graph; this operation reads legacy v1-v3 documents only",
+                wire.version
+            )));
+        }
         let (canvas, layers, pages) = if wire.version == 3 {
             let first = wire
                 .pages

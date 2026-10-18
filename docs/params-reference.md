@@ -12,7 +12,7 @@ object. An unknown key is rejected and the error lists the valid keys.
 | `color-balance` | `red`, `green`, `blue` |
 | `black-and-white` | `red`, `green`, `blue` |
 | `channel-mixer` | `matrix`: 3 rows of `[R, G, B, offset]` |
-| `gradient-map` | `stops`: `[{"offset":0,"rgb":[r,g,b]}, ...]` (note `rgb`, not `color`) |
+| `gradient-map` | `stops`: `[{"position":0,"rgb":[r,g,b]}, ...]` (note `position`, not `offset`, and `rgb`, not `color`) |
 | `posterize` | `levels` |
 | `threshold` | `level` |
 | `brightness-contrast`, `levels`, `curves`, `hue-saturation` | same keys as the matching image operation |
@@ -35,7 +35,7 @@ then opacity.
 
 ## Fills
 
-`fill add --kind linear|radial|conic --params '{"stops":[{"offset":0,"color":"#fff"}, ...]}'`
+`fill add --kind linear|radial|conic --params '{"stops":[{"position":0,"color":"#fff"}, ...]}'`
 
 Geometry is **node-local** pixels (`x1,y1,x2,y2`; `cx,cy,radius`). When omitted it
 spans the node's bounds (radial/conic centre = node centre). Coordinates entirely

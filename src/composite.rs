@@ -519,10 +519,13 @@ fn gradient(params: &Value) -> Result<Vec<(f64, [f64; 3])>> {
         .context("[invalid-adjustment] gradient map requires 2..=16 stops")?;
     let mut result = Vec::with_capacity(stops.len());
     for stop in stops {
+        if stop.get("position").is_none() && stop.get("offset").is_some() {
+            bail!("[invalid-adjustment] gradient stops use \"position\", not \"offset\"");
+        }
         let position = stop["position"]
             .as_f64()
             .filter(|v| (0.0..=1.0).contains(v))
-            .context("[invalid-adjustment] gradient position must be in 0..=1")?;
+            .context("[invalid-adjustment] gradient stop \"position\" must be a number in 0..=1")?;
         let rgb = stop["rgb"]
             .as_array()
             .filter(|a| a.len() == 3)
@@ -2692,5 +2695,20 @@ mod plain_node_budget_tests {
         assert_eq!(plain_node_pixels(&effect, canvas, 1.0), canvas);
         let text = json!({"kind":"text","id":"t","width":40,"height":40});
         assert_eq!(plain_node_pixels(&text, canvas, 1.0), canvas);
+    }
+}
+
+#[cfg(test)]
+mod gradient_stop_tests {
+    use super::*;
+
+    #[test]
+    fn gradient_map_stops_name_the_position_key() {
+        let offset = json!({"stops":[{"offset":0,"rgb":[0,0,0]},{"offset":1,"rgb":[255,255,255]}]});
+        let error = gradient(&offset).unwrap_err().to_string();
+        assert!(error.contains("\"position\", not \"offset\""), "{error}");
+        let position =
+            json!({"stops":[{"position":0,"rgb":[0,0,0]},{"position":1,"rgb":[255,255,255]}]});
+        assert_eq!(gradient(&position).unwrap().len(), 2);
     }
 }

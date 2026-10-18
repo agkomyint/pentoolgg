@@ -1800,8 +1800,10 @@ fn batch_render(
     const MAX_TOTAL_SAMPLES: u64 = 256 * 1024 * 1024;
     const MAX_TOTAL_PNG_BYTES: usize = 256 * 1024 * 1024;
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] batch mockup rendering requires document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] batch mockup rendering requires document format v11 or newer"
     );
     ensure!(
         !requested_nodes.is_empty() && requested_nodes.len() <= MAX_NODES,
@@ -2099,8 +2101,10 @@ fn queue_job_preflight(raw: &Value, requested_nodes: &[String]) -> Result<(usize
     const MAX_PIXELS: u64 = 64_000_000;
     const MAX_SAMPLES: u64 = 256 * 1024 * 1024;
     ensure!(
-        raw.get("version").and_then(Value::as_u64) == Some(11),
-        "[unsupported-capability] batch mockup rendering requires document format v11"
+        raw.get("version")
+            .and_then(Value::as_u64)
+            .is_some_and(|v| v >= 11),
+        "[unsupported-capability] batch mockup rendering requires document format v11 or newer"
     );
     ensure!(
         !requested_nodes.is_empty() && requested_nodes.len() <= MAX_NODES,

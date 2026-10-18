@@ -704,6 +704,9 @@ pentool asset preview project-assets/ui/card --output card.png
 
 Place an editable copy or an offline-safe instance. Instances retain materialized
 content, so documents continue to render when the source library is unavailable.
+`add` and `import` place into legacy v1-v3 documents; in a v4+ scene graph (the
+`pentool new` default) reuse artwork as a component instead (`pentool group DOC promote GROUP --component NAME`,
+then `group DOC instantiate`); both commands say so rather than failing obscurely.
 
 ```sh
 pentool add poster.pen project-assets/ui/card --mode copy --at 100 80

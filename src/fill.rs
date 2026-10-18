@@ -107,10 +107,13 @@ fn stops(fill: &Value, styles: &Value, validation: Option<bool>) -> Result<Vec<(
         .context("[invalid-fill] gradients require 2..64 stops")?;
     let mut out = Vec::new();
     for value in values {
+        if value.get("position").is_none() && value.get("offset").is_some() {
+            bail!("[invalid-fill] gradient stops use \"position\", not \"offset\"");
+        }
         let position = value["position"]
             .as_f64()
             .filter(|v| (0.0..=1.0).contains(v))
-            .context("gradient position must be in 0..1")?;
+            .context("gradient stop \"position\" must be a number in 0..1")?;
         let color = if let Some(native) = validation {
             validate_color(&value["color"], styles, native)?;
             [0.0; 4]
@@ -892,5 +895,25 @@ mod linear_fill_tests {
             }
         }
         assert_eq!(raw, before);
+    }
+}
+
+#[cfg(test)]
+mod gradient_stop_tests {
+    use super::*;
+
+    #[test]
+    fn fill_stops_name_the_position_key() {
+        let offset = json!({"kind":"linear","stops":[
+            {"offset":0,"color":"#000000"},{"offset":1,"color":"#ffffff"}]});
+        let error = stops(&offset, &json!({}), None).unwrap_err().to_string();
+        assert!(error.contains("\"position\", not \"offset\""), "{error}");
+        let position = json!({"kind":"linear","stops":[
+            {"position":0,"color":"#000000"},{"position":1,"color":"#ffffff"}]});
+        assert_eq!(stops(&position, &json!({}), None).unwrap().len(), 2);
+        let color = crate::color::gradient::sources(&offset, &json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(color.contains("\"position\", not \"offset\""), "{color}");
     }
 }

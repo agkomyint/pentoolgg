@@ -636,3 +636,18 @@ fn idempotent_image_op_toggles_report_an_unchanged_document() {
         "{enabled_again}"
     );
 }
+
+#[test]
+fn add_into_a_scene_graph_document_names_the_component_workflow() {
+    let ws = Workspace::new("add-v4");
+    let doc = ws.path("scene.pen");
+    let raw = pentool::scene::new_document(200, 200);
+    fs::write(&doc, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+    let before = fs::read(&doc).unwrap();
+    let out = run(&["add", doc.to_str().unwrap(), "any/asset"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("[unsupported-version]"), "{stderr}");
+    assert!(stderr.contains("--component"), "{stderr}");
+    assert_eq!(fs::read(&doc).unwrap(), before);
+}

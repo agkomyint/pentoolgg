@@ -151,7 +151,7 @@
               },
               "shadow_map_size": 512,
               "shadows": true,
-              "supersample": 3,
+              "supersample": 2,
               "width": 1200.0,
               "x": 0.0,
               "y": 0.0
