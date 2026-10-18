@@ -65,7 +65,7 @@ describe("moveInStack", () => {
     useStudio.setState({ pageId: undefined });
     moveInStack("p1", { node: "p2", where: "above" });
     const doc = useStudio.getState().doc!;
-    expect(doc.layers![0]!.paths!.map((n) => n.id)).toEqual(["p2", "p1"]);
+    expect(pageOf(doc, undefined)!.layers![0]!.paths!.map((n) => n.id)).toEqual(["p2", "p1"]);
     const before = JSON.stringify(doc);
     moveInStack("p1", { layer: "y" });
     expect(JSON.stringify(useStudio.getState().doc)).toBe(before);
