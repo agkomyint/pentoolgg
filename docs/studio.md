@@ -37,6 +37,23 @@ vanilla-JS editor (`/classic`) was retired once its photo and raster panels were
   device pixel ratio (up to 8192 px on the long edge, and above 1:1 when zoomed
   in), so zoomed artwork and images stay sharp. A coarse proxy appears first
   after an edit. Preview sizing never changes exported pixels.
+- Canvas interaction: dragging shows smart guides to page and object edges and
+  centres plus a size/position badge. Right-click opens a context menu (cut,
+  copy, paste, duplicate, delete, arrange, group, select all, zoom). Ctrl+C/X/V copy
+  objects through the system clipboard as `.pen` nodes; Ctrl+A selects every
+  object on visible, unlocked layers of the current page. Text is edited in
+  place: the text tool opens an editor where you click, and double-click or
+  Enter edits a selected text; Esc, Ctrl+Enter or a click outside commits, and
+  a new text left empty is removed.
+- Ctrl/Cmd+K opens a command palette (edit, arrange, view, tools, pages,
+  export, panels, extensions) with fuzzy search; `?` opens the keyboard
+  shortcut sheet, also reachable from the status bar.
+- Layers: drag rows to restack, onto the middle of a group row to nest, or onto
+  a layer header to move between layers; objects keep their painted position
+  (the old parent transform is baked in). Locked layers refuse drops. Legacy
+  (v1-v3) objects reorder only within their own layer. Double-click or F2
+  renames a row inline. Hovering a row outlines the object on the canvas and
+  hovering the canvas highlights its row.
 - Visited focus views remain mounted. Hidden views pause their global shortcuts
   and preview requests. An unchanged document snapshot can reuse a bounded
   preview cache; editing creates a new snapshot.
@@ -112,7 +129,7 @@ unsupported. Studio does not expose component override editing.
 
 ### Extensions (0.18)
 
-The Extensions workspace and the Ctrl/Cmd+K palette list the project's installed
+The Extensions workspace and the Ctrl/Cmd+K command palette list the project's installed
 sandboxed extensions with their approved capabilities and limits, then preview
 (dry run) or run a command against the served document through
 `GET /api/extensions` and `POST /api/extensions/run` (guarded by the document
