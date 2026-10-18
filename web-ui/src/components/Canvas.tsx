@@ -48,11 +48,49 @@ type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
 type Drag =
-  | { mode: "move"; start: Point; ids: string[] }
+  | { mode: "move"; start: Point; ids: string[]; box: Rect | null; snaps: Snaps }
   | { mode: "resize"; start: Point; ids: string[]; handle: Handle; box: Rect }
   | { mode: "marquee"; start: Point; additive: boolean }
   | { mode: "create"; start: Point }
   | { mode: "pen"; index: number; start: Point };
+
+/** Edges and centres other objects and the page offer to a dragged selection. */
+type Snaps = { xs: number[]; ys: number[] };
+type Guide = { axis: "x" | "y"; at: number; from: number; to: number };
+
+function snapTargets(page: ReturnType<typeof pageOf>, skip: Set<string>, canvas: { width: number; height: number }): Snaps {
+  const xs = [0, canvas.width / 2, canvas.width];
+  const ys = [0, canvas.height / 2, canvas.height];
+  for (const id of topLevelIn(page, { x: -1e9, y: -1e9, width: 2e9, height: 2e9 })) {
+    if (skip.has(id)) continue;
+    const f = findNode(page, id);
+    const b = f ? pageBounds(f) : null;
+    if (!b) continue;
+    xs.push(b.x, b.x + b.width / 2, b.x + b.width);
+    ys.push(b.y, b.y + b.height / 2, b.y + b.height);
+  }
+  return { xs, ys };
+}
+
+/** Nudge a moved box onto the nearest edge or centre within `tol`; returns the correction and guides. */
+function snapBox(box: Rect, snaps: Snaps, tol: number): { dx: number; dy: number; guides: Guide[] } {
+  const best = (mine: number[], targets: number[]) => {
+    let pick: { d: number; at: number } | null = null;
+    for (const m of mine) for (const t of targets) {
+      const d = t - m;
+      if (Math.abs(d) <= tol && (!pick || Math.abs(d) < Math.abs(pick.d))) pick = { d, at: t };
+    }
+    return pick;
+  };
+  const sx = best([box.x, box.x + box.width / 2, box.x + box.width], snaps.xs);
+  const sy = best([box.y, box.y + box.height / 2, box.y + box.height], snaps.ys);
+  const guides: Guide[] = [];
+  const top = box.y + (sy?.d ?? 0);
+  const left = box.x + (sx?.d ?? 0);
+  if (sx) guides.push({ axis: "x", at: sx.at, from: top, to: top + box.height });
+  if (sy) guides.push({ axis: "y", at: sy.at, from: left, to: left + box.width });
+  return { dx: sx?.d ?? 0, dy: sy?.d ?? 0, guides };
+}
 
 /** Preview sizes the server is asked for; bucketing keeps zooming from re-rendering on every step. */
 const PREVIEW_EDGES = [512, 768, 1024, 1536, 2048, 3072, 4096, 6144, 8192];
@@ -119,6 +157,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const [live, setLive] = useState<Matrix | null>(null);
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [guides, setGuides] = useState<Guide[]>([]);
   const drag = useRef<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const scrollPosition = useRef({ left: 0, top: 0 });
@@ -443,7 +482,14 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       }
       if (hit) {
         const ids = selectionRoots();
-        drag.current = { mode: "move", start: p, ids };
+        const st = useStudio.getState();
+        let box: Rect | null = null;
+        for (const id of ids) {
+          const f = findNode(page, id);
+          const bb = f ? pageBounds(f) : null;
+          if (bb) box = unite(box, bb);
+        }
+        drag.current = { mode: "move", start: p, ids, box, snaps: snapTargets(page, new Set(st.selectedIds), canvas) };
         clearSprite();
         if (ids.length === 1) startSprite(ids[0]!);
       } else {
@@ -499,6 +545,13 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         if (Math.abs(dx) > Math.abs(dy)) dy = 0;
         else dx = 0;
       }
+      // Snap to other objects and the page; Ctrl/Cmd moves freely.
+      if (d.box && !(e.ctrlKey || e.metaKey)) {
+        const snap = snapBox({ ...d.box, x: d.box.x + dx, y: d.box.y + dy }, d.snaps, 6 / scale);
+        if (!e.shiftKey || dy === 0) dx += snap.dx;
+        if (!e.shiftKey || dx === 0) dy += snap.dy;
+        setGuides(snap.guides.filter((g) => !e.shiftKey || (g.axis === "x" ? dy === 0 : dx === 0)));
+      } else setGuides([]);
       setLive([1, 0, 0, 1, dx, dy]);
     } else if (d.mode === "resize") {
       const nb = resizedBox(d.box, d.handle, p, e.shiftKey);
@@ -531,6 +584,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     const d = drag.current;
     drag.current = null;
+    setGuides([]);
     try {
       svg.current?.releasePointerCapture(e.pointerId);
     } catch {
@@ -825,6 +879,23 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   if (k === "ellipse") return <ellipse cx={Number(f.node.cx ?? 0)} cy={Number(f.node.cy ?? 0)} rx={Number(f.node.radius_x ?? 0)} ry={Number(f.node.radius_y ?? 0)} transform={`matrix(${m.join(" ")})`} {...outline} />;
                   const b = pageBounds(f);
                   return b && <rect {...b} {...outline} />;
+                })()}
+                {guides.map((g, i) => g.axis === "x"
+                  ? <line key={i} x1={g.at} x2={g.at} y1={Math.min(0, g.from)} y2={Math.max(canvas.height, g.to)} stroke="#ec4899" strokeWidth={px} pointerEvents="none" />
+                  : <line key={i} y1={g.at} y2={g.at} x1={Math.min(0, g.from)} x2={Math.max(canvas.width, g.to)} stroke="#ec4899" strokeWidth={px} pointerEvents="none" />)}
+                {(() => {
+                  // Size or position label under the box, like Figma's dimension badge.
+                  const b = ghost && (tool === "rect" || tool === "ellipse") ? ghost : tool === "select" ? liveBox : null;
+                  if (!b) return null;
+                  const moving = drag.current?.mode === "move" && live;
+                  const text = moving ? `X ${Math.round(b.x)}  Y ${Math.round(b.y)}` : `${Math.round(b.width)} × ${Math.round(b.height)}`;
+                  const w = (text.length * 6.2 + 10) * px;
+                  return (
+                    <g pointerEvents="none" aria-label="Selection size">
+                      <rect x={b.x + b.width / 2 - w / 2} y={b.y + b.height + 6 * px} width={w} height={16 * px} rx={3 * px} fill="#2563eb" />
+                      <text x={b.x + b.width / 2} y={b.y + b.height + 17.5 * px} fontSize={11 * px} fill="#fff" textAnchor="middle" fontFamily="system-ui, sans-serif">{text}</text>
+                    </g>
+                  );
                 })()}
                 {marquee && (
                   <rect {...marquee} fill="#2563eb" fillOpacity={0.08} stroke="#2563eb" strokeWidth={px} pointerEvents="none" />
