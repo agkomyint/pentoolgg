@@ -64,12 +64,15 @@ export function addObject(
 }
 
 export function deleteSelected(): void {
-  const { selectedId, pageId } = state();
+  const { selectedId, selectedIds, pageId } = state();
   if (!selectedId) return;
+  const ids = selectedIds.length ? selectedIds : [selectedId];
   state().edit("Delete", (draft) => {
-    const found = findNode(pageOf(draft, pageId), selectedId);
-    if (!found || found.layer.locked) return;
-    found.siblings.splice(found.siblings.indexOf(found.node), 1);
+    for (const id of ids) {
+      const found = findNode(pageOf(draft, pageId), id);
+      if (!found || found.layer.locked) continue;
+      found.siblings.splice(found.siblings.indexOf(found.node), 1);
+    }
   });
   state().select(null);
 }

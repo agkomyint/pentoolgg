@@ -408,6 +408,11 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         return;
       }
       const hit = hitTest(page, p.x, p.y);
+      // Shift-click adds or removes an object without starting a move.
+      if (e.shiftKey && hit) {
+        s.select(hit.node.id, "toggle");
+        return;
+      }
       s.select(hit ? hit.node.id : null);
       const hitPanelId = hit?.node.dieline_panel_id ?? hit?.node.dieline_panel_label;
       if (typeof hitPanelId === "string") {
@@ -562,6 +567,13 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
             e.preventDefault();
             duplicateSelected();
           }
+        } else if (key === "a" && !useStudio.getState().paintMode) {
+          // Select every object on visible, unlocked layers of this page.
+          e.preventDefault();
+          const ids = (page?.layers ?? [])
+            .filter((l) => l.visible !== false && !l.locked)
+            .flatMap((l) => (Array.isArray(l.nodes) ? l.nodes : [...(l.paths ?? []), ...(l.texts ?? [])]).map((n) => n.id));
+          s.selectMany(ids);
         } else if (key === "g") {
           e.preventDefault();
           if (e.shiftKey) ungroupSelected();
@@ -733,6 +745,11 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                     <image href={`data:image/png;base64,${faceHighlight.png}`} x={0} y={0} width={Number(found.node.width)} height={Number(found.node.height)} preserveAspectRatio="none" />
                   </g>;
                 })()}
+                {tool === "select" && s.selectedIds.length > 1 && s.selectedIds.map((id) => {
+                  const f = id === selectedId ? null : findNode(page, id);
+                  const b = f ? pageBounds(f) : null;
+                  return b && <rect key={id} {...b} fill="none" stroke="#2563eb" strokeWidth={px} pointerEvents="none" />;
+                })}
                 {liveBox && tool === "select" && (
                   <g>
                     <rect {...liveBox} fill="none" stroke="#2563eb" strokeWidth={px * 1.5} pointerEvents="none" />

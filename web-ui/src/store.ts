@@ -20,6 +20,8 @@ type State = {
   pageId: string | undefined;
   layerId: string | undefined;
   selectedId: string | null;
+  /** Every selected object; `selectedId` is the primary (last picked) one. */
+  selectedIds: string[];
   /** Stable panel ID shared by the packaging stage and its inspector. */
   selectedPackagePanel: string | null;
   setSelectedPackagePanel: (id: string | null) => void;
@@ -52,7 +54,9 @@ type State = {
   redo: () => void;
   setPage: (id: string) => void;
   setLayer: (id: string) => void;
-  select: (id: string | null) => void;
+  /** Replace the selection, or with `toggle` add/remove one object (Shift-click). */
+  select: (id: string | null, mode?: "replace" | "toggle") => void;
+  selectMany: (ids: string[]) => void;
   setTool: (tool: Tool) => void;
   setLook: (look: Partial<Appearance>) => void;
   setWorkspace: (id: string) => void;
@@ -117,6 +121,7 @@ export const useStudio = create<State>((set, get) => {
     pageId: undefined,
     layerId: undefined,
     selectedId: null,
+    selectedIds: [],
     selectedPackagePanel: null,
     setSelectedPackagePanel: (selectedPackagePanel) => set({ selectedPackagePanel }),
     tool: "select",
@@ -151,7 +156,7 @@ export const useStudio = create<State>((set, get) => {
             shared = false;
             document = get().doc ?? blankDoc();
           }
-          set({ past: [], future: [], dirty: false, selectedId: null });
+          set({ past: [], future: [], dirty: false, selectedId: null, selectedIds: [] });
           adopt(document, { base: clone(document), revision, shared, version: health.version, message: null, view: { kind: "document" } });
         } catch (error) {
           get().notify(error instanceof Error ? error.message : "Could not load the document.", true);
@@ -186,7 +191,7 @@ export const useStudio = create<State>((set, get) => {
       } catch {
         // server unreachable: fall back to the base scene format
       }
-      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, pageId: undefined, layerId: undefined });
+      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, selectedIds: [], pageId: undefined, layerId: undefined });
       adopt(doc, { base: clone(doc) });
       get().notify(note);
     },
@@ -202,7 +207,7 @@ export const useStudio = create<State>((set, get) => {
       }
     },
     openDoc(doc) {
-      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, pageId: undefined, layerId: undefined });
+      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, selectedIds: [], pageId: undefined, layerId: undefined });
       adopt(doc, { base: clone(doc) });
       get().notify("Opened as a standalone document. Use Save to download it.");
     },
@@ -248,13 +253,22 @@ export const useStudio = create<State>((set, get) => {
     },
     setPage: (pageId) => {
       const doc = get().doc;
-      set({ pageId, layerId: doc ? firstLayer(doc, pageId) : undefined, selectedId: null, view: { kind: "document" } });
+      set({ pageId, layerId: doc ? firstLayer(doc, pageId) : undefined, selectedId: null, selectedIds: [], view: { kind: "document" } });
     },
     setLayer: (layerId) => set({ layerId }),
-    select: (selectedId) => {
-      const { doc, pageId } = get();
+    select: (id, mode = "replace") => {
+      const { doc, pageId, selectedIds } = get();
+      let ids = id ? [id] : [];
+      if (mode === "toggle" && id) ids = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+      const selectedId = ids.at(-1) ?? null;
       const found = selectedId && doc ? findNode(pageOf(doc, pageId), selectedId) : null;
-      set({ selectedId, ...(found ? { layerId: found.layer.id } : {}) });
+      set({ selectedId, selectedIds: ids, ...(found ? { layerId: found.layer.id } : {}) });
+    },
+    selectMany: (ids) => {
+      const { doc, pageId } = get();
+      const selectedId = ids.at(-1) ?? null;
+      const found = selectedId && doc ? findNode(pageOf(doc, pageId), selectedId) : null;
+      set({ selectedId, selectedIds: ids, ...(found ? { layerId: found.layer.id } : {}) });
     },
     // A vector tool leaves painting; the paint options give way to Properties.
     setTool: (tool) => set({ tool, paintMode: false, ...(get().workspaceId === "paint" ? { workspaceId: "design" } : {}) }),
