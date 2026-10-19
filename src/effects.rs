@@ -242,8 +242,10 @@ pub(crate) fn apply<'a>(
 ) -> Result<RgbaImage> {
     let mut result = source.clone();
     let content = num(node, "content_opacity", 1.0, 0.0, 1.0)?;
-    for pixel in result.pixels_mut() {
-        pixel[3] = byte(f64::from(pixel[3]) * content);
+    if content != 1.0 {
+        for pixel in result.pixels_mut() {
+            pixel[3] = byte(f64::from(pixel[3]) * content);
+        }
     }
     for op in stack(raw, node)? {
         crate::composite::check_cancelled()?;
@@ -285,6 +287,15 @@ pub(crate) fn apply<'a>(
                         );
                     }
                 }
+            }
+            if opacity == 1.0 {
+                // The mix below reduces exactly to the blurred pixel at full opacity
+                // (`(c * a) / a == c` for byte values), except that zero alpha clears RGB.
+                for pixel in blur.pixels_mut().filter(|p| p[3] == 0) {
+                    *pixel = Rgba([0, 0, 0, 0]);
+                }
+                result = blur;
+                continue;
             }
             for (pixel, blur) in result.pixels_mut().zip(blur.pixels()) {
                 let a = f64::from(pixel[3]) * (1.0 - opacity) + f64::from(blur[3]) * opacity;
@@ -607,4 +618,39 @@ pub fn edit(
     crate::scene::validate(&candidate)?;
     *raw = candidate;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The general blur mix at full opacity equals the shortcut (blurred pixel, RGB
+    /// cleared at zero alpha) for every byte pixel.
+    #[test]
+    fn full_opacity_blur_mix_is_the_blurred_pixel() {
+        let opacity = 1.0;
+        for alpha in 0..=255u8 {
+            for value in 0..=255u8 {
+                for original in [[0u8, 0, 0, 0], [9, 200, 77, 31], [255, 255, 255, 255]] {
+                    let blur = [value, 255 - value, value / 3, alpha];
+                    let a = f64::from(original[3]) * (1.0 - opacity) + f64::from(blur[3]) * opacity;
+                    let mut general = [0u8; 4];
+                    for i in 0..3 {
+                        general[i] = if a == 0.0 {
+                            0
+                        } else {
+                            byte(
+                                (f64::from(original[i]) * f64::from(original[3]) * (1.0 - opacity)
+                                    + f64::from(blur[i]) * f64::from(blur[3]) * opacity)
+                                    / a,
+                            )
+                        };
+                    }
+                    general[3] = byte(a);
+                    let shortcut = if alpha == 0 { [0; 4] } else { blur };
+                    assert_eq!(general, shortcut, "{blur:?} over {original:?}");
+                }
+            }
+        }
+    }
 }
