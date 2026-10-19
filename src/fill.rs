@@ -666,9 +666,58 @@ fn render_target(
     let (node_w, node_h) = (bounds.2, bounds.3);
     let get = |key, default| n(fill, key, default).unwrap();
     let geo = |key: &str| n(fill, key, geometry_default(kind, key, node_w, node_h)).unwrap();
-    for y in 0..height {
+    // Read the gradient geometry once, not per sample; the per-sample
+    // arithmetic below is unchanged, so every output byte is too.
+    let spread = fill["spread"].as_str().unwrap_or("pad");
+    let space = fill["space"].as_str().unwrap_or("srgb");
+    let (x1, y1, x2, y2, cx, cy, radius, angle) = match kind {
+        "linear" => (
+            geo("x1"),
+            geo("y1"),
+            geo("x2"),
+            geo("y2"),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ),
+        "radial" => (0.0, 0.0, 0.0, 0.0, geo("cx"), geo("cy"), geo("radius"), 0.0),
+        "solid" | "pattern" => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        _ => (
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            geo("cx"),
+            geo("cy"),
+            0.0,
+            get("angle", 0.0),
+        ),
+    };
+    // Only pixels whose samples can land inside the node's transformed bounds
+    // are visited; every other pixel has no covered sample and stays clear.
+    let corners = [
+        (bounds.0, bounds.1),
+        (bounds.0 + bounds.2, bounds.1),
+        (bounds.0, bounds.1 + bounds.3),
+        (bounds.0 + bounds.2, bounds.1 + bounds.3),
+    ]
+    .map(|(x, y)| world * kurbo::Point::new(x, y));
+    let pixel_span = |values: [f64; 4], limit: u32| {
+        let lo = values.iter().copied().fold(f64::INFINITY, f64::min) * f64::from(scale);
+        let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max) * f64::from(scale);
+        if !lo.is_finite() || !hi.is_finite() {
+            return 0..limit;
+        }
+        let start = (lo.floor() - 1.0).clamp(0.0, f64::from(limit)) as u32;
+        let end = (hi.ceil() + 1.0).clamp(0.0, f64::from(limit)) as u32;
+        start..end
+    };
+    let columns = pixel_span(corners.map(|p| p.x), width);
+    let rows = pixel_span(corners.map(|p| p.y), height);
+    for y in rows {
         crate::composite::check_cancelled()?;
-        for x in 0..width {
+        for x in columns.clone() {
             let mut sum = [0.0; 4];
             for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
                 let p = inv
@@ -719,16 +768,15 @@ fn render_target(
                 } else {
                     let t = match kind {
                         "linear" => {
-                            let (dx, dy) = (geo("x2") - geo("x1"), geo("y2") - geo("y1"));
-                            ((p.x - geo("x1")) * dx + (p.y - geo("y1")) * dy) / (dx * dx + dy * dy)
+                            let (dx, dy) = (x2 - x1, y2 - y1);
+                            ((p.x - x1) * dx + (p.y - y1) * dy) / (dx * dx + dy * dy)
                         }
                         "radial" => {
-                            let (dx, dy) = (p.x - geo("cx"), p.y - geo("cy"));
-                            (dx * dx + dy * dy).sqrt() / geo("radius")
+                            let (dx, dy) = (p.x - cx, p.y - cy);
+                            (dx * dx + dy * dy).sqrt() / radius
                         }
                         _ => {
-                            (atan2(p.y - geo("cy"), p.x - geo("cx"))
-                                - get("angle", 0.0) * std::f64::consts::PI / 180.0)
+                            (atan2(p.y - cy, p.x - cx) - angle * std::f64::consts::PI / 180.0)
                                 .rem_euclid(std::f64::consts::TAU)
                                 / std::f64::consts::TAU
                         }
@@ -739,24 +787,15 @@ fn render_target(
                                 engine.as_deref_mut().unwrap(),
                                 working,
                                 t,
-                                fill["spread"].as_str().unwrap_or("pad"),
+                                spread,
                             )?;
                             out.clipped(clipped);
                             rgba
                         } else {
-                            native.sample(
-                                engine.as_deref_mut().unwrap(),
-                                t,
-                                fill["spread"].as_str().unwrap_or("pad"),
-                            )?
+                            native.sample(engine.as_deref_mut().unwrap(), t, spread)?
                         }
                     } else {
-                        let rgba = gradient(
-                            stops.as_ref().unwrap(),
-                            t,
-                            fill["spread"].as_str().unwrap_or("pad"),
-                            fill["space"].as_str().unwrap_or("srgb"),
-                        );
+                        let rgba = gradient(stops.as_ref().unwrap(), t, spread, space);
                         if let Some(working) = target.working {
                             engine
                                 .as_deref_mut()
