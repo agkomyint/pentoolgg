@@ -476,6 +476,12 @@ fn premultiply(image: &RgbaImage) -> Vec<[f64; 4]> {
     image
         .pixels()
         .map(|px| {
+            // Exact shortcuts: `c * 255 / 255 == c` and `c * 0 / 255 == 0`.
+            match px[3] {
+                0 => return [0.0; 4],
+                255 => return [px[0], px[1], px[2], 255].map(f64::from),
+                _ => {}
+            }
             let a = f64::from(px[3]);
             [
                 f64::from(px[0]) * a / 255.0,
@@ -757,6 +763,23 @@ mod tests {
         data.chunks_exact(4)
             .map(|p| [p[0], p[1], p[2], p[3]])
             .collect()
+    }
+
+    #[test]
+    fn premultiply_shortcuts_match_the_general_formula() {
+        for a in 0..=255u8 {
+            for c in 0..=255u8 {
+                let pixel = image::Rgba([c, 255 - c, c / 2, a]);
+                let image = RgbaImage::from_pixel(1, 1, pixel);
+                let alpha = f64::from(a);
+                let general = [0, 1, 2].map(|i| f64::from(pixel[i]) * alpha / 255.0);
+                let got = premultiply(&image)[0];
+                for i in 0..3 {
+                    assert_eq!(got[i].to_bits(), general[i].to_bits(), "{pixel:?}");
+                }
+                assert_eq!(got[3].to_bits(), alpha.to_bits());
+            }
+        }
     }
 
     #[test]
