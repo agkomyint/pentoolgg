@@ -33,6 +33,8 @@ import {
   updateNode,
 } from "@/lib/actions";
 import { findNode, getStyle, isScene, nodeKind, pageBounds, pageOf, setStyle } from "@/lib/model";
+import { AdjustmentPanel, MaskPanel } from "@/components/AdjustmentPanel";
+import { adjustmentLabel, COMPOSITE_VERSION } from "@/lib/layers";
 
 const input = "mt-0.5 h-7 w-full rounded border bg-card px-1.5 text-xs";
 
@@ -171,7 +173,7 @@ export function Properties() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-medium">{kind}</span>
+        <span className="rounded bg-accent px-1.5 py-0.5 text-[11px] font-medium">{kind === "adjustment" ? `${adjustmentLabel(node.adjustment)} adjustment` : kind}</span>
         <code className="truncate text-[11px] text-muted-foreground" title={node.id}>
           {node.id}
         </code>
@@ -208,7 +210,7 @@ export function Properties() {
         )}
       </div>
 
-      <AlignBar count={1} />
+      {kind !== "adjustment" && <AlignBar count={1} />}
 
       <Field label="Name">
         <input
@@ -220,7 +222,10 @@ export function Properties() {
         />
       </Field>
 
-      {box && (
+      {kind === "adjustment" && <AdjustmentPanel node={node} locked={locked} />}
+      {scene && doc.version >= COMPOSITE_VERSION && <MaskPanel node={node} locked={locked} />}
+
+      {box && kind !== "adjustment" && (
         <section className="space-y-2">
           <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Layout</h4>
           <div className="grid grid-cols-2 gap-2">

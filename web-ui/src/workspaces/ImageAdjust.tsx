@@ -49,7 +49,7 @@ function useLive(node: SceneNode) {
   return { live, commit };
 }
 
-function Slider({
+export function Slider({
   label,
   value,
   min,

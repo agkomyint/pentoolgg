@@ -5064,7 +5064,8 @@ fn binary(bytes: Vec<u8>, kind: &'static str, name: &'static str) -> Response {
 fn problem(error: anyhow::Error) -> Response {
     (
         StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({"error": error.to_string()})),
+        // `{:#}` keeps the cause chain, so batch errors name the failing check.
+        Json(serde_json::json!({"error": format!("{error:#}")})),
     )
         .into_response()
 }

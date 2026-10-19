@@ -797,12 +797,18 @@ pub fn validate(raw: &Value) -> Result<()> {
                 if node["kind"] == "adjustment" || clip_base != Some(base) {
                     bail!("[invalid-clipping] node {} must be a following sibling of base {base} (immediately after it or its clipping members); detach clipping before reordering",node["id"])
                 }
+            } else if node["kind"] == "adjustment" {
+                // An adjustment scoped to the current base is clipped to it, so the
+                // clipping group continues above it; any other adjustment ends it.
+                let ids = scope_ids(node);
+                if node["scope"]["kind"] != "targets"
+                    || ids.is_empty()
+                    || ids.iter().any(|id| Some(*id) != clip_base)
+                {
+                    clip_base = None;
+                }
             } else {
-                clip_base = if node["kind"] == "adjustment" {
-                    None
-                } else {
-                    node["id"].as_str()
-                };
+                clip_base = node["id"].as_str();
             }
             if node["kind"] == "adjustment" {
                 *count += 1;
@@ -1569,7 +1575,8 @@ impl Renderer<'_> {
         let any_clipping = nodes.iter().any(|node| node.get("clipping").is_some());
         for node in nodes {
             if node.get("visible").and_then(Value::as_bool) == Some(false) {
-                if node.get("clipping").is_none() {
+                // Adjustments never set the clipping base, so hiding one keeps the group.
+                if node.get("clipping").is_none() && node["kind"] != "adjustment" {
                     clip_alpha = None;
                 }
                 continue;

@@ -109,8 +109,11 @@ appearance into a verified PNG source, preserves its ID and page placement,
 removes the mask attachment, and retains normal transaction history.
 
 Clipping membership is `clipping: {base: "ID"}`. Members must immediately follow
-the base or its existing members in the same sibling stack. Adjustments cannot
-interrupt a clipping stack. Members multiply their alpha by the rendered base
+the base or its existing members in the same sibling stack. An adjustment whose
+`scope` is `targets` naming only the base is a clipped adjustment and continues
+the stack (since 0.22.0); any other adjustment ends it, and an adjustment cannot
+be a base or carry `clipping`. Hiding a clipped adjustment does not end the
+stack. Members multiply their alpha by the rendered base
 alpha, including its mask and opacity. A hidden base conceals the stack. Broken
 references or reordering that breaks consecutiveness fail validation with guidance
 to detach clipping before reordering. Group stacks are isolated from parent stacks.

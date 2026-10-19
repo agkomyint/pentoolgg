@@ -358,3 +358,31 @@ fn cli_adjustment_validates_operation_before_requiring_id() {
         "unexpected error: {message}"
     );
 }
+
+/// Photoshop's clipping group: a clipped adjustment (scope targets the base)
+/// sits inside the group, so layers above it can still clip to the same base.
+#[test]
+fn clipped_adjustment_keeps_the_clipping_group_open() {
+    let mut raw = document();
+    raw["pages"][0]["layers"][0]["nodes"] = json!([
+        rect("base", 0, 4, "#204060"),
+        {"kind":"adjustment","id":"grade","adjustment":"invert","params":{},
+         "scope":{"kind":"targets","ids":["base"]},"enabled":true,"opacity":1.0,
+         "blend_mode":"normal","blend_space":"srgb"},
+        rect("tint", 0, 8, "#ff0000")
+    ]);
+    raw["pages"][0]["layers"][0]["nodes"][2]["clipping"] = json!({"base":"base"});
+    scene::validate(&raw).unwrap();
+    let pixels = composite::render(&raw, Path::new("target/composite.pen"), None, 1.0).unwrap();
+    // The tint is drawn only where the base is, and nowhere past it.
+    assert_eq!(pixels.get_pixel(1, 1).0, [255, 0, 0, 255]);
+    assert_eq!(pixels.get_pixel(6, 1).0, [0, 0, 0, 0]);
+    // Hiding the clipped adjustment does not release the tint from the base.
+    raw["pages"][0]["layers"][0]["nodes"][1]["visible"] = json!(false);
+    let hidden = composite::render(&raw, Path::new("target/composite.pen"), None, 1.0).unwrap();
+    assert_eq!(hidden.get_pixel(6, 1).0, [0, 0, 0, 0]);
+    // An adjustment over everything below still ends the group.
+    raw["pages"][0]["layers"][0]["nodes"][1]["scope"] = json!({"kind":"below"});
+    let error = scene::validate(&raw).unwrap_err().to_string();
+    assert!(error.contains("invalid-clipping"), "{error}");
+}

@@ -137,6 +137,20 @@ unsaved edits nothing is replaced: the header shows "Changed on disk · Reload",
 and Save stays guarded by the revision. Standalone (downloaded or new) documents
 are not followed. This works with or without `--collab`.
 
+### Layers and adjustment layers (0.22)
+
+`web-ui/src/lib/layers.ts` holds the layer rules as pure functions over a
+sibling list (`toggleClipIn`, `clipMembers`, `settleClipping`, `afterClipGroup`)
+plus the actions that call them; `layers.test.ts` covers them. A clipped
+adjustment is an `adjustment` node whose `scope` is `targets` naming only the
+base; Studio treats it like a content layer with `clipping: {base}`. Every
+reorder settles clipping so the stack stays valid. Adding an adjustment, clipping
+or pasting composite layers into a version 4 or 5 document first runs the
+version 6 upgrade (one undo step). `components/AdjustmentPanel.tsx` has the
+per-kind controls and the mask panel; they preview while dragging and commit one
+history entry on release. The clipboard carries the source document version and
+the image, mask and raster resources the copied nodes reference.
+
 ### Extensions (0.18)
 
 The Extensions workspace and the Ctrl/Cmd+K command palette list the project's installed

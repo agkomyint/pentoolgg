@@ -172,6 +172,15 @@ to Smart Filters), and adjustment nodes (close to Photoshop adjustment layers).
    save.
 7. Drag an adjustment row onto an image row: clip it to that image.
 
+Status (0.22.0): items 1-7 are implemented in Studio and covered by
+`web-ui/src/lib/layers.test.ts`. The eye on an adjustment row is bound to
+`visible` (as in Photoshop); `enabled` is the "On" switch in Properties. Item 5
+needed one engine change: a clipped adjustment (scope `targets` naming only the
+base) now continues the clipping group instead of ending it
+(`tests/v080_adjustments.rs`, `clipped_adjustment_keeps_the_clipping_group_open`).
+Still open: page layers are separate stacks (Stage 1), masks cannot be painted
+(only made from a shape, an alpha or an asset), and presets (Stage B).
+
 ### Stage B: moving settings between systems
 
 - "Save adjustment as preset" and an Adjustments library, so one look applies
@@ -193,4 +202,4 @@ still limits `scope: below` to one page layer until it lands.
 3. Keep `scope: targets` for agents, or move everything to clipping?
 4. Order of Stages 2-5. Stage 2 (retouch layer plus sample-all) gives users the
    most visible win; Stage 1 is the most fundamental.
-5. Stage A (adjustment layers in Studio) in 0.22.0, or the next minor?
+5. Stage A (adjustment layers in Studio): shipping in 0.22.0 at the maintainer's request.

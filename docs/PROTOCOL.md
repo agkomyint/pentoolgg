@@ -49,7 +49,10 @@ The v6 development renderer and operation contract is specified in
 `POST /api/scene` accepts composite batch operations with `page`, the semantic
 `revision` returned by `GET /api/document`, and optional `dry_run`. The server
 also guards the exact on-disk revision at commit, including against CLI writers.
-One successful batch produces one document history entry.
+One successful batch produces one document history entry. A failed batch
+returns 400 with `{ "error": "operation N failed (page, layer, group, object): cause" }`;
+since 0.22.0 the message includes the underlying cause chain, such as
+`[missing-mask] mask nope missing`.
 
 `GET /api/document/events` is a server-sent event stream for the shared document
 (404 without one). On connect, and whenever the file's revision changes for any

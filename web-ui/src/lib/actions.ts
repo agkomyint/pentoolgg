@@ -25,7 +25,8 @@ import {
   type Found,
   type Tool,
 } from "@/lib/model";
-import { useStudio } from "@/store";
+import { LATEST_FORMAT, useStudio } from "@/store";
+import { afterClipGroup, clipBaseOf, clipMembers, mergeResources, needsComposite, referencedResources, release, remapReferences, settleClipping, COMPOSITE_VERSION, type Resources } from "@/lib/layers";
 
 const state = () => useStudio.getState();
 const fail = (error: unknown, fallback: string) =>
@@ -97,6 +98,12 @@ export function duplicateSelected(): void {
       children(node).forEach((child) => reassign(child, false));
     };
     reassign(copy, true);
+    const at = found.siblings.indexOf(found.node);
+    if (copy.kind === "adjustment") {
+      // Adjustments have no position; the copy sits directly above the original.
+      found.siblings.splice(at + 1, 0, copy);
+      return;
+    }
     // Offset so the copy is visibly distinct from the original.
     const m = Array.isArray(copy.transform) ? (copy.transform as number[]) : [1, 0, 0, 1, 0, 0];
     if (typeof found.node.kind === "string" || Array.isArray(copy.transform)) {
@@ -107,7 +114,8 @@ export function duplicateSelected(): void {
     } else {
       copy.transform = [1, 0, 0, 1, 16, 16];
     }
-    found.siblings.splice(found.siblings.indexOf(found.node) + 1, 0, copy);
+    // A copy of a clipping base goes above its clipped layers, so the group stays intact.
+    found.siblings.splice(clipBaseOf(copy) ? at + 1 : afterClipGroup(found.siblings, at), 0, copy);
   });
   state().select(next);
 }
@@ -185,7 +193,8 @@ export function ungroupSelected(): void {
  * parent transforms are baked in so nothing moves on the page. Legacy objects
  * only reorder within their own list.
  */
-export function moveInStack(id: string, target: { node: string; where: "above" | "below" | "into" } | { layer: string }): void {
+/** Reorder a node. With `clip` (Alt-drop) it also joins the clipping group it lands in. */
+export function moveInStack(id: string, target: { node: string; where: "above" | "below" | "into" } | { layer: string }, clip = false): void {
   const { doc, pageId } = state();
   const page = pageOf(doc, pageId);
   const from = findNode(page, id);
@@ -218,6 +227,7 @@ export function moveInStack(id: string, target: { node: string; where: "above" |
     const into = dst && "node" in target && target.where === "into";
     const list = into ? children(dst.node) : dst ? dst.siblings : (dstLayer.nodes ?? []);
     const world = into ? multiply(dst.world, nodeMatrix(dst.node)) : dst ? dst.world : ([1, 0, 0, 1, 0, 0] as Matrix);
+    const members = new Set([...clipMembers(src.siblings), ...clipMembers(list)]);
     src.siblings.splice(src.siblings.indexOf(src.node), 1);
     // Keep the painted position when the parent transform changes.
     if (scene && (src.parent || into || dst?.parent)) {
@@ -228,6 +238,17 @@ export function moveInStack(id: string, target: { node: string; where: "above" |
     else list.splice(list.indexOf(dst.node) + ("node" in target && target.where === "above" ? 1 : 0), 0, src.node);
     if (into && !Array.isArray(dst.node.children)) dst.node.children = list;
     if (!dst && !Array.isArray(dstLayer.nodes)) dstLayer.nodes = list;
+    if (!scene) return;
+    // Like Photoshop: dropping inside a clipping group joins it, dragging out releases.
+    const at = list.indexOf(src.node);
+    const below = list[at - 1];
+    const above = list[at + 1];
+    const stays = members.has(id) && !!below && (members.has(below.id) || below.id === clipBaseOf(src.node));
+    const join = (clip && draft.version >= COMPOSITE_VERSION) || stays || (above && members.has(above.id));
+    if (join) members.add(id);
+    else if (members.delete(id)) release(src.node);
+    settleClipping(list, members);
+    if (src.siblings !== list) settleClipping(src.siblings, members);
   });
 }
 
@@ -735,11 +756,13 @@ export function duplicateSelectionBy(dx: number, dy: number): void {
 /** Prefix that marks Studio objects on the system clipboard. */
 export const CLIPBOARD_MARK = "pentool-objects:";
 type ClipEntry = { node: SceneNode; bucket: "nodes" | "paths" | "texts" };
+type ClipData = { scene: boolean; version?: number; entries: ClipEntry[]; resources?: Resources };
 let pasteCount = 0;
 
 /**
  * Clipboard text for the selection: the root objects with their parent group
- * transforms baked in, so a paste lands where the copy was.
+ * transforms baked in, so a paste lands where the copy was, plus the images,
+ * masks and tiles they reference so they paste into another document intact.
  */
 export function copySelectionText(): string | null {
   const { doc, pageId } = state();
@@ -749,20 +772,25 @@ export function copySelectionText(): string | null {
     const found = findNode(page, id);
     if (!found) continue;
     const node = clone(found.node);
-    if (found.parent) node.transform = multiply(found.world, nodeMatrix(found.node));
+    if (found.parent && node.kind !== "adjustment") node.transform = multiply(found.world, nodeMatrix(found.node));
     entries.push({ node, bucket: !isScene(doc) && nodeKind(found.node, found.layer) === "text" ? "texts" : !isScene(doc) ? "paths" : "nodes" });
   }
-  if (!entries.length) return null;
+  if (!entries.length || !doc) return null;
   pasteCount = 0;
-  return CLIPBOARD_MARK + JSON.stringify({ scene: isScene(doc), entries });
+  const data: ClipData = { scene: isScene(doc), version: doc.version, entries, resources: referencedResources(doc, entries.map((e) => e.node)) };
+  return CLIPBOARD_MARK + JSON.stringify(data);
 }
 
-/** Add clipboard objects to the current layer with fresh IDs and select them. */
+/**
+ * Add clipboard objects with fresh IDs and select them. Adjustment layers go
+ * directly above the selected layer, like Photoshop; other objects go on top
+ * of the current layer, stepped so repeated pastes stay visible.
+ */
 export function pasteSelectionText(text: string): boolean {
   if (!text.startsWith(CLIPBOARD_MARK)) return false;
-  const { doc, pageId, layerId } = state();
+  const { doc } = state();
   if (!doc) return true;
-  let data: { scene: boolean; entries: ClipEntry[] };
+  let data: ClipData;
   try {
     data = JSON.parse(text.slice(CLIPBOARD_MARK.length));
   } catch {
@@ -773,36 +801,67 @@ export function pasteSelectionText(text: string): boolean {
     state().notify("Objects copied from a legacy (v1-v3) document cannot be pasted into a scene document, or the reverse.", true);
     return true;
   }
-  const layer = currentLayer(doc, pageId, layerId);
-  if (!layer || layer.locked || layer.visible === false) {
-    state().notify("Choose a visible, unlocked layer to paste into.", true);
+  const nodes = data.entries.map((e) => e.node);
+  if (isScene(doc) && doc.version < COMPOSITE_VERSION && needsComposite(nodes)) {
+    // Adjustment layers, masks and blend modes need the compositing format.
+    void state().upgradeDoc(Math.max(COMPOSITE_VERSION, Math.min(data.version ?? COMPOSITE_VERSION, LATEST_FORMAT))).then(() => {
+      if ((state().doc?.version ?? 0) >= COMPOSITE_VERSION) pasteData(data);
+    });
     return true;
   }
+  pasteData(data);
+  return true;
+}
+
+function pasteData(data: ClipData): void {
+  const { doc, pageId, layerId, selectedId } = state();
+  if (!doc) return;
+  const anchor = findNode(pageOf(doc, pageId), selectedId);
+  const layer = anchor?.layer ?? currentLayer(doc, pageId, layerId);
+  if (!layer || layer.locked || layer.visible === false) {
+    state().notify("Choose a visible, unlocked layer to paste into.", true);
+    return;
+  }
+  const inPlace = data.entries.every((e) => e.node.kind === "adjustment");
   // Each repeated paste of the same copy steps further, so copies stay visible.
-  const offset = 16 * ++pasteCount;
+  const offset = inPlace ? 0 : 16 * ++pasteCount;
   const made: string[] = [];
   state().edit("Paste", (draft) => {
-    const target = currentLayer(draft, pageId, layerId)!;
+    mergeResources(draft, data.resources);
     const seen = collectIds(draft);
     const scene = isScene(draft);
-    for (const { node, bucket } of data.entries) {
+    const renamed = new Map<string, string>();
+    const copies = data.entries.map(({ node, bucket }) => {
       const copy = clone(node);
       const reassign = (n: SceneNode) => {
         let next = uid("copy");
         while (seen.has(next)) next = uid("copy");
         seen.add(next);
+        renamed.set(n.id, next);
         n.id = next;
         children(n).forEach(reassign);
       };
       reassign(copy);
-      addToLayer(target, copy, bucket);
-      const list = Array.isArray(target.nodes) ? target.nodes : target[bucket === "texts" ? "texts" : "paths"]!;
-      moveFound(copy, { node: copy, layer: target, siblings: list, parent: null, world: [1, 0, 0, 1, 0, 0] }, scene, offset, offset);
+      return { copy, bucket };
+    });
+    remapReferences(copies.map((c) => c.copy), renamed);
+    // Scene pastes land above the selected layer (and its clipping group). Positioned
+    // objects only do so at the top level, where their page transform still applies.
+    const found = scene ? findNode(pageOf(draft, pageId), selectedId) : null;
+    const above = found && (inPlace || !found.parent) ? found : null;
+    let at = above ? afterClipGroup(above.siblings, above.siblings.indexOf(above.node)) : 0;
+    const target = above?.layer ?? pageOf(draft, pageId)?.layers?.find((l) => l.id === layer.id) ?? currentLayer(draft, pageId, layerId)!;
+    for (const { copy, bucket } of copies) {
+      if (above) above.siblings.splice(at++, 0, copy);
+      else addToLayer(target, copy, bucket);
+      if (offset && copy.kind !== "adjustment") {
+        const list = above?.siblings ?? (Array.isArray(target.nodes) ? target.nodes : target[bucket === "texts" ? "texts" : "paths"]!);
+        moveFound(copy, { node: copy, layer: target, siblings: list, parent: null, world: [1, 0, 0, 1, 0, 0] }, scene, offset, offset);
+      }
       made.push(copy.id);
     }
   });
   state().selectMany(made);
-  return true;
 }
 
 export type Align = "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom" | "hspace" | "vspace";

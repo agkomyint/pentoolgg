@@ -348,6 +348,23 @@ fn browser_endpoints_use_shared_services_and_label_preview_status() {
         !stale.status().is_success(),
         "stale revision must be rejected"
     );
+    // A failed batch reports the operation context and the underlying cause.
+    let failed: Value = client
+        .post(format!("{base}/api/scene"))
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({"document":document,"operations":[
+            {"type":"image-op-remove","id":"hero","op_id":"no-such-op"}]})
+            .to_string(),
+        )
+        .send()
+        .unwrap()
+        .text()
+        .map(|t| serde_json::from_str(&t).unwrap())
+        .unwrap();
+    let message = failed["error"].as_str().unwrap();
+    assert!(message.starts_with("operation 0 failed"), "{message}");
+    assert!(message.contains("no-such-op"), "{message}");
 
     // Bake: dry run leaves the file alone; the real run flattens and prunes the stack.
     let before = fs::read(&doc).unwrap();
