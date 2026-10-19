@@ -36,12 +36,14 @@ test("renders run one at a time and a newer canvas render replaces a waiting one
   answer(posted[0]!.id);
   expect(await first).toBeInstanceOf(Blob);
   await tick();
+  // The page on screen goes ahead of the thumbnail that was queued earlier.
+  expect(posted.map((j) => j.scale)).toEqual([0.5, 1]);
   answer(posted[1]!.id);
-  expect(await thumb).toBeInstanceOf(Blob);
-  await tick();
-  expect(posted.map((j) => j.scale)).toEqual([0.5, 0.12, 1]);
-  answer(posted[2]!.id);
   expect(await latest).toBeInstanceOf(Blob);
+  await tick();
+  expect(posted.map((j) => j.scale)).toEqual([0.5, 1, 0.12]);
+  answer(posted[2]!.id);
+  expect(await thumb).toBeInstanceOf(Blob);
 });
 
 test("a missing module falls back to the server from then on", async () => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Maximize2, Minus, Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import { Superseded } from "@/lib/wasmCore";
-import { dragLayers } from "@/lib/dragSprite";
+import { dragLayers, sameContent } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import { LayoutOverlay } from "@/workspaces/layout/LayoutOverlay";
@@ -184,7 +184,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
   // While an object is dragged, the page is shown as two server-rendered
   // layers (backdrop without the object, object alone) so the object follows
   // the pointer instantly. `rest` keeps the final offset until the real render lands.
-  const [sprite, setSprite] = useState<{ backdrop: string; object: string; id: string } | null>(null);
+  const [sprite, setSprite] = useState<{ backdrop: string; object: string; above: string | null; id: string } | null>(null);
   const [rest, setRest] = useState<Point | null>(null);
   const spriteToken = useRef(0);
   const spaceDown = useRef(false);
@@ -262,27 +262,55 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       if (old) {
         URL.revokeObjectURL(old.backdrop);
         URL.revokeObjectURL(old.object);
+        if (old.above) URL.revokeObjectURL(old.above);
       }
       return null;
     });
   }, []);
 
+  // The drag parts of one object, rendered at the displayed size. Identical
+  // parts map to one document, so a part that did not change (the backdrop
+  // after the object moved) comes straight from the render cache.
+  const spriteParts = useCallback(
+    (id: string) => {
+      if (!doc) return null;
+      const parts = dragLayers(doc, pageId, id);
+      const renderPage = isScene(doc) ? pageId : undefined;
+      return Promise.all([
+        api.renderPng(sameContent(parts.backdrop), renderPage, edge, "sprite-backdrop"),
+        api.renderPng(sameContent(parts.sprite), renderPage, edge, "sprite-object"),
+        parts.above ? api.renderPng(sameContent(parts.above), renderPage, edge, "sprite-above") : null,
+      ]);
+    },
+    [doc, pageId, edge],
+  );
+
   const startSprite = useCallback(
     (id: string) => {
-      if (!doc) return;
       const mine = ++spriteToken.current;
-      const parts = dragLayers(doc, pageId, id);
-      const edge = 2048;
-      const renderPage = isScene(doc) ? pageId : undefined;
-      void Promise.all([api.renderPng(parts.backdrop, renderPage, edge), api.renderPng(parts.sprite, renderPage, edge)])
-        .then(([backdrop, object]) => {
+      void spriteParts(id)
+        ?.then(([backdrop, object, above]) => {
           if (mine !== spriteToken.current) return;
-          setSprite({ backdrop: URL.createObjectURL(backdrop), object: URL.createObjectURL(object), id });
+          setSprite({
+            backdrop: URL.createObjectURL(backdrop),
+            object: URL.createObjectURL(object),
+            above: above ? URL.createObjectURL(above) : null,
+            id,
+          });
         })
         .catch(() => undefined);
     },
-    [doc, pageId],
+    [spriteParts],
   );
+
+  // Prepare the drag parts once an object is selected, so a drag that starts
+  // later moves at once instead of waiting for the parts to render.
+  const single = selectedIds.length <= 1 ? selectedId : null;
+  useEffect(() => {
+    if (!active || !single || tool !== "select" || view.kind !== "document") return;
+    const timer = window.setTimeout(() => void spriteParts(single)?.catch(() => undefined), 150);
+    return () => window.clearTimeout(timer);
+  }, [active, single, tool, view.kind, spriteParts]);
 
   // Rust render, debounced so a drag-heavy session does not queue renders.
   // The server renders at the size Studio displays (`edge`), so zooming in
@@ -891,6 +919,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   draggable={false}
                 />
               )}
+              {sprite?.above && <img src={sprite.above} alt="" className="pointer-events-none absolute inset-0 block h-full w-full" draggable={false} />}
               {textEdit && (() => {
                 const f = findNode(page, textEdit.id);
                 const b = f ? pageBounds(f) : null;

@@ -144,10 +144,14 @@ function start(): Worker | null {
   return worker;
 }
 
-/** The worker renders one page at a time; the rest wait here. */
+/**
+ * The worker renders one page at a time; the rest wait here. The page on
+ * screen (the `canvas` lane) goes first, ahead of thumbnails and drag parts.
+ */
 function pump() {
   if (running) return;
-  const next = queue.shift();
+  const first = queue.findIndex((waiting) => waiting.lane === "canvas");
+  const next = queue.splice(Math.max(first, 0), 1)[0];
   const w = next && start();
   if (!next) return;
   if (!w) return next.resolve({ id: next.job.id, ok: false, unavailable: true });
