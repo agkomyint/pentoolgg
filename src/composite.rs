@@ -1708,251 +1708,7 @@ impl Renderer<'_> {
                 self.release();
                 continue;
             }
-            let affine = transform(node)?;
-            let direct_affine = if node["kind"] == "group" || node["kind"] == "instance" {
-                None
-            } else {
-                crate::transform::affine(node)?
-            };
-            let render_parent = direct_affine.unwrap_or(kurbo::Affine::IDENTITY) * parent;
-            let mut passed = None;
-            let mut surface = if node["kind"] == "group" {
-                let surface =
-                    self.siblings(node["children"].as_array().unwrap(), parent * affine)?;
-                if node["isolation"] == "pass-through" {
-                    self.reserve()?;
-                    passed = Some(self.siblings_with_backdrop(
-                        node["children"].as_array().unwrap(),
-                        parent * affine,
-                        Some(result.clone()),
-                    )?);
-                }
-                surface
-            } else if node["kind"] == "instance" {
-                self.siblings(std::slice::from_ref(&node["fallback"]), parent * affine)?
-            } else if node["kind"] == "fill" {
-                self.reserve()?;
-                self.pixel_work += u64::from(self.width) * u64::from(self.height) * 4;
-                if self.pixel_work > MAX_PIXEL_WORK {
-                    bail!("[limit-exceeded] fill pixel-work budget exceeded")
-                }
-                let fill = crate::fill::resolved(self.raw, &node["fill"])?;
-                let intent = crate::color::gradient::setting(self.raw, fill)?
-                    .map(|(_, intent)| intent)
-                    .or(self.working.map(|setting| setting.intent));
-                let engine = if let Some(intent) = intent {
-                    Some(crate::color::gradient::engine(
-                        self.gradient_profiles,
-                        &mut self.gradient_engines,
-                        intent,
-                    )?)
-                } else {
-                    None
-                };
-                if let Some(working) = self.working {
-                    let result = crate::fill::render_linear_prepared(
-                        self.raw,
-                        node,
-                        self.document,
-                        render_parent,
-                        &crate::fill::LinearFillOptions {
-                            dimensions: (self.width, self.height),
-                            scale: self.scale,
-                            working: working.destination.clone(),
-                        },
-                        engine.unwrap(),
-                    )?;
-                    self.conversion_clipped |= result.conversion_clipped;
-                    SceneSurface::Working(result.surface)
-                } else {
-                    SceneSurface::Byte(crate::fill::render(
-                        self.raw,
-                        node,
-                        self.document,
-                        render_parent,
-                        (self.width, self.height),
-                        self.scale,
-                        engine,
-                    )?)
-                }
-            } else {
-                let raster_source = matches!(
-                    node["kind"].as_str(),
-                    Some("image" | "raster" | "photo" | "scene3d")
-                );
-                let vector_source = matches!(
-                    node["kind"].as_str(),
-                    Some("path" | "rect" | "ellipse" | "line" | "text")
-                );
-                if self.working.is_some() && !raster_source && !vector_source {
-                    bail!("[unsupported-capability] float scene rendering for node {} ({}) is not implemented",node["id"],node["kind"])
-                }
-                if self.working.is_some() && vector_source {
-                    self.vector_surface(node, render_parent)?
-                } else {
-                    // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
-                    let work = self.plain_node_pixels(node);
-                    self.reserve_surface(work)?;
-                    let mut content = node.clone();
-                    if matches!(
-                        content["kind"].as_str(),
-                        Some("image" | "raster" | "photo" | "scene3d")
-                    ) {
-                        content["opacity"] = json!(1.0);
-                        content["blend_mode"] = json!("normal");
-                    }
-                    if content
-                        .get("mask")
-                        .is_some_and(|m| m.get("resource").is_some())
-                    {
-                        content.as_object_mut().unwrap().remove("mask");
-                    }
-                    if self.working.is_some() {
-                        self.reserve_byte_scratch()?;
-                    }
-                    let fragment = crate::image::fragment_svg(
-                        self.raw,
-                        self.page,
-                        self.document,
-                        &content,
-                        render_parent,
-                    )?;
-                    let bytes = crate::render::scene_to_rgba_proxy(&fragment, self.scale)?;
-                    if self.working.is_some() {
-                        self.srgb8_surface(bytes)?
-                    } else {
-                        SceneSurface::Byte(bytes)
-                    }
-                }
-            };
-            if let Some(stack) = node
-                .get("transforms")
-                .and_then(Value::as_array)
-                .filter(|s| !s.is_empty())
-                .filter(|_| direct_affine.is_none())
-            {
-                self.reserve()?; // warped result
-                                 // Float resampling also holds an encoded sRGB copy of the source.
-                let encoded = matches!(surface, SceneSurface::Working(_));
-                if encoded {
-                    self.reserve()?;
-                }
-                let mut masks = Vec::with_capacity(stack.len());
-                for op in stack {
-                    masks.push(self.mask(op, kurbo::Affine::IDENTITY)?);
-                }
-                self.pixel_work +=
-                    u64::from(self.width) * u64::from(self.height) * stack.len() as u64;
-                if self.pixel_work > MAX_PIXEL_WORK {
-                    bail!("[limit-exceeded] transform pixel-work budget exceeded")
-                }
-                match &mut surface {
-                    SceneSurface::Byte(pixels) => {
-                        *pixels = crate::transform::warp(pixels, stack, &masks, self.scale)?;
-                    }
-                    SceneSurface::Working(pixels) => {
-                        let context = self
-                            .blend_context
-                            .context("working blend context missing")?;
-                        *pixels = crate::transform::warp_working(
-                            pixels, stack, &masks, self.scale, context,
-                        )
-                        .with_context(|| {
-                            format!("float scene transform resampling for node {}", node["id"])
-                        })?;
-                    }
-                }
-                for _ in masks.iter().flatten() {
-                    self.release();
-                }
-                if encoded {
-                    self.release();
-                }
-                self.release();
-            }
-            // Layer-style order: the mask defines the silhouette first, so effects
-            // (glows, shadows, strokes) follow the masked shape instead of being
-            // clipped away by a second mask pass.
-            if let Some(mask) = self.mask(node, parent)? {
-                let coverage = match &surface {
-                    SceneSurface::Byte(_) => Coverage::Byte(mask),
-                    SceneSurface::Working(_) => Coverage::Working(
-                        mask.into_iter()
-                            .map(|alpha| f64::from(alpha) / 255.0)
-                            .collect(),
-                    ),
-                };
-                surface.clip(Some(&coverage))?;
-                self.release();
-            }
-            let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
-            if node.get("effects").is_some() || node.get("content_opacity").is_some() {
-                if self.working.is_some() {
-                    if crate::effects::stack(self.raw, node)?
-                        .iter()
-                        .any(|op| op["enabled"] == true)
-                    {
-                        let SceneSurface::Working(source) = &surface else {
-                            unreachable!("working effect target")
-                        };
-                        surface = SceneSurface::Working(
-                            self.working_effects(node, source).with_context(|| {
-                                format!("float scene effects for node {}", node["id"])
-                            })?,
-                        );
-                    } else {
-                        surface.opacity(node["content_opacity"].as_f64().unwrap_or(1.0))?;
-                    }
-                } else {
-                    let surface = surface.byte_mut("effects")?;
-                    // Effects run on the content's bounds plus the effect reach, never the
-                    // whole canvas; the budget below follows that region.
-                    let (cx, cy, cw, ch) =
-                        crate::effects::region(self.raw, node, surface, self.scale)?;
-                    if cw > 0 && ch > 0 {
-                        let pixels = u64::from(cw) * u64::from(ch);
-                        // Conservative bound includes the image engine's f64 blur planes.
-                        for _ in 0..32 {
-                            self.reserve_pixels(pixels)?;
-                        }
-                        self.pixel_work +=
-                            crate::effects::stack(self.raw, node)?.len() as u64 * pixels * 32;
-                        if self.pixel_work > MAX_PIXEL_WORK {
-                            bail!("[limit-exceeded] effect pixel-work budget exceeded")
-                        }
-                        let full = (cw, ch) == surface.dimensions();
-                        let source = if full {
-                            surface.clone()
-                        } else {
-                            image::imageops::crop_imm(surface, cx, cy, cw, ch).to_image()
-                        };
-                        let applied = crate::effects::apply(
-                            self.raw,
-                            node,
-                            &source,
-                            self.document,
-                            self.scale,
-                            self.gradient_profiles,
-                            &mut self.gradient_engines,
-                        )?;
-                        if full {
-                            *surface = applied;
-                        } else {
-                            *surface = RgbaImage::new(surface.width(), surface.height());
-                            image::imageops::replace(
-                                surface,
-                                &applied,
-                                i64::from(cx),
-                                i64::from(cy),
-                            );
-                        }
-                        for _ in 0..32 {
-                            self.live_bytes -= pixels * 4;
-                        }
-                    }
-                }
-            }
-            surface.opacity(opacity)?;
+            let (mut surface, passed) = self.node_surface(node, parent, &result)?;
             if node.get("clipping").is_some() {
                 surface.clip(clip_alpha.as_ref())?;
             } else if any_clipping {
@@ -1995,6 +1751,252 @@ impl Renderer<'_> {
             * self.coverage_bytes();
         self.live_bytes -= u64::from(self.width) * u64::from(self.height) * self.coverage_bytes();
         Ok(result)
+    }
+
+    /// One node's finished surface (content, transforms, mask, effects and
+    /// opacity) before sibling clipping, plus the pass-through result of a group.
+    fn node_surface(
+        &mut self,
+        node: &Value,
+        parent: kurbo::Affine,
+        result: &SceneSurface,
+    ) -> Result<(SceneSurface, Option<SceneSurface>)> {
+        let affine = transform(node)?;
+        let direct_affine = if node["kind"] == "group" || node["kind"] == "instance" {
+            None
+        } else {
+            crate::transform::affine(node)?
+        };
+        let render_parent = direct_affine.unwrap_or(kurbo::Affine::IDENTITY) * parent;
+        let mut passed = None;
+        let mut surface = if node["kind"] == "group" {
+            let surface = self.siblings(node["children"].as_array().unwrap(), parent * affine)?;
+            if node["isolation"] == "pass-through" {
+                self.reserve()?;
+                passed = Some(self.siblings_with_backdrop(
+                    node["children"].as_array().unwrap(),
+                    parent * affine,
+                    Some(result.clone()),
+                )?);
+            }
+            surface
+        } else if node["kind"] == "instance" {
+            self.siblings(std::slice::from_ref(&node["fallback"]), parent * affine)?
+        } else if node["kind"] == "fill" {
+            self.reserve()?;
+            self.pixel_work += u64::from(self.width) * u64::from(self.height) * 4;
+            if self.pixel_work > MAX_PIXEL_WORK {
+                bail!("[limit-exceeded] fill pixel-work budget exceeded")
+            }
+            let fill = crate::fill::resolved(self.raw, &node["fill"])?;
+            let intent = crate::color::gradient::setting(self.raw, fill)?
+                .map(|(_, intent)| intent)
+                .or(self.working.map(|setting| setting.intent));
+            let engine = if let Some(intent) = intent {
+                Some(crate::color::gradient::engine(
+                    self.gradient_profiles,
+                    &mut self.gradient_engines,
+                    intent,
+                )?)
+            } else {
+                None
+            };
+            if let Some(working) = self.working {
+                let result = crate::fill::render_linear_prepared(
+                    self.raw,
+                    node,
+                    self.document,
+                    render_parent,
+                    &crate::fill::LinearFillOptions {
+                        dimensions: (self.width, self.height),
+                        scale: self.scale,
+                        working: working.destination.clone(),
+                    },
+                    engine.unwrap(),
+                )?;
+                self.conversion_clipped |= result.conversion_clipped;
+                SceneSurface::Working(result.surface)
+            } else {
+                SceneSurface::Byte(crate::fill::render(
+                    self.raw,
+                    node,
+                    self.document,
+                    render_parent,
+                    (self.width, self.height),
+                    self.scale,
+                    engine,
+                )?)
+            }
+        } else {
+            let raster_source = matches!(
+                node["kind"].as_str(),
+                Some("image" | "raster" | "photo" | "scene3d")
+            );
+            let vector_source = matches!(
+                node["kind"].as_str(),
+                Some("path" | "rect" | "ellipse" | "line" | "text")
+            );
+            if self.working.is_some() && !raster_source && !vector_source {
+                bail!("[unsupported-capability] float scene rendering for node {} ({}) is not implemented",node["id"],node["kind"])
+            }
+            if self.working.is_some() && vector_source {
+                self.vector_surface(node, render_parent)?
+            } else {
+                // Reuse the image/vector/text serializer and font pipeline; never copy source bytes.
+                let work = self.plain_node_pixels(node);
+                self.reserve_surface(work)?;
+                let mut content = node.clone();
+                if matches!(
+                    content["kind"].as_str(),
+                    Some("image" | "raster" | "photo" | "scene3d")
+                ) {
+                    content["opacity"] = json!(1.0);
+                    content["blend_mode"] = json!("normal");
+                }
+                if content
+                    .get("mask")
+                    .is_some_and(|m| m.get("resource").is_some())
+                {
+                    content.as_object_mut().unwrap().remove("mask");
+                }
+                if self.working.is_some() {
+                    self.reserve_byte_scratch()?;
+                }
+                let fragment = crate::image::fragment_svg(
+                    self.raw,
+                    self.page,
+                    self.document,
+                    &content,
+                    render_parent,
+                )?;
+                let bytes = crate::render::scene_to_rgba_proxy(&fragment, self.scale)?;
+                if self.working.is_some() {
+                    self.srgb8_surface(bytes)?
+                } else {
+                    SceneSurface::Byte(bytes)
+                }
+            }
+        };
+        if let Some(stack) = node
+            .get("transforms")
+            .and_then(Value::as_array)
+            .filter(|s| !s.is_empty())
+            .filter(|_| direct_affine.is_none())
+        {
+            self.reserve()?; // warped result
+                             // Float resampling also holds an encoded sRGB copy of the source.
+            let encoded = matches!(surface, SceneSurface::Working(_));
+            if encoded {
+                self.reserve()?;
+            }
+            let mut masks = Vec::with_capacity(stack.len());
+            for op in stack {
+                masks.push(self.mask(op, kurbo::Affine::IDENTITY)?);
+            }
+            self.pixel_work += u64::from(self.width) * u64::from(self.height) * stack.len() as u64;
+            if self.pixel_work > MAX_PIXEL_WORK {
+                bail!("[limit-exceeded] transform pixel-work budget exceeded")
+            }
+            match &mut surface {
+                SceneSurface::Byte(pixels) => {
+                    *pixels = crate::transform::warp(pixels, stack, &masks, self.scale)?;
+                }
+                SceneSurface::Working(pixels) => {
+                    let context = self
+                        .blend_context
+                        .context("working blend context missing")?;
+                    *pixels =
+                        crate::transform::warp_working(pixels, stack, &masks, self.scale, context)
+                            .with_context(|| {
+                                format!("float scene transform resampling for node {}", node["id"])
+                            })?;
+                }
+            }
+            for _ in masks.iter().flatten() {
+                self.release();
+            }
+            if encoded {
+                self.release();
+            }
+            self.release();
+        }
+        // Layer-style order: the mask defines the silhouette first, so effects
+        // (glows, shadows, strokes) follow the masked shape instead of being
+        // clipped away by a second mask pass.
+        if let Some(mask) = self.mask(node, parent)? {
+            let coverage = match &surface {
+                SceneSurface::Byte(_) => Coverage::Byte(mask),
+                SceneSurface::Working(_) => Coverage::Working(
+                    mask.into_iter()
+                        .map(|alpha| f64::from(alpha) / 255.0)
+                        .collect(),
+                ),
+            };
+            surface.clip(Some(&coverage))?;
+            self.release();
+        }
+        let opacity = node.get("opacity").and_then(Value::as_f64).unwrap_or(1.0);
+        if node.get("effects").is_some() || node.get("content_opacity").is_some() {
+            if self.working.is_some() {
+                if crate::effects::stack(self.raw, node)?
+                    .iter()
+                    .any(|op| op["enabled"] == true)
+                {
+                    let SceneSurface::Working(source) = &surface else {
+                        unreachable!("working effect target")
+                    };
+                    surface =
+                        SceneSurface::Working(self.working_effects(node, source).with_context(
+                            || format!("float scene effects for node {}", node["id"]),
+                        )?);
+                } else {
+                    surface.opacity(node["content_opacity"].as_f64().unwrap_or(1.0))?;
+                }
+            } else {
+                let surface = surface.byte_mut("effects")?;
+                // Effects run on the content's bounds plus the effect reach, never the
+                // whole canvas; the budget below follows that region.
+                let (cx, cy, cw, ch) = crate::effects::region(self.raw, node, surface, self.scale)?;
+                if cw > 0 && ch > 0 {
+                    let pixels = u64::from(cw) * u64::from(ch);
+                    // Conservative bound includes the image engine's f64 blur planes.
+                    for _ in 0..32 {
+                        self.reserve_pixels(pixels)?;
+                    }
+                    self.pixel_work +=
+                        crate::effects::stack(self.raw, node)?.len() as u64 * pixels * 32;
+                    if self.pixel_work > MAX_PIXEL_WORK {
+                        bail!("[limit-exceeded] effect pixel-work budget exceeded")
+                    }
+                    let full = (cw, ch) == surface.dimensions();
+                    let source = if full {
+                        surface.clone()
+                    } else {
+                        image::imageops::crop_imm(surface, cx, cy, cw, ch).to_image()
+                    };
+                    let applied = crate::effects::apply(
+                        self.raw,
+                        node,
+                        &source,
+                        self.document,
+                        self.scale,
+                        self.gradient_profiles,
+                        &mut self.gradient_engines,
+                    )?;
+                    if full {
+                        *surface = applied;
+                    } else {
+                        *surface = RgbaImage::new(surface.width(), surface.height());
+                        image::imageops::replace(surface, &applied, i64::from(cx), i64::from(cy));
+                    }
+                    for _ in 0..32 {
+                        self.live_bytes -= pixels * 4;
+                    }
+                }
+            }
+        }
+        surface.opacity(opacity)?;
+        Ok((surface, passed))
     }
 
     fn mask(&mut self, node: &Value, parent: kurbo::Affine) -> Result<Option<Vec<u8>>> {
