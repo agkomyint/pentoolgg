@@ -1189,8 +1189,11 @@ impl SceneSurface {
     }
     fn opacity(&mut self, opacity: f64) -> Result<()> {
         match self {
+            // Full opacity leaves every byte alpha unchanged.
+            Self::Byte(_) if opacity == 1.0 => Ok(()),
             Self::Byte(image) => {
-                for p in image.pixels_mut() {
+                // Zero alpha stays zero, so only covered pixels need the multiply.
+                for p in image.pixels_mut().filter(|p| p[3] != 0) {
                     p[3] = round(f64::from(p[3]) * opacity);
                 }
                 Ok(())

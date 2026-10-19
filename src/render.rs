@@ -388,12 +388,20 @@ pub(crate) fn scene_to_rgba_proxy(
     scale: f32,
 ) -> Result<image::RgbaImage> {
     let pixmap = rasterize(&scene.svg, scene.width, scene.height, scale, &scene.fonts)?;
-    let mut out = image::RgbaImage::new(pixmap.width(), pixmap.height());
-    for (target, pixel) in out.pixels_mut().zip(pixmap.pixels()) {
-        let c = pixel.demultiply();
-        *target = image::Rgba([c.red(), c.green(), c.blue(), c.alpha()]);
+    let (width, height) = (pixmap.width(), pixmap.height());
+    let mut data = pixmap.take();
+    for pixel in data.chunks_exact_mut(4) {
+        // Transparent and opaque pixels demultiply to themselves, so a node that
+        // covers a small part of the canvas costs little more than a scan.
+        if pixel[3] == 0 || pixel[3] == 255 {
+            continue;
+        }
+        let c = tiny_skia::PremultipliedColorU8::from_rgba(pixel[0], pixel[1], pixel[2], pixel[3])
+            .context("rasterizer produced an invalid premultiplied pixel")?
+            .demultiply();
+        pixel.copy_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
-    Ok(out)
+    image::RgbaImage::from_raw(width, height, data).context("proxy surface size mismatch")
 }
 
 fn svg_to_png_with_fonts(
@@ -585,6 +593,21 @@ fn atomic_write(output: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `scene_to_rgba_proxy` skips transparent and opaque pixels on this basis.
+    #[test]
+    fn transparent_and_opaque_pixels_demultiply_to_themselves() {
+        let demultiply = |r, g, b, a| {
+            let c = tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
+                .unwrap()
+                .demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        };
+        assert_eq!(demultiply(0, 0, 0, 0), [0, 0, 0, 0]);
+        for v in 0..=255 {
+            assert_eq!(demultiply(v, 255 - v, v / 2, 255), [v, 255 - v, v / 2, 255]);
+        }
+    }
 
     fn invalid_document() -> Document {
         let mut doc = Document::new(10, 10);

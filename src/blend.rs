@@ -533,6 +533,9 @@ impl LinearSurface {
         Ok(())
     }
 }
+fn separable(mode: &str) -> bool {
+    !matches!(mode, "hue" | "saturation" | "color" | "luminosity")
+}
 /// Premultiplied source-over with blend applied only in source/backdrop overlap.
 pub fn over(dst: &mut RgbaImage, src: &RgbaImage, mode: &str, space: &str) -> Result<()> {
     validate(mode, space)?;
@@ -540,19 +543,20 @@ pub fn over(dst: &mut RgbaImage, src: &RgbaImage, mode: &str, space: &str) -> Re
         bail!("[invalid-composite] surface dimensions differ")
     }
     let plain = mode == "normal" && space == "srgb";
+    // A transparent source leaves an sRGB backdrop byte-for-byte unchanged under
+    // every separable mode: the mix is finite and is weighted by zero source alpha.
+    let clear = space == "srgb" && separable(mode);
     for (d, s) in dst.pixels_mut().zip(src.pixels()) {
-        if plain {
-            // Exact shortcuts for the common cases: nothing to add / fully opaque source.
-            if s[3] == 0 {
-                if d[3] == 0 {
-                    *d = image::Rgba([0, 0, 0, 0]);
-                }
-                continue;
+        // Exact shortcuts for the common cases: nothing to add / fully opaque source.
+        if clear && s[3] == 0 {
+            if d[3] == 0 {
+                *d = image::Rgba([0, 0, 0, 0]);
             }
-            if s[3] == 255 {
-                *d = *s;
-                continue;
-            }
+            continue;
+        }
+        if plain && s[3] == 255 {
+            *d = *s;
+            continue;
         }
         let (sa, da) = (f64::from(s[3]) / 255.0, f64::from(d[3]) / 255.0);
         let a = sa + da * (1.0 - sa);
@@ -582,6 +586,51 @@ pub fn over(dst: &mut RgbaImage, src: &RgbaImage, mode: &str, space: &str) -> Re
         d[3] = byte(a);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod transparent_source_tests {
+    use super::*;
+
+    /// The general path of `over` for one sRGB pixel, without shortcuts.
+    fn general(mode: &str, d: [u8; 4], s: [u8; 4]) -> [u8; 4] {
+        let (sa, da) = (f64::from(s[3]) / 255.0, f64::from(d[3]) / 255.0);
+        let a = sa + da * (1.0 - sa);
+        if a == 0.0 {
+            return [0; 4];
+        }
+        let unit = |v: [u8; 4]| [0, 1, 2].map(|i| f64::from(v[i]) / 255.0);
+        let (cb, cs) = (unit(d), unit(s));
+        let composed = source_over(mode, [cb[0], cb[1], cb[2], da], [cs[0], cs[1], cs[2], sa]);
+        [
+            byte(composed[0]),
+            byte(composed[1]),
+            byte(composed[2]),
+            byte(a),
+        ]
+    }
+
+    #[test]
+    fn transparent_source_shortcut_matches_the_general_path() {
+        for mode in MODES.iter().copied().filter(|m| separable(m)) {
+            for alpha in 0..=255u8 {
+                for channel in 0..=255u8 {
+                    for source in [0u8, 1, 64, 127, 128, 200, 254, 255] {
+                        let d = [channel, 255 - channel, channel / 2, alpha];
+                        let s = [source, 255 - source, source / 3, 0];
+                        let mut dst = RgbaImage::from_pixel(1, 1, image::Rgba(d));
+                        let src = RgbaImage::from_pixel(1, 1, image::Rgba(s));
+                        over(&mut dst, &src, mode, "srgb").unwrap();
+                        assert_eq!(
+                            dst.get_pixel(0, 0).0,
+                            general(mode, d, s),
+                            "{mode} {d:?} {s:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
