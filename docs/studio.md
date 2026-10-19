@@ -133,9 +133,12 @@ A tab serving a shared document follows `GET /api/document/events`. When the
 file changes on disk and the tab has no unsaved edits, Studio adopts the new
 document in place, keeping the page, layer and any selected objects that still
 exist; undo history is cleared because it described the previous revision. With
-unsaved edits nothing is replaced: the header shows "Changed on disk · Reload",
-and Save stays guarded by the revision. Standalone (downloaded or new) documents
-are not followed. This works with or without `--collab`.
+unsaved edits, `lib/merge.ts` merges the incoming document with the tab's edits
+against the last saved base, so neither side is lost, and Save stays guarded by
+the revision. Remote changes are highlighted on the canvas with the editor's
+name and colour (`components/Presence.tsx`); the Version history panel previews
+any stored revision and restores it as a new step. Standalone (downloaded or
+new) documents are not followed. This works with or without `--collab`.
 
 ### Layers and adjustment layers (0.22)
 

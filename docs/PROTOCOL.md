@@ -64,6 +64,12 @@ every 250 ms and re-hashes at least every 5 s. It works with or without
 streams (429 beyond that) and ends each stream after 15 minutes; clients
 reconnect and receive the current revision again.
 
+Version history (0.22.0): `GET /api/history/version?hash=H` returns
+`{ "hash", "document" }` for a revision stored in the document's bounded
+history (view access). `POST /api/history/restore` with `{ "hash": "H" }`
+writes that revision back as a new `restore` history step, so the restore can
+itself be undone; it returns `{ "ok", "revision", "changed" }` (edit access).
+
 `POST /api/composite/analyze` accepts `document`, `page`, `scope` (default `page`),
 optional `query`, `samples` (pixel coordinate pairs) and `compare`. It returns
 read-only `analysis` and optional `comparison`; no client color math is trusted.
