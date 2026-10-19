@@ -3,3 +3,9 @@
 # and macOS CI targets keep their platform defaults.
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
+
+# Browser core: 128-bit SIMD (every current browser supports it). IEEE results
+# are the same lane by lane, so rendered bytes do not change; blur and fills run
+# faster.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]
