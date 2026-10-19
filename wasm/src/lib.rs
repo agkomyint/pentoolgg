@@ -47,6 +47,9 @@ fn text<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {
     std::str::from_utf8(bytes).map_err(|e| format!("input is not UTF-8: {e}"))
 }
 
+/// Pixel memory for cached node surfaces in the browser.
+const NODE_CACHE_BYTES: usize = 96 << 20;
+
 fn render_inner(
     doc: *const u8,
     doc_len: usize,
@@ -58,6 +61,8 @@ fn render_inner(
         serde_json::from_str(text(doc, doc_len)?).map_err(|e| format!("invalid document: {e}"))?;
     let page = text(page, page_len)?;
     let page = (!page.is_empty()).then_some(page);
+    // Keep finished layers between renders: an edit re-renders only what changed.
+    pentool::composite::cache_node_surfaces(NODE_CACHE_BYTES);
     let image = pentool::composite::render(&raw, Path::new(""), page, scale)
         .map_err(|e| format!("{e:#}"))?;
     let out = output();

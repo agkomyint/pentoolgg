@@ -31,6 +31,132 @@ pub(crate) fn check_cancelled() -> Result<()> {
     }
     Ok(())
 }
+
+/// A finished node surface kept between renders, cropped to its nonzero pixels,
+/// with the node's pixel-work and memory accounting relative to where it started.
+struct CachedSurface {
+    x: u32,
+    y: u32,
+    pixels: RgbaImage,
+    work: u64,
+    work_peak: u64,
+    live: u64,
+    live_peak: u64,
+    used: u64,
+}
+
+#[derive(Default)]
+struct NodeCache {
+    limit: usize,
+    bytes: usize,
+    clock: u64,
+    entries: HashMap<[u8; 32], CachedSurface>,
+}
+
+thread_local! { static NODE_CACHE: std::cell::RefCell<Option<NodeCache>> = const { std::cell::RefCell::new(None) }; }
+
+/// Keep finished node surfaces between renders on this thread, up to `limit_bytes`
+/// of pixels (least recently used first out); 0 turns the cache off. Studio's
+/// browser core opts in so that editing one layer re-renders only that layer;
+/// exports never do. A hit is the same bytes and the same budget accounting as a
+/// fresh render, so output and limit errors do not change.
+pub fn cache_node_surfaces(limit_bytes: usize) {
+    NODE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        match (cache.as_mut(), limit_bytes) {
+            (_, 0) => *cache = None,
+            (Some(existing), limit) => existing.limit = limit,
+            (None, limit) => {
+                *cache = Some(NodeCache {
+                    limit,
+                    ..NodeCache::default()
+                })
+            }
+        }
+    });
+}
+
+/// Everything outside the node that a cached node surface depends on: the
+/// document apart from its pages, the page canvas size, the document path, and
+/// the render size. None when the cache is off.
+fn node_context(
+    raw: &Value,
+    page: &Value,
+    document: &Path,
+    scale: f32,
+    size: (u32, u32),
+) -> Option<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    if NODE_CACHE.with(|cache| cache.borrow().is_none()) {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    for (key, value) in raw.as_object()? {
+        if key != "pages" {
+            serde_json::to_writer(&mut hasher, key).ok()?;
+            serde_json::to_writer(&mut hasher, value).ok()?;
+        }
+    }
+    serde_json::to_writer(&mut hasher, &page["canvas"]["width"]).ok()?;
+    serde_json::to_writer(&mut hasher, &page["canvas"]["height"]).ok()?;
+    hasher.update(document.to_string_lossy().as_bytes());
+    hasher.update([0]);
+    hasher.update(scale.to_bits().to_le_bytes());
+    hasher.update(size.0.to_le_bytes());
+    hasher.update(size.1.to_le_bytes());
+    Some(hasher.finalize().into())
+}
+
+/// Store `image` cropped to its nonzero pixels (everything else is [0, 0, 0, 0],
+/// so expanding the crop restores it exactly), then evict to the byte limit.
+fn remember(key: [u8; 32], image: &RgbaImage, mut entry: CachedSurface) {
+    let (w, h) = image.dimensions();
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for (y, row) in image.as_raw().chunks_exact(w as usize * 4).enumerate() {
+        let mut pixels = row.chunks_exact(4).map(|p| p != [0, 0, 0, 0]);
+        if let Some(first) = pixels.position(|set| set) {
+            let last = row
+                .chunks_exact(4)
+                .rposition(|p| p != [0, 0, 0, 0])
+                .unwrap_or(first);
+            x0 = x0.min(first as u32);
+            x1 = x1.max(last as u32 + 1);
+            y0 = y0.min(y as u32);
+            y1 = y1.max(y as u32 + 1);
+        }
+    }
+    if x1 > x0 && y1 > y0 {
+        entry.x = x0;
+        entry.y = y0;
+        entry.pixels = image::imageops::crop_imm(image, x0, y0, x1 - x0, y1 - y0).to_image();
+    }
+    NODE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(cache) = cache.as_mut() else { return };
+        let size = entry.pixels.as_raw().len() + 128;
+        if size > cache.limit {
+            return;
+        }
+        cache.clock += 1;
+        entry.used = cache.clock;
+        if let Some(old) = cache.entries.insert(key, entry) {
+            cache.bytes -= old.pixels.as_raw().len() + 128;
+        }
+        cache.bytes += size;
+        while cache.bytes > cache.limit {
+            let Some(oldest) = cache
+                .entries
+                .iter()
+                .min_by_key(|(_, e)| e.used)
+                .map(|(k, _)| *k)
+            else {
+                break;
+            };
+            let old = cache.entries.remove(&oldest).unwrap();
+            cache.bytes -= old.pixels.as_raw().len() + 128;
+        }
+    });
+}
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn with_cancel<T>(
     flag: Arc<AtomicBool>,
@@ -1269,6 +1395,9 @@ struct Renderer<'a> {
         crate::color::icc::Intent,
         crate::color::value::Evaluator<'a>,
     )>,
+    /// Highest pixel work seen at a budget check (it can drop after one).
+    work_peak: u64,
+    node_context: Option<[u8; 32]>,
 }
 
 impl Renderer<'_> {
@@ -1310,6 +1439,7 @@ impl Renderer<'_> {
             .pixel_work
             .checked_add(pixels)
             .context("pixel work overflow")?;
+        self.work_peak = self.work_peak.max(self.pixel_work);
         self.live_bytes = self
             .live_bytes
             .checked_add(pixels * self.pixel_bytes())
@@ -1708,7 +1838,7 @@ impl Renderer<'_> {
                 self.release();
                 continue;
             }
-            let (mut surface, passed) = self.node_surface(node, parent, &result)?;
+            let (mut surface, passed) = self.cached_node_surface(node, parent, &result)?;
             if node.get("clipping").is_some() {
                 surface.clip(clip_alpha.as_ref())?;
             } else if any_clipping {
@@ -1751,6 +1881,102 @@ impl Renderer<'_> {
             * self.coverage_bytes();
         self.live_bytes -= u64::from(self.width) * u64::from(self.height) * self.coverage_bytes();
         Ok(result)
+    }
+
+    /// The cache key of a node whose surface reads only the node, its parent
+    /// transform and the render context: byte-precision leaves. Images (masks can
+    /// name other page nodes), text (wrap and threads read the page), 3D, groups
+    /// and instances are always rendered.
+    fn node_key(&self, node: &Value, parent: kurbo::Affine) -> Option<[u8; 32]> {
+        use sha2::{Digest, Sha256};
+        let context = self.node_context.filter(|_| self.working.is_none())?;
+        if !matches!(
+            node["kind"].as_str(),
+            Some("fill" | "path" | "rect" | "ellipse" | "line")
+        ) {
+            return None;
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(context);
+        for coefficient in parent.as_coeffs() {
+            hasher.update(coefficient.to_bits().to_le_bytes());
+        }
+        serde_json::to_writer(&mut hasher, node).ok()?;
+        Some(hasher.finalize().into())
+    }
+
+    /// [`Self::node_surface`] through the node cache. A hit replays the node's
+    /// pixel-work and memory accounting; when that would cross a limit the node
+    /// renders normally so the same error is reported.
+    fn cached_node_surface(
+        &mut self,
+        node: &Value,
+        parent: kurbo::Affine,
+        result: &SceneSurface,
+    ) -> Result<(SceneSurface, Option<SceneSurface>)> {
+        let Some(key) = self.node_key(node, parent) else {
+            return self.node_surface(node, parent, result);
+        };
+        let (work0, live0) = (self.pixel_work, self.live_bytes);
+        let (width, height) = (self.width, self.height);
+        let hit = NODE_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let cache = cache.as_mut()?;
+            cache.clock += 1;
+            let clock = cache.clock;
+            let entry = cache.entries.get_mut(&key)?;
+            if work0 + entry.work_peak > MAX_PIXEL_WORK || live0 + entry.live_peak > MAX_TEMP_BYTES
+            {
+                return None;
+            }
+            entry.used = clock;
+            let mut image = RgbaImage::new(width, height);
+            image::imageops::replace(
+                &mut image,
+                &entry.pixels,
+                i64::from(entry.x),
+                i64::from(entry.y),
+            );
+            Some((
+                image,
+                entry.work,
+                entry.work_peak,
+                entry.live,
+                entry.live_peak,
+            ))
+        });
+        if let Some((image, work, work_peak, live, live_peak)) = hit {
+            self.pixel_work += work;
+            self.work_peak = self.work_peak.max(work0 + work_peak);
+            self.live_bytes += live;
+            self.peak_live_bytes = self.peak_live_bytes.max(live0 + live_peak);
+            return Ok((SceneSurface::Byte(image), None));
+        }
+        let (saved_live_peak, saved_work_peak) = (self.peak_live_bytes, self.work_peak);
+        self.peak_live_bytes = live0;
+        self.work_peak = work0;
+        let outcome = self.node_surface(node, parent, result);
+        let live_peak = self.peak_live_bytes;
+        let work_peak = self.work_peak.max(self.pixel_work);
+        self.peak_live_bytes = saved_live_peak.max(live_peak);
+        self.work_peak = saved_work_peak.max(work_peak);
+        let (surface, passed) = outcome?;
+        if let (SceneSurface::Byte(image), None) = (&surface, &passed) {
+            if self.pixel_work >= work0 && self.live_bytes >= live0 {
+                let entry = CachedSurface {
+                    x: 0,
+                    y: 0,
+                    pixels: RgbaImage::new(0, 0),
+                    work: self.pixel_work - work0,
+                    work_peak: work_peak - work0,
+                    live: self.live_bytes - live0,
+                    live_peak: live_peak - live0,
+                    used: 0,
+                };
+                remember(key, image, entry);
+            }
+        }
+        Ok((surface, passed))
     }
 
     /// One node's finished surface (content, transforms, mask, effects and
@@ -2244,6 +2470,8 @@ pub fn node_pixels(
                 conversion_clipped: false,
                 gradient_profiles: &gradient_profiles,
                 gradient_engines: Vec::new(),
+                work_peak: 0,
+                node_context: None,
             };
             return renderer
                 .siblings(std::slice::from_ref(node), parent)?
@@ -2324,6 +2552,8 @@ pub fn mask_coverage(
         conversion_clipped: false,
         gradient_profiles: &gradient_profiles,
         gradient_engines: Vec::new(),
+        work_peak: 0,
+        node_context: None,
     };
     let node = json!({"kind":"rect","id":"mask-analysis","mask":{"resource":digest,"invert":false,"linked":false,"density":1,"feather":0,"transform":[1,0,0,1,0,0]}});
     renderer
@@ -2506,6 +2736,8 @@ fn render_scene(
         conversion_clipped: false,
         gradient_profiles: &gradient_profiles,
         gradient_engines: Vec::new(),
+        work_peak: 0,
+        node_context: node_context(raw, page, document, scale, (w, h)),
     };
     renderer.reserve()?;
     let background = json!({"kind":"rect","id":"composite-background","x":0,"y":0,"width":width,"height":height,
@@ -2722,5 +2954,69 @@ mod gradient_stop_tests {
         let position =
             json!({"stops":[{"position":0,"rgb":[0,0,0]},{"position":1,"rgb":[255,255,255]}]});
         assert_eq!(gradient(&position).unwrap().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod node_cache_tests {
+    use super::*;
+
+    fn scene(raw: &Value, page: &str) -> (Vec<u8>, u64, u64) {
+        let render = render_scene(raw, Path::new(""), Some(page), 0.75, true, false).unwrap();
+        let (peak, work) = (render.peak_temporary_bytes, render.pixel_work);
+        (render.surface.into_byte().unwrap().into_raw(), peak, work)
+    }
+
+    #[test]
+    fn cached_node_surfaces_render_the_same_bytes_and_budget() {
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v6-composite.pen")).unwrap();
+        let blurred = json!({"kind":"ellipse","id":"cloud","cx":3.5,"cy":2.5,"radius_x":2.5,"radius_y":1.5,
+            "style":{"fill":{"fallback":"#ffffff"}},
+            "effects":[{"id":"soft","kind":"blur","enabled":true,"opacity":1,"blend_mode":"normal","params":{"radius":1.5}}]});
+        raw["pages"][0]["layers"][0]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .insert(3, blurred);
+        let pages: Vec<String> = raw["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap().to_string())
+            .collect();
+        let fresh: Vec<_> = pages.iter().map(|p| scene(&raw, p)).collect();
+        cache_node_surfaces(64 << 20);
+        for _ in 0..2 {
+            for (page, expected) in pages.iter().zip(&fresh) {
+                assert_eq!(&scene(&raw, page), expected, "page {page}");
+            }
+        }
+        // Moving one node re-renders it; the others come from the cache.
+        raw["pages"][0]["layers"][0]["nodes"][3]["cx"] = json!(5);
+        let cached = scene(&raw, &pages[0]);
+        cache_node_surfaces(0);
+        assert_eq!(cached, scene(&raw, &pages[0]));
+        assert_ne!(cached.0, fresh[0].0);
+    }
+
+    #[test]
+    fn a_hit_that_would_cross_a_limit_renders_and_fails_the_same_way() {
+        cache_node_surfaces(64 << 20);
+        let mut raw: Value =
+            serde_json::from_str(include_str!("../docs/fixtures/v6-composite.pen")).unwrap();
+        raw["pages"].as_array_mut().unwrap().truncate(1);
+        scene(&raw, "composite");
+        let key = NODE_CACHE.with(|c| c.borrow().as_ref().unwrap().entries.len());
+        assert!(key > 0);
+        // An entry claims a peak beyond the budget: the node must render instead.
+        NODE_CACHE.with(|c| {
+            for entry in c.borrow_mut().as_mut().unwrap().entries.values_mut() {
+                entry.live_peak = MAX_TEMP_BYTES;
+                entry.pixels = RgbaImage::from_pixel(1, 1, Rgba([1, 2, 3, 4]));
+            }
+        });
+        let again = scene(&raw, "composite");
+        cache_node_surfaces(0);
+        assert_eq!(again, scene(&raw, "composite"));
     }
 }
