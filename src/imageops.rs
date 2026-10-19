@@ -556,40 +556,61 @@ fn box_sizes(sigma: f64) -> [usize; 3] {
     sizes
 }
 
+/// One clamped-edge running-sum box pass. Each line keeps a window sum per
+/// channel that starts with the samples `-radius..=radius` added in order and
+/// then slides by `+ (entering - leaving)`; the vertical pass walks rows in
+/// memory order with one running sum per column, so the arithmetic (and every
+/// output bit) is the same as walking each column on its own.
 fn box_pass(
-    data: &[f64],
-    width: usize,
-    height: usize,
+    src: &[[f64; 4]],
+    out: &mut [[f64; 4]],
+    w: usize,
+    h: usize,
     radius: usize,
     horizontal: bool,
-    channel: usize,
-) -> Vec<f64> {
-    let mut out = vec![0.0; data.len()];
-    let (lines, length) = if horizontal {
-        (height, width)
-    } else {
-        (width, height)
-    };
+) {
     let window = (2 * radius + 1) as f64;
-    for line in 0..lines {
-        let at = |i: usize| -> usize {
-            if horizontal {
-                line * width + i
-            } else {
-                i * width + line
+    let r = radius as isize;
+    if horizontal {
+        let last = w as isize - 1;
+        for (row, dst) in src.chunks_exact(w).zip(out.chunks_exact_mut(w)) {
+            let get = |i: isize| &row[i.clamp(0, last) as usize];
+            let mut sum = [0.0; 4];
+            for k in -r..=r {
+                let v = get(k);
+                for c in 0..4 {
+                    sum[c] += v[c];
+                }
             }
-        };
-        let get = |i: isize| data[at(i.clamp(0, length as isize - 1) as usize) * 4 + channel];
-        let mut sum = 0.0;
-        for k in -(radius as isize)..=(radius as isize) {
-            sum += get(k);
+            for (i, d) in dst.iter_mut().enumerate() {
+                let (enter, leave) = (get(i as isize + r + 1), get(i as isize - r));
+                for c in 0..4 {
+                    d[c] = sum[c] / window;
+                    sum[c] += enter[c] - leave[c];
+                }
+            }
         }
-        for i in 0..length {
-            out[at(i) * 4 + channel] = sum / window;
-            sum += get(i as isize + radius as isize + 1) - get(i as isize - radius as isize);
+        return;
+    }
+    let last = h as isize - 1;
+    let row = |i: isize| &src[i.clamp(0, last) as usize * w..][..w];
+    let mut sums = vec![[0.0; 4]; w];
+    for k in -r..=r {
+        for (sum, v) in sums.iter_mut().zip(row(k)) {
+            for c in 0..4 {
+                sum[c] += v[c];
+            }
         }
     }
-    out
+    for (i, dst) in out.chunks_exact_mut(w).enumerate() {
+        let (enter, leave) = (row(i as isize + r + 1), row(i as isize - r));
+        for (((d, sum), e), l) in dst.iter_mut().zip(&mut sums).zip(enter).zip(leave) {
+            for c in 0..4 {
+                d[c] = sum[c] / window;
+                sum[c] += e[c] - l[c];
+            }
+        }
+    }
 }
 
 pub(crate) fn blur_planes(
@@ -599,32 +620,18 @@ pub(crate) fn blur_planes(
     sigma: f64,
 ) -> Vec<[f64; 4]> {
     let (w, h) = (width as usize, height as usize);
-    let mut data: Vec<f64> = pixels.iter().flatten().copied().collect();
-    if sigma > 0.0 {
+    let mut data = pixels.to_vec();
+    if sigma > 0.0 && w > 0 && h > 0 {
+        let mut next = vec![[0.0; 4]; data.len()];
         for size in box_sizes(sigma) {
             let radius = (size - 1) / 2;
             for horizontal in [true, false] {
-                let mut next = data.clone();
-                for channel in 0..4 {
-                    let pass = box_pass(&data, w, h, radius, horizontal, channel);
-                    for i in 0..w * h {
-                        next[i * 4 + channel] = pass[i * 4 + channel];
-                    }
-                }
-                data = next;
+                box_pass(&data, &mut next, w, h, radius, horizontal);
+                std::mem::swap(&mut data, &mut next);
             }
         }
     }
-    (0..data.len() / 4)
-        .map(|i| {
-            [
-                data[4 * i],
-                data[4 * i + 1],
-                data[4 * i + 2],
-                data[4 * i + 3],
-            ]
-        })
-        .collect()
+    data
 }
 
 fn blur(image: &RgbaImage, radius: f64) -> RgbaImage {
@@ -710,6 +717,69 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cropped.get_pixel(0, 0).0, [9, 9, 9, 255]);
+    }
+
+    /// The original per-channel, column-walking blur, kept to pin output bits.
+    fn reference_blur(pixels: &[[f64; 4]], w: usize, h: usize, sigma: f64) -> Vec<[f64; 4]> {
+        let mut data: Vec<f64> = pixels.iter().flatten().copied().collect();
+        for size in box_sizes(sigma) {
+            let radius = (size - 1) / 2;
+            for horizontal in [true, false] {
+                let mut next = data.clone();
+                for channel in 0..4 {
+                    let (lines, length) = if horizontal { (h, w) } else { (w, h) };
+                    let window = (2 * radius + 1) as f64;
+                    for line in 0..lines {
+                        let at = |i: usize| {
+                            if horizontal {
+                                line * w + i
+                            } else {
+                                i * w + line
+                            }
+                        };
+                        let get = |i: isize| {
+                            data[at(i.clamp(0, length as isize - 1) as usize) * 4 + channel]
+                        };
+                        let mut sum = 0.0;
+                        for k in -(radius as isize)..=(radius as isize) {
+                            sum += get(k);
+                        }
+                        for i in 0..length {
+                            next[at(i) * 4 + channel] = sum / window;
+                            sum += get(i as isize + radius as isize + 1)
+                                - get(i as isize - radius as isize);
+                        }
+                    }
+                }
+                data = next;
+            }
+        }
+        data.chunks_exact(4)
+            .map(|p| [p[0], p[1], p[2], p[3]])
+            .collect()
+    }
+
+    #[test]
+    fn row_order_blur_matches_the_column_reference_bit_for_bit() {
+        let mut seed = 0x9e37_79b9_u32;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            f64::from(seed % 65_026) / 255.0
+        };
+        for (w, h) in [(1, 1), (1, 9), (9, 1), (37, 23), (64, 5)] {
+            let pixels: Vec<[f64; 4]> = (0..w * h)
+                .map(|_| [next(), next(), next(), next()])
+                .collect();
+            for sigma in [0.4, 1.0, 2.5, 7.0, 31.0] {
+                let fast = blur_planes(&pixels, w as u32, h as u32, sigma);
+                let slow = reference_blur(&pixels, w, h, sigma);
+                let bits =
+                    |v: &[[f64; 4]]| v.iter().flatten().map(|f| f.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(&fast), bits(&slow), "{w}x{h} sigma {sigma}");
+            }
+        }
     }
 
     #[test]
