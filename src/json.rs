@@ -178,6 +178,14 @@ impl Scanner<'_> {
     }
 }
 
+/// Round a measured float for emission in public agent APIs. Derived bounds
+/// carry binary representation noise (e.g. `28.799999999999997` for a 28.8
+/// height); three decimals is the documented output precision, well inside
+/// document precision, so equivalent geometry emits equivalent JSON.
+pub fn round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,12 +210,4 @@ mod tests {
     fn same_key_in_sibling_objects_is_fine() {
         reject_duplicate_keys(br#"[{"x":1},{"x":2}]"#).unwrap();
     }
-}
-
-/// Round a measured float for emission in public agent APIs. Derived bounds
-/// carry binary representation noise (e.g. `28.799999999999997` for a 28.8
-/// height); three decimals is the documented output precision, well inside
-/// document precision, so equivalent geometry emits equivalent JSON.
-pub fn round3(value: f64) -> f64 {
-    (value * 1000.0).round() / 1000.0
 }
