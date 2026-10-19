@@ -160,5 +160,13 @@ path = "tests/v017_interchange.rs"
 name = "v017_psd_export"
 path = "tests/v017_psd_export.rs"
 
+[[test]]
+name = "live_document"
+path = "tests/live_document.rs"
+
+[[test]]
+name = "photo_import_studio"
+path = "tests/photo_import_studio.rs"
+
 [dev-dependencies]
 wat = "1.258.3"

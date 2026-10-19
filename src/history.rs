@@ -1,5 +1,5 @@
 //! Project-local, content-addressed document history.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -13,6 +13,34 @@ pub struct Entry {
     pub before: String,
     pub after: String,
     pub timestamp_ms: u128,
+    /// Who made the change; absent in entries written before 0.22.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<EntryActor>,
+}
+
+/// The actor behind a recorded change, as Studio's version history shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntryActor {
+    /// `human` or `agent`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Display name of the human an agent acts for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directed_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+}
+
+fn recorded_actor() -> Option<EntryActor> {
+    // Attribution is best effort: an agent without --actor-id still records.
+    let (actor, director) = crate::collab::current_actor().ok()?;
+    Some(EntryActor {
+        kind: actor.kind,
+        name: actor.display_name,
+        directed_by: director.and_then(|human| human.display_name),
+        tool: actor.tool,
+    })
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -134,6 +162,7 @@ pub fn record(document: &Path, operation: &str, before: &[u8], after: &[u8]) -> 
         before: before_hash,
         after: after_hash,
         timestamp_ms: SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),
+        actor: recorded_actor(),
     });
     manifest.cursor = manifest.entries.len();
     save(&root, &manifest)?;
@@ -146,7 +175,32 @@ pub fn list(document: &Path) -> Result<serde_json::Value> {
     Ok(serde_json::json!({"cursor":manifest.cursor,"entries":manifest.entries}))
 }
 
+/// History revisions are SHA-256 digests; anything else could name a path.
+fn check_hash(hash: &str) -> Result<()> {
+    ensure!(
+        hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()),
+        "[invalid-input] history revision must be a 64-digit SHA-256 hex digest, got {hash:?}"
+    );
+    Ok(())
+}
+
+/// The newest applied entry, when it produced exactly `current` (the bytes on
+/// disk). `None` after an undo or an edit that bypassed history.
+pub fn change_for(document: &Path, current: &[u8]) -> Option<Entry> {
+    let manifest = load(&root(document).ok()?).ok()?;
+    let entry = manifest.entries.get(manifest.cursor.checked_sub(1)?)?;
+    (entry.after == crate::transaction::revision(current)).then(|| entry.clone())
+}
+
+/// Bytes of one stored revision, to preview a version without restoring it.
+pub fn version(document: &Path, hash: &str) -> Result<Vec<u8>> {
+    check_hash(hash)?;
+    fs::read(root(document)?.join(format!("{hash}.pen")))
+        .with_context(|| format!("[missing-resource] history revision not found: {hash}"))
+}
+
 fn restore_hash(document: &Path, root: &Path, hash: &str, cause: &str) -> Result<()> {
+    check_hash(hash)?;
     let bytes = fs::read(root.join(format!("{hash}.pen")))
         .with_context(|| format!("history revision not found: {hash}"))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
@@ -230,6 +284,22 @@ pub fn restore(document: &Path, hash: &str) -> Result<serde_json::Value> {
     let _lock = lock(&root)?;
     restore_hash(document, &root, hash, "restore")?;
     Ok(serde_json::json!({"ok":true,"revision":hash}))
+}
+
+/// Restore a stored revision as a new history step, so the restore itself
+/// shows in the version history and can be undone.
+pub fn restore_as_step(document: &Path, hash: &str) -> Result<serde_json::Value> {
+    let root = root(document)?;
+    let before = fs::read(document)?;
+    {
+        let _lock = lock(&root)?;
+        restore_hash(document, &root, hash, "restore")?;
+    }
+    let after = fs::read(document)?;
+    if before != after {
+        record(document, "restore", &before, &after)?;
+    }
+    Ok(serde_json::json!({"ok":true,"revision":hash,"changed":before != after}))
 }
 
 pub fn prune(document: &Path, keep: usize, dry_run: bool) -> Result<serde_json::Value> {

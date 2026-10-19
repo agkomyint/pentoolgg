@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { LABELS, getPath, photoApi, type Develop, type PhotoDetail, type PhotoSummary, type PreviewReport, type Shot } from "@/lib/photo";
+import type { Layer } from "@/lib/api";
+import { pageOf } from "@/lib/model";
+import { useStudio } from "@/store";
 
 export type PhotoView = "grid" | "loupe" | "compare";
 export type Overlay = "none" | "clipping" | "gamut";
@@ -26,6 +29,39 @@ async function drain(space: () => string) {
     }
   }
   draining = false;
+}
+
+/** Drag data for photo IDs (a JSON array) dragged from the photo strip. */
+export const PHOTO_DRAG_TYPE = "application/x-pentool-photos";
+
+/** Where photos go and how: a page (default: the one shown), a drop point, and whether to open Design. */
+export type Placement = { pageId?: string; at?: { x: number; y: number }; openDesign?: boolean };
+
+// Photos go onto the active layer of the page Studio shows, else the first layer
+// of the target page that can take them.
+function placeTarget(pageId?: string) {
+  const studio = useStudio.getState();
+  const page = pageOf(studio.doc, pageId ?? studio.pageId);
+  const canvas = page?.canvas as { width: number; height: number } | undefined;
+  const usable = (layer: Layer) => !layer.locked && layer.visible !== false;
+  const layers = page?.layers ?? [];
+  const active = page?.id === studio.pageId ? layers.find((l) => l.id === studio.layerId && usable(l)) : undefined;
+  return { shared: studio.shared, page, canvas, layer: active ?? layers.find(usable) };
+}
+
+/** Why photos cannot be placed on the page now, or null when they can. */
+export function placementBlocker(pageId?: string): string | null {
+  const { shared, page, canvas, layer } = placeTarget(pageId);
+  if (!shared) return "Serve a .pen project file to add photos to its canvas.";
+  if (!page || !canvas) return "This page has no canvas size to place photos on.";
+  if (!layer) return "Unlock or show a layer on this page first.";
+  return null;
+}
+
+/** The photos a drag of `id` carries: the whole selection when `id` is part of it. */
+export function draggedPhotos(id: string): string[] {
+  const { selected } = usePhoto.getState();
+  return selected.includes(id) ? selected : [id];
 }
 
 type State = {
@@ -69,6 +105,10 @@ type State = {
   clearThumbs: () => void;
   undo: () => Promise<void>;
   developOf: () => Develop;
+  /** Place the selected photos (with their edits) on the canvas and switch to Design. */
+  placeOnCanvas: () => Promise<void>;
+  /** Place photos, with their edits, on a page; see {@link Placement}. */
+  place: (ids: string[], placement?: Placement) => Promise<void>;
 };
 
 export const usePhoto = create<State>((set, get) => ({
@@ -256,6 +296,82 @@ export const usePhoto = create<State>((set, get) => ({
     thumbs.clear();
     await get().loadCatalog();
     set({ status: "Undone." });
+  },
+
+  async placeOnCanvas() {
+    const s = get();
+    const ids = s.selected.length ? s.selected : s.current ? [s.current] : [];
+    if (!ids.length) return set({ status: "Select a photo first." });
+    await s.place(ids, { openDesign: true });
+  },
+
+  async place(ids, placement = {}) {
+    const studio = useStudio.getState();
+    const blocker = placementBlocker(placement.pageId);
+    if (blocker) {
+      set({ status: blocker });
+      return studio.notify(blocker, true);
+    }
+    const { page, canvas, layer } = placeTarget(placement.pageId);
+    // A drop sizes the photo to a comfortable part of the page; the button fills most of it.
+    const share = placement.at ? 0.4 : 0.8;
+    const centre = placement.at ?? { x: canvas!.width / 2, y: canvas!.height / 2 };
+    // Not `run`: a drop right after clicking a thumbnail (which loads its detail) must not be ignored.
+    set({ status: `Placing ${ids.length === 1 ? ids[0] : `${ids.length} photos`}…` });
+    try {
+      // The server places into the file, so unsaved pages and layers must reach it first.
+      if (studio.dirty) {
+        await studio.save();
+        if (useStudio.getState().dirty) throw new Error("The canvas has unsaved changes that could not be saved.");
+      }
+      // Canvas saves change the file too, so read the current revision rather than trusting a cached one.
+      let { revision } = await photoApi.catalog("");
+      // The placement reaches this tab through the live document; it is not someone else's change.
+      studio.expectOwnChange();
+      let last = "";
+      for (const [index, id] of ids.entries()) {
+        // The open photo keeps its chosen variant and cropped shape; others use their master.
+        const open = id === get().current;
+        const summary = get().photos.find((p) => p.id === id);
+        const report = open ? get().report : null;
+        const sourceWidth = Math.max(1, report?.developed_width ?? summary?.width ?? 1);
+        const sourceHeight = Math.max(1, report?.developed_height ?? summary?.height ?? 1);
+        const scale = Math.min((canvas!.width * share) / sourceWidth, (canvas!.height * share) / sourceHeight);
+        const width = Math.max(1, sourceWidth * scale);
+        const height = Math.max(1, sourceHeight * scale);
+        const step = Math.min(index, 8) * 24;
+        const result = await photoApi.place({
+          photo: id,
+          variant: open ? get().variant : "master",
+          page: page!.id,
+          layer: layer!.id,
+          x: centre.x - width / 2 + step,
+          y: centre.y - height / 2 + step,
+          width,
+          height,
+          fit: "contain",
+          position: [0.5, 0.5],
+          revision,
+        });
+        revision = result.revision;
+        last = result.result.id;
+      }
+      set({ revision });
+      // Merge rather than reload, so unsaved canvas edits survive.
+      await studio.pull();
+      const after = useStudio.getState();
+      if (placement.openDesign) after.setWorkspace("design");
+      after.setPage(page!.id);
+      after.select(last);
+      const name = layer!.name ?? layer!.id;
+      const message = `Added ${ids.length === 1 ? ids[0] : `${ids.length} photos`} to ${name}. Later Photo edits update it on the canvas.`;
+      set({ status: message });
+      after.notify(message);
+    } catch (error) {
+      const message = `${error instanceof Error ? error.message : "Could not place the photo."} Nothing was changed; retry.`;
+      set({ status: message });
+      studio.notify(message, true);
+    }
   },
 }));
 

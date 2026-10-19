@@ -51,6 +51,16 @@ The v6 development renderer and operation contract is specified in
 also guards the exact on-disk revision at commit, including against CLI writers.
 One successful batch produces one document history entry.
 
+`GET /api/document/events` is a server-sent event stream for the shared document
+(404 without one). On connect, and whenever the file's revision changes for any
+writer (Studio, the CLI, an agent, a collaboration peer), it sends
+`event: revision` with `{ "revision": "..." }`, the same token as
+`GET /api/document`. The server checks the file's size and modification time
+every 250 ms and re-hashes at least every 5 s. It works with or without
+`--collab`, needs view access when collaboration is on, holds at most 32 open
+streams (429 beyond that) and ends each stream after 15 minutes; clients
+reconnect and receive the current revision again.
+
 `POST /api/composite/analyze` accepts `document`, `page`, `scope` (default `page`),
 optional `query`, `samples` (pixel coordinate pairs) and `compare`. It returns
 read-only `analysis` and optional `comparison`; no client color math is trusted.

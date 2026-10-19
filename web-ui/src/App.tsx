@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tip, TooltipProvider } from "@/components/ui/tooltip";
 import { Canvas } from "@/components/Canvas";
 import { Outline } from "@/components/Outline";
+import { PhotoStrip } from "@/workspaces/PhotoStrip";
 import { Properties } from "@/components/Properties";
 import { Toolbar } from "@/components/Toolbar";
 import { DocumentSettings, DesignAssets } from "@/workspaces/DesignPanel";
@@ -34,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { layoutOps } from "@/lib/api";
 import { useRenderStats } from "@/lib/wasmCore";
 import { Welcome } from "@/components/Welcome";
+import { ActivityToast, HistoryButton, HistoryPanel, RecentActors, VersionPreviewBar } from "@/components/Presence";
 import { usePaint } from "@/workspaces/rasterStore";
 import { startPainting } from "@/workspaces/paintLayer";
 
@@ -123,6 +125,36 @@ function KeepStage({ active, children, label }: { active: boolean; children: Rea
   return <section className="studio-stage" hidden={!active} aria-label={label}>{children}</section>;
 }
 
+/** Layers, with the project's photos one tab away for dragging onto the canvas. */
+function LayersDock() {
+  const [tab, setTab] = useState<"layers" | "photos">(() => {
+    try {
+      return localStorage.getItem("pentool.dock-tab") === "photos" ? "photos" : "layers";
+    } catch {
+      return "layers";
+    }
+  });
+  const choose = (next: "layers" | "photos") => {
+    setTab(next);
+    try {
+      localStorage.setItem("pentool.dock-tab", next);
+    } catch {
+      // Remembering the tab is a convenience only.
+    }
+  };
+  return <>
+    <div role="tablist" aria-label="Layers and photos" className="mb-2 flex gap-1 border-b pb-1">
+      {(["layers", "photos"] as const).map((id) => (
+        <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => choose(id)}
+          className={cn("rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide", tab === id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}>
+          {id}
+        </button>
+      ))}
+    </div>
+    <div role="tabpanel">{tab === "layers" ? <Outline /> : <PhotoStrip />}</div>
+  </>;
+}
+
 function Dock({ mobileOpen, collapsed, onCollapse }: { mobileOpen: boolean; collapsed: boolean; onCollapse: () => void }) {
   const { workspaceId, selectedId, setWorkspace } = useStudio();
   const [width, setWidth] = useState(320);
@@ -153,7 +185,7 @@ function Dock({ mobileOpen, collapsed, onCollapse }: { mobileOpen: boolean; coll
       onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
       onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) changeLayers((dock.current?.getBoundingClientRect().bottom ?? window.innerHeight) - event.clientY); }}
       onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} />
-    <section aria-label="Document layers" className="studio-layers" style={{ height: layerHeight }}><Outline /></section>
+    <section aria-label="Document layers" className="studio-layers" style={{ height: layerHeight }}><LayersDock /></section>
   </aside>;
 }
 
@@ -329,6 +361,9 @@ export default function App() {
       <div className="studio-shell flex h-full flex-col bg-background text-foreground">
         <CommandPalette open={palette} onClose={() => setPalette(false)} openPanel={openPanel} panels={PANELS} />
         <ShortcutSheet open={sheet} onClose={() => setSheet(false)} />
+        <ActivityToast />
+        <HistoryPanel />
+        <VersionPreviewBar />
         <header className="studio-appbar flex h-12 shrink-0 items-center gap-2 border-b bg-card px-2 sm:px-3">
           <Tip label="Start screen">
             <Button variant="ghost" size="icon" className="size-10 shrink-0" aria-label="Start screen" onClick={() => setShowWelcome(true)}>
@@ -349,6 +384,7 @@ export default function App() {
           </div>}
 
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={String(s.doc?.name ?? "Untitled")}>{String(s.doc?.name ?? "Untitled")}{s.dirty ? " · unsaved" : ""}</span>
+          <RecentActors />
           <div className="studio-app-actions hidden shrink-0 items-center gap-0.5 md:flex">
             <Tip label="New document"><Button variant="ghost" size="icon" className="size-9" aria-label="New document" onClick={() => confirmDiscard() && s.newDoc()}><FilePlus2 size={15} /></Button></Tip>
             <Tip label="Open .pen file"><Button variant="ghost" size="icon" className="size-9" aria-label="Open .pen file" onClick={() => openInput.current?.click()}><FolderOpen size={15} /></Button></Tip>
@@ -359,6 +395,7 @@ export default function App() {
             </Button>
           </Tip>
           <span className="mx-1 hidden h-6 w-px bg-border sm:block" />
+          <HistoryButton />
           <Tip label="Undo"><Button variant="ghost" size="icon" className="size-9" aria-label="Undo" onClick={s.undo} disabled={!s.past.length}><Undo2 size={15} /></Button></Tip>
           <Tip label="Redo"><Button variant="ghost" size="icon" className="size-9" aria-label="Redo" onClick={s.redo} disabled={!s.future.length}><Redo2 size={15} /></Button></Tip>
           <Tip label="Save (Ctrl+S)">

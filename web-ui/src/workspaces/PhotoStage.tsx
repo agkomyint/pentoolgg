@@ -3,6 +3,7 @@ import { LABELS } from "@/lib/photo";
 import { cn } from "@/lib/utils";
 import { usePhoto } from "./photoStore";
 import { useStudio } from "@/store";
+import { AddToCanvas } from "./AddToCanvas";
 
 const stars = (rating: number) => "★".repeat(rating) + "☆".repeat(5 - rating);
 const LABEL_COLORS: Record<string, string> = {
@@ -13,7 +14,7 @@ const LABEL_COLORS: Record<string, string> = {
   purple: "text-purple-500",
 };
 
-function Thumb({ id }: { id: string }) {
+export function Thumb({ id, className }: { id: string; className?: string }) {
   const thumbnail = usePhoto((s) => s.thumbnail);
   const generation = usePhoto((s) => s.photos);
   const [url, setUrl] = useState<string | null>(null);
@@ -35,7 +36,7 @@ function Thumb({ id }: { id: string }) {
     };
   }, [id, thumbnail, generation]);
   return (
-    <div ref={ref} className="flex aspect-[3/2] items-center justify-center overflow-hidden rounded bg-muted">
+    <div ref={ref} className={cn("flex aspect-[3/2] items-center justify-center overflow-hidden rounded bg-muted", className)}>
       {url ? <img src={url} alt={id} className="h-full w-full object-contain" draggable={false} /> : <span className="text-[10px] text-muted-foreground">…</span>}
     </div>
   );
@@ -336,6 +337,7 @@ export function PhotoStage({ active = true }: { active?: boolean } = {}) {
         </form>
         <span className="text-muted-foreground">{s.count}</span>
         <span className="ml-auto truncate text-muted-foreground">{s.status}</span>
+        {s.photos.length > 0 && <AddToCanvas compact />}
       </div>
       {active && (s.view === "grid" ? <Grid /> : <Loupe />)}
     </main>

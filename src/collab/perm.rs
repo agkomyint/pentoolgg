@@ -80,6 +80,8 @@ static ROUTES: &[Entry] = &[
     e("/api/design/template/check", VIEW, NONE),
     e("/api/extensions", VIEW, NONE),
     e("/api/history", VIEW, NONE),
+    e("/api/history/version", VIEW, NONE),
+    e("/api/history/restore", NONE, EDIT),
     e("/api/fonts", VIEW, NONE),
     e("/api/assets", VIEW, NONE),
     e("/api/asset", VIEW, NONE),
@@ -89,6 +91,7 @@ static ROUTES: &[Entry] = &[
     e("/api/comments", VIEW, COMMENT),
     // read, and mutate the document
     e("/api/document", VIEW, EDIT),
+    e("/api/document/events", VIEW, NONE),
     e("/api/scene3d/cache", VIEW, EDIT),
     // mutate the document or project assets
     e("/api/raster", NONE, EDIT),

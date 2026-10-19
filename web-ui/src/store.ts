@@ -1,8 +1,24 @@
 import { create } from "zustand";
-import { api, type Doc } from "@/lib/api";
-import { clone, collectIds, findNode, pageOf, uid, type Appearance, type Tool } from "@/lib/model";
+import { api, type Doc, type HistoryActor, type HistoryEntry } from "@/lib/api";
+import { streamEvents } from "@/lib/collab";
+import { changedNodeIds, mergeDocs } from "@/lib/merge";
+import { clone, collectIds, findNode, pageOf, pagesOf, uid, type Appearance, type Tool } from "@/lib/model";
 
 export type CanvasView = { kind: "document" } | { kind: "image"; url: string; label: string };
+
+/** A change another writer (an agent, the CLI, a teammate) saved to the shared document. */
+export type RemoteChange = {
+  seq: number;
+  /** Changed node IDs on the page this tab shows. */
+  ids: string[];
+  pageId: string | undefined;
+  actor: HistoryActor | null;
+  operation: string | null;
+  at: number;
+};
+
+/** A stored version shown on the canvas instead of the document. */
+export type VersionPreview = { hash: string; entry: HistoryEntry; doc: Doc };
 
 type Mutator = (doc: Doc, ctx: { pageId: string | undefined }) => void;
 
@@ -14,6 +30,22 @@ type State = {
   /** Last document known to be on disk (shared) or opened (standalone). */
   base: Doc | null;
   revision: string | null;
+  /** Newest change another writer made; drives the canvas highlight and agent cursor. */
+  remoteChange: RemoteChange | null;
+  /** Recent remote changes, newest first. */
+  activity: RemoteChange[];
+  historyOpen: boolean;
+  setHistoryOpen: (open: boolean) => void;
+  versionPreview: VersionPreview | null;
+  /** Show a stored version on the canvas (read-only) until `endVersionPreview` or an edit. */
+  previewVersion: (entry: HistoryEntry, hash: string) => Promise<void>;
+  endVersionPreview: () => void;
+  /** Make a stored version current, as a new undoable step in the shared history. */
+  restoreVersion: (hash: string) => Promise<void>;
+  /** Mark the next server-side changes as this tab's own, so they are not shown as remote activity. */
+  expectOwnChange: () => void;
+  /** Adopt the served document now, merging unsaved edits (as a live update does). */
+  pull: () => Promise<void>;
   shared: boolean;
   dirty: boolean;
   version: string | null;
@@ -107,10 +139,86 @@ function blankDoc(width = 1200, height = 800): Doc {
 export const useStudio = create<State>((set, get) => {
   const firstLayer = (doc: Doc, pageId: string | undefined) => pageOf(doc, pageId)?.layers?.[0]?.id;
   let pendingLoad: Promise<void> | null = null;
+  let saving = false;
+  let following = false;
+  let changeSeq = 0;
+  // Until this time, changes on disk come from this tab's own server-side edits.
+  let ownUntil = 0;
+  // A revision event that arrived mid-save or mid-load, replayed afterwards.
+  let deferred: { latest: string; change: HistoryEntry | null } | null = null;
+  // Adopt the document on disk when another writer (the CLI, an agent, a peer
+  // or another tab) changed it. Unsaved edits are merged, not discarded: the
+  // remote document becomes the new base and this tab's edits stay on top.
+  const followDisk = async (latest: string, change: HistoryEntry | null) => {
+    const state = get();
+    if (!state.shared || latest === state.revision) return;
+    if (saving || pendingLoad) {
+      deferred = { latest, change };
+      return;
+    }
+    let loaded: { revision: string; document: Doc };
+    try {
+      loaded = await api.document();
+    } catch {
+      return;
+    }
+    const now = get();
+    if (!now.shared || !now.doc || loaded.revision === now.revision) return;
+    if (saving || pendingLoad) {
+      deferred = { latest: loaded.revision, change };
+      return;
+    }
+    const remote = loaded.document;
+    const doc = now.dirty && now.base ? mergeDocs(now.base, now.doc, remote) : remote;
+    const dirty = now.dirty && JSON.stringify(doc) !== JSON.stringify(remote);
+    const page = pageOf(doc, now.pageId);
+    const ids = page ? collectIds({ ...doc, pages: [page] } as Doc) : new Set<string>();
+    const selectedIds = now.selectedIds.filter((id) => ids.has(id));
+    const remoteChange: RemoteChange = {
+      seq: ++changeSeq,
+      ids: changedNodeIds(pageOf(now.doc, now.pageId), page),
+      pageId: page?.id,
+      actor: change?.actor ?? null,
+      operation: change?.operation ?? null,
+      at: Date.now(),
+    };
+    const activity = Date.now() < ownUntil ? {} : { remoteChange, activity: [remoteChange, ...now.activity].slice(0, 20) };
+    // Local undo steps describe the document before the merge; replaying them would undo the remote change.
+    set({ past: [], future: [], selectedIds, selectedId: selectedIds.at(-1) ?? null, ...activity });
+    adopt(doc, { base: clone(remote), revision: loaded.revision, dirty });
+  };
+  const replayDeferred = () => {
+    const next = deferred;
+    deferred = null;
+    if (next) void followDisk(next.latest, next.change);
+  };
+  const follow = () => {
+    if (following) return;
+    following = true;
+    const connect = () => {
+      streamEvents(
+        "/api/document/events",
+        (name, data) => {
+          if (name !== "revision") return;
+          try {
+            const event = JSON.parse(data) as { revision: string; change?: HistoryEntry };
+            void followDisk(event.revision, event.change ?? null);
+          } catch {
+            // ignore a malformed frame
+          }
+        },
+        // The server ends streams periodically; reconnecting reports the current revision.
+        () => window.setTimeout(connect, 2000),
+      );
+    };
+    connect();
+  };
   const adopt = (doc: Doc, extra: Partial<State> = {}) => {
     const page = pageOf(doc, get().pageId);
     const layer = page?.layers?.find((l) => l.id === get().layerId)?.id ?? page?.layers?.[0]?.id;
-    set({ doc, preview: null, pageId: page?.id, layerId: layer, ...extra });
+    // A version being previewed stays on the canvas until it is closed.
+    const version = "versionPreview" in extra ? extra.versionPreview : get().versionPreview;
+    set({ doc, preview: version?.doc ?? null, pageId: page?.id, layerId: layer, ...extra });
   };
   return {
     doc: null,
@@ -118,6 +226,39 @@ export const useStudio = create<State>((set, get) => {
     setPreview: (preview) => set({ preview }),
     base: null,
     revision: null,
+    remoteChange: null,
+    activity: [],
+    historyOpen: false,
+    setHistoryOpen: (historyOpen) => set({ historyOpen }),
+    versionPreview: null,
+    async previewVersion(entry, hash) {
+      try {
+        const version = await api.historyVersion(hash);
+        const versionPreview = { hash, entry, doc: version.document };
+        const page = pageOf(version.document, get().pageId);
+        set({ versionPreview, preview: version.document, ...(page ? {} : { pageId: pagesOf(version.document)[0]?.id }) });
+      } catch (error) {
+        get().notify(error instanceof Error ? error.message : "Could not load that version.", true);
+      }
+    },
+    endVersionPreview: () => set({ versionPreview: null, preview: null }),
+    expectOwnChange: () => {
+      ownUntil = Date.now() + 4000;
+    },
+    pull: () => followDisk("", null),
+    async restoreVersion(hash) {
+      if (get().dirty && !window.confirm("Restoring replaces your unsaved changes. Continue?")) return;
+      try {
+        await api.restoreVersion(hash);
+        // Adopt the restored file now rather than waiting for the live stream.
+        const loaded = await api.document();
+        set({ past: [], future: [], dirty: false, versionPreview: null, selectedId: null, selectedIds: [] });
+        adopt(loaded.document, { base: clone(loaded.document), revision: loaded.revision, versionPreview: null });
+        get().notify("Version restored. It is a new step in the history, so you can undo it there.");
+      } catch (error) {
+        get().notify(error instanceof Error ? error.message : "Could not restore that version.", true);
+      }
+    },
     shared: false,
     dirty: false,
     version: null,
@@ -161,14 +302,18 @@ export const useStudio = create<State>((set, get) => {
             shared = false;
             document = get().doc ?? blankDoc();
           }
-          set({ past: [], future: [], dirty: false, selectedId: null, selectedIds: [] });
+          set({ past: [], future: [], dirty: false, versionPreview: null, selectedId: null, selectedIds: [] });
           adopt(document, { base: clone(document), revision, shared, version: health.version, message: null, view: { kind: "document" } });
+          if (shared) follow();
         } catch (error) {
           get().notify(error instanceof Error ? error.message : "Could not load the document.", true);
         } finally {
           set({ busy: false });
         }
-      })().finally(() => { pendingLoad = null; });
+      })().finally(() => {
+        pendingLoad = null;
+        replayDeferred();
+      });
       return pendingLoad;
     },
     edit(label, mutate) {
@@ -177,7 +322,7 @@ export const useStudio = create<State>((set, get) => {
       const next = clone(doc);
       mutate(next, { pageId });
       const nextPast = [...past, JSON.stringify(doc)].slice(-HISTORY_LIMIT);
-      adopt(next, { past: nextPast, future: [], dirty: true });
+      adopt(next, { past: nextPast, future: [], dirty: true, versionPreview: null });
       void label;
     },
     replaceDoc(next) {
@@ -196,7 +341,7 @@ export const useStudio = create<State>((set, get) => {
       } catch {
         // server unreachable: fall back to the base scene format
       }
-      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, selectedIds: [], pageId: undefined, layerId: undefined });
+      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, versionPreview: null, activity: [], remoteChange: null, selectedId: null, selectedIds: [], pageId: undefined, layerId: undefined });
       adopt(doc, { base: clone(doc) });
       get().notify(note);
     },
@@ -212,7 +357,7 @@ export const useStudio = create<State>((set, get) => {
       }
     },
     openDoc(doc) {
-      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, selectedId: null, selectedIds: [], pageId: undefined, layerId: undefined });
+      set({ past: [], future: [], dirty: false, shared: false, base: null, revision: null, versionPreview: null, activity: [], remoteChange: null, selectedId: null, selectedIds: [], pageId: undefined, layerId: undefined });
       adopt(doc, { base: clone(doc) });
       get().notify("Opened as a standalone document. Use Save to download it.");
     },
@@ -221,12 +366,22 @@ export const useStudio = create<State>((set, get) => {
       if (!doc) return;
       try {
         if (shared) {
-          const r = await fetch("/api/document", {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ revision, base, document: doc }),
-          });
-          const body = (await r.json()) as { revision?: string; error?: string };
+          saving = true;
+          let r: Response;
+          let body: { revision?: string; error?: string };
+          try {
+            r = await fetch("/api/document", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ revision, base, document: doc }),
+            });
+            body = (await r.json()) as { revision?: string; error?: string };
+          } finally {
+            saving = false;
+          }
+          // Our own save comes back on the stream with this revision and is skipped.
+          if (r.ok && body.revision) set({ revision: body.revision });
+          replayDeferred();
           if (!r.ok) throw new Error(body.error ?? "Save failed.");
           set({ revision: body.revision ?? revision, base: clone(doc), dirty: false });
           get().notify("Saved to the shared document.");

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { GROUPS, SLIDERS, getPath, photoApi, type Develop, type PreviewReport } from "@/lib/photo";
+import { GROUPS, SLIDERS, getPath, type Develop, type PreviewReport } from "@/lib/photo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { usePhoto } from "./photoStore";
 import { useStudio } from "@/store";
-import { pageOf } from "@/lib/model";
+import { AddToCanvas } from "./AddToCanvas";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
 
@@ -99,9 +99,6 @@ function Slider({ label, min, max, step, value, onCommit, onReset }: { label: st
 export function PhotoPanel() {
   const s = usePhoto();
   const studio = useStudio();
-  const page = pageOf(studio.doc, studio.pageId);
-  const canvas = page?.canvas as { width: number; height: number } | undefined;
-  const layer = page?.layers?.find((candidate) => !candidate.locked && candidate.visible !== false);
   const importInput = useRef<HTMLInputElement>(null);
   const develop: Develop = s.developOf();
   const [temperature, setTemperature] = useState(5500);
@@ -131,39 +128,6 @@ export function PhotoPanel() {
   const snapshots = s.detail?.photo.snapshots ?? [];
   const local: { id: string; name?: string; enabled?: boolean; params?: { exposure?: number }; mask: { components: { kind: string }[] } }[] = develop.local ?? [];
   const crop: number[] | undefined = develop.crop?.rect;
-
-  const placeOnCanvas = () => {
-    if (!photo || !studio.shared || !page || !canvas || !layer || !s.revision) {
-      s.set({ status: "Open a served project and select an unlocked page layer before placing this photo." });
-      return;
-    }
-    const sourceWidth = Math.max(1, s.detail?.width ?? 1);
-    const sourceHeight = Math.max(1, s.detail?.height ?? 1);
-    const scale = Math.min((canvas.width * 0.8) / sourceWidth, (canvas.height * 0.8) / sourceHeight);
-    const width = Math.max(1, sourceWidth * scale);
-    const height = Math.max(1, sourceHeight * scale);
-    void s.run(async () => {
-      const result = await photoApi.place({
-        photo,
-        variant,
-        page: page.id,
-        layer: layer.id,
-        x: (canvas.width - width) / 2,
-        y: (canvas.height - height) / 2,
-        width,
-        height,
-        fit: "contain",
-        position: [0.5, 0.5],
-        revision: s.revision!,
-      });
-      await useStudio.getState().load();
-      const state = useStudio.getState();
-      state.setWorkspace("design");
-      state.setPage(page.id);
-      state.select(result.result.id);
-      s.set({ status: `Placed ${photo} on ${page.name ?? page.id}.` });
-    });
-  };
 
   const importControl = <>
     <input ref={importInput} className="sr-only" type="file" accept=".dng,.DNG,.jpg,.jpeg,.png,image/jpeg,image/png,image/x-adobe-dng" multiple disabled={s.busy} aria-label="Choose photo files"
@@ -233,7 +197,7 @@ export function PhotoPanel() {
       <div className="mb-2 flex items-center justify-between gap-2 rounded-md border bg-muted/20 p-2">
         <div className="min-w-0"><p className="font-medium">Photo library</p><p className="truncate text-[11px] text-muted-foreground">{s.count || "Import a photo shoot to begin"}</p></div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="outline" className="min-h-10" disabled={s.busy || studio.busy || !studio.shared || !canvas || !layer} title={!studio.shared ? "Serve a .pen project file to place from the RAW catalog." : undefined} onClick={placeOnCanvas}>Place on page</Button>
+          <AddToCanvas />
           {importControl}
         </div>
       </div>

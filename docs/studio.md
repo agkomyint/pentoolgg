@@ -127,6 +127,16 @@ and instance links are retained with materialized fallback artwork. Unique
 text nodes; other property types and live override propagation remain
 unsupported. Studio does not expose component override editing.
 
+### Live document (0.22)
+
+A tab serving a shared document follows `GET /api/document/events`. When the
+file changes on disk and the tab has no unsaved edits, Studio adopts the new
+document in place, keeping the page, layer and any selected objects that still
+exist; undo history is cleared because it described the previous revision. With
+unsaved edits nothing is replaced: the header shows "Changed on disk · Reload",
+and Save stays guarded by the revision. Standalone (downloaded or new) documents
+are not followed. This works with or without `--collab`.
+
 ### Extensions (0.18)
 
 The Extensions workspace and the Ctrl/Cmd+K command palette list the project's installed

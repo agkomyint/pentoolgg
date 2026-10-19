@@ -174,6 +174,11 @@ async function whileBusy<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Who made a recorded change (`pentool --actor-*` or the server's user). */
+export type HistoryActor = { kind: string; name?: string; directed_by?: string; tool?: string };
+/** One step of the shared document's version history (`GET /api/history`). */
+export type HistoryEntry = { operation: string; before: string; after: string; timestamp_ms: number; actor?: HistoryActor };
+
 export const api = {
   health: () => getJson<{ ok: boolean; version: string }>("/api/health"),
   document: () => getJson<{ revision: string; document: Doc }>("/api/document"),
@@ -181,6 +186,10 @@ export const api = {
     postJson<{ document: Doc; from_version: number; to_version: number }>("/api/migrate", { document, target }),
   undo: () => postJson<unknown>("/api/undo", {}),
   redo: () => postJson<unknown>("/api/redo", {}),
+  history: () => getJson<{ cursor: number; entries: HistoryEntry[] }>("/api/history"),
+  historyVersion: (hash: string) =>
+    getJson<{ hash: string; document: Doc }>(`/api/history/version?hash=${encodeURIComponent(hash)}`),
+  restoreVersion: (hash: string) => postJson<{ ok: boolean; changed: boolean }>("/api/history/restore", { hash }),
   async renderPng(doc: Doc, page: string | undefined, maxEdge: number): Promise<Blob> {
     let cache = previewCache.get(doc);
     if (!cache) {

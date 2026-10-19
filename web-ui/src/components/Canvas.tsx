@@ -5,9 +5,11 @@ import { dragLayers } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
 import { LayoutOverlay } from "@/workspaces/layout/LayoutOverlay";
+import { RemoteActivity } from "@/components/Presence";
 import { PaintOverlay } from "@/workspaces/PaintOverlay";
 import type { RasterTool } from "@/workspaces/rasterStore";
 import { startPainting } from "@/workspaces/paintLayer";
+import { PHOTO_DRAG_TYPE, usePhoto } from "@/workspaces/photoStore";
 import type { Doc } from "@/lib/api";
 import { useLayout } from "@/workspaces/layout/layoutStore";
 import {
@@ -823,6 +825,12 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    const photos = e.dataTransfer.getData(PHOTO_DRAG_TYPE);
+    if (photos) {
+      // Photos from the strip land centred where they are dropped, with their edits.
+      if (view.kind !== "image" && svg.current) void usePhoto.getState().place(JSON.parse(photos) as string[], { at: toPage(e) });
+      return;
+    }
     for (const file of Array.from(e.dataTransfer.files)) {
       if (file.type.startsWith("image/")) void addImage(file, file.name);
       else notify(`Unsupported file: ${file.name}. Use File > Import .pen for documents.`, true);
@@ -847,7 +855,10 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         ref={scroller}
         onScroll={(event) => { if (active) scrollPosition.current = { left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }; }}
         className="flex-1 select-none overflow-auto [&_img]:pointer-events-none [&_img]:select-none [-webkit-user-drag:none]"
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer.types.includes(PHOTO_DRAG_TYPE)) e.dataTransfer.dropEffect = "copy";
+        }}
         onDrop={onDrop}
       >
         <div className="flex min-h-full min-w-full items-center justify-center p-8">
@@ -999,6 +1010,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
                   const b = pageBounds(f);
                   return b && <rect {...b} {...outline} />;
                 })()}
+                <RemoteActivity page={page} px={px} />
                 {guides.map((g, i) => g.axis === "x"
                   ? <line key={i} x1={g.at} x2={g.at} y1={Math.min(0, g.from)} y2={Math.max(canvas.height, g.to)} stroke="#ec4899" strokeWidth={px} pointerEvents="none" />
                   : <line key={i} y1={g.at} y2={g.at} x1={Math.min(0, g.from)} x2={Math.max(canvas.width, g.to)} stroke="#ec4899" strokeWidth={px} pointerEvents="none" />)}

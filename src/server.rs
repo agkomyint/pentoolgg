@@ -22,6 +22,8 @@ struct Shared {
     previews: Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
     /// Bypass the photo preview cache (`serve --no-cache`).
     no_cache: bool,
+    /// Open `/api/document/events` streams, bounded by [`MAX_DOCUMENT_STREAMS`].
+    document_streams: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Built from `web-ui/` (`bun run build`); committed so cargo needs no Node or Bun.
@@ -155,6 +157,7 @@ fn build_app(
         .route("/api/render/png", post(render_png))
         .route("/api/render/svg", post(render_svg))
         .route("/api/document", get(get_document).put(put_document))
+        .route("/api/document/events", get(document_events))
         .route("/api/scene", post(scene_command))
         .route("/api/design/tokens", get(design_tokens))
         .route("/api/design/library/status", get(design_library_status))
@@ -168,6 +171,8 @@ fn build_app(
         .route("/api/history", get(history_list))
         .route("/api/collab/stats", get(collab_stats))
         .route("/api/collab/conflicts", get(collab_conflicts))
+        .route("/api/history/version", get(history_version))
+        .route("/api/history/restore", post(history_restore))
         .route("/api/undo", post(history_undo))
         .route("/api/redo", post(history_redo))
         .route("/api/geometry", post(geometry_command))
@@ -199,6 +204,7 @@ fn build_app(
             gate: Arc::new(Mutex::new(())),
             previews: Arc::new(Mutex::new(std::collections::HashMap::new())),
             no_cache,
+            document_streams: Arc::default(),
         });
     Ok(app)
 }
@@ -1020,6 +1026,110 @@ async fn get_document(State(state): State<Shared>) -> Response {
         }
         Err(e) => problem(e.into()),
     }
+}
+
+/// Open-tab limit for `/api/document/events`; each Studio tab holds one stream.
+const MAX_DOCUMENT_STREAMS: usize = 32;
+/// How often a stream checks the document file's size and modification time.
+const DOCUMENT_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+/// Re-hash the file at least this often, in case a write kept size and mtime.
+const DOCUMENT_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
+/// Streams end after this long; clients reconnect and get the current revision.
+const DOCUMENT_STREAM_LIFETIME: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Releases a `/api/document/events` slot when its stream ends.
+struct DocumentStreamSlot(Arc<std::sync::atomic::AtomicUsize>);
+
+impl DocumentStreamSlot {
+    fn acquire(open: &Arc<std::sync::atomic::AtomicUsize>) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        // Construct the guard first so a refused slot is released on return.
+        let slot = Self(open.clone());
+        (open.fetch_add(1, Ordering::SeqCst) < MAX_DOCUMENT_STREAMS).then_some(slot)
+    }
+}
+
+impl Drop for DocumentStreamSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Revision of the document on disk, plus the history entry that produced
+/// it (operation, actor, time) when there is one; `None` while unreadable.
+fn disk_revision(file: &std::path::Path) -> Option<(String, Option<crate::history::Entry>)> {
+    let bytes = std::fs::read(file).ok()?;
+    let document = serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
+    Some((
+        revision(&document),
+        crate::history::change_for(file, &bytes),
+    ))
+}
+
+/// Server-sent `revision` events: the current revision of the shared document
+/// on connect, then each time any writer (Studio, the CLI, an agent or a
+/// collaboration peer) changes the file. The revision matches
+/// `GET /api/document`, so a client reloads only when it differs from its own.
+async fn document_events(State(state): State<Shared>) -> Response {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    let Some(file) = state.file.clone() else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let Some(slot) = DocumentStreamSlot::acquire(&state.document_streams) else {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": "too many open document streams; close a Studio tab and retry"
+            })),
+        )
+            .into_response();
+    };
+    type Stamp = Option<(Option<std::time::SystemTime>, u64)>;
+    let stamp = |file: &std::path::Path| -> Stamp {
+        std::fs::metadata(file)
+            .ok()
+            .map(|meta| (meta.modified().ok(), meta.len()))
+    };
+    let started = std::time::Instant::now();
+    let initial: (Stamp, Option<String>, std::time::Instant) = (None, None, started);
+    let stream = futures_util::stream::unfold(
+        (file, slot, initial),
+        move |(file, slot, (mut seen, last, mut hashed))| async move {
+            loop {
+                if started.elapsed() > DOCUMENT_STREAM_LIFETIME {
+                    return None;
+                }
+                let now = stamp(&file);
+                if last.is_none() || now != seen || hashed.elapsed() >= DOCUMENT_RECHECK {
+                    let path = file.clone();
+                    let current = tokio::task::spawn_blocking(move || disk_revision(&path))
+                        .await
+                        .ok()
+                        .flatten();
+                    hashed = std::time::Instant::now();
+                    // An unreadable file (mid-write elsewhere) is retried next tick.
+                    if let Some((current, change)) = current {
+                        seen = now;
+                        if last.as_deref() != Some(current.as_str()) {
+                            let mut data = serde_json::json!({ "revision": current });
+                            if let Some(change) = change {
+                                data["change"] = serde_json::json!(change);
+                            }
+                            let event = Event::default().event("revision").data(data.to_string());
+                            return Some((
+                                Ok::<Event, std::convert::Infallible>(event),
+                                (file, slot, (seen, Some(current), hashed)),
+                            ));
+                        }
+                    }
+                }
+                tokio::time::sleep(DOCUMENT_POLL).await;
+            }
+        },
+    );
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
+        .into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -4016,12 +4126,16 @@ async fn photo_catalog(
 ) -> Response {
     let result = (|| -> Result<serde_json::Value> {
         let (_, raw, revision) = shared_photo_document(&state)?;
-        let mut value = crate::photo::organize::search(
-            &raw,
-            &q.query,
-            q.limit.unwrap_or(200),
-            q.offset.unwrap_or(0),
-        )?;
+        let (limit, offset) = (q.limit.unwrap_or(200), q.offset.unwrap_or(0));
+        // A project gets its catalog with its first photo. Until then the grid is
+        // empty, and Studio needs this revision to import that first photo.
+        if raw.get("photography").is_none() {
+            return Ok(serde_json::json!({
+                "query": q.query, "matches": 0, "returned": 0, "offset": offset,
+                "limit": limit, "has_more": false, "photos": [], "revision": revision,
+            }));
+        }
+        let mut value = crate::photo::organize::search(&raw, &q.query, limit, offset)?;
         value["revision"] = serde_json::json!(revision);
         Ok(value)
     })();
@@ -4496,6 +4610,48 @@ async fn history_list(State(state): State<Shared>) -> Response {
         Err(error) => problem(error),
     }
 }
+#[derive(serde::Deserialize)]
+struct HistoryHash {
+    hash: String,
+}
+
+/// One stored version, for previewing it in Studio's version history.
+async fn history_version(
+    State(state): State<Shared>,
+    axum::extract::Query(q): axum::extract::Query<HistoryHash>,
+) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let bytes = crate::history::version(&file, &q.hash)?;
+        let document: serde_json::Value = serde_json::from_slice(&bytes)?;
+        Ok(serde_json::json!({"hash":q.hash,"document":document}))
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
+/// Restore a stored version as a new, undoable history step.
+async fn history_restore(State(state): State<Shared>, Json(body): Json<HistoryHash>) -> Response {
+    let Some(file) = state.file else {
+        return (StatusCode::NOT_FOUND, "No shared document").into_response();
+    };
+    let result = (|| -> Result<serde_json::Value> {
+        let _guard = state
+            .gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        crate::history::restore_as_step(&file, &body.hash)
+    })();
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => problem(error),
+    }
+}
+
 async fn history_undo(State(state): State<Shared>) -> Response {
     let Some(file) = state.file else {
         return (StatusCode::NOT_FOUND, "No shared document").into_response();
@@ -5080,6 +5236,7 @@ mod tests {
             gate: std::sync::Arc::new(std::sync::Mutex::new(())),
             previews: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             no_cache: false,
+            document_streams: std::sync::Arc::default(),
         };
         let response = super::scene3d_pack_export_bundle(
             axum::extract::State(state),
