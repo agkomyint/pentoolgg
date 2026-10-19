@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minus, Plus } from "lucide-react";
 import { api } from "@/lib/api";
+import { Superseded } from "@/lib/wasmCore";
 import { dragLayers } from "@/lib/dragSprite";
 import { useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -310,13 +311,13 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
       const renderPage = isScene(shown) ? pageId : undefined;
       const first = zoomOnly ? edge : Math.min(edge, preview ? 1024 : 768);
       api
-        .renderPng(shown, renderPage, first)
+        .renderPng(shown, renderPage, first, "canvas")
         .then(async (blob) => {
           if (!publish(blob) || preview || first >= edge) return;
-          publish(await api.renderPng(shown, renderPage, edge));
+          publish(await api.renderPng(shown, renderPage, edge, "canvas"));
         })
         .catch((error: unknown) => {
-          if (mine !== token.current) return;
+          if (mine !== token.current || error instanceof Superseded) return;
           notify(error instanceof Error ? error.message : "Preview failed.", true);
         })
         .finally(() => {

@@ -190,7 +190,7 @@ export const api = {
   historyVersion: (hash: string) =>
     getJson<{ hash: string; document: Doc }>(`/api/history/version?hash=${encodeURIComponent(hash)}`),
   restoreVersion: (hash: string) => postJson<{ ok: boolean; changed: boolean }>("/api/history/restore", { hash }),
-  async renderPng(doc: Doc, page: string | undefined, maxEdge: number): Promise<Blob> {
+  async renderPng(doc: Doc, page: string | undefined, maxEdge: number, lane?: string): Promise<Blob> {
     let cache = previewCache.get(doc);
     if (!cache) {
       cache = new Map();
@@ -200,7 +200,7 @@ export const api = {
     const cached = cache.get(key);
     if (cached) return cached;
     const request = (async () => {
-      const local = await renderLocal(doc, page, maxEdge);
+      const local = await renderLocal(doc, page, maxEdge, lane);
       if (local) return local;
       const started = performance.now();
       const q = new URLSearchParams({ max_edge: String(maxEdge) });
