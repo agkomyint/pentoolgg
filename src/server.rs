@@ -5001,6 +5001,24 @@ fn problem(error: anyhow::Error) -> Response {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn studio_tracks_the_newest_format() {
+        // Studio creates documents at LATEST_FORMAT and renders them locally
+        // only inside localVersion; both went stale when v12 shipped, so new
+        // Studio documents missed v12 and upgraded ones lost the fast path.
+        let latest = crate::scene::LATEST_VERSION;
+        let store = include_str!("../web-ui/src/store.ts");
+        assert!(
+            store.contains(&format!("export const LATEST_FORMAT = {latest};")),
+            "web-ui/src/store.ts LATEST_FORMAT must be {latest}"
+        );
+        let wasm = include_str!("../web-ui/src/lib/wasmCore.ts");
+        assert!(
+            wasm.contains(&format!("version >= 6 && version <= {latest};")),
+            "web-ui/src/lib/wasmCore.ts localVersion must include v{latest}"
+        );
+    }
+
+    #[test]
     fn studio_photo_import_embeds_dng_and_rejects_stale_or_invalid_input_atomically() {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

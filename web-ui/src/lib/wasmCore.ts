@@ -164,8 +164,11 @@ function pump() {
   w.postMessage(next.job);
 }
 
-/** Formats the local renderer understands (the compositing documents). */
-export const localVersion = (version: number) => version >= 6 && version <= 9;
+/**
+ * Formats the local renderer understands: the compositing documents, v6
+ * through the newest (v12). It renders these byte-identically to the server.
+ */
+export const localVersion = (version: number) => version >= 6 && version <= 12;
 
 /**
  * Render one page locally, off the main thread. Returns null when local
