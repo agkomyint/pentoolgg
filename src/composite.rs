@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use image::{Rgba, RgbaImage};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -107,9 +107,53 @@ fn node_context(
     Some(hasher.finalize().into())
 }
 
+impl CachedSurface {
+    /// The entry as stored by [`crate::render_cache`]: position, size and
+    /// accounting as little-endian integers, then the pixels.
+    fn encode(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(48 + self.pixels.as_raw().len());
+        for value in [self.x, self.y, self.pixels.width(), self.pixels.height()] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [self.work, self.work_peak, self.live, self.live_peak] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(self.pixels.as_raw());
+        bytes
+    }
+
+    /// An encoded entry that fits a `width` x `height` render.
+    fn decode(mut bytes: Vec<u8>, width: u32, height: u32) -> Option<Self> {
+        if bytes.len() < 48 {
+            return None;
+        }
+        let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let long = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+        let (x, y, w, h) = (word(0), word(4), word(8), word(12));
+        let fits = u64::from(x) + u64::from(w) <= u64::from(width)
+            && u64::from(y) + u64::from(h) <= u64::from(height);
+        if !fits || (bytes.len() - 48) as u64 != u64::from(w) * u64::from(h) * 4 {
+            return None;
+        }
+        let (work, work_peak, live, live_peak) = (long(16), long(24), long(32), long(40));
+        bytes.drain(..48);
+        Some(Self {
+            x,
+            y,
+            pixels: RgbaImage::from_raw(w, h, bytes)?,
+            work,
+            work_peak,
+            live,
+            live_peak,
+            used: 0,
+        })
+    }
+}
+
 /// Store `image` cropped to its nonzero pixels (everything else is [0, 0, 0, 0],
-/// so expanding the crop restores it exactly), then evict to the byte limit.
-fn remember(key: [u8; 32], image: &RgbaImage, mut entry: CachedSurface) {
+/// so expanding the crop restores it exactly), on disk too when `disk` is
+/// given, then evict to the byte limit.
+fn remember(key: [u8; 32], image: &RgbaImage, mut entry: CachedSurface, disk: Option<&Path>) {
     let (w, h) = image.dimensions();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
     for (y, row) in image.as_raw().chunks_exact(w as usize * 4).enumerate() {
@@ -130,6 +174,14 @@ fn remember(key: [u8; 32], image: &RgbaImage, mut entry: CachedSurface) {
         entry.y = y0;
         entry.pixels = image::imageops::crop_imm(image, x0, y0, x1 - x0, y1 - y0).to_image();
     }
+    if let Some(directory) = disk {
+        crate::render_cache::write(directory, &key, &entry.encode());
+    }
+    store(key, entry);
+}
+
+/// Keep `entry` in this thread's node cache, then evict to the byte limit.
+fn store(key: [u8; 32], mut entry: CachedSurface) {
     NODE_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let Some(cache) = cache.as_mut() else { return };
@@ -1398,6 +1450,8 @@ struct Renderer<'a> {
     /// Highest pixel work seen at a budget check (it can drop after one).
     work_peak: u64,
     node_context: Option<[u8; 32]>,
+    /// Where node surfaces persist between processes, when they do.
+    node_disk: Option<PathBuf>,
 }
 
 impl Renderer<'_> {
@@ -1919,17 +1973,10 @@ impl Renderer<'_> {
         };
         let (work0, live0) = (self.pixel_work, self.live_bytes);
         let (width, height) = (self.width, self.height);
-        let hit = NODE_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            let cache = cache.as_mut()?;
-            cache.clock += 1;
-            let clock = cache.clock;
-            let entry = cache.entries.get_mut(&key)?;
-            if work0 + entry.work_peak > MAX_PIXEL_WORK || live0 + entry.live_peak > MAX_TEMP_BYTES
-            {
-                return None;
-            }
-            entry.used = clock;
+        let fits = |entry: &CachedSurface| {
+            work0 + entry.work_peak <= MAX_PIXEL_WORK && live0 + entry.live_peak <= MAX_TEMP_BYTES
+        };
+        let expand = |entry: &CachedSurface| {
             let mut image = RgbaImage::new(width, height);
             image::imageops::replace(
                 &mut image,
@@ -1937,13 +1984,32 @@ impl Renderer<'_> {
                 i64::from(entry.x),
                 i64::from(entry.y),
             );
-            Some((
+            (
                 image,
                 entry.work,
                 entry.work_peak,
                 entry.live,
                 entry.live_peak,
-            ))
+            )
+        };
+        let hit = NODE_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let cache = cache.as_mut()?;
+            cache.clock += 1;
+            let clock = cache.clock;
+            let entry = cache.entries.get_mut(&key)?;
+            if !fits(entry) {
+                return None;
+            }
+            entry.used = clock;
+            Some(expand(entry))
+        });
+        let hit = hit.or_else(|| {
+            let bytes = crate::render_cache::read(self.node_disk.as_deref()?, &key)?;
+            let entry = CachedSurface::decode(bytes, width, height).filter(|e| fits(e))?;
+            let hit = expand(&entry);
+            store(key, entry);
+            Some(hit)
         });
         if let Some((image, work, work_peak, live, live_peak)) = hit {
             self.pixel_work += work;
@@ -1973,7 +2039,7 @@ impl Renderer<'_> {
                     live_peak: live_peak - live0,
                     used: 0,
                 };
-                remember(key, image, entry);
+                remember(key, image, entry, self.node_disk.as_deref());
             }
         }
         Ok((surface, passed))
@@ -2472,6 +2538,7 @@ pub fn node_pixels(
                 gradient_engines: Vec::new(),
                 work_peak: 0,
                 node_context: None,
+                node_disk: None,
             };
             return renderer
                 .siblings(std::slice::from_ref(node), parent)?
@@ -2554,6 +2621,7 @@ pub fn mask_coverage(
         gradient_engines: Vec::new(),
         work_peak: 0,
         node_context: None,
+        node_disk: None,
     };
     let node = json!({"kind":"rect","id":"mask-analysis","mask":{"resource":digest,"invert":false,"linked":false,"density":1,"feather":0,"transform":[1,0,0,1,0,0]}});
     renderer
@@ -2738,7 +2806,11 @@ fn render_scene(
         gradient_engines: Vec::new(),
         work_peak: 0,
         node_context: node_context(raw, page, document, scale, (w, h)),
+        node_disk: None,
     };
+    if renderer.node_context.is_some() {
+        renderer.node_disk = crate::render_cache::directory(document);
+    }
     renderer.reserve()?;
     let background = json!({"kind":"rect","id":"composite-background","x":0,"y":0,"width":width,"height":height,
         "style":{"fill":{"fallback":page["canvas"]["background"]}}});

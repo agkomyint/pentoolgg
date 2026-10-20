@@ -203,6 +203,11 @@ pub fn configure(settings: Settings) -> Result<()> {
     Ok(())
 }
 
+/// Whether this process renders a preview.
+pub fn enabled() -> bool {
+    state().is_some()
+}
+
 /// Print one line of command output. With previews on, output is held until
 /// [`finish`] so the preview can join the command's JSON result; otherwise
 /// it is printed at once, unchanged.

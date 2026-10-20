@@ -88,6 +88,15 @@ scene compositing and blur run on one thread.
   versioned, corrupt entries ignored). Edit-then-preview across separate CLI
   calls should then match the browser's ~8x. Enabled for previews and export;
   `--no-cache` and `PENTOOL_CACHE=0` turn it off.
+  _Implemented in `src/render_cache.rs` and `composite::cached_node_surface`
+  (memory first, then disk). Entries are `PNRC` + header + pixels + checksum,
+  written via temp file and rename; the directory name hashes the format,
+  package version and executable, and other `render-*` directories are
+  removed on prune. Covered by
+  `render_cache_reuses_layers_between_calls_without_changing_bytes`. The warm
+  landscape preview is 209 ms against 335 ms uncached; the ~8x target is not
+  met by the cache alone because process start, decoding cached surfaces,
+  compositing and PNG encoding remain (items 8-10)._
 - [ ] **8. One process for many commands.** `pentool session --jsonl` reads
   one command per line on stdin and writes one JSON result per line. It keeps
   the parsed document, fonts and layer cache warm, saving process start and

@@ -18,6 +18,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Layer surfaces a previewing or exporting CLI process keeps in memory.
+const CLI_NODE_CACHE_BYTES: usize = 256 << 20;
+
 #[derive(Parser)]
 #[command(
     name = "pentool",
@@ -70,6 +73,10 @@ struct Cli {
     /// write a diff image. Implies --preview.
     #[arg(long, global = true, value_name = "REV|FILE|before")]
     compare: Option<String>,
+    /// Do not read or write the render cache in DOC_DIR/.pentool/cache/ that
+    /// previews and exports use. PENTOOL_CACHE=0 sets it.
+    #[arg(long, global = true)]
+    no_cache: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -3766,6 +3773,7 @@ fn cli_main() -> Result<()> {
             let result = run();
             // Held output and the --preview image, on the same large stack.
             pentool::preview::finish();
+            pentool::render_cache::finish();
             result
         })?
         .join();
@@ -4406,6 +4414,17 @@ async fn run() -> Result<()> {
             annotate: cli.annotate,
             compare: cli.compare.clone(),
         })?;
+    }
+    // Previews and exports keep finished layer surfaces on disk, so the next
+    // call re-renders only what changed. The bytes are the same either way.
+    let renders = pentool::preview::enabled()
+        || matches!(
+            cli.command,
+            Some(Command::Export { .. } | Command::Preview { .. })
+        );
+    if renders && !cli.no_cache && std::env::var("PENTOOL_CACHE").map_or(true, |v| v != "0") {
+        pentool::composite::cache_node_surfaces(CLI_NODE_CACHE_BYTES);
+        pentool::render_cache::enable(true);
     }
     let selected_page = cli.page.as_deref();
     match cli.command.unwrap_or(Command::Serve {

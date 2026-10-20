@@ -976,6 +976,15 @@ the changed pixels in red over a faded copy:
 pentool shape artwork.pen rect badge --layer ui --x 10 --y 10 --w 50 --h 50 --fill "#ff0000" --compare before
 ```
 
+Previews and exports of composite (v6) documents keep each finished layer
+surface in `.pentool/cache/` beside the document, keyed by a hash of the layer
+and everything that affects how it renders. The next CLI call renders only
+the layers that changed, so edit-then-preview loops get faster after the first
+call; the output bytes are the same with or without the cache. The cache is
+bounded to 256 MB (least recently used entries go first), is dropped when the
+`pentool` binary changes, and treats a damaged entry as a miss. `--no-cache`
+or `PENTOOL_CACHE=0` turns it off; deleting the directory is always safe.
+
 `export --max-size PX` does the same sizing for exports: it picks the scale so
 the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
 the largest page decides) and reports it as `"scale"` beside `"max_size"`. It

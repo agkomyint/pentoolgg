@@ -75,6 +75,7 @@ pub mod psd_import;
 pub mod publish;
 pub mod raster;
 pub mod render;
+pub mod render_cache;
 pub mod replace;
 pub mod resource;
 pub mod scene;

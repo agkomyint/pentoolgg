@@ -43,3 +43,10 @@ are unchanged; new flags and JSON fields are additive.
   chosen `scale`. It cannot be combined with `--scale`, and a bound that would
   need a scale below 0.1 fails with `[limit-exceeded]` before anything is
   written. Exports without it print the same bytes as before.
+- Previews and exports of composite (v6) documents keep finished layer
+  surfaces in `.pentool/cache/render-*` beside the document, so the next CLI
+  call re-renders only the layers that changed (warm preview of a 55-layer
+  1200x675 landscape: 335 ms to 209 ms). Output bytes are identical with and
+  without it. Entries are checksummed (a damaged one is a miss), the
+  directory is bounded to 256 MB by least recent use and is replaced when the
+  binary changes. `--no-cache` or `PENTOOL_CACHE=0` turns it off.

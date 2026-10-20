@@ -698,3 +698,74 @@ fn compare_in_a_focused_preview_uses_the_same_crop() {
         [64, 64, 400, 400]
     );
 }
+
+fn cache_entries(doc: &Path) -> Vec<PathBuf> {
+    let root = doc.parent().unwrap().join(".pentool").join("cache");
+    let mut entries: Vec<PathBuf> = fs::read_dir(&root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .flat_map(|dir| fs::read_dir(dir.path()).into_iter().flatten().flatten())
+        .map(|entry| entry.path())
+        .collect();
+    entries.sort();
+    entries
+}
+
+#[test]
+fn render_cache_reuses_layers_between_calls_without_changing_bytes() {
+    let space = Workspace::new("render-cache");
+    let doc = space.document();
+    let path = doc.to_str().unwrap();
+    json(&pentool(&["migrate", path, "--target", "6"], &[]));
+    let render = |name: &str, extra: &[&str], env: &[(&str, &str)]| {
+        let out = space.0.join(name);
+        json(&pentool(
+            &[&["export", path, out.to_str().unwrap()], extra].concat(),
+            env,
+        ));
+        fs::read(out).unwrap()
+    };
+
+    let uncached = render("a.png", &["--no-cache"], &[]);
+    assert!(cache_entries(&doc).is_empty(), "--no-cache writes nothing");
+    let off = render("b.png", &[], &[("PENTOOL_CACHE", "0")]);
+    assert!(
+        cache_entries(&doc).is_empty(),
+        "PENTOOL_CACHE=0 writes nothing"
+    );
+    assert_eq!(off, uncached);
+
+    assert_eq!(render("cold.png", &[], &[]), uncached);
+    let entries = cache_entries(&doc);
+    assert!(!entries.is_empty(), "a cached render keeps its layers");
+    assert_eq!(render("warm.png", &[], &[]), uncached);
+    assert_eq!(cache_entries(&doc), entries, "a warm render adds nothing");
+
+    // Damaged entries are misses: they are replaced and the output is unchanged.
+    for entry in &entries {
+        let mut bytes = fs::read(entry).unwrap();
+        let middle = bytes.len() / 2;
+        bytes[middle] ^= 0x55;
+        fs::write(entry, bytes).unwrap();
+    }
+    assert_eq!(render("damaged.png", &[], &[]), uncached);
+    assert_eq!(render("repaired.png", &[], &[]), uncached);
+
+    // An edit renders what changed; the rest comes from the cache.
+    run(&rect(&doc, "badge", &[]), &[]);
+    let edited = render("edited.png", &["--no-cache"], &[]);
+    assert_ne!(edited, uncached);
+    assert_eq!(render("edited-cached.png", &[], &[]), edited);
+    assert!(cache_entries(&doc).len() > entries.len());
+
+    // Previews share the cache and stay identical to the export.
+    let preview = space.0.join("preview.png");
+    let looked = json(&pentool(
+        &["preview", path, "--out", preview.to_str().unwrap()],
+        &[],
+    ));
+    let scale = looked["preview"]["scale"].as_f64().unwrap().to_string();
+    let scaled = render("scaled.png", &["--scale", &scale, "--no-cache"], &[]);
+    assert_eq!(fs::read(&preview).unwrap(), scaled);
+}
