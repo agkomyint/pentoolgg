@@ -50,3 +50,10 @@ are unchanged; new flags and JSON fields are additive.
   without it. Entries are checksummed (a damaged one is a miss), the
   directory is bounded to 256 MB by least recent use and is replaced when the
   binary changes. `--no-cache` or `PENTOOL_CACHE=0` turns it off.
+- `pentool session --jsonl` runs one command per stdin line (a JSON array of
+  arguments, or `{"id", "args"}`) and prints one JSON reply per line
+  (`ok`, `result` or `text`, `error`, and the `id`), keeping fonts and layer
+  surfaces warm between lines. Commands use the same transaction, lock and
+  revision-guard path as separate processes and write identical documents.
+  On the 55-layer landscape (fast build, Windows): `tree` 4 ms per line
+  against 27 ms per process; edit plus whole-page preview 89 ms per line.

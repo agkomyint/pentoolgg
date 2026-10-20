@@ -985,6 +985,22 @@ bounded to 256 MB (least recently used entries go first), is dropped when the
 `pentool` binary changes, and treats a damaged entry as a miss. `--no-cache`
 or `PENTOOL_CACHE=0` turns it off; deleting the directory is always safe.
 
+`pentool session --jsonl` runs many commands in one process, so an agent
+pays process start once and keeps fonts and rendered layers warm. Each stdin
+line is a JSON array of the arguments that would follow `pentool`, or an
+object with `args` and an optional `id`; each reply is one line:
+`{"ok":true,"result":...}` (or `"text"` for plain output) or
+`{"ok":false,"error":{...}}` with the same error object as `--json`. A bad
+line gets an error reply and the session continues. Documents are read and
+written exactly as single commands do, with the same locks, history and
+`--if-revision` guards; `serve` and nested sessions are refused.
+
+```sh
+printf '%s\n' '["tree","art.pen","--limit","5"]' \
+  '{"id":2,"args":["shape","art.pen","rect","badge","--layer","ui","--x","10","--y","10","--w","50","--h","50","--preview"]}' \
+  | pentool session --jsonl
+```
+
 `export --max-size PX` does the same sizing for exports: it picks the scale so
 the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
 the largest page decides) and reports it as `"scale"` beside `"max_size"`. It

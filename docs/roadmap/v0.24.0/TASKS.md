@@ -102,6 +102,14 @@ scene compositing and blur run on one thread.
   the parsed document, fonts and layer cache warm, saving process start and
   parsing for every call after the first. It uses the same transaction path,
   locks and revision guards as single commands.
+  _Implemented as `session`/`session_call` in `src/main.rs`: each line is
+  parsed by the same clap definition and run through `execute`, with output
+  held by `preview::capture` and printed as one reply line. Flags on the
+  session itself are refused (they would be ignored). Covered by
+  `session_runs_commands_like_separate_processes` (identical results and
+  document bytes) and `session_reports_bad_lines_and_keeps_going`. Measured
+  on the landscape: reads 4 ms per line (target < 10 ms), edit + preview
+  89 ms (target < 150 ms)._
 - [ ] **9. Multithreaded compositing and blur.** Split independent rows across
   `std::thread::scope` (no new dependency), as `photo/adjust.rs` already does.
   Results must be byte-identical whatever the thread count; `PENTOOL_THREADS=1`

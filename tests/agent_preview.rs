@@ -769,3 +769,103 @@ fn render_cache_reuses_layers_between_calls_without_changing_bytes() {
     let scaled = render("scaled.png", &["--scale", &scale, "--no-cache"], &[]);
     assert_eq!(fs::read(&preview).unwrap(), scaled);
 }
+
+fn session(lines: &[String]) -> Vec<Value> {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args(["session", "--jsonl"])
+        .env_remove("PENTOOL_PREVIEW")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for line in lines {
+        writeln!(stdin, "{line}").unwrap();
+    }
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+#[test]
+fn session_runs_commands_like_separate_processes() {
+    let space = Workspace::new("session");
+    let (one, many) = (space.0.join("one"), space.0.join("many"));
+    fs::create_dir_all(&one).unwrap();
+    fs::create_dir_all(&many).unwrap();
+    let (single, shared) = (one.join("doc.pen"), many.join("doc.pen"));
+    fs::copy("docs/fixtures/v4-scene.pen", &single).unwrap();
+    fs::copy("docs/fixtures/v4-scene.pen", &shared).unwrap();
+    let tree = |doc: &Path| vec!["tree".to_string(), doc.display().to_string()];
+
+    let expected = [
+        run(&tree(&single), &[]),
+        run(&rect(&single, "badge", &[]), &[]),
+        run(&tree(&single), &[]),
+    ];
+    let lines: Vec<String> = [tree(&shared), rect(&shared, "badge", &[]), tree(&shared)]
+        .iter()
+        .map(|args| serde_json::to_string(args).unwrap())
+        .collect();
+    let replies = session(&lines);
+    assert_eq!(replies.len(), 3);
+    // The two documents differ only in their directory.
+    let without = |value: &Value, dir: &Path| {
+        let native = serde_json::to_string(&dir.display().to_string()).unwrap();
+        let slashed = dir
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        value
+            .to_string()
+            .replace(native.trim_matches('"'), "DIR")
+            .replace(&slashed, "DIR")
+    };
+    for (reply, expected) in replies.iter().zip(&expected) {
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(without(&reply["result"], &many), without(expected, &one));
+    }
+    assert_eq!(fs::read(&shared).unwrap(), fs::read(&single).unwrap());
+}
+
+#[test]
+fn session_reports_bad_lines_and_keeps_going() {
+    let space = Workspace::new("session-errors");
+    let doc = space.document();
+    let before = fs::read(&doc).unwrap();
+    let path = doc.display().to_string();
+    let guarded = rect(&doc, "badge", &["--if-revision", &"0".repeat(64)]);
+    let replies = session(&[
+        "not json".into(),
+        r#"{"id": "x1", "args": ["no-such-command"]}"#.into(),
+        serde_json::to_string(&["serve"]).unwrap(),
+        serde_json::to_string(&guarded).unwrap(),
+        serde_json::json!({"id": 2, "args": ["preview", path, "--max-size", "64"]}).to_string(),
+    ]);
+    assert_eq!(replies.len(), 5);
+    for reply in &replies[..4] {
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert!(reply["error"]["message"].is_string());
+    }
+    assert_eq!(replies[1]["id"], "x1");
+    assert_eq!(
+        fs::read(&doc).unwrap(),
+        before,
+        "a refused edit writes nothing"
+    );
+    assert_eq!(replies[4]["id"], 2);
+    assert_eq!(replies[4]["ok"], true);
+    let image = image::open(replies[4]["result"]["preview"]["path"].as_str().unwrap()).unwrap();
+    assert_eq!(image.width().max(image.height()), 64);
+
+    // Flags belong on each line, not on the session.
+    let flagged = pentool(&["session", "--jsonl", "--preview"], &[]);
+    assert!(!flagged.status.success());
+    assert!(String::from_utf8_lossy(&flagged.stderr).contains("put them on each line"));
+}

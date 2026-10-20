@@ -2833,6 +2833,23 @@ enum Command {
         #[command(subcommand)]
         operation: geometry::Operation,
     },
+    /// Run many commands in one process: read one command per line on stdin
+    /// and print one JSON result per line. Documents are read and written as
+    /// by single commands; fonts and rendered layers stay warm between lines.
+    #[command(
+        after_help = "Each line is a JSON array of arguments, or an object with `args` and an
+optional `id` that the reply repeats. Replies are {\"ok\":true,\"result\":...}
+(or \"text\" for plain output) and {\"ok\":false,\"error\":{...}}.
+
+Examples:
+  printf '%s\\n' '[\"tree\",\"art.pen\",\"--limit\",\"5\"]' | pentool session --jsonl
+  printf '%s\\n' '{\"id\":1,\"args\":[\"preview\",\"art.pen\"]}' | pentool session --jsonl"
+    )]
+    Session {
+        /// Read and write JSON lines (the only format).
+        #[arg(long, required = true)]
+        jsonl: bool,
+    },
     /// Launch the browser editor and JSON API.
     Serve {
         /// Open a shared document for browser viewing and editing.
@@ -4367,13 +4384,94 @@ fn error_suggestions(error: &anyhow::Error) -> Vec<String> {
 
 /// Parse the command line; `PENTOOL_AI=off` also hides the `ai` command from help.
 fn parse_cli() -> Result<Cli, clap::Error> {
+    parse_cli_from(std::env::args_os())
+}
+
+fn parse_cli_from<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
     use clap::{CommandFactory, FromArgMatches};
     let mut command = Cli::command();
     if ai::disabled() {
         command = command.mut_subcommand("ai", |sub| sub.hide(true));
     }
-    let matches = command.try_get_matches()?;
+    let matches = command.try_get_matches_from(args)?;
     Cli::from_arg_matches(&matches)
+}
+
+/// `pentool session --jsonl`: run one command per stdin line and print one
+/// JSON result per line, in this one process.
+async fn session() -> Result<()> {
+    use std::io::{BufRead, Write};
+    for line in std::io::stdin().lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let reply = session_call(&line).await;
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{reply}")?;
+        stdout.flush()?;
+    }
+    Ok(())
+}
+
+/// One session line: a JSON array of arguments, or an object with `args` and
+/// an optional `id` that the reply repeats.
+async fn session_call(line: &str) -> serde_json::Value {
+    let request: Result<(serde_json::Value, Vec<String>)> = (|| {
+        let value: serde_json::Value =
+            serde_json::from_str(line).context("[invalid-input] each session line must be JSON")?;
+        let (id, args) = match value {
+            serde_json::Value::Object(mut object) => (
+                object.remove("id").unwrap_or_default(),
+                object.remove("args").unwrap_or_default(),
+            ),
+            args => (serde_json::Value::Null, args),
+        };
+        let args = serde_json::from_value(args).context(
+            "[invalid-input] a session line is [\"tree\", \"doc.pen\"] or {\"id\": 1, \"args\": [...]}",
+        )?;
+        Ok((id, args))
+    })();
+    let (id, args) = match request {
+        Ok(request) => request,
+        Err(error) => return serde_json::json!({"ok": false, "error": ai_error_json(&error)}),
+    };
+    pentool::preview::capture(true);
+    let result = match parse_cli_from(std::iter::once("pentool".to_string()).chain(args)) {
+        Err(error) => Err(anyhow::anyhow!(
+            "[invalid-input] {}",
+            error.to_string().trim_end()
+        )),
+        Ok(Cli {
+            command: None | Some(Command::Serve { .. } | Command::Session { .. }),
+            ..
+        }) => Err(anyhow::anyhow!(
+            "[invalid-input] serve and session cannot run inside a session"
+        )),
+        Ok(cli) => Box::pin(execute(cli)).await,
+    };
+    pentool::preview::finish();
+    pentool::render_cache::finish();
+    let output = pentool::preview::capture(false).join("\n");
+    let mut reply = serde_json::Map::new();
+    if !id.is_null() {
+        reply.insert("id".into(), id);
+    }
+    reply.insert("ok".into(), result.is_ok().into());
+    if let Err(error) = &result {
+        reply.insert("error".into(), ai_error_json(error));
+    }
+    if !output.trim().is_empty() {
+        match serde_json::from_str::<serde_json::Value>(&output) {
+            Ok(value) => reply.insert("result".into(), value),
+            Err(_) => reply.insert("text".into(), output.into()),
+        };
+    }
+    reply.into()
 }
 
 #[tokio::main]
@@ -4391,6 +4489,30 @@ async fn run() -> Result<()> {
         }
         Err(error) => return Err(anyhow::anyhow!(error.to_string())),
     };
+    if matches!(cli.command, Some(Command::Session { .. })) {
+        let flagged = cli.page.is_some()
+            || cli.actor_kind.is_some()
+            || cli.actor_id.is_some()
+            || cli.actor_name.is_some()
+            || cli.directed_by.is_some()
+            || cli.preview
+            || cli.preview_out.is_some()
+            || cli.preview_size.is_some()
+            || !cli.focus.is_empty()
+            || cli.no_focus
+            || cli.annotate
+            || cli.compare.is_some()
+            || cli.no_cache;
+        if flagged {
+            bail!("[invalid-input] session takes no command flags; put them on each line, e.g. [\"tree\", \"doc.pen\", \"--page\", \"p1\"]");
+        }
+        return session().await;
+    }
+    execute(cli).await
+}
+
+/// Run one parsed command.
+async fn execute(cli: Cli) -> Result<()> {
     let _json_output = cli.json;
     pentool::collab::set_actor_flags(pentool::collab::ActorSpec {
         kind: cli.actor_kind.clone(),
@@ -4422,9 +4544,10 @@ async fn run() -> Result<()> {
             cli.command,
             Some(Command::Export { .. } | Command::Preview { .. })
         );
-    if renders && !cli.no_cache && std::env::var("PENTOOL_CACHE").map_or(true, |v| v != "0") {
-        pentool::composite::cache_node_surfaces(CLI_NODE_CACHE_BYTES);
-        pentool::render_cache::enable(true);
+    if renders {
+        let cache = !cli.no_cache && std::env::var("PENTOOL_CACHE").map_or(true, |v| v != "0");
+        pentool::composite::cache_node_surfaces(if cache { CLI_NODE_CACHE_BYTES } else { 0 });
+        pentool::render_cache::enable(cache);
     }
     let selected_page = cli.page.as_deref();
     match cli.command.unwrap_or(Command::Serve {
@@ -7636,6 +7759,9 @@ async fn run() -> Result<()> {
             println!("{}", serde_json::json!({"change":change,"changes":changes}));
             Ok(())
         }
+        Command::Session { .. } => {
+            bail!("[invalid-input] a session cannot start another session")
+        }
         Command::Serve {
             host,
             port,
@@ -8759,12 +8885,12 @@ async fn run() -> Result<()> {
                     }
                 }
                 let mut fidelity = serde_json::to_value(&fidelity_report)?;
-                if report.is_some() && !dry_run {
+                if let (Some(report), false) = (&report, dry_run) {
                     if let Some(object) = fidelity.as_object_mut() {
                         object.remove("items");
                         object.insert(
                             "report_path".into(),
-                            serde_json::json!(report.as_ref().unwrap().display().to_string()),
+                            serde_json::json!(report.display().to_string()),
                         );
                     }
                 }
@@ -10783,7 +10909,8 @@ async fn run() -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                print!("{}", pentool::collab::stats::render_text(&report));
+                let text = pentool::collab::stats::render_text(&report);
+                println!("{}", text.strip_suffix('\n').unwrap_or(&text));
             }
             Ok(())
         }
@@ -11220,23 +11347,23 @@ async fn run() -> Result<()> {
                     .with_context(|| format!("could not write {}", report_path.display()))?;
             }
             let mut fidelity_summary = serde_json::to_value(&fidelity)?;
-            if report.is_none() {
+            if let Some(report) = &report {
                 if let Some(object) = fidelity_summary.as_object_mut() {
+                    object.remove("items");
                     object.insert(
-                        "items_omitted".into(),
-                        serde_json::json!(fidelity.items.len() + fidelity.items_omitted),
-                    );
-                    object.insert("items".into(), serde_json::json!([]));
-                    object.insert(
-                        "report_hint".into(),
-                        serde_json::json!("pass --report PATH to write detailed fidelity items"),
+                        "report_path".into(),
+                        serde_json::json!(report.display().to_string()),
                     );
                 }
             } else if let Some(object) = fidelity_summary.as_object_mut() {
-                object.remove("items");
                 object.insert(
-                    "report_path".into(),
-                    serde_json::json!(report.as_ref().unwrap().display().to_string()),
+                    "items_omitted".into(),
+                    serde_json::json!(fidelity.items.len() + fidelity.items_omitted),
+                );
+                object.insert("items".into(), serde_json::json!([]));
+                object.insert(
+                    "report_hint".into(),
+                    serde_json::json!("pass --report PATH to write detailed fidelity items"),
                 );
             }
             let mut result = serde_json::json!({"exported":output.display().to_string(),"fidelity":fidelity_summary});

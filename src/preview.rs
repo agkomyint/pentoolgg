@@ -184,6 +184,24 @@ struct State {
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
+/// Output lines held for `pentool session`, which prints one line per command.
+static CAPTURE: Mutex<Option<Vec<String>>> = Mutex::new(None);
+
+/// Start holding command output (`true`) or stop; returns what was held.
+pub fn capture(on: bool) -> Vec<String> {
+    let mut capture = CAPTURE.lock().unwrap_or_else(|e| e.into_inner());
+    let held = capture.take().unwrap_or_default();
+    *capture = on.then(Vec::new);
+    held
+}
+
+fn emit(line: String) {
+    match CAPTURE.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        Some(lines) => lines.push(line),
+        None => std::println!("{line}"),
+    }
+}
+
 fn state() -> std::sync::MutexGuard<'static, Option<State>> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -214,7 +232,7 @@ pub fn enabled() -> bool {
 pub fn print(line: String) {
     match state().as_mut() {
         Some(state) => state.output.push(line),
-        None => std::println!("{line}"),
+        None => emit(line),
     }
 }
 
@@ -267,7 +285,7 @@ pub fn finish() {
         }
     }
     for line in output {
-        std::println!("{line}");
+        emit(line);
     }
 }
 
