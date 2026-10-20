@@ -48,7 +48,7 @@ pub fn directory(document: &Path) -> Option<PathBuf> {
 }
 
 /// Format version, package version and this executable's size and time.
-fn namespace() -> &'static str {
+pub(crate) fn namespace() -> &'static str {
     static NAMESPACE: OnceLock<String> = OnceLock::new();
     NAMESPACE.get_or_init(|| {
         let mut hasher = Sha256::new();
@@ -76,7 +76,7 @@ fn entry(directory: &Path, key: &[u8; 32]) -> PathBuf {
 
 /// A 64-bit checksum against torn or damaged files (not against tampering:
 /// the cache is as trusted as the document beside it).
-fn checksum(bytes: &[u8]) -> u64 {
+pub(crate) fn checksum(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     let mut words = bytes.chunks_exact(8);
     for word in &mut words {

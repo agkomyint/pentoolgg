@@ -62,3 +62,12 @@ are unchanged; new flags and JSON fields are additive.
   same arithmetic as on one thread, so exports are byte-identical for any
   thread count; `PENTOOL_THREADS=N` sets it and `1` forces one thread.
   Uncached export of the 55-layer landscape at scale 2: 1315 ms to 1064 ms.
+- Faster start for renders. Layers without text no longer build a font
+  database, and text layers share one instead of rebuilding it per layer
+  (in-process time of a scale-0.1 landscape export: about 50 ms to 37 ms).
+  On Windows and macOS the installed-font list is kept in the per-user cache
+  (`%LOCALAPPDATA%\pentool\fonts.bin`, `~/Library/Caches/pentool/fonts.bin`)
+  and used only while the font folders' listing is unchanged: loading it
+  takes about 5 ms against 27–77 ms for a warm scan and about 340 ms for a
+  cold one. Linux keeps scanning, because its font folders come from
+  fontconfig's configuration. Output bytes are unchanged.

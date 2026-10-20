@@ -426,8 +426,6 @@ fn rasterize(
     if !(1.0 / 16384.0..=8.0).contains(&scale) {
         bail!("proxy scale must be between 1/16384 and 8");
     }
-    let mut doc = Document::new(canvas_width, canvas_height);
-    doc.fonts = fonts.to_vec();
     let width = (f64::from(canvas_width) * f64::from(scale))
         .round()
         .max(1.0) as u32;
@@ -436,11 +434,17 @@ fn rasterize(
         .max(1.0) as u32;
     let dimensions = Document::new(width, height);
     render_dimensions(&dimensions, 1.0)?;
-    let options = resvg::usvg::Options {
-        font_family: fonts::DEFAULT_FAMILY.into(),
-        fontdb: std::sync::Arc::new(fonts::database(&doc, true)?),
-        font_resolver: fonts::resolver(),
-        ..Default::default()
+    // Fonts are only consulted for `<text>`; skipping them for other fragments
+    // avoids scanning the installed fonts at all for text-free documents.
+    let options = if svg.contains("<text") {
+        resvg::usvg::Options {
+            font_family: fonts::DEFAULT_FAMILY.into(),
+            fontdb: proxy_fonts(fonts)?,
+            font_resolver: fonts::resolver(),
+            ..Default::default()
+        }
+    } else {
+        resvg::usvg::Options::default()
     };
     let tree =
         resvg::usvg::Tree::from_str(svg, &options).context("could not parse generated SVG")?;
@@ -451,6 +455,40 @@ fn rasterize(
         &mut pixmap.as_mut(),
     );
     Ok(pixmap)
+}
+
+/// The font database for `fonts`, reused while consecutive fragments embed the
+/// same fonts instead of being rebuilt for every text node.
+fn proxy_fonts(
+    fonts: &[crate::document::FontAsset],
+) -> Result<std::sync::Arc<resvg::usvg::fontdb::Database>> {
+    type Entry = (
+        Vec<(String, String)>,
+        std::sync::Arc<resvg::usvg::fontdb::Database>,
+    );
+    static LAST: std::sync::Mutex<Option<Entry>> = std::sync::Mutex::new(None);
+    let mut last = LAST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((key, db)) = last.as_ref() {
+        if key.len() == fonts.len()
+            && key
+                .iter()
+                .zip(fonts)
+                .all(|((id, data), font)| *id == font.id && *data == font.data)
+        {
+            return Ok(db.clone());
+        }
+    }
+    let mut doc = Document::new(1, 1);
+    doc.fonts = fonts.to_vec();
+    let db = std::sync::Arc::new(fonts::database(&doc, true)?);
+    let key = fonts
+        .iter()
+        .map(|font| (font.id.clone(), font.data.clone()))
+        .collect();
+    *last = Some((key, db.clone()));
+    Ok(db)
 }
 
 pub fn to_png_profiled(doc: &Document, scale: f32) -> Result<ProfiledPng> {

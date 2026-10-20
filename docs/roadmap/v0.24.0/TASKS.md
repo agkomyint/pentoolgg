@@ -126,6 +126,21 @@ scene compositing and blur run on one thread.
 - [ ] **10. Cold start.** Find what the first export after boot spends its
   1.5 s on (font discovery is the suspect) and make it lazy, or cache it in
   `.pentool/`.
+  _Measured on Windows: process creation is ~75–110 ms before `main` (not
+  ours; `session` removes it), a scale-0.1 landscape export spends ~13 ms in
+  Pentool without text and ~50 ms with text, of which the installed-font
+  scan was ~25–35 ms warm and ~340 ms on the first run after a new binary.
+  Implemented: text-free SVG fragments use no font database
+  (`render::rasterize`), text fragments share one (`proxy_fonts`), and
+  `src/font_cache.rs` keeps the face list in the per-user cache folder
+  (not `.pentool/`, because it describes the machine, not the document),
+  fingerprinted by a listing of fontdb's own font folders. A hit takes
+  ~5 ms. Lazy per-family loading was rejected because the fallback selector
+  checks every installed face for missing glyphs, so it could change text
+  output. Linux keeps scanning. Covered by
+  `cached_faces_match_a_scan_exactly`,
+  `installed_fonts_round_trip_through_the_cache` and
+  `font_list_cache_never_changes_text_rendering`._
 - [ ] **11. Evidence.** A benchmark script for the agent loop (edit + preview,
   10 steps, small and 55-layer documents) recorded in `docs/performance.md`
   against v0.23.0 on all three OSes. Byte-identity checks for every speedup;

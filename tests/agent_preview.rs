@@ -919,3 +919,49 @@ fn thread_count_never_changes_rendered_bytes() {
         );
     }
 }
+
+#[test]
+fn font_list_cache_never_changes_text_rendering() {
+    let space = Workspace::new("font-cache");
+    let doc = space.document();
+    let path = doc.to_str().unwrap();
+    json(&pentool(&["migrate", path, "--target", "6"], &[]));
+    // The per-user cache folder, moved into the workspace.
+    let home = space.0.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let home = home.to_str().unwrap();
+    let cached = if cfg!(windows) {
+        Some(space.0.join("home").join("pentool").join("fonts.bin"))
+    } else if cfg!(target_os = "macos") {
+        Some(space.0.join("home/Library/Caches/pentool/fonts.bin"))
+    } else {
+        None
+    };
+    let export = |name: &str, extra: &[&str]| {
+        let out = space.0.join(name);
+        json(&pentool(
+            &[&["export", path, out.to_str().unwrap()], extra].concat(),
+            &[("LOCALAPPDATA", home), ("HOME", home)],
+        ));
+        fs::read(out).unwrap()
+    };
+    // `--no-cache` scans the installed fonts and writes nothing.
+    let scanned = export("scanned.png", &["--no-cache"]);
+    assert!(cached.as_ref().is_none_or(|file| !file.exists()));
+    assert_eq!(export("cold.png", &[]), scanned);
+    if let Some(file) = &cached {
+        assert!(file.exists(), "a cached render keeps the font list");
+        assert_eq!(export("warm.png", &[]), scanned);
+        let mut bytes = fs::read(file).unwrap();
+        let middle = bytes.len() / 2;
+        bytes[middle] ^= 0x55;
+        fs::write(file, &bytes).unwrap();
+        assert_eq!(export("damaged.png", &[]), scanned);
+        assert_ne!(
+            fs::read(file).unwrap(),
+            bytes,
+            "a damaged list is rewritten"
+        );
+        assert_eq!(export("repaired.png", &[]), scanned);
+    }
+}

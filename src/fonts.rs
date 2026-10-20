@@ -87,11 +87,7 @@ pub fn database(doc: &Document, system: bool) -> Result<Database> {
     }
     if system {
         static SYSTEM: OnceLock<Database> = OnceLock::new();
-        let installed = SYSTEM.get_or_init(|| {
-            let mut db = Database::new();
-            db.load_system_fonts();
-            db
-        });
+        let installed = SYSTEM.get_or_init(crate::font_cache::system_fonts);
         for face in installed.faces() {
             db.push_face_info(face.clone());
         }

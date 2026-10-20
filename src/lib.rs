@@ -30,6 +30,7 @@ pub mod extension;
 mod fig_binary;
 pub mod figma_import;
 pub mod fill;
+pub mod font_cache;
 pub mod fonts;
 pub mod geometry;
 pub mod grids;
