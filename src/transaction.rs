@@ -125,6 +125,7 @@ pub fn commit_value(
         .ok()
         .is_some_and(|before_value| before_value == *value);
     if unchanged {
+        crate::preview::record(path, &before, value, &current, dry_run);
         return Ok(ChangeSummary {
             ok: true,
             operation: operation.into(),
@@ -216,6 +217,9 @@ pub fn commit_bytes(
         Some(history)
     };
     let changed = before != after;
+    // Rendered from the planned value: the derived `collab` block that a
+    // commit may add is never drawn, so this is the committed revision's image.
+    crate::preview::record(path, &before, &value, &after_revision, dry_run);
     Ok(ChangeSummary {
         ok: true,
         operation: operation.into(),

@@ -1,3 +1,9 @@
+/// Command output goes through `preview::print`, so `--preview` can add its
+/// result to the command's JSON. Without previews it prints at once, unchanged.
+macro_rules! println {
+    ($($arg:tt)*) => { pentool::preview::print(format!($($arg)*)) };
+}
+
 use pentool::{
     agent, ai, asset, benchmark, comments, composite, diff, document, editing, extension, fonts,
     geometry, history, image, import, instance, json, layout, library, package, page, pdf, raster,
@@ -38,6 +44,16 @@ struct Cli {
     /// Human the agent acts for (required for agents); recorded in the collaboration log.
     #[arg(long, global = true, value_name = "HUMAN")]
     directed_by: Option<String>,
+    /// After a mutating command (or its dry run), render the changed page and
+    /// add a "preview" object to the JSON result. PENTOOL_PREVIEW=1 sets it.
+    #[arg(long, global = true)]
+    preview: bool,
+    /// Write the preview here instead of DOC_DIR/.pentool/preview/ (implies --preview).
+    #[arg(long, global = true, value_name = "PATH")]
+    preview_out: Option<PathBuf>,
+    /// Longest preview edge in pixels (default 1024, at most 8192).
+    #[arg(long, global = true, value_name = "PX")]
+    preview_size: Option<u32>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -3709,7 +3725,12 @@ fn cli_main() -> Result<()> {
     let joined = std::thread::Builder::new()
         .name("pentool-cli".into())
         .stack_size(8 * 1024 * 1024)
-        .spawn(run)?
+        .spawn(|| {
+            let result = run();
+            // Held output and the --preview image, on the same large stack.
+            pentool::preview::finish();
+            result
+        })?
         .join();
     let result = match joined {
         Ok(result) => result,
@@ -4332,6 +4353,17 @@ async fn run() -> Result<()> {
         name: cli.actor_name.clone(),
         directed_by: cli.directed_by.clone(),
     });
+    // Server saves never render CLI previews.
+    if !matches!(cli.command, None | Some(Command::Serve { .. })) {
+        pentool::preview::configure(pentool::preview::Settings {
+            enabled: cli.preview
+                || cli.preview_out.is_some()
+                || std::env::var("PENTOOL_PREVIEW").is_ok_and(|value| value == "1"),
+            out: cli.preview_out.clone(),
+            max_edge: cli.preview_size,
+            page: cli.page.clone(),
+        })?;
+    }
     let selected_page = cli.page.as_deref();
     match cli.command.unwrap_or(Command::Serve {
         input: None,

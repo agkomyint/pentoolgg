@@ -168,5 +168,9 @@ path = "tests/live_document.rs"
 name = "photo_import_studio"
 path = "tests/photo_import_studio.rs"
 
+[[test]]
+name = "agent_preview"
+path = "tests/agent_preview.rs"
+
 [dev-dependencies]
 wat = "1.258.3"

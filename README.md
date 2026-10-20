@@ -907,6 +907,32 @@ default. Add `"mode":"replace"` to an operation, or pass `--upsert` to `batch`, 
 replace the node in place (stacking position is kept; groups are never replaced).
 Re-running the same batch with `--upsert` is therefore idempotent.
 
+### See the result in the same call (v0.24, in development)
+
+Add `--preview` to any command that changes a document, or to its `--dry-run`.
+After the commit, Pentool renders the changed page with the normal export
+renderer, at 1024 px on the long edge, and adds a top-level `preview` object to
+the command's JSON result:
+
+```sh
+pentool shape artwork.pen rect badge --layer ui --x 10 --y 10 --w 50 --h 50 --fill "#ff0000" --preview
+```
+
+```json
+"preview": {"path": ".pentool/preview/artwork-cae6baff68dd.png", "page": "page-1",
+            "width": 1024, "height": 768, "scale": 3.2,
+            "revision": "cae6baff…", "dry_run": false}
+```
+
+`revision` is the revision the same call wrote, so the image never shows a
+stale state. `--preview-size PX` picks the long edge (1 to 8192),
+`--preview-out PATH` writes the image to a chosen path, and `--page` picks the
+page (otherwise the first page that changed). `PENTOOL_PREVIEW=1` turns previews
+on for every mutating command. Images in `.pentool/preview/` are derived data:
+the 32 newest are kept and older ones are removed. A preview that cannot be
+rendered or written is reported as `"preview": {"error": ...}`; the edit itself
+still succeeds. Read-only commands print exactly what they print without it.
+
 Unknown JSON extension fields follow objects through rename, duplicate, move,
 and reorder. Locked source/target layers reject mutations. Object matching never
 guesses: mutation commands require exact layer and object IDs. Inside a layer,

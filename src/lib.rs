@@ -1,4 +1,11 @@
 //! Browser-independent document, editing, geometry, and rendering engine.
+
+/// Command output goes through `preview::print`, so `--preview` can add its
+/// result to the command's JSON. Without previews it prints at once, unchanged.
+macro_rules! println {
+    ($($arg:tt)*) => { $crate::preview::print(format!($($arg)*)) };
+}
+
 pub mod agent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ai;

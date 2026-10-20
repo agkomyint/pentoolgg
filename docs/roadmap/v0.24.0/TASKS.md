@@ -47,9 +47,11 @@ scene compositing and blur run on one thread.
   the JSON result. Dry runs preview the planned result without writing the
   document. `PENTOOL_PREVIEW=1` turns it on for a whole session. Previews go to
   `.pentool/preview/` (bounded, oldest removed) unless `--preview-out` is given.
-- [ ] **2. Size-bounded rendering.** `--max-size <px>` (long edge) for previews
-  and `export`, default 1024 for previews. It picks the scale, so agents stop
-  guessing `--scale`.
+  *Implemented as global flags (`--preview`, `--preview-out`, `--preview-size`)
+  with `tests/agent_preview.rs`; the box is ticked after three-OS CI.*
+- [ ] **2. Size-bounded rendering.** A long-edge bound for previews
+  (`--preview-size <px>`, default 1024, done with item 1) and `export`
+  (`--max-size <px>`). It picks the scale, so agents stop guessing `--scale`.
 - [ ] **3. Focus on the change.** `--focus <id>` renders the object's bounds plus
   padding at higher detail. With `--preview`, the default is the changed
   objects' union, plus a small full-page thumbnail for context.
