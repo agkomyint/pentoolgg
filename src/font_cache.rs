@@ -79,12 +79,19 @@ fn roots() -> Option<Vec<PathBuf>> {
 
 fn location() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    {
+        let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+        Some(base.join("pentool").join("fonts.bin"))
+    }
     #[cfg(target_os = "macos")]
-    let base = Path::new(&std::env::var_os("HOME")?).join("Library/Caches");
+    {
+        let base = Path::new(&std::env::var_os("HOME")?).join("Library/Caches");
+        Some(base.join("pentool").join("fonts.bin"))
+    }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let base: PathBuf = return None;
-    Some(base.join("pentool").join("fonts.bin"))
+    {
+        None
+    }
 }
 
 /// A hash of every entry under `roots`, following links like fontdb does.
