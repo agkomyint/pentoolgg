@@ -119,18 +119,31 @@ fn walk(dir: &Path, hasher: &mut Sha256, count: &mut usize, depth: u32) -> Optio
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(std::fs::DirEntry::path);
     for entry in entries {
+        let path = entry.path();
+        // Only what fontdb reads: font files by extension, folders, and links
+        // (followed to their target). Other files cost no stat and never
+        // change the scan.
+        let kind = entry.file_type().ok();
+        let symlink = kind.is_some_and(|kind| kind.is_symlink());
+        let folder = kind.is_some_and(|kind| kind.is_dir());
+        let font = matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("ttf" | "ttc" | "TTF" | "TTC" | "otf" | "otc" | "OTF" | "OTC")
+        );
+        if kind.is_some() && !symlink && !folder && !font {
+            continue;
+        }
         *count += 1;
         if *count > MAX_ENTRIES {
             return None;
         }
-        let path = entry.path();
         hasher.update(b"\0entry\0");
         hasher.update(path.to_str()?.as_bytes());
-        // Directory listings carry size and time without opening each file;
-        // links are followed to their target.
-        let metadata = match entry.file_type() {
-            Ok(kind) if kind.is_symlink() => std::fs::metadata(&path),
-            _ => entry.metadata(),
+        // Directory listings carry size and time without opening each file.
+        let metadata = if symlink {
+            std::fs::metadata(&path)
+        } else {
+            entry.metadata()
         };
         let Ok(metadata) = metadata else {
             hasher.update(b"\0unreadable");
@@ -311,6 +324,9 @@ mod tests {
         assert!(decode(&bytes[..bytes.len() - 1], &print).is_none());
         // Adding a font changes the fingerprint.
         let before = fingerprint(std::slice::from_ref(&dir)).unwrap();
+        assert_eq!(fingerprint(std::slice::from_ref(&dir)).unwrap(), before);
+        // Files the scan never reads are not part of it.
+        std::fs::write(dir.join("notes.plist"), b"not a font").unwrap();
         assert_eq!(fingerprint(std::slice::from_ref(&dir)).unwrap(), before);
         std::fs::write(dir.join("extra.ttf"), crate::fonts::BUNDLED[0].3).unwrap();
         assert_ne!(fingerprint(std::slice::from_ref(&dir)).unwrap(), before);

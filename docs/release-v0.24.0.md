@@ -72,7 +72,8 @@ are unchanged; new flags and JSON fields are additive.
   (in-process time of a scale-0.1 landscape export: about 50 ms to 37 ms).
   On Windows and macOS the installed-font list is kept in the per-user cache
   (`%LOCALAPPDATA%\pentool\fonts.bin`, `~/Library/Caches/pentool/fonts.bin`)
-  and used only while the font folders' listing is unchanged: loading it
-  takes about 5 ms against 27–77 ms for a warm scan and about 340 ms for a
-  cold one. Linux keeps scanning, because its font folders come from
+  and used only while the listing of font files in the font folders is
+  unchanged (other files there are not even looked at): loading it takes
+  about 5 ms against 27–77 ms for a warm scan and about 340 ms for a cold
+  one. Linux keeps scanning, because its font folders come from
   fontconfig's configuration. Output bytes are unchanged.
