@@ -372,3 +372,51 @@ fn page_list_carries_spread_parent_and_label_for_v9() {
     assert_eq!(list["pages"][1]["spread"], "s2");
     assert_eq!(list["pages"][0]["facing"], false);
 }
+
+#[test]
+fn parent_items_are_painted_beneath_the_page_in_raster_exports() {
+    let ws = Workspace::new("parent-render");
+    let doc = book(&ws, 1);
+    let with = ws.0.join("with.png").to_string_lossy().into_owned();
+    let without = ws.0.join("without.png").to_string_lossy().into_owned();
+    ok(&["parent", &doc, "create", "Paper"]);
+    ok(&[
+        "parent",
+        &doc,
+        "item-add",
+        "Paper",
+        "--node",
+        &rect("band", 0, "#ff0000"),
+    ]);
+    ok(&["export", &doc, &without, "--no-cache"]);
+    ok(&["parent", &doc, "assign", "page-1", "--parent", "Paper"]);
+    ok(&["export", &doc, &with, "--no-cache"]);
+    assert!(
+        std::fs::read(&with).unwrap() != std::fs::read(&without).unwrap(),
+        "a parent item must change the rendered page"
+    );
+    // Detaching turns it into an ordinary node, which must render the same way.
+    ok(&["override", &doc, "detach", "page-1", "band"]);
+    let detached = ws.0.join("detached.png").to_string_lossy().into_owned();
+    ok(&["export", &doc, &detached, "--no-cache"]);
+    assert!(
+        std::fs::read(&with).unwrap() == std::fs::read(&detached).unwrap(),
+        "a parent item and its detached copy must render identically"
+    );
+}
+
+#[test]
+fn spread_facing_accepts_true_and_false() {
+    let ws = Workspace::new("facing-flag");
+    let doc = book(&ws, 2);
+    ok(&["spread", &doc, "merge", "page-1", "p2"]);
+    let spread = ws.json()["layout"]["spreads"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    ok(&["spread", &doc, "facing", &spread, "true"]);
+    assert_eq!(ws.json()["layout"]["spreads"][0]["facing"], true);
+    ok(&["spread", &doc, "facing", &spread, "false"]);
+    assert_eq!(ws.json()["layout"]["spreads"][0]["facing"], false);
+    fails(&["spread", &doc, "facing", &spread]);
+}

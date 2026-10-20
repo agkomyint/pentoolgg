@@ -549,7 +549,8 @@ pub fn materialize(raw: &Value) -> Result<Option<Value>> {
                             .any(|n| n.get("kind") == Some(&json!("graphic-frame")))
                     })
             });
-    if !has_frames {
+    let parent_items = parent_item_layers(raw);
+    if !has_frames && parent_items.iter().all(Option::is_none) {
         return Ok(None);
     }
     let set = typeset_cached(raw)?;
@@ -589,6 +590,9 @@ pub fn materialize(raw: &Value) -> Result<Option<Value>> {
                 strip_frames(nodes);
             }
         }
+        if let Some(Some(layer)) = parent_items.get(index) {
+            layers.insert(0, layer.clone());
+        }
         let mut nodes = Vec::new();
         for (n, line) in set.page_lines(index).enumerate() {
             if line.text.is_empty() || !shown.contains(&line.frame) {
@@ -627,6 +631,52 @@ pub fn materialize(raw: &Value) -> Result<Option<Value>> {
         }
     }
     Ok(Some(out))
+}
+
+/// Per page, one locked bottom layer holding the items the page receives from
+/// its parent chain (after overrides and detaches), or `None` when it has none.
+/// Parent items render beneath the page's own layers; text frames among them
+/// have no story on a page and are dropped like any other frame.
+fn parent_item_layers(raw: &Value) -> Vec<Option<Value>> {
+    let parents = raw
+        .get("layout")
+        .and_then(|l| l.get("parents"))
+        .and_then(Value::as_array);
+    raw.get("pages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|page| {
+            let id = page.get("id").and_then(Value::as_str)?;
+            let resolved = crate::spreads::resolve_page(raw, id).ok()?;
+            let mut nodes: Vec<Value> = resolved["items"]
+                .as_array()?
+                .iter()
+                .filter(|item| {
+                    let hidden = parents
+                        .into_iter()
+                        .flatten()
+                        .find(|p| p["id"] == item["parent"])
+                        .and_then(|p| p["layers"].as_array())
+                        .and_then(|layers| layers.iter().find(|l| l["id"] == item["layer"]))
+                        .is_some_and(|l| l["visible"].as_bool() == Some(false));
+                    !hidden
+                })
+                .map(|item| item["node"].clone())
+                .collect();
+            strip_frames(&mut nodes);
+            if nodes.is_empty() {
+                return None;
+            }
+            Some(json!({
+                "id": "parent-items",
+                "name": "Parent items",
+                "visible": true,
+                "locked": true,
+                "nodes": nodes,
+            }))
+        })
+        .collect()
 }
 
 /// IDs of text frames on visible layers (and not hidden individually).

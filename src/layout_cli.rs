@@ -17,6 +17,7 @@ pub enum SpreadAction {
     Facing {
         spread: String,
         /// true or false.
+        #[arg(action = clap::ArgAction::Set)]
         facing: bool,
     },
     /// Group adjacent pages (in page order) into one spread.
