@@ -310,14 +310,18 @@ struct PngCache {
 
 static PNG_CACHE: std::sync::Mutex<Option<PngCache>> = std::sync::Mutex::new(None);
 
-/// Digest of everything that determines the rendered pixels: the canonical
-/// document JSON and the scale. The renderer is deterministic, so equal keys
-/// give byte-identical PNGs.
+/// Digest of everything that determines the rendered pixels: the selected
+/// page, the canonical document JSON and the scale. The JSON holds every page
+/// whichever is selected, so the selection is hashed separately. The renderer
+/// is deterministic, so equal keys give byte-identical PNGs.
 fn png_cache_key(doc: &Document, scale: f32) -> Result<[u8; 32]> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(b"pentool-png-v1");
+    hasher.update(b"pentool-png-v2");
     hasher.update(scale.to_bits().to_le_bytes());
+    let page = doc.active_page_id().as_bytes();
+    hasher.update((page.len() as u64).to_le_bytes());
+    hasher.update(page);
     hasher.update(serde_json::to_vec(doc).context("could not hash document")?);
     Ok(hasher.finalize().into())
 }
@@ -691,6 +695,27 @@ mod tests {
         let (other, hit) = to_png_cached(&doc, 2.0).unwrap();
         assert!(!hit);
         assert_ne!(other.len(), direct.len());
+    }
+
+    #[test]
+    fn cached_png_renders_the_selected_page() {
+        // Serializing a document writes every page whatever page is selected, so
+        // the cache must key on the selection too (Studio thumbnails of a
+        // multi-page v4 document all showed the first page).
+        let mut doc: Document = serde_json::from_value(serde_json::json!({
+            "format": "pentool", "version": 3, "name": "Pages",
+            "pages": [
+                {"id": "first", "name": "First", "canvas": {"width": 8, "height": 8, "background": "#ff0000"}, "layers": [{"id": "a", "name": "A", "visible": true, "locked": false, "paths": []}]},
+                {"id": "second", "name": "Second", "canvas": {"width": 8, "height": 8, "background": "#0000ff"}, "layers": [{"id": "b", "name": "B", "visible": true, "locked": false, "paths": []}]}
+            ]
+        }))
+        .unwrap();
+        doc.select_page("first").unwrap();
+        let (first, _) = to_png_cached(&doc, 1.0).unwrap();
+        doc.select_page("second").unwrap();
+        let (second, _) = to_png_cached(&doc, 1.0).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(second, to_png(&doc, 1.0).unwrap());
     }
 
     #[test]
