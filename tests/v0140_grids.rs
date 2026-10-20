@@ -198,6 +198,19 @@ fn guides_are_paginated_validated_and_derive_margins() {
         "1",
     ]);
     assert_eq!(r["guides"][0]["position"], 150.0);
+    // The ID and --page forms are exclusive, and --help says so.
+    let both = run(&[
+        "layout-grid",
+        &doc,
+        "guide-remove",
+        "g2",
+        "--page",
+        "page-1",
+    ]);
+    assert!(!both.status.success());
+    assert!(String::from_utf8_lossy(&both.stderr).contains("either a guide ID or --page"));
+    let help = run(&["layout-grid", &doc, "guide-remove", "--help"]);
+    assert!(String::from_utf8_lossy(&help.stdout).contains("not both"));
     let r = ok(&["layout-grid", &doc, "guide-remove", "g2"]);
     assert_eq!(r["removed"], 1);
     ok(&["layout-grid", &doc, "guide-remove", "--page", "page-1"]);

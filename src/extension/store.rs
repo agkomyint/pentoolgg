@@ -138,8 +138,8 @@ struct Opened {
 }
 
 fn open(package: &Path) -> Result<Opened> {
-    let package_bytes =
-        fs::read(package).with_context(|| format!("could not read {}", package.display()))?;
+    let package_bytes = fs::read(package)
+        .with_context(|| format!("[missing-resource] could not read {}", package.display()))?;
     let package_hash = asset::hash_bytes(&package_bytes);
     let mut zip = ZipArchive::new(std::io::Cursor::new(package_bytes))
         .context("[malformed-resource] not a valid .penext archive")?;

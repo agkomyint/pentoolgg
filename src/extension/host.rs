@@ -453,8 +453,12 @@ pub fn run(req: RunRequest<'_>) -> Result<Value> {
     if req.wasm.len() > MAX_MODULE_BYTES {
         bail!("[limit-exceeded] module is larger than {MAX_MODULE_BYTES} bytes")
     }
-    let bytes = std::fs::read(req.document)
-        .with_context(|| format!("could not read {}", req.document.display()))?;
+    let bytes = std::fs::read(req.document).with_context(|| {
+        format!(
+            "[missing-resource] could not read {}",
+            req.document.display()
+        )
+    })?;
     let working: Value = serde_json::from_slice(&bytes)
         .with_context(|| format!("{} is not a .pen document", req.document.display()))?;
     if !scene::is_scene_document(&working) {

@@ -804,3 +804,28 @@ fn batch_put_operations_respect_locked_layers() {
         assert_eq!(fs::read(&doc).unwrap(), before);
     }
 }
+
+#[test]
+fn unreadable_inputs_carry_a_missing_resource_code() {
+    let ws = Workspace::new("unreadable");
+    quiet(&ws, &["new", "d.pen"]);
+    for args in [
+        vec!["extension", "add", "NOPE.penext"],
+        vec![
+            "extension",
+            "run",
+            "stamp",
+            "NOPE.pen",
+            "--command",
+            "stamp",
+        ],
+        vec!["import", "d.pen", "NOPE.svg"],
+        vec!["import", "NOPE.pen", "some.svg"],
+    ] {
+        let err = fails(&ws, &args);
+        assert!(
+            err.contains("[missing-resource]"),
+            "{args:?} should report [missing-resource], got: {err}"
+        );
+    }
+}

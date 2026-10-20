@@ -15,3 +15,10 @@ Patch notes. Not published: the next public release is 0.25.0.
 - Placed tables are not laid out or drawn by the renderer; only their story
   text is. Table layout needs a decision before work starts.
 - Paragraph styles have no colour property.
+
+## Also in 0.24.2
+
+- `layout-grid guide-remove --help` documents that a guide ID and `--page` are
+  exclusive (#169).
+- Unreadable inputs to `import` and `extension add/run` report
+  `[missing-resource]` like the other commands (#207).

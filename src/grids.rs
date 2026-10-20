@@ -124,9 +124,11 @@ pub enum GridAction {
         #[arg(long, allow_negative_numbers = true)]
         position: f64,
     },
-    /// Remove one guide, or all guides of a page with --page.
+    /// Remove one guide by ID, or all guides of a page with --page (not both).
     GuideRemove {
+        /// Guide ID; give this or --page, not both.
         id: Option<String>,
+        /// Remove every guide of this page; give this or a guide ID, not both.
         #[arg(long)]
         page: Option<String>,
     },

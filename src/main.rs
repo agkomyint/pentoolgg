@@ -8838,13 +8838,23 @@ async fn execute(cli: Cli) -> Result<()> {
                 }
                 let destination_bytes =
                     pentool::resource::read_bounded(&destination, 512 * 1024 * 1024).with_context(
-                        || format!("could not read destination {}", destination.display()),
+                        || {
+                            format!(
+                                "[missing-resource] could not read destination {}",
+                                destination.display()
+                            )
+                        },
                     )?;
                 let destination_document: serde_json::Value =
                     serde_json::from_slice(&destination_bytes)
                         .context("destination is not a valid Pentool JSON document")?;
                 let source_bytes = pentool::resource::read_bounded(&source, 512 * 1024 * 1024)
-                    .with_context(|| format!("could not read source {}", source.display()))?;
+                    .with_context(|| {
+                        format!(
+                            "[missing-resource] could not read source {}",
+                            source.display()
+                        )
+                    })?;
                 let imported = pentool::interchange::import_design(
                     format,
                     &source_bytes,
