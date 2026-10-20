@@ -1,10 +1,15 @@
-# Pentool v0.24.0 — Agent previews and a faster CLI (in development)
+# Pentool v0.24.0 — Agent previews and a faster CLI
 
 Plan and acceptance criteria: `docs/roadmap/v0.24.0/TASKS.md`. Exported bytes
 are unchanged; new flags and JSON fields are additive.
 
 ## Changes
 
+- Agent loop (add a shape, then look at the whole page at 1024 px; Windows,
+  ms per step, v0.23.0 edit+export / v0.24.0 `--preview` / v0.24.0 session):
+  small document 498 / 361 / 98, 55-layer document 780 / 423 / 300. Every
+  image is byte-identical to v0.23.0's export. `scripts/bench-agent-loop.py`
+  reproduces it, and CI runs it on all three OSes.
 - `--preview` on every mutating command and its dry run: one call edits the
   document and returns a PNG of the changed page, rendered by the normal
   export renderer at 1024 px on the long edge. The JSON result gains a

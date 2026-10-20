@@ -41,7 +41,7 @@ scene compositing and blur run on one thread.
 
 ### Agent previews
 
-- [ ] **1. `--preview` on mutating commands** (`object`, `batch`, `shape`,
+- [x] **1. `--preview` on mutating commands** (`object`, `batch`, `shape`,
   `text`, `fill`, `effect`, `group`, ...). After the commit, render the touched
   page and add `"preview": {"path", "width", "height", "revision", "page"}` to
   the JSON result. Dry runs preview the planned result without writing the
@@ -49,30 +49,30 @@ scene compositing and blur run on one thread.
   `.pentool/preview/` (bounded, oldest removed) unless `--preview-out` is given.
   *Implemented as global flags (`--preview`, `--preview-out`, `--preview-size`)
   with `tests/agent_preview.rs`; the box is ticked after three-OS CI.*
-- [ ] **2. Size-bounded rendering.** A long-edge bound for previews
+- [x] **2. Size-bounded rendering.** A long-edge bound for previews
   (`--preview-size <px>`, default 1024, done with item 1) and `export`
   (`--max-size <px>`). It picks the scale, so agents stop guessing `--scale`.
   *`export --max-size` implemented with tests in `tests/agent_preview.rs`;
   the box is ticked after three-OS CI.*
-- [ ] **3. Focus on the change.** `--focus <id>` renders the object's bounds plus
+- [x] **3. Focus on the change.** `--focus <id>` renders the object's bounds plus
   padding at higher detail. With `--preview`, the default is the changed
   objects' union, plus a small full-page thumbnail for context.
   *Implemented for `--preview` (`--focus`, `--no-focus`) with tests in
   `tests/agent_preview.rs`; the focused image crops a budgeted full render so
   pixels match export. `pentool preview --focus` comes with item 4.*
-- [ ] **4. `pentool preview DOC`** for read-only looks: page, `--focus`,
+- [x] **4. `pentool preview DOC`** for read-only looks: page, `--focus`,
   `--max-size`, `--annotate`, `--compare <revision|file>`. Same renderer and
   JSON shape as item 1.
   *Implemented with page, `--focus`, `--max-size`, `--out`, `--annotate`
   and `--compare`.*
-- [ ] **5. Labeled overlay (`--annotate`).** Draw object IDs and bounds on the
+- [x] **5. Labeled overlay (`--annotate`).** Draw object IDs and bounds on the
   preview (never on export), capped at N labels, with the label list in the
   JSON. Agents can then name what they see ("move `cloud-12` left") instead of
   guessing from `tree`.
   *Implemented as the global `--annotate` (implies `--preview`, also on
   `pentool preview`), capped at 50 labels, with tests in
   `tests/agent_preview.rs`.*
-- [ ] **6. Before/after numbers.** `--compare` reports `changed_pixels`,
+- [x] **6. Before/after numbers.** `--compare` reports `changed_pixels`,
   `changed_pct` and `changed_bbox`, plus an optional diff image. Often the agent
   can verify "only the right thing moved" without reading an image. Reuse the
   `analyze` and `paint-review` comparison code.
@@ -83,7 +83,7 @@ scene compositing and blur run on one thread.
 
 ### Faster CLI
 
-- [ ] **7. Persistent layer cache.** Store v0.23.0 node-cache entries in
+- [x] **7. Persistent layer cache.** Store v0.23.0 node-cache entries in
   `.pentool/cache/` (content-addressed by the same sha256 key, bounded LRU,
   versioned, corrupt entries ignored). Edit-then-preview across separate CLI
   calls should then match the browser's ~8x. Enabled for previews and export;
@@ -97,7 +97,7 @@ scene compositing and blur run on one thread.
   landscape preview is 209 ms against 335 ms uncached; the ~8x target is not
   met by the cache alone because process start, decoding cached surfaces,
   compositing and PNG encoding remain (items 8-10)._
-- [ ] **8. One process for many commands.** `pentool session --jsonl` reads
+- [x] **8. One process for many commands.** `pentool session --jsonl` reads
   one command per line on stdin and writes one JSON result per line. It keeps
   the parsed document, fonts and layer cache warm, saving process start and
   parsing for every call after the first. It uses the same transaction path,
@@ -110,7 +110,7 @@ scene compositing and blur run on one thread.
   document bytes) and `session_reports_bad_lines_and_keeps_going`. Measured
   on the landscape: reads 4 ms per line (target < 10 ms), edit + preview
   89 ms (target < 150 ms)._
-- [ ] **9. Multithreaded compositing and blur.** Split independent rows across
+- [x] **9. Multithreaded compositing and blur.** Split independent rows across
   `std::thread::scope` (no new dependency), as `photo/adjust.rs` already does.
   Results must be byte-identical whatever the thread count; `PENTOOL_THREADS=1`
   forces one thread.
@@ -123,7 +123,7 @@ scene compositing and blur run on one thread.
   `PENTOOL_THREADS` 1, 2, 3, 8). Landscape at scale 2: 1315 ms to 1064 ms,
   identical bytes. Color-managed (working-space) fills stay sequential
   because their color engine is mutable per call._
-- [ ] **10. Cold start.** Find what the first export after boot spends its
+- [x] **10. Cold start.** Find what the first export after boot spends its
   1.5 s on (font discovery is the suspect) and make it lazy, or cache it in
   `.pentool/`.
   _Measured on Windows: process creation is ~75–110 ms before `main` (not
@@ -141,11 +141,18 @@ scene compositing and blur run on one thread.
   `cached_faces_match_a_scan_exactly`,
   `installed_fonts_round_trip_through_the_cache` and
   `font_list_cache_never_changes_text_rendering`._
-- [ ] **11. Evidence.** A benchmark script for the agent loop (edit + preview,
+- [x] **11. Evidence.** A benchmark script for the agent loop (edit + preview,
   10 steps, small and 55-layer documents) recorded in `docs/performance.md`
   against v0.23.0 on all three OSes. Byte-identity checks for every speedup;
   tests for cache invalidation (edit, font change, linked file change, scale,
   page size) and for a corrupt or full cache.
+  _Done: `scripts/bench-agent-loop.py`, run by CI's `binary-size` job on all
+  three OSes against the v0.23.0 release binaries (table in the job summary);
+  Windows results in `docs/performance.md`. Cache tests:
+  `render_cache_reuses_layers_between_calls_without_changing_bytes` (edit,
+  corrupt), `render_cache_follows_scale_page_size_fonts_and_linked_files`
+  (scale, page size, fonts, linked file, unusable cache directory) and
+  `pruning_keeps_the_newest_entries_within_the_limit` (full cache)._
 
 ## Targets
 
