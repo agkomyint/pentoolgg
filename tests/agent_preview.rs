@@ -81,8 +81,9 @@ fn sha256(bytes: &[u8]) -> String {
 fn preview_matches_the_committed_revision_and_is_size_bounded() {
     let space = Workspace::new("commit");
     let doc = space.document();
-    let result = run(&rect(&doc, "box", &["--preview"]), &[]);
+    let result = run(&rect(&doc, "box", &["--preview", "--no-focus"]), &[]);
     let preview = &result["preview"];
+    assert!(preview.get("focus").is_none() && preview.get("thumbnail").is_none());
     assert_eq!(preview["revision"], result["revision_after"]);
     assert_eq!(
         preview["revision"].as_str().unwrap(),
@@ -134,6 +135,7 @@ fn composite_documents_preview_through_the_composite_renderer() {
             "--preview",
             "--preview-size",
             "400",
+            "--no-focus",
         ],
         &[],
     ));
@@ -187,7 +189,7 @@ fn environment_turns_previews_on_and_size_is_selectable() {
     let space = Workspace::new("env");
     let doc = space.document();
     let result = run(
-        &rect(&doc, "box", &["--preview-size", "200"]),
+        &rect(&doc, "box", &["--preview-size", "200", "--no-focus"]),
         &[("PENTOOL_PREVIEW", "1")],
     );
     let image = image::open(result["preview"]["path"].as_str().unwrap()).unwrap();
@@ -386,4 +388,101 @@ fn export_max_size_rejects_bad_bounds_before_writing() {
         assert!(stderr.contains(message), "{args:?}: {stderr}");
         assert!(!out.exists());
     }
+}
+
+/// The `(x, y, width, height)` pixels of `image` as raw RGBA.
+fn crop(image: &image::DynamicImage, x: u32, y: u32, width: u32, height: u32) -> Vec<u8> {
+    image.crop_imm(x, y, width, height).to_rgba8().into_raw()
+}
+
+#[test]
+fn preview_focuses_on_the_changed_objects_with_a_page_thumbnail() {
+    let space = Workspace::new("focus");
+    let doc = space.document();
+    let result = run(&rect(&doc, "box", &["--preview"]), &[]);
+    let preview = &result["preview"];
+    // 50 x 50 at (10, 10), padded by 8 on each side.
+    assert_eq!(
+        preview["focus"],
+        serde_json::json!({"ids": ["box"], "x": 2.0, "y": 2.0, "width": 66.0, "height": 66.0})
+    );
+    assert_eq!(preview["scale"], 8.0);
+    let image = image::open(preview["path"].as_str().unwrap()).unwrap();
+    assert_eq!((image.width(), image.height()), (528, 528));
+    assert_eq!(preview["width"], 528);
+    let thumbnail = &preview["thumbnail"];
+    let small = image::open(thumbnail["path"].as_str().unwrap()).unwrap();
+    assert_eq!((small.width(), small.height()), (256, 192));
+    assert_eq!(thumbnail["width"], 256);
+
+    // The focused image is the matching part of a full export at its scale.
+    let exported = space.0.join("export.png");
+    json(&export(&doc, &exported, &["--scale", "8"]));
+    let full = image::open(&exported).unwrap();
+    assert_eq!(crop(&full, 16, 16, 528, 528), image.to_rgba8().into_raw());
+}
+
+#[test]
+fn focus_names_objects_and_reports_unknown_ones_as_preview_errors() {
+    let space = Workspace::new("focus-explicit");
+    let doc = space.document();
+    let result = run(
+        &rect(
+            &doc,
+            "box",
+            &["--preview", "--focus", "box", "--focus", "card"],
+        ),
+        &[],
+    );
+    assert_eq!(
+        result["preview"]["focus"]["ids"],
+        serde_json::json!(["box", "card"])
+    );
+    let result = run(
+        &rect(&doc, "box2", &["--preview", "--focus", "missing"]),
+        &[],
+    );
+    let error = result["preview"]["error"].as_str().unwrap();
+    assert!(error.contains("cannot focus on `missing`"), "{error}");
+    assert!(result["revision_after"].is_string());
+    let output = pentool(
+        &["tree", doc.to_str().unwrap(), "--focus", "a", "--no-focus"],
+        &[],
+    );
+    assert!(!output.status.success());
+}
+
+#[test]
+fn large_changes_preview_the_whole_page() {
+    let space = Workspace::new("focus-large");
+    let doc = space.document();
+    let mut args = rect(&doc, "cover", &["--preview"]);
+    for (flag, value) in [("--x", "0"), ("--y", "0"), ("--w", "320"), ("--h", "240")] {
+        let at = args.iter().position(|a| a == flag).unwrap();
+        args[at + 1] = value.into();
+    }
+    let preview = &run(&args, &[])["preview"];
+    assert!(preview.get("focus").is_none());
+    assert_eq!(preview["width"], 1024);
+}
+
+#[test]
+fn composite_focus_is_a_crop_of_the_composite_render() {
+    let space = Workspace::new("focus-composite");
+    let doc = space.document();
+    let path = doc.to_str().unwrap();
+    json(&pentool(&["migrate", path, "--target", "6"], &[]));
+    let result = run(&rect(&doc, "box", &["--preview"]), &[]);
+    let preview = &result["preview"];
+    assert_eq!(preview["focus"]["ids"], serde_json::json!(["box"]));
+    let image = image::open(preview["path"].as_str().unwrap()).unwrap();
+    let scale = preview["scale"].as_f64().unwrap();
+    let exported = space.0.join("export.png");
+    json(&export(&doc, &exported, &["--scale", &scale.to_string()]));
+    let full = image::open(&exported).unwrap();
+    let origin = (2.0 * scale).floor() as u32;
+    assert_eq!(
+        crop(&full, origin, origin, image.width(), image.height()),
+        image.to_rgba8().into_raw()
+    );
 }

@@ -17,6 +17,13 @@ are unchanged; new flags and JSON fields are additive.
   newest. A failed preview is reported as `preview.error` and never fails an
   edit that already committed. Without previews every command prints exactly
   the same bytes as before; the Studio server never renders CLI previews.
+- Previews zoom in on the change: when the edited or added objects cover
+  less than half the page, the image shows them plus padding at up to 8x and
+  the result adds `focus` (`ids`, `x`, `y`, `width`, `height`) and a 256 px
+  whole-page `thumbnail`. The focused image is a crop of the normal render at
+  the reported scale, so every pixel matches `export --scale`. `--focus ID`
+  (repeatable) picks the objects and `--no-focus` shows the whole page; an
+  unknown ID is reported as `preview.error`.
 - `export --max-size PX` picks the export scale so the longest page edge is at
   most `PX` pixels (1 to 8192; with `--all-pages` the largest page decides),
   instead of the agent guessing `--scale`. The result adds `max_size` and the

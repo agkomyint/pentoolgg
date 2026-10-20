@@ -933,6 +933,16 @@ the 32 newest are kept and older ones are removed. A preview that cannot be
 rendered or written is reported as `"preview": {"error": ...}`; the edit itself
 still succeeds. Read-only commands print exactly what they print without it.
 
+A preview zooms in on what changed. When the command added or edited objects
+that cover less than half of the page, the image shows their bounds plus
+padding at up to 8x detail, and the result gains `focus` (the object IDs and
+the area in document units) and `thumbnail` (a 256 px image of the whole page,
+written beside the preview with a `-page` suffix). Every pixel is the export
+render at the reported `scale`, cropped. `--focus ID` (repeatable) zooms in on
+chosen objects instead; `--no-focus` always shows the whole page. More than 64
+changed objects, or none that can be identified (a page rename, say), show the
+whole page.
+
 `export --max-size PX` does the same sizing for exports: it picks the scale so
 the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
 the largest page decides) and reports it as `"scale"` beside `"max_size"`. It

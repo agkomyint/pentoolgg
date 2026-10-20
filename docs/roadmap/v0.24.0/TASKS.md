@@ -57,6 +57,9 @@ scene compositing and blur run on one thread.
 - [ ] **3. Focus on the change.** `--focus <id>` renders the object's bounds plus
   padding at higher detail. With `--preview`, the default is the changed
   objects' union, plus a small full-page thumbnail for context.
+  *Implemented for `--preview` (`--focus`, `--no-focus`) with tests in
+  `tests/agent_preview.rs`; the focused image crops a budgeted full render so
+  pixels match export. `pentool preview --focus` comes with item 4.*
 - [ ] **4. `pentool preview DOC`** for read-only looks: page, `--focus`,
   `--max-size`, `--annotate`, `--compare <revision|file>`. Same renderer and
   JSON shape as item 1.

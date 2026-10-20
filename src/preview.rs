@@ -154,11 +154,16 @@ pub struct Settings {
     pub out: Option<PathBuf>,
     pub max_edge: Option<u32>,
     pub page: Option<String>,
+    /// Objects to focus on; empty means the objects the command changed.
+    pub focus: Vec<String>,
+    /// Always show the whole page.
+    pub no_focus: bool,
 }
 
 /// The last commit of this process, kept until its preview is rendered.
 struct Pending {
     path: PathBuf,
+    before: Vec<u8>,
     value: Value,
     page: Option<String>,
     revision: String,
@@ -217,6 +222,7 @@ pub fn record(path: &Path, before: &[u8], after: &Value, revision: &str, dry_run
         .or_else(|| changed_page(before, after));
     state.pending = Some(Pending {
         path: path.to_owned(),
+        before: before.to_vec(),
         value: after.clone(),
         page,
         revision: revision.into(),
@@ -289,6 +295,23 @@ pub fn png(
         let scale = composite_preview_scale(value, page, max_edge)?;
         return composite_png_scaled(value, document, page, scale, true);
     }
+    render_page(value, document, page, |width, height| {
+        preview_scale(width, height, max_edge, 0.1)
+    })
+}
+
+/// Render one page through the same renderer as `export`, at the scale
+/// `scale` picks from the page size in document units.
+fn render_page(
+    value: &Value,
+    document: &Path,
+    page: Option<&str>,
+    scale: impl FnOnce(f64, f64) -> Result<f32>,
+) -> Result<(Vec<u8>, f32)> {
+    if crate::composite::is_document(value) {
+        let (width, height) = canvas_size(value, page)?;
+        return composite_png_scaled(value, document, page, scale(width, height)?, true);
+    }
     let image_scene = value
         .get("version")
         .and_then(Value::as_u64)
@@ -299,12 +322,7 @@ pub fn png(
             .is_some_and(|assets| !assets.is_empty());
     if image_scene {
         let scene = crate::image::to_svg(value, document, page)?;
-        let scale = preview_scale(
-            f64::from(scene.width),
-            f64::from(scene.height),
-            max_edge,
-            0.1,
-        )?;
+        let scale = scale(f64::from(scene.width), f64::from(scene.height))?;
         return Ok((crate::render::scene_to_png(&scene, scale)?, scale));
     }
     let flattened = if crate::scene::is_scene_document(value) {
@@ -317,12 +335,7 @@ pub fn png(
     if let Some(page) = page {
         doc.select_page(page).map_err(anyhow::Error::msg)?;
     }
-    let scale = preview_scale(
-        f64::from(doc.canvas.width),
-        f64::from(doc.canvas.height),
-        max_edge,
-        0.1,
-    )?;
+    let scale = scale(f64::from(doc.canvas.width), f64::from(doc.canvas.height))?;
     Ok((crate::render::to_png(&doc, scale)?, scale))
 }
 
@@ -335,12 +348,21 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
         ..
     } = pending;
     let page = pending.page.as_deref();
-    let (bytes, scale) = png(
-        value,
-        path,
-        page,
-        settings.max_edge.unwrap_or(DEFAULT_PREVIEW_EDGE),
-    )?;
+    let max_edge = settings.max_edge.unwrap_or(DEFAULT_PREVIEW_EDGE);
+    let focus = if settings.no_focus {
+        None
+    } else if !settings.focus.is_empty() {
+        Some(focus_region(value, page, &settings.focus)?)
+    } else {
+        changed_ids(&pending.before, value, page)
+            .filter(|ids| ids.len() <= MAX_FOCUS_IDS)
+            .and_then(|ids| focus_region(value, page, &ids).ok())
+            .filter(|focus| focus.is_small(value, page))
+    };
+    let (bytes, scale) = match &focus {
+        Some(focus) => png_region(value, path, page, max_edge, focus)?,
+        None => png(value, path, page, max_edge)?,
+    };
     let (width, height) = png_size(&bytes).context("renderer returned an invalid PNG")?;
     let target = match &settings.out {
         Some(out) => out.clone(),
@@ -362,13 +384,33 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
     }
     crate::editing::atomic_write(&target, &bytes)
         .with_context(|| format!("could not write preview {}", target.display()))?;
+    let thumbnail = match &focus {
+        Some(_) => {
+            let (bytes, scale) = png(value, path, page, THUMBNAIL_EDGE)?;
+            let (width, height) = png_size(&bytes).context("renderer returned an invalid PNG")?;
+            let stem = target
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "preview".into());
+            let thumbnail = target.with_file_name(format!("{stem}-page.png"));
+            crate::editing::atomic_write(&thumbnail, &bytes)
+                .with_context(|| format!("could not write preview {}", thumbnail.display()))?;
+            Some(json!({
+                "path": thumbnail.display().to_string(),
+                "width": width,
+                "height": height,
+                "scale": scale,
+            }))
+        }
+        None => None,
+    };
     if settings.out.is_none() {
         prune(&target);
     }
     let page = page
         .map(str::to_owned)
         .or_else(|| value["pages"][0]["id"].as_str().map(str::to_owned));
-    Ok(json!({
+    let mut result = json!({
         "path": target.display().to_string(),
         "page": page,
         "width": width,
@@ -376,7 +418,235 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
         "scale": scale,
         "revision": revision,
         "dry_run": dry_run,
-    }))
+    });
+    if let (Some(focus), Some(thumbnail)) = (focus, thumbnail) {
+        result["focus"] = focus.to_json();
+        result["thumbnail"] = thumbnail;
+    }
+    Ok(result)
+}
+
+/// Long edge of the whole-page thumbnail that accompanies a focused preview.
+pub const THUMBNAIL_EDGE: u32 = 256;
+/// More changed objects than this are previewed as the whole page.
+pub const MAX_FOCUS_IDS: usize = 64;
+/// A focused preview crops a page render of at most this many pixels; the
+/// composite pipeline (effects, blur) costs more per pixel, so gets less.
+const FOCUS_PAGE_PIXELS: f64 = 16.0 * 1024.0 * 1024.0;
+const FOCUS_COMPOSITE_PIXELS: f64 = 4.0 * 1024.0 * 1024.0;
+
+/// The page area a focused preview shows, in document units: the union of
+/// the objects' bounds plus padding, clamped to the canvas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Focus {
+    pub ids: Vec<String>,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Focus {
+    /// A change worth zooming into covers less than half of the page.
+    fn is_small(&self, value: &Value, page: Option<&str>) -> bool {
+        canvas_size(value, page)
+            .is_ok_and(|(width, height)| self.width * self.height < 0.5 * width * height)
+    }
+
+    pub fn to_json(&self) -> Value {
+        let r = crate::json::round3;
+        json!({
+            "ids": self.ids,
+            "x": r(self.x),
+            "y": r(self.y),
+            "width": r(self.width),
+            "height": r(self.height),
+        })
+    }
+
+    /// `(x, y, width, height)` of the output pixels covered at `scale`, within
+    /// a page `limit` pixels in size.
+    fn pixels(&self, scale: f32, limit: (u32, u32)) -> (u32, u32, u32, u32) {
+        let scale = f64::from(scale);
+        let (max_x, max_y) = (limit.0.max(1), limit.1.max(1));
+        let x = ((self.x * scale).floor() as u32).min(max_x - 1);
+        let y = ((self.y * scale).floor() as u32).min(max_y - 1);
+        let right = (((self.x + self.width) * scale).ceil() as u32).clamp(x + 1, max_x);
+        let bottom = (((self.y + self.height) * scale).ceil() as u32).clamp(y + 1, max_y);
+        (x, y, right - x, bottom - y)
+    }
+}
+
+/// Width and height of the selected page's canvas (the first page, or the
+/// top-level canvas of a legacy document).
+fn canvas_size(value: &Value, page: Option<&str>) -> Result<(f64, f64)> {
+    let canvas = match value.get("pages").and_then(Value::as_array) {
+        Some(pages) if !pages.is_empty() => match page {
+            Some(id) => pages
+                .iter()
+                .find(|p| p.get("id").and_then(Value::as_str) == Some(id))
+                .with_context(|| format!("[not-found] page not found: {id}"))?,
+            None => &pages[0],
+        }
+        .get("canvas")
+        .or_else(|| value.get("canvas")),
+        _ => value.get("canvas"),
+    }
+    .context("[invalid-input] document has no canvas size")?;
+    let size = |key: &str| {
+        canvas
+            .get(key)
+            .and_then(Value::as_f64)
+            .filter(|v| *v > 0.0)
+            .with_context(|| format!("canvas {key} missing"))
+    };
+    Ok((size("width")?, size("height")?))
+}
+
+/// Bounds of one object in document units, for any document version.
+fn object_bounds(value: &Value, page: Option<&str>, id: &str) -> Result<kurbo::Rect> {
+    let bounds = if crate::scene::is_scene_document(value) {
+        crate::scene::node_bounds(value, page, id)?
+    } else {
+        let mut doc: crate::document::Document =
+            serde_json::from_value(value.clone()).context("invalid .pen document")?;
+        if let Some(page) = page {
+            doc.select_page(page).map_err(anyhow::Error::msg)?;
+        }
+        let layer = doc
+            .layers
+            .iter()
+            .find(|layer| {
+                layer.paths.iter().any(|p| p.id == id) || layer.texts.iter().any(|t| t.id == id)
+            })
+            .map(|layer| layer.id.clone())
+            .with_context(|| format!("object not found: {id}"))?;
+        crate::geometry::execute(&mut doc, &layer, id, &crate::geometry::Operation::Bounds)?
+    };
+    let number = |key: &str| {
+        bounds[key]
+            .as_f64()
+            .with_context(|| format!("bounds of {id} have no {key}"))
+    };
+    let (x, y) = (number("x")?, number("y")?);
+    Ok(kurbo::Rect::new(
+        x,
+        y,
+        x + number("width")?,
+        y + number("height")?,
+    ))
+}
+
+/// Union of the objects' bounds plus padding, clamped to the page canvas.
+pub fn focus_region(value: &Value, page: Option<&str>, ids: &[String]) -> Result<Focus> {
+    let mut union: Option<kurbo::Rect> = None;
+    for id in ids {
+        let bounds = object_bounds(value, page, id)
+            .with_context(|| format!("[not-found] cannot focus on `{id}`"))?;
+        union = Some(union.map_or(bounds, |u| u.union(bounds)));
+    }
+    let union = union.context("[invalid-input] focus needs at least one object id")?;
+    let (width, height) = canvas_size(value, page)?;
+    let pad = (0.1 * union.width().max(union.height())).max(8.0);
+    let padded = union
+        .inflate(pad, pad)
+        .intersect(kurbo::Rect::new(0.0, 0.0, width, height));
+    if !(padded.width() > 0.0 && padded.height() > 0.0) {
+        anyhow::bail!("[invalid-input] the focused objects are outside the page")
+    }
+    Ok(Focus {
+        ids: ids.to_vec(),
+        x: padded.x0,
+        y: padded.y0,
+        width: padded.width(),
+        height: padded.height(),
+    })
+}
+
+/// Render the focused region with its long edge at most `max_edge` pixels.
+/// The page is rendered by the same renderer as `export` (within a pixel
+/// budget, so a tiny object on a huge page gets less zoom) and cropped, so
+/// every pixel equals the export at the reported scale. Returns the PNG and
+/// scale.
+pub fn png_region(
+    value: &Value,
+    document: &Path,
+    page: Option<&str>,
+    max_edge: u32,
+    focus: &Focus,
+) -> Result<(Vec<u8>, f32)> {
+    // One pixel of slack: the region's edges are rounded outwards.
+    let edge = Some(max_edge.saturating_sub(1).max(1));
+    let wanted = preview_scale(focus.width, focus.height, edge, 0.1)?;
+    let budget = if crate::composite::is_document(value) {
+        FOCUS_COMPOSITE_PIXELS
+    } else {
+        FOCUS_PAGE_PIXELS
+    };
+    let (bytes, scale) = render_page(value, document, page, |width, height| {
+        let fit = (budget / (width * height)).sqrt() as f32;
+        Ok(wanted.min(fit).max(0.1))
+    })?;
+    let image = ::image::load_from_memory(&bytes)
+        .context("could not decode the page render")?
+        .to_rgba8();
+    let (x, y, width, height) = focus.pixels(scale, image.dimensions());
+    let cropped = ::image::imageops::crop_imm(&image, x, y, width, height).to_image();
+    let mut out = std::io::Cursor::new(Vec::new());
+    cropped
+        .write_to(&mut out, ::image::ImageFormat::Png)
+        .context("could not encode the focused preview")?;
+    Ok((out.into_inner(), scale))
+}
+
+/// IDs of the objects on `page` that the change added or modified, in
+/// document order. A group counts as changed only for its own fields, not
+/// for changes inside it. `None` when nothing identifiable changed.
+fn changed_ids(before: &[u8], after: &Value, page: Option<&str>) -> Option<Vec<String>> {
+    let before: Value = serde_json::from_slice(before).ok()?;
+    let old: std::collections::HashMap<String, Value> =
+        objects(&before, page).into_iter().collect();
+    let changed: Vec<String> = objects(after, page)
+        .into_iter()
+        .filter(|(id, node)| old.get(id) != Some(node))
+        .map(|(id, _)| id)
+        .collect();
+    (!changed.is_empty()).then_some(changed)
+}
+
+/// `(id, fields without children)` for every object on the page.
+fn objects(value: &Value, page: Option<&str>) -> Vec<(String, Value)> {
+    fn walk(nodes: &Value, out: &mut Vec<(String, Value)>) {
+        for node in nodes.as_array().into_iter().flatten() {
+            if let Some(id) = node.get("id").and_then(Value::as_str) {
+                let mut own = node.clone();
+                if let Some(object) = own.as_object_mut() {
+                    object.remove("children");
+                }
+                out.push((id.to_owned(), own));
+            }
+            if let Some(children) = node.get("children") {
+                walk(children, out);
+            }
+        }
+    }
+    let layers = match value.get("pages").and_then(Value::as_array) {
+        Some(pages) if crate::scene::is_scene_document(value) => match page {
+            Some(id) => pages.iter().find(|p| p["id"] == id),
+            None => pages.first(),
+        }
+        .map(|page| &page["layers"]),
+        _ => value.get("layers"),
+    };
+    let mut out = Vec::new();
+    for layer in layers.and_then(Value::as_array).into_iter().flatten() {
+        for key in ["nodes", "paths", "texts"] {
+            if let Some(nodes) = layer.get(key) {
+                walk(nodes, &mut out);
+            }
+        }
+    }
+    out
 }
 
 /// First page whose content differs between the two documents, matched by
@@ -433,6 +703,33 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changed_ids_name_edited_objects_not_their_groups() {
+        let before = json!({"version": 4, "pages": [{"id": "p", "layers": [{"id": "l", "nodes": [
+            {"id": "g", "kind": "group", "children": [{"id": "a", "kind": "rect", "x": 1}]},
+            {"id": "b", "kind": "rect", "x": 2},
+        ]}]}]});
+        let mut after = before.clone();
+        after["pages"][0]["layers"][0]["nodes"][0]["children"][0]["x"] = json!(5);
+        after["pages"][0]["layers"][0]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": "c", "kind": "rect"}));
+        let bytes = serde_json::to_vec(&before).unwrap();
+        assert_eq!(
+            changed_ids(&bytes, &after, None),
+            Some(vec!["a".to_owned(), "c".to_owned()])
+        );
+        assert_eq!(changed_ids(&bytes, &before, None), None);
+        let legacy = json!({"version": 2, "layers": [{"id": "l", "paths": [{"id": "p1", "d": "M0 0"}], "texts": []}]});
+        let mut edited = legacy.clone();
+        edited["layers"][0]["paths"][0]["d"] = json!("M1 1");
+        assert_eq!(
+            changed_ids(&serde_json::to_vec(&legacy).unwrap(), &edited, None),
+            Some(vec!["p1".to_owned()])
+        );
+    }
 
     #[test]
     fn page_extent_selects_pages_and_falls_back_to_the_canvas() {

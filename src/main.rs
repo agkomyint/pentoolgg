@@ -54,6 +54,13 @@ struct Cli {
     /// Longest preview edge in pixels (default 1024, at most 8192).
     #[arg(long, global = true, value_name = "PX")]
     preview_size: Option<u32>,
+    /// Preview these objects (repeatable) at higher detail with a page thumbnail.
+    /// Without it a preview focuses on the objects the command changed.
+    #[arg(long, global = true, value_name = "ID", conflicts_with = "no_focus")]
+    focus: Vec<String>,
+    /// Preview the whole page instead of the changed objects.
+    #[arg(long, global = true)]
+    no_focus: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -4366,6 +4373,8 @@ async fn run() -> Result<()> {
             out: cli.preview_out.clone(),
             max_edge: cli.preview_size,
             page: cli.page.clone(),
+            focus: cli.focus.clone(),
+            no_focus: cli.no_focus,
         })?;
     }
     let selected_page = cli.page.as_deref();
