@@ -158,6 +158,8 @@ pub struct Settings {
     pub focus: Vec<String>,
     /// Always show the whole page.
     pub no_focus: bool,
+    /// Draw object IDs and bounds on the preview image.
+    pub annotate: bool,
 }
 
 /// The last commit of this process, kept until its preview is rendered.
@@ -387,9 +389,23 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
             .and_then(|ids| focus_region(value, page, &ids).ok())
             .filter(|focus| focus.is_small(value, page))
     };
-    let (bytes, scale) = match &focus {
+    let (mut bytes, scale, origin) = match &focus {
         Some(focus) => png_region(value, path, page, max_edge, focus)?,
-        None => png(value, path, page, max_edge)?,
+        None => {
+            let (bytes, scale) = png(value, path, page, max_edge)?;
+            (bytes, scale, (0, 0))
+        }
+    };
+    let annotations = if settings.annotate {
+        let ids = match &focus {
+            Some(focus) => focus.ids.clone(),
+            None => objects(value, page).into_iter().map(|(id, _)| id).collect(),
+        };
+        let (annotated, labels) = annotate(&bytes, value, page, scale, origin, &ids)?;
+        bytes = annotated;
+        Some(labels)
+    } else {
+        None
     };
     let (width, height) = png_size(&bytes).context("renderer returned an invalid PNG")?;
     let target = match &settings.out {
@@ -450,6 +466,9 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
     if let (Some(focus), Some(thumbnail)) = (focus, thumbnail) {
         result["focus"] = focus.to_json();
         result["thumbnail"] = thumbnail;
+    }
+    if let Some(annotations) = annotations {
+        result["annotations"] = annotations;
     }
     Ok(result)
 }
@@ -595,14 +614,14 @@ pub fn focus_region(value: &Value, page: Option<&str>, ids: &[String]) -> Result
 /// The page is rendered by the same renderer as `export` (within a pixel
 /// budget, so a tiny object on a huge page gets less zoom) and cropped, so
 /// every pixel equals the export at the reported scale. Returns the PNG and
-/// scale.
+/// scale, and the region's top-left corner in page pixels.
 pub fn png_region(
     value: &Value,
     document: &Path,
     page: Option<&str>,
     max_edge: u32,
     focus: &Focus,
-) -> Result<(Vec<u8>, f32)> {
+) -> Result<(Vec<u8>, f32, (u32, u32))> {
     // One pixel of slack: the region's edges are rounded outwards.
     let edge = Some(max_edge.saturating_sub(1).max(1));
     let wanted = preview_scale(focus.width, focus.height, edge, 0.1)?;
@@ -624,7 +643,119 @@ pub fn png_region(
     cropped
         .write_to(&mut out, ::image::ImageFormat::Png)
         .context("could not encode the focused preview")?;
-    Ok((out.into_inner(), scale))
+    Ok((out.into_inner(), scale, (x, y)))
+}
+
+/// Labels an annotated preview draws at most.
+pub const MAX_ANNOTATIONS: usize = 50;
+/// Objects whose bounds are looked up for labels at most, so a huge page with
+/// few visible objects stays bounded.
+const MAX_ANNOTATION_LOOKUPS: usize = 4 * MAX_ANNOTATIONS;
+const ANNOTATION_COLORS: [&str; 6] = [
+    "#e6194b", "#2f9e44", "#4363d8", "#e8590c", "#911eb4", "#0b7285",
+];
+
+/// Draw the bounds and ID of each object in `ids` that shows in the preview
+/// (`scale` page pixels per unit, cropped at `origin`). The overlay is drawn
+/// on the preview image only, never on the document or an export. Returns the
+/// annotated PNG and `{"labels": [{id, color, x, y, width, height}],
+/// "truncated"}` in preview pixels.
+fn annotate(
+    bytes: &[u8],
+    value: &Value,
+    page: Option<&str>,
+    scale: f32,
+    origin: (u32, u32),
+    ids: &[String],
+) -> Result<(Vec<u8>, Value)> {
+    let mut image = ::image::load_from_memory(bytes)
+        .context("could not decode the preview")?
+        .to_rgba8();
+    let (width, height) = image.dimensions();
+    let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+    let scale = f64::from(scale);
+    let (ox, oy) = (f64::from(origin.0), f64::from(origin.1));
+    let mut labels = Vec::new();
+    let mut truncated = false;
+    for (looked_up, id) in ids.iter().enumerate() {
+        if labels.len() == MAX_ANNOTATIONS || looked_up == MAX_ANNOTATION_LOOKUPS {
+            truncated = true;
+            break;
+        }
+        let Ok(bounds) = object_bounds(value, page, id) else {
+            continue;
+        };
+        let rect = kurbo::Rect::new(
+            bounds.x0 * scale - ox,
+            bounds.y0 * scale - oy,
+            bounds.x1 * scale - ox,
+            bounds.y1 * scale - oy,
+        )
+        .intersect(frame);
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
+            continue;
+        }
+        labels.push((id.as_str(), rect.round()));
+    }
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">"#
+    );
+    let mut list = Vec::new();
+    for (index, (id, rect)) in labels.iter().enumerate() {
+        let color = ANNOTATION_COLORS[index % ANNOTATION_COLORS.len()];
+        let text: String = if id.chars().count() > 32 {
+            id.chars().take(31).chain(std::iter::once('…')).collect()
+        } else {
+            (*id).to_owned()
+        };
+        let tag_width = 6.0 + 6.5 * text.chars().count() as f64;
+        let tag_y = if rect.y0 >= 14.0 {
+            rect.y0 - 14.0
+        } else {
+            rect.y0
+        };
+        let tag_x = rect.x0.min(f64::from(width) - tag_width).max(0.0);
+        svg.push_str(&format!(
+            r##"<rect x="{}" y="{}" width="{}" height="{}" fill="none" stroke="{color}" stroke-width="2"/><rect x="{tag_x}" y="{tag_y}" width="{tag_width}" height="14" fill="{color}"/><text x="{}" y="{}" font-family="{}" font-size="11" font-weight="700" fill="#ffffff">{}</text>"##,
+            rect.x0 + 1.0,
+            rect.y0 + 1.0,
+            (rect.width() - 2.0).max(1.0),
+            (rect.height() - 2.0).max(1.0),
+            tag_x + 3.0,
+            tag_y + 11.0,
+            crate::fonts::DEFAULT_FAMILY,
+            xml_escape(&text),
+        ));
+        list.push(json!({
+            "id": id,
+            "color": color,
+            "x": rect.x0,
+            "y": rect.y0,
+            "width": rect.width(),
+            "height": rect.height(),
+        }));
+    }
+    svg.push_str("</svg>");
+    let overlay = crate::render::svg_to_png(&svg, width, height, 1.0)?;
+    let overlay = ::image::load_from_memory(&overlay)
+        .context("could not decode the annotation overlay")?
+        .to_rgba8();
+    ::image::imageops::overlay(&mut image, &overlay, 0, 0);
+    let mut out = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut out, ::image::ImageFormat::Png)
+        .context("could not encode the annotated preview")?;
+    Ok((
+        out.into_inner(),
+        json!({ "labels": list, "truncated": truncated }),
+    ))
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// IDs of the objects on `page` that the change added or modified, in

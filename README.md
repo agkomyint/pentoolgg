@@ -952,6 +952,16 @@ disk. It shows the whole page unless `--focus ID` is given, and takes
 pentool preview artwork.pen --focus badge --max-size 512
 ```
 
+`--annotate` (with `pentool preview` or any mutating command; it implies
+`--preview`) draws each object's bounds and ID on the preview image, so an
+agent can name what it sees ("move `cloud-12` left") without a `tree` call.
+The result gains `annotations`: `labels` lists `id`, `color` and the box
+`x`, `y`, `width`, `height` in preview pixels, in document order (later labels
+are drawn on top), and `truncated` says whether objects were left out. A
+whole-page preview labels every object on the page, a focused one labels the
+focused objects; at most 50 labels are drawn. The overlay exists only in the
+preview image: the thumbnail, exports and the document never carry it.
+
 `export --max-size PX` does the same sizing for exports: it picks the scale so
 the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
 the largest page decides) and reports it as `"scale"` beside `"max_size"`. It

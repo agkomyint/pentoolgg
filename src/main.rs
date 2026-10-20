@@ -61,6 +61,10 @@ struct Cli {
     /// Preview the whole page instead of the changed objects.
     #[arg(long, global = true)]
     no_focus: bool,
+    /// Draw object IDs and bounds on the preview (never on exports) and list
+    /// them in its "annotations" (at most 50 labels). Implies --preview.
+    #[arg(long, global = true)]
+    annotate: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -3096,6 +3100,7 @@ enum Command {
     #[command(after_help = "Examples:
   pentool preview artwork.pen
   pentool preview artwork.pen --focus badge --max-size 512
+  pentool preview artwork.pen --annotate
   pentool preview artwork.pen --page page-2 --out page2.png")]
     Preview {
         input: PathBuf,
@@ -4384,12 +4389,14 @@ async fn run() -> Result<()> {
         pentool::preview::configure(pentool::preview::Settings {
             enabled: cli.preview
                 || cli.preview_out.is_some()
+                || cli.annotate
                 || std::env::var("PENTOOL_PREVIEW").is_ok_and(|value| value == "1"),
             out: cli.preview_out.clone(),
             max_edge: cli.preview_size,
             page: cli.page.clone(),
             focus: cli.focus.clone(),
             no_focus: cli.no_focus,
+            annotate: cli.annotate,
         })?;
     }
     let selected_page = cli.page.as_deref();
@@ -10782,6 +10789,7 @@ async fn run() -> Result<()> {
                     page: cli.page.clone(),
                     no_focus: cli.focus.is_empty(),
                     focus: cli.focus.clone(),
+                    annotate: cli.annotate,
                 },
             )?;
             println!("{}", serde_json::json!({ "preview": preview }));

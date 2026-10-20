@@ -28,6 +28,11 @@ are unchanged; new flags and JSON fields are additive.
   with the same `preview` object (no `dry_run`): the whole page, or the
   `--focus` objects with a thumbnail; `--page`, `--max-size PX` and
   `--out PATH` as above.
+- `--annotate` draws object IDs and bounds on the preview image (never on
+  exports or the thumbnail) and adds `annotations` with `labels` (`id`,
+  `color`, box in preview pixels) and `truncated`. It labels every object on
+  a whole-page preview, or the focused objects, at most 50, and implies
+  `--preview`.
 - `export --max-size PX` picks the export scale so the longest page edge is at
   most `PX` pixels (1 to 8192; with `--all-pages` the largest page decides),
   instead of the agent guessing `--scale`. The result adds `max_size` and the

@@ -534,3 +534,83 @@ fn preview_command_looks_without_writing() {
     }
     assert_eq!(fs::read(&doc).unwrap(), original);
 }
+
+#[test]
+fn annotate_labels_objects_on_the_preview_only() {
+    let space = Workspace::new("annotate");
+    let doc = space.document();
+    let path = doc.to_str().unwrap();
+    let plain = json(&pentool(&["preview", path], &[]));
+    let plain_bytes = fs::read(plain["preview"]["path"].as_str().unwrap()).unwrap();
+    let out = space.0.join("labels.png");
+    let result = json(&pentool(
+        &[
+            "preview",
+            path,
+            "--annotate",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+        &[],
+    ));
+    let annotations = &result["preview"]["annotations"];
+    let labels = annotations["labels"].as_array().unwrap();
+    assert!(!labels.is_empty());
+    assert_eq!(annotations["truncated"], false);
+    let ids: Vec<&str> = labels.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"title"), "{ids:?}");
+    let annotated = image::open(&out).unwrap().to_rgba8();
+    let plain = image::load_from_memory(&plain_bytes).unwrap().to_rgba8();
+    assert_eq!(annotated.dimensions(), plain.dimensions());
+    assert_ne!(annotated.as_raw(), plain.as_raw());
+    // The last label is drawn on top, in its color on its left edge.
+    let first = labels.last().unwrap();
+    let color = first["color"].as_str().unwrap();
+    let rgb = [1, 3, 5].map(|i| u8::from_str_radix(&color[i..i + 2], 16).unwrap());
+    let (x, y) = (
+        first["x"].as_f64().unwrap() as u32 + 1,
+        (first["y"].as_f64().unwrap() + first["height"].as_f64().unwrap() / 2.0) as u32,
+    );
+    assert_eq!(annotated.get_pixel(x, y).0[..3], rgb);
+
+    // Exports never carry the overlay.
+    let a = space.0.join("a.png");
+    let b = space.0.join("b.png");
+    json(&export(&doc, &a, &[]));
+    json(&export(&doc, &b, &["--annotate"]));
+    assert_eq!(fs::read(a).unwrap(), fs::read(b).unwrap());
+}
+
+#[test]
+fn annotate_with_focus_labels_the_focused_objects_in_crop_pixels() {
+    let space = Workspace::new("annotate-focus");
+    let doc = space.document();
+    let result = run(&rect(&doc, "box", &["--preview", "--annotate"]), &[]);
+    let preview = &result["preview"];
+    let labels = preview["annotations"]["labels"].as_array().unwrap();
+    assert_eq!(labels.len(), 1);
+    // The 50x50 box at (10,10), focused at (2,2) and scale 8.
+    assert_eq!(labels[0]["id"], "box");
+    assert_eq!(
+        [
+            &labels[0]["x"],
+            &labels[0]["y"],
+            &labels[0]["width"],
+            &labels[0]["height"]
+        ],
+        [64.0, 64.0, 400.0, 400.0]
+    );
+    // The page thumbnail stays clean.
+    let thumbnail = preview["thumbnail"]["path"].as_str().unwrap();
+    let clean = json(&pentool(
+        &["preview", doc.to_str().unwrap(), "--max-size", "256"],
+        &[],
+    ));
+    assert_eq!(
+        image::open(thumbnail).unwrap().to_rgba8().as_raw(),
+        image::open(clean["preview"]["path"].as_str().unwrap())
+            .unwrap()
+            .to_rgba8()
+            .as_raw()
+    );
+}
