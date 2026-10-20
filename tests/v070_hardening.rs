@@ -668,3 +668,36 @@ fn add_into_a_scene_graph_document_names_the_component_workflow() {
     assert!(stderr.contains("--component"), "{stderr}");
     assert_eq!(fs::read(&doc).unwrap(), before);
 }
+
+#[test]
+fn serve_reports_missing_document_and_busy_port_without_claiming_to_listen() {
+    let ws = Workspace::new("serve-errors");
+    let missing = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args([
+            "serve",
+            ws.path("nope.pen").to_str().unwrap(),
+            "--port",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(!String::from_utf8_lossy(&missing.stdout).contains("listening"));
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("[missing-resource]"));
+
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port().to_string();
+    let doc = ws.path("d.pen");
+    let made = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args(["new", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    let busy = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args(["serve", doc.to_str().unwrap(), "--port", &port])
+        .output()
+        .unwrap();
+    assert!(!busy.status.success());
+    assert!(!String::from_utf8_lossy(&busy.stdout).contains("listening"));
+    assert!(String::from_utf8_lossy(&busy.stderr).contains("[conflict]"));
+}

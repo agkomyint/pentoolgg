@@ -233,7 +233,21 @@ pub async fn serve_with(
     if let (Some(options), Some(path)) = (&collab, &file) {
         crate::collab::sync::check_bind(path, host, options.allow_insecure_lan)?;
     }
-    let listener = tokio::net::TcpListener::bind(address).await?;
+    if let Some(path) = &file {
+        if !path.is_file() {
+            bail!(
+                "[missing-resource] document not found: {}; create it with `pentool new` or check the path",
+                path.display()
+            );
+        }
+    }
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .with_context(|| {
+            format!(
+                "[conflict] could not listen on {address}; the port may already be in use, try another with --port"
+            )
+        })?;
     println!("Pentool listening on http://{address}");
     serve_listener(listener, file, no_cache, collab).await
 }
