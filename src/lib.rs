@@ -62,6 +62,7 @@ pub mod pdf;
 pub mod pdf_import;
 pub mod photo;
 pub mod preset;
+pub mod preview;
 pub mod psd_export;
 pub mod psd_import;
 pub mod publish;
