@@ -962,6 +962,20 @@ whole-page preview labels every object on the page, a focused one labels the
 focused objects; at most 50 labels are drawn. The overlay exists only in the
 preview image: the thumbnail, exports and the document never carry it.
 
+`--compare REV|FILE|before` (it also implies `--preview`) checks a change by
+numbers instead of by eye. It renders the same view of another state at the
+same scale and adds `compare` to the preview: `against`, its `revision`,
+`changed_pixels`, `changed_pct` and `changed_bbox` (preview pixels, or `null`
+when nothing changed). `before` is the state the command started from (for
+`pentool preview`, the start of the last recorded change); a 64-digit hex
+value is a revision from the document's history; anything else is a `.pen`
+file. When pixels changed, `diff.path` names an image beside the preview with
+the changed pixels in red over a faded copy:
+
+```sh
+pentool shape artwork.pen rect badge --layer ui --x 10 --y 10 --w 50 --h 50 --fill "#ff0000" --compare before
+```
+
 `export --max-size PX` does the same sizing for exports: it picks the scale so
 the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
 the largest page decides) and reports it as `"scale"` beside `"max_size"`. It

@@ -63,8 +63,8 @@ scene compositing and blur run on one thread.
 - [ ] **4. `pentool preview DOC`** for read-only looks: page, `--focus`,
   `--max-size`, `--annotate`, `--compare <revision|file>`. Same renderer and
   JSON shape as item 1.
-  *Implemented with page, `--focus`, `--max-size`, `--out` and
-  `--annotate`; `--compare` arrives with item 6.*
+  *Implemented with page, `--focus`, `--max-size`, `--out`, `--annotate`
+  and `--compare`.*
 - [ ] **5. Labeled overlay (`--annotate`).** Draw object IDs and bounds on the
   preview (never on export), capped at N labels, with the label list in the
   JSON. Agents can then name what they see ("move `cloud-12` left") instead of
@@ -76,6 +76,10 @@ scene compositing and blur run on one thread.
   `changed_pct` and `changed_bbox`, plus an optional diff image. Often the agent
   can verify "only the right thing moved" without reading an image. Reuse the
   `analyze` and `paint-review` comparison code.
+  *Implemented as the global `--compare REV|FILE|before` (implies
+  `--preview`) with tests in `tests/agent_preview.rs`. Those modules compare
+  scoped layer renders with their own options, so the preview keeps an exact
+  RGBA comparison of the two renders of the same view.*
 
 ### Faster CLI
 

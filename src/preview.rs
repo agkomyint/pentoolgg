@@ -160,6 +160,9 @@ pub struct Settings {
     pub no_focus: bool,
     /// Draw object IDs and bounds on the preview image.
     pub annotate: bool,
+    /// Count the preview pixels that differ from the same view of an earlier
+    /// revision, a file, or `before` (the state before this change).
+    pub compare: Option<String>,
 }
 
 /// The last commit of this process, kept until its preview is rendered.
@@ -362,6 +365,13 @@ pub fn view(path: &Path, settings: Settings) -> Result<Value> {
         value,
         dry_run: false,
     };
+    let mut pending = pending;
+    if settings.compare.as_deref() == Some("before") {
+        // The revision the last recorded change started from.
+        if let Some(entry) = crate::history::change_for(path, &bytes) {
+            pending.before = crate::history::version(path, &entry.before)?;
+        }
+    }
     let mut preview = write(&pending, &settings)?;
     if let Some(object) = preview.as_object_mut() {
         object.remove("dry_run");
@@ -389,25 +399,6 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
             .and_then(|ids| focus_region(value, page, &ids).ok())
             .filter(|focus| focus.is_small(value, page))
     };
-    let (mut bytes, scale, origin) = match &focus {
-        Some(focus) => png_region(value, path, page, max_edge, focus)?,
-        None => {
-            let (bytes, scale) = png(value, path, page, max_edge)?;
-            (bytes, scale, (0, 0))
-        }
-    };
-    let annotations = if settings.annotate {
-        let ids = match &focus {
-            Some(focus) => focus.ids.clone(),
-            None => objects(value, page).into_iter().map(|(id, _)| id).collect(),
-        };
-        let (annotated, labels) = annotate(&bytes, value, page, scale, origin, &ids)?;
-        bytes = annotated;
-        Some(labels)
-    } else {
-        None
-    };
-    let (width, height) = png_size(&bytes).context("renderer returned an invalid PNG")?;
     let target = match &settings.out {
         Some(out) => out.clone(),
         None => {
@@ -422,6 +413,29 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
             directory.join(format!("{stem}-{}{suffix}.png", &revision[..12]))
         }
     };
+    let (mut bytes, scale, origin) = match &focus {
+        Some(focus) => png_region(value, path, page, max_edge, focus)?,
+        None => {
+            let (bytes, scale) = png(value, path, page, max_edge)?;
+            (bytes, scale, (0, 0))
+        }
+    };
+    let comparison = match &settings.compare {
+        Some(against) => Some(compare(pending, against, &bytes, scale, origin, &target)?),
+        None => None,
+    };
+    let annotations = if settings.annotate {
+        let ids = match &focus {
+            Some(focus) => focus.ids.clone(),
+            None => objects(value, page).into_iter().map(|(id, _)| id).collect(),
+        };
+        let (annotated, labels) = annotate(&bytes, value, page, scale, origin, &ids)?;
+        bytes = annotated;
+        Some(labels)
+    } else {
+        None
+    };
+    let (width, height) = png_size(&bytes).context("renderer returned an invalid PNG")?;
     if let Some(parent) = target.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("could not create {}", parent.display()))?;
@@ -432,11 +446,7 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
         Some(_) => {
             let (bytes, scale) = png(value, path, page, THUMBNAIL_EDGE)?;
             let (width, height) = png_size(&bytes).context("renderer returned an invalid PNG")?;
-            let stem = target
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "preview".into());
-            let thumbnail = target.with_file_name(format!("{stem}-page.png"));
+            let thumbnail = sibling(&target, "page");
             crate::editing::atomic_write(&thumbnail, &bytes)
                 .with_context(|| format!("could not write preview {}", thumbnail.display()))?;
             Some(json!({
@@ -466,6 +476,9 @@ fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
     if let (Some(focus), Some(thumbnail)) = (focus, thumbnail) {
         result["focus"] = focus.to_json();
         result["thumbnail"] = thumbnail;
+    }
+    if let Some(comparison) = comparison {
+        result["compare"] = comparison;
     }
     if let Some(annotations) = annotations {
         result["annotations"] = annotations;
@@ -644,6 +657,117 @@ pub fn png_region(
         .write_to(&mut out, ::image::ImageFormat::Png)
         .context("could not encode the focused preview")?;
     Ok((out.into_inner(), scale, (x, y)))
+}
+
+/// `<stem>-<suffix>.png` beside a preview image.
+fn sibling(target: &Path, suffix: &str) -> PathBuf {
+    let stem = target
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "preview".into());
+    target.with_file_name(format!("{stem}-{suffix}.png"))
+}
+
+/// The document a preview is compared with: `before` (the state this change
+/// started from), a 64-digit history revision, or a `.pen` file. Returns its
+/// bytes and the path its relative resources resolve against.
+fn comparison_document(pending: &Pending, against: &str) -> Result<(Vec<u8>, PathBuf)> {
+    if against == "before" {
+        if pending.before.is_empty() {
+            anyhow::bail!(
+                "[not-found] no recorded change produced this revision; compare with a history revision or a file"
+            )
+        }
+        return Ok((pending.before.clone(), pending.path.clone()));
+    }
+    if against.len() == 64 && against.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Ok((
+            crate::history::version(&pending.path, against)?,
+            pending.path.clone(),
+        ));
+    }
+    let file = PathBuf::from(against);
+    let bytes = crate::resource::read_bounded(&file, 512 * 1024 * 1024)
+        .with_context(|| format!("[missing-resource] cannot read {}", file.display()))?;
+    Ok((bytes, file))
+}
+
+/// Compare the clean preview `image` (at `scale`, cropped at `origin`) with
+/// the same view of another document. Pixels outside the other render count
+/// as transparent. When any pixel differs, writes `<stem>-diff.png`: the
+/// preview faded to gray with the changed pixels in red.
+fn compare(
+    pending: &Pending,
+    against: &str,
+    image: &[u8],
+    scale: f32,
+    origin: (u32, u32),
+    target: &Path,
+) -> Result<Value> {
+    let (bytes, document) = comparison_document(pending, against)?;
+    let other: Value = serde_json::from_slice(&bytes)
+        .context("[malformed-resource] comparison document is not a .pen file")?;
+    let (rendered, _) = render_page(&other, &document, pending.page.as_deref(), |_, _| Ok(scale))
+        .context("could not render the comparison document")?;
+    let other = ::image::load_from_memory(&rendered)
+        .context("could not decode the comparison render")?
+        .to_rgba8();
+    let image = ::image::load_from_memory(image)
+        .context("could not decode the preview")?
+        .to_rgba8();
+    let (width, height) = image.dimensions();
+    let mut diff = ::image::RgbaImage::new(width, height);
+    let mut changed = 0u64;
+    let mut bbox: Option<(u32, u32, u32, u32)> = None;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        let then = other
+            .get_pixel_checked(x + origin.0, y + origin.1)
+            .copied()
+            .unwrap_or(::image::Rgba([0, 0, 0, 0]));
+        let out = if *pixel == then {
+            let [r, g, b, a] = pixel.0.map(u32::from);
+            // Luma over white, faded towards white.
+            let luma = (299 * r + 587 * g + 114 * b) / 1000;
+            let over_white = (luma * a + 255 * (255 - a)) / 255;
+            let faded = (255 - (255 - over_white) / 4) as u8;
+            ::image::Rgba([faded, faded, faded, 255])
+        } else {
+            changed += 1;
+            bbox = Some(match bbox {
+                None => (x, y, x, y),
+                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+            });
+            ::image::Rgba([255, 0, 0, 255])
+        };
+        diff.put_pixel(x, y, out);
+    }
+    let total = u64::from(width) * u64::from(height);
+    let mut result = json!({
+        "against": against,
+        "revision": crate::transaction::revision(&bytes),
+        "changed_pixels": changed,
+        "changed_pct": crate::json::round3(100.0 * changed as f64 / total.max(1) as f64),
+        "changed_bbox": bbox.map(|(x0, y0, x1, y1)| json!({
+            "x": x0,
+            "y": y0,
+            "width": x1 - x0 + 1,
+            "height": y1 - y0 + 1,
+        })),
+    });
+    if changed > 0 {
+        let path = sibling(target, "diff");
+        let mut out = std::io::Cursor::new(Vec::new());
+        diff.write_to(&mut out, ::image::ImageFormat::Png)
+            .context("could not encode the diff image")?;
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("could not create {}", parent.display()))?;
+        }
+        crate::editing::atomic_write(&path, &out.into_inner())
+            .with_context(|| format!("could not write preview {}", path.display()))?;
+        result["diff"] = json!({ "path": path.display().to_string() });
+    }
+    Ok(result)
 }
 
 /// Labels an annotated preview draws at most.

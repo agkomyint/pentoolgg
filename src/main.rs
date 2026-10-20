@@ -65,6 +65,11 @@ struct Cli {
     /// them in its "annotations" (at most 50 labels). Implies --preview.
     #[arg(long, global = true)]
     annotate: bool,
+    /// Report the preview pixels that differ from the same view of a history
+    /// revision, a .pen file, or `before` (the state before this change), and
+    /// write a diff image. Implies --preview.
+    #[arg(long, global = true, value_name = "REV|FILE|before")]
+    compare: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -3101,6 +3106,7 @@ enum Command {
   pentool preview artwork.pen
   pentool preview artwork.pen --focus badge --max-size 512
   pentool preview artwork.pen --annotate
+  pentool preview artwork.pen --compare before
   pentool preview artwork.pen --page page-2 --out page2.png")]
     Preview {
         input: PathBuf,
@@ -4390,6 +4396,7 @@ async fn run() -> Result<()> {
             enabled: cli.preview
                 || cli.preview_out.is_some()
                 || cli.annotate
+                || cli.compare.is_some()
                 || std::env::var("PENTOOL_PREVIEW").is_ok_and(|value| value == "1"),
             out: cli.preview_out.clone(),
             max_edge: cli.preview_size,
@@ -4397,6 +4404,7 @@ async fn run() -> Result<()> {
             focus: cli.focus.clone(),
             no_focus: cli.no_focus,
             annotate: cli.annotate,
+            compare: cli.compare.clone(),
         })?;
     }
     let selected_page = cli.page.as_deref();
@@ -10790,6 +10798,7 @@ async fn run() -> Result<()> {
                     no_focus: cli.focus.is_empty(),
                     focus: cli.focus.clone(),
                     annotate: cli.annotate,
+                    compare: cli.compare.clone(),
                 },
             )?;
             println!("{}", serde_json::json!({ "preview": preview }));

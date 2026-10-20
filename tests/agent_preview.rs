@@ -614,3 +614,87 @@ fn annotate_with_focus_labels_the_focused_objects_in_crop_pixels() {
             .as_raw()
     );
 }
+
+#[test]
+fn compare_counts_the_changed_pixels_and_writes_a_diff() {
+    let space = Workspace::new("compare");
+    let doc = space.document();
+    let original = fs::read(&doc).unwrap();
+    let path = doc.to_str().unwrap();
+    let result = run(
+        &rect(&doc, "box", &["--compare", "before", "--no-focus"]),
+        &[],
+    );
+    let preview = &result["preview"];
+    let compare = &preview["compare"];
+    assert_eq!(compare["against"], "before");
+    assert_eq!(compare["revision"].as_str().unwrap(), sha256(&original));
+    let scale = preview["scale"].as_f64().unwrap();
+    // The 50x50 box at (10,10), give or take antialiased edges.
+    let bbox = &compare["changed_bbox"];
+    for (key, expected) in [("x", 10.0), ("y", 10.0), ("width", 50.0), ("height", 50.0)] {
+        let got = bbox[key].as_f64().unwrap();
+        assert!((got - expected * scale).abs() <= 2.0, "{key}: {got} {bbox}");
+    }
+    let changed = compare["changed_pixels"].as_u64().unwrap();
+    let total = preview["width"].as_u64().unwrap() * preview["height"].as_u64().unwrap();
+    assert!(changed > 0 && changed <= bbox["width"].as_u64().unwrap().pow(2));
+    let pct = compare["changed_pct"].as_f64().unwrap();
+    assert!((pct - 100.0 * changed as f64 / total as f64).abs() < 0.001);
+    let diff = image::open(compare["diff"]["path"].as_str().unwrap())
+        .unwrap()
+        .to_rgba8();
+    let red = diff.pixels().filter(|p| p.0 == [255, 0, 0, 255]).count();
+    assert_eq!(red as u64, changed);
+
+    // The read-only command compares with a history revision, `before` (the
+    // last recorded change's start) or a file, and never writes the document.
+    let after = fs::read(&doc).unwrap();
+    let by_revision = json(&pentool(
+        &["preview", path, "--compare", &sha256(&original)],
+        &[],
+    ));
+    let by_before = json(&pentool(&["preview", path, "--compare", "before"], &[]));
+    assert_eq!(by_revision["preview"]["compare"]["changed_pixels"], changed);
+    assert_eq!(
+        by_before["preview"]["compare"]["changed_bbox"],
+        by_revision["preview"]["compare"]["changed_bbox"]
+    );
+    let same = space.0.join("same.pen");
+    fs::write(&same, &after).unwrap();
+    let unchanged = json(&pentool(
+        &["preview", path, "--compare", same.to_str().unwrap()],
+        &[],
+    ));
+    let compare = &unchanged["preview"]["compare"];
+    assert_eq!(compare["changed_pixels"], 0);
+    assert_eq!(compare["changed_bbox"], Value::Null);
+    assert!(compare.get("diff").is_none());
+    assert_eq!(fs::read(&doc).unwrap(), after);
+
+    let fresh = space.0.join("fresh.pen");
+    fs::write(&fresh, &original).unwrap();
+    for args in [
+        &["preview", path, "--compare", "missing.pen"][..],
+        &["preview", fresh.to_str().unwrap(), "--compare", "before"][..],
+        &["preview", path, "--compare", &"0".repeat(64)][..],
+    ] {
+        let output = pentool(args, &[]);
+        assert!(!output.status.success(), "{args:?}");
+    }
+}
+
+#[test]
+fn compare_in_a_focused_preview_uses_the_same_crop() {
+    let space = Workspace::new("compare-focus");
+    let doc = space.document();
+    let result = run(&rect(&doc, "box", &["--compare", "before"]), &[]);
+    let preview = &result["preview"];
+    assert_eq!(preview["focus"]["ids"], serde_json::json!(["box"]));
+    // Box (10,10)-(60,60) in a focus at (2,2), scale 8: pixels 64..464.
+    let bbox = &preview["compare"]["changed_bbox"];
+    assert_eq!(
+        [&bbox["x"], &bbox["y"], &bbox["width"], &bbox["height"]],
+        [64, 64, 400, 400]
+    );
+}

@@ -33,6 +33,10 @@ are unchanged; new flags and JSON fields are additive.
   `color`, box in preview pixels) and `truncated`. It labels every object on
   a whole-page preview, or the focused objects, at most 50, and implies
   `--preview`.
+- `--compare REV|FILE|before` renders the same view of a history revision, a
+  `.pen` file or the state before the change, and adds `compare` with
+  `changed_pixels`, `changed_pct`, `changed_bbox` and, when pixels changed, a
+  `diff` image (changed pixels in red). It implies `--preview`.
 - `export --max-size PX` picks the export scale so the longest page edge is at
   most `PX` pixels (1 to 8192; with `--all-pages` the largest page decides),
   instead of the agent guessing `--scale`. The result adds `max_size` and the
