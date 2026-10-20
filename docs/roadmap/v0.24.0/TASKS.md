@@ -63,6 +63,8 @@ scene compositing and blur run on one thread.
 - [ ] **4. `pentool preview DOC`** for read-only looks: page, `--focus`,
   `--max-size`, `--annotate`, `--compare <revision|file>`. Same renderer and
   JSON shape as item 1.
+  *Implemented with page, `--focus`, `--max-size` and `--out`;
+  `--annotate` and `--compare` arrive with items 5 and 6.*
 - [ ] **5. Labeled overlay (`--annotate`).** Draw object IDs and bounds on the
   preview (never on export), capped at N labels, with the label list in the
   JSON. Agents can then name what they see ("move `cloud-12` left") instead of

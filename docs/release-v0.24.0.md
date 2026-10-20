@@ -24,6 +24,10 @@ are unchanged; new flags and JSON fields are additive.
   the reported scale, so every pixel matches `export --scale`. `--focus ID`
   (repeatable) picks the objects and `--no-focus` shows the whole page; an
   unknown ID is reported as `preview.error`.
+- `pentool preview DOC` renders the document as it is on disk, read-only,
+  with the same `preview` object (no `dry_run`): the whole page, or the
+  `--focus` objects with a thumbnail; `--page`, `--max-size PX` and
+  `--out PATH` as above.
 - `export --max-size PX` picks the export scale so the longest page edge is at
   most `PX` pixels (1 to 8192; with `--all-pages` the largest page decides),
   instead of the agent guessing `--scale`. The result adds `max_size` and the

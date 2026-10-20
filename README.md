@@ -943,6 +943,15 @@ chosen objects instead; `--no-focus` always shows the whole page. More than 64
 changed objects, or none that can be identified (a page rename, say), show the
 whole page.
 
+`pentool preview DOC` takes the same look without changing anything: it
+prints `{"preview": {...}}` with the same fields for the document as it is on
+disk. It shows the whole page unless `--focus ID` is given, and takes
+`--page`, `--max-size PX` (default 1024) and `--out PATH`:
+
+```sh
+pentool preview artwork.pen --focus badge --max-size 512
+```
+
 `export --max-size PX` does the same sizing for exports: it picks the scale so
 the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
 the largest page decides) and reports it as `"scale"` beside `"max_size"`. It

@@ -339,6 +339,34 @@ fn render_page(
     Ok((crate::render::to_png(&doc, scale)?, scale))
 }
 
+/// Render the document as it is on disk, for `pentool preview`: the whole
+/// page, or the `--focus` objects with a page thumbnail. Never writes the
+/// document.
+pub fn view(path: &Path, settings: Settings) -> Result<Value> {
+    if let Some(edge) = settings.max_edge {
+        if !(1..=PREVIEW_MAX_EDGE).contains(&edge) {
+            anyhow::bail!("[invalid-input] --max-size must be in 1..={PREVIEW_MAX_EDGE}")
+        }
+    }
+    crate::editing::recover_interrupted_write(path)?;
+    let bytes = crate::resource::read_bounded(path, 512 * 1024 * 1024)
+        .with_context(|| format!("could not read {}", path.display()))?;
+    let value: Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
+    let pending = Pending {
+        path: path.to_owned(),
+        before: Vec::new(),
+        page: settings.page.clone(),
+        revision: crate::transaction::revision(&bytes),
+        value,
+        dry_run: false,
+    };
+    let mut preview = write(&pending, &settings)?;
+    if let Some(object) = preview.as_object_mut() {
+        object.remove("dry_run");
+    }
+    Ok(preview)
+}
+
 fn write(pending: &Pending, settings: &Settings) -> Result<Value> {
     let Pending {
         path,

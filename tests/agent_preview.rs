@@ -486,3 +486,51 @@ fn composite_focus_is_a_crop_of_the_composite_render() {
         image.to_rgba8().into_raw()
     );
 }
+
+#[test]
+fn preview_command_looks_without_writing() {
+    let space = Workspace::new("view");
+    let doc = space.document();
+    let original = fs::read(&doc).unwrap();
+    let path = doc.to_str().unwrap();
+    let result = json(&pentool(&["preview", path], &[]));
+    let preview = &result["preview"];
+    assert_eq!(preview["revision"].as_str().unwrap(), sha256(&original));
+    assert_eq!(preview["page"], "page-1");
+    assert!(preview.get("focus").is_none() && preview.get("dry_run").is_none());
+    let image = image::open(preview["path"].as_str().unwrap()).unwrap();
+    assert_eq!((image.width(), image.height()), (1024, 768));
+    assert_eq!(fs::read(&doc).unwrap(), original);
+
+    let out = space.0.join("card.png");
+    let result = json(&pentool(
+        &[
+            "preview",
+            path,
+            "--focus",
+            "title",
+            "--max-size",
+            "300",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+        &[],
+    ));
+    let preview = &result["preview"];
+    assert_eq!(preview["path"], out.display().to_string());
+    assert_eq!(preview["focus"]["ids"], serde_json::json!(["title"]));
+    let image = image::open(&out).unwrap();
+    assert!(image.width().max(image.height()) <= 300);
+    assert!(image::open(space.0.join("card-page.png")).is_ok());
+    assert_eq!(fs::read(&doc).unwrap(), original);
+
+    for args in [
+        &["preview", path, "--focus", "missing"][..],
+        &["preview", path, "--max-size", "0"][..],
+        &["preview", path, "--page", "nope"][..],
+    ] {
+        let output = pentool(args, &[]);
+        assert!(!output.status.success(), "{args:?}");
+    }
+    assert_eq!(fs::read(&doc).unwrap(), original);
+}

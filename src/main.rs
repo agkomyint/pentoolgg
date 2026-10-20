@@ -3091,6 +3091,21 @@ enum Command {
         #[command(subcommand)]
         action: editing::PathAction,
     },
+    /// Look at a document without changing it: render a size-bounded PNG of a
+    /// page, or of objects with --focus, and print where it is as JSON.
+    #[command(after_help = "Examples:
+  pentool preview artwork.pen
+  pentool preview artwork.pen --focus badge --max-size 512
+  pentool preview artwork.pen --page page-2 --out page2.png")]
+    Preview {
+        input: PathBuf,
+        /// Write the image here instead of DOC_DIR/.pentool/preview/.
+        #[arg(long, value_name = "PATH")]
+        out: Option<PathBuf>,
+        /// Longest image edge in pixels (default 1024, at most 8192).
+        #[arg(long, value_name = "PX")]
+        max_size: Option<u32>,
+    },
     /// Render a .pen document to PNG, SVG or PDF (selected by extension).
     Export {
         input: PathBuf,
@@ -10751,6 +10766,25 @@ async fn run() -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(&history::restore(&input, &revision)?)?
             );
+            Ok(())
+        }
+        Command::Preview {
+            input,
+            out,
+            max_size,
+        } => {
+            let preview = pentool::preview::view(
+                &input,
+                pentool::preview::Settings {
+                    enabled: true,
+                    out,
+                    max_edge: max_size.or(cli.preview_size),
+                    page: cli.page.clone(),
+                    no_focus: cli.focus.is_empty(),
+                    focus: cli.focus.clone(),
+                },
+            )?;
+            println!("{}", serde_json::json!({ "preview": preview }));
             Ok(())
         }
         Command::Export {
