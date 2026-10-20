@@ -546,45 +546,51 @@ pub fn over(dst: &mut RgbaImage, src: &RgbaImage, mode: &str, space: &str) -> Re
     // A transparent source leaves an sRGB backdrop byte-for-byte unchanged under
     // every separable mode: the mix is finite and is weighted by zero source alpha.
     let clear = space == "srgb" && separable(mode);
-    for (d, s) in dst.pixels_mut().zip(src.pixels()) {
-        // Exact shortcuts for the common cases: nothing to add / fully opaque source.
-        if clear && s[3] == 0 {
-            if d[3] == 0 {
-                *d = image::Rgba([0, 0, 0, 0]);
+    // Pixels are independent, so rows run on their own threads.
+    let width = dst.width() as usize * 4;
+    let source = src.as_raw();
+    crate::threads::rows(dst, width, |first, band| {
+        let src = &source[first * width..][..band.len()];
+        for (d, s) in band.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+            // Exact shortcuts for the common cases: nothing to add / fully opaque source.
+            if clear && s[3] == 0 {
+                if d[3] == 0 {
+                    d.fill(0);
+                }
+                continue;
             }
-            continue;
-        }
-        if plain && s[3] == 255 {
-            *d = *s;
-            continue;
-        }
-        let (sa, da) = (f64::from(s[3]) / 255.0, f64::from(d[3]) / 255.0);
-        let a = sa + da * (1.0 - sa);
-        if a == 0.0 {
-            *d = image::Rgba([0, 0, 0, 0]);
-            continue;
-        }
-        let mut cb = [0.0; 3];
-        let mut cs = [0.0; 3];
-        for i in 0..3 {
-            cb[i] = f64::from(d[i]) / 255.0;
-            cs[i] = f64::from(s[i]) / 255.0;
-            if space == "linear" {
-                cb[i] = to_linear(cb[i]);
-                cs[i] = to_linear(cs[i]);
+            if plain && s[3] == 255 {
+                d.copy_from_slice(s);
+                continue;
             }
+            let (sa, da) = (f64::from(s[3]) / 255.0, f64::from(d[3]) / 255.0);
+            let a = sa + da * (1.0 - sa);
+            if a == 0.0 {
+                d.fill(0);
+                continue;
+            }
+            let mut cb = [0.0; 3];
+            let mut cs = [0.0; 3];
+            for i in 0..3 {
+                cb[i] = f64::from(d[i]) / 255.0;
+                cs[i] = f64::from(s[i]) / 255.0;
+                if space == "linear" {
+                    cb[i] = to_linear(cb[i]);
+                    cs[i] = to_linear(cs[i]);
+                }
+            }
+            let composed = source_over(mode, [cb[0], cb[1], cb[2], da], [cs[0], cs[1], cs[2], sa]);
+            for i in 0..3 {
+                let c = composed[i];
+                d[i] = byte(if space == "linear" {
+                    to_srgb(c.clamp(0.0, 1.0))
+                } else {
+                    c
+                });
+            }
+            d[3] = byte(a);
         }
-        let composed = source_over(mode, [cb[0], cb[1], cb[2], da], [cs[0], cs[1], cs[2], sa]);
-        for i in 0..3 {
-            let c = composed[i];
-            d[i] = byte(if space == "linear" {
-                to_srgb(c.clamp(0.0, 1.0))
-            } else {
-                c
-            });
-        }
-        d[3] = byte(a);
-    }
+    });
     Ok(())
 }
 

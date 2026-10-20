@@ -577,44 +577,58 @@ fn box_pass(
 ) {
     let window = (2 * radius + 1) as f64;
     let r = radius as isize;
+    // Rows (horizontal) or column strips (vertical) run on their own threads;
+    // each line's arithmetic is unchanged, so the thread count never shows.
     if horizontal {
         let last = w as isize - 1;
-        for (row, dst) in src.chunks_exact(w).zip(out.chunks_exact_mut(w)) {
-            let get = |i: isize| &row[i.clamp(0, last) as usize];
-            let mut sum = [0.0; 4];
-            for k in -r..=r {
-                let v = get(k);
+        crate::threads::rows(out, w, |first, band| {
+            for (k, dst) in band.chunks_exact_mut(w).enumerate() {
+                let row = &src[(first + k) * w..][..w];
+                let get = |i: isize| &row[i.clamp(0, last) as usize];
+                let mut sum = [0.0; 4];
+                for k in -r..=r {
+                    let v = get(k);
+                    for c in 0..4 {
+                        sum[c] += v[c];
+                    }
+                }
+                for (i, d) in dst.iter_mut().enumerate() {
+                    let (enter, leave) = (get(i as isize + r + 1), get(i as isize - r));
+                    for c in 0..4 {
+                        d[c] = sum[c] / window;
+                        sum[c] += enter[c] - leave[c];
+                    }
+                }
+            }
+        });
+        return;
+    }
+    let last = h as isize - 1;
+    let strips = crate::threads::columns(w, w * h, |x0, x1| {
+        let row = |i: isize| &src[i.clamp(0, last) as usize * w..][x0..x1];
+        let mut sums = vec![[0.0; 4]; x1 - x0];
+        for k in -r..=r {
+            for (sum, v) in sums.iter_mut().zip(row(k)) {
                 for c in 0..4 {
                     sum[c] += v[c];
                 }
             }
-            for (i, d) in dst.iter_mut().enumerate() {
-                let (enter, leave) = (get(i as isize + r + 1), get(i as isize - r));
+        }
+        let mut strip = vec![[0.0; 4]; (x1 - x0) * h];
+        for (i, dst) in strip.chunks_exact_mut(x1 - x0).enumerate() {
+            let (enter, leave) = (row(i as isize + r + 1), row(i as isize - r));
+            for (((d, sum), e), l) in dst.iter_mut().zip(&mut sums).zip(enter).zip(leave) {
                 for c in 0..4 {
                     d[c] = sum[c] / window;
-                    sum[c] += enter[c] - leave[c];
+                    sum[c] += e[c] - l[c];
                 }
             }
         }
-        return;
-    }
-    let last = h as isize - 1;
-    let row = |i: isize| &src[i.clamp(0, last) as usize * w..][..w];
-    let mut sums = vec![[0.0; 4]; w];
-    for k in -r..=r {
-        for (sum, v) in sums.iter_mut().zip(row(k)) {
-            for c in 0..4 {
-                sum[c] += v[c];
-            }
-        }
-    }
-    for (i, dst) in out.chunks_exact_mut(w).enumerate() {
-        let (enter, leave) = (row(i as isize + r + 1), row(i as isize - r));
-        for (((d, sum), e), l) in dst.iter_mut().zip(&mut sums).zip(enter).zip(leave) {
-            for c in 0..4 {
-                d[c] = sum[c] / window;
-                sum[c] += e[c] - l[c];
-            }
+        strip
+    });
+    for (x0, x1, strip) in strips {
+        for (dst, line) in out.chunks_exact_mut(w).zip(strip.chunks_exact(x1 - x0)) {
+            dst[x0..x1].copy_from_slice(line);
         }
     }
 }

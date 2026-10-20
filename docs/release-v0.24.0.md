@@ -57,3 +57,8 @@ are unchanged; new flags and JSON fields are additive.
   revision-guard path as separate processes and write identical documents.
   On the 55-layer landscape (fast build, Windows): `tree` 4 ms per line
   against 27 ms per process; edit plus whole-page preview 89 ms per line.
+- Gradient fills, blur effects and layer blending run on up to 16 threads
+  (`std::thread::scope`, no new dependency). Every row is computed by the
+  same arithmetic as on one thread, so exports are byte-identical for any
+  thread count; `PENTOOL_THREADS=N` sets it and `1` forces one thread.
+  Uncached export of the 55-layer landscape at scale 2: 1315 ms to 1064 ms.

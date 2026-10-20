@@ -869,3 +869,53 @@ fn session_reports_bad_lines_and_keeps_going() {
     assert!(!flagged.status.success());
     assert!(String::from_utf8_lossy(&flagged.stderr).contains("put them on each line"));
 }
+
+#[test]
+fn thread_count_never_changes_rendered_bytes() {
+    let space = Workspace::new("threads");
+    let doc = space.document();
+    let path = doc.to_str().unwrap();
+    json(&pentool(&["migrate", path, "--target", "6"], &[]));
+    // A full-page gradient fill and a blurred, translucent ellipse exercise the
+    // parallel fill, blur and blend loops.
+    let mut value: Value = serde_json::from_slice(&fs::read(&doc).unwrap()).unwrap();
+    let nodes = value["pages"][0]["layers"][0]["nodes"]
+        .as_array_mut()
+        .unwrap();
+    nodes.insert(
+        0,
+        serde_json::json!({"kind":"fill","id":"sky","x":0,"y":0,"width":800,"height":600,
+            "fill":{"kind":"linear","x1":0,"y1":0,"x2":0,"y2":600,"stops":[
+                {"position":0,"color":"#2f7fd6"},{"position":0.55,"color":"#6fb3ea"},
+                {"position":1,"color":"#d4eefb"}]}}),
+    );
+    nodes.push(
+        serde_json::json!({"kind":"ellipse","id":"glow","cx":300,"cy":200,
+        "radius_x":170,"radius_y":120,"opacity":0.65,"style":{"fill":{"fallback":"#fff6d0"}},
+        "effects":[{"id":"soft","kind":"blur","enabled":true,"opacity":1,
+            "blend_mode":"normal","params":{"radius":40}}]}),
+    );
+    fs::write(&doc, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    let render = |name: &str, threads: &str| {
+        let out = space.0.join(name);
+        json(&pentool(
+            &[
+                "export",
+                path,
+                out.to_str().unwrap(),
+                "--scale",
+                "2",
+                "--no-cache",
+            ],
+            &[("PENTOOL_THREADS", threads)],
+        ));
+        fs::read(out).unwrap()
+    };
+    let one = render("one.png", "1");
+    for threads in ["2", "3", "8"] {
+        assert!(
+            render(&format!("{threads}.png"), threads) == one,
+            "{threads} threads changed the export"
+        );
+    }
+}

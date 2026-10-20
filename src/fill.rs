@@ -715,48 +715,91 @@ fn render_target(
     };
     let columns = pixel_span(corners.map(|p| p.x), width);
     let rows = pixel_span(corners.map(|p| p.y), height);
-    for y in rows {
-        crate::composite::check_cancelled()?;
-        for x in columns.clone() {
-            let mut sum = [0.0; 4];
-            for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
-                let p = inv
-                    * kurbo::Point::new(
-                        (f64::from(x) + sx) / f64::from(scale),
-                        (f64::from(y) + sy) / f64::from(scale),
-                    );
-                if p.x < bounds.0
-                    || p.y < bounds.1
-                    || p.x >= bounds.0 + bounds.2
-                    || p.y >= bounds.1 + bounds.3
+    // One output pixel: four samples averaged with premultiplied alpha.
+    let pixel = |x: u32,
+                 y: u32,
+                 mut engine: Option<&mut crate::color::value::Evaluator<'_>>,
+                 mut native: Option<&mut crate::color::gradient::Gradient>,
+                 clip: &mut bool|
+     -> Result<Option<[f64; 4]>> {
+        let mut sum = [0.0; 4];
+        for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+            let p = inv
+                * kurbo::Point::new(
+                    (f64::from(x) + sx) / f64::from(scale),
+                    (f64::from(y) + sy) / f64::from(scale),
+                );
+            if p.x < bounds.0
+                || p.y < bounds.1
+                || p.x >= bounds.0 + bounds.2
+                || p.y >= bounds.1 + bounds.3
+            {
+                continue;
+            }
+            let p = fill_inv * kurbo::Point::new(p.x - bounds.0, p.y - bounds.1);
+            let c = if let Some(solid) = solid {
+                solid
+            } else if let Some(pattern) = &pattern {
+                let px = (p.x - get("origin_x", 0.0)) / get("scale_x", 1.0);
+                let py = (p.y - get("origin_y", 0.0)) / get("scale_y", 1.0);
+                let repeat = fill["repeat"].as_str().unwrap_or("repeat");
+                if ((!matches!(repeat, "repeat" | "repeat-x"))
+                    && (px < 0.0 || px >= f64::from(pattern.width())))
+                    || ((!matches!(repeat, "repeat" | "repeat-y"))
+                        && (py < 0.0 || py >= f64::from(pattern.height())))
                 {
                     continue;
                 }
-                let p = fill_inv * kurbo::Point::new(p.x - bounds.0, p.y - bounds.1);
-                let c = if let Some(solid) = solid {
-                    solid
-                } else if let Some(pattern) = &pattern {
-                    let px = (p.x - get("origin_x", 0.0)) / get("scale_x", 1.0);
-                    let py = (p.y - get("origin_y", 0.0)) / get("scale_y", 1.0);
-                    let repeat = fill["repeat"].as_str().unwrap_or("repeat");
-                    if ((!matches!(repeat, "repeat" | "repeat-x"))
-                        && (px < 0.0 || px >= f64::from(pattern.width())))
-                        || ((!matches!(repeat, "repeat" | "repeat-y"))
-                            && (py < 0.0 || py >= f64::from(pattern.height())))
-                    {
-                        continue;
+                let pixel = pattern.get_pixel(
+                    px.rem_euclid(f64::from(pattern.width())).floor() as u32,
+                    py.rem_euclid(f64::from(pattern.height())).floor() as u32,
+                );
+                // Pattern assets are sRGB8 rasters, interpreted like images.
+                let rgba = [
+                    f64::from(pixel[0]) / 255.0,
+                    f64::from(pixel[1]) / 255.0,
+                    f64::from(pixel[2]) / 255.0,
+                    f64::from(pixel[3]) / 255.0,
+                ];
+                if let Some(working) = target.working {
+                    engine
+                        .as_deref_mut()
+                        .context("working fill color context missing")?
+                        .srgb_working_rgba(rgba, working)?
+                } else {
+                    rgba
+                }
+            } else {
+                let t = match kind {
+                    "linear" => {
+                        let (dx, dy) = (x2 - x1, y2 - y1);
+                        ((p.x - x1) * dx + (p.y - y1) * dy) / (dx * dx + dy * dy)
                     }
-                    let pixel = pattern.get_pixel(
-                        px.rem_euclid(f64::from(pattern.width())).floor() as u32,
-                        py.rem_euclid(f64::from(pattern.height())).floor() as u32,
-                    );
-                    // Pattern assets are sRGB8 rasters, interpreted like images.
-                    let rgba = [
-                        f64::from(pixel[0]) / 255.0,
-                        f64::from(pixel[1]) / 255.0,
-                        f64::from(pixel[2]) / 255.0,
-                        f64::from(pixel[3]) / 255.0,
-                    ];
+                    "radial" => {
+                        let (dx, dy) = (p.x - cx, p.y - cy);
+                        (dx * dx + dy * dy).sqrt() / radius
+                    }
+                    _ => {
+                        (atan2(p.y - cy, p.x - cx) - angle * std::f64::consts::PI / 180.0)
+                            .rem_euclid(std::f64::consts::TAU)
+                            / std::f64::consts::TAU
+                    }
+                };
+                if let Some(native) = native.as_deref_mut() {
+                    if let Some(working) = target.working {
+                        let (rgba, clipped) = native.sample_working(
+                            engine.as_deref_mut().unwrap(),
+                            working,
+                            t,
+                            spread,
+                        )?;
+                        *clip |= clipped;
+                        rgba
+                    } else {
+                        native.sample(engine.as_deref_mut().unwrap(), t, spread)?
+                    }
+                } else {
+                    let rgba = gradient(stops.as_ref().unwrap(), t, spread, space);
                     if let Some(working) = target.working {
                         engine
                             .as_deref_mut()
@@ -765,61 +808,75 @@ fn render_target(
                     } else {
                         rgba
                     }
-                } else {
-                    let t = match kind {
-                        "linear" => {
-                            let (dx, dy) = (x2 - x1, y2 - y1);
-                            ((p.x - x1) * dx + (p.y - y1) * dy) / (dx * dx + dy * dy)
-                        }
-                        "radial" => {
-                            let (dx, dy) = (p.x - cx, p.y - cy);
-                            (dx * dx + dy * dy).sqrt() / radius
-                        }
-                        _ => {
-                            (atan2(p.y - cy, p.x - cx) - angle * std::f64::consts::PI / 180.0)
-                                .rem_euclid(std::f64::consts::TAU)
-                                / std::f64::consts::TAU
-                        }
-                    };
-                    if let Some(native) = &mut native_gradient {
-                        if let Some(working) = target.working {
-                            let (rgba, clipped) = native.sample_working(
-                                engine.as_deref_mut().unwrap(),
-                                working,
-                                t,
-                                spread,
-                            )?;
-                            out.clipped(clipped);
-                            rgba
-                        } else {
-                            native.sample(engine.as_deref_mut().unwrap(), t, spread)?
-                        }
-                    } else {
-                        let rgba = gradient(stops.as_ref().unwrap(), t, spread, space);
-                        if let Some(working) = target.working {
-                            engine
-                                .as_deref_mut()
-                                .context("working fill color context missing")?
-                                .srgb_working_rgba(rgba, working)?
-                        } else {
-                            rgba
+                }
+            };
+            for i in 0..3 {
+                sum[i] += c[i] * c[3] * 0.25;
+            }
+            sum[3] += c[3] * 0.25;
+        }
+        if sum[3] == 0.0 {
+            return Ok(None);
+        }
+        let mut rgba = [0.0; 4];
+        for i in 0..3 {
+            rgba[i] = sum[i] / sum[3];
+        }
+        rgba[3] = sum[3];
+        Ok(Some(rgba))
+    };
+    if target.working.is_none() && native_gradient.is_none() {
+        // Plain sRGB fills use no color engine, so rows run in parallel; the
+        // cancellation checkpoints stay one per row on this thread.
+        for _ in rows.clone() {
+            crate::composite::check_cancelled()?;
+        }
+        let span = columns.len();
+        let mut pixels = vec![None; span * rows.len()];
+        let failure = std::sync::Mutex::new(None);
+        crate::threads::rows(&mut pixels, span.max(1), |first, band| {
+            for (k, line) in band.chunks_exact_mut(span.max(1)).enumerate() {
+                let y = rows.start + (first + k) as u32;
+                for (slot, x) in line.iter_mut().zip(columns.clone()) {
+                    match pixel(x, y, None, None, &mut false) {
+                        Ok(value) => *slot = value,
+                        Err(error) => {
+                            failure.lock().unwrap().get_or_insert(error);
+                            return;
                         }
                     }
-                };
-                for i in 0..3 {
-                    sum[i] += c[i] * c[3] * 0.25;
                 }
-                sum[3] += c[3] * 0.25;
             }
-            if sum[3] == 0.0 {
-                continue;
+        });
+        if let Some(error) = failure.into_inner().unwrap() {
+            return Err(error);
+        }
+        if span > 0 {
+            for (y, line) in rows.zip(pixels.chunks_exact(span)) {
+                for (x, value) in columns.clone().zip(line) {
+                    if let Some(rgba) = value {
+                        out.write(x, y, *rgba)?;
+                    }
+                }
             }
-            let mut rgba = [0.0; 4];
-            for i in 0..3 {
-                rgba[i] = sum[i] / sum[3];
+        }
+        return Ok(out);
+    }
+    for y in rows {
+        crate::composite::check_cancelled()?;
+        for x in columns.clone() {
+            let mut clipped = false;
+            let value = pixel(
+                x,
+                y,
+                engine.as_deref_mut(),
+                native_gradient.as_mut(),
+                &mut clipped,
+            )?;
+            out.clipped(clipped);
+            if let Some(rgba) = value {
+                out.write(x, y, rgba)?;
             }
-            rgba[3] = sum[3];
-            out.write(x, y, rgba)?;
         }
     }
     Ok(out)

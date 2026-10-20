@@ -95,6 +95,7 @@ pub mod svg_import;
 pub mod svg_paint;
 pub mod tables;
 pub mod text;
+pub mod threads;
 pub mod tokens;
 pub mod transaction;
 pub mod transform;

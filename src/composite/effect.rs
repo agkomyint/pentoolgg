@@ -222,56 +222,86 @@ fn blur(
 ) -> Result<()> {
     let (w, h) = result.dimensions();
     let width = w as usize;
+    let source = result.pixels();
     let mut planes = Vec::new();
-    planes.try_reserve_exact(result.pixels().len())?;
-    for pixel in result.pixels() {
-        let e = context.coordinates(*pixel, "srgb");
-        planes.push([e[0] * pixel[3], e[1] * pixel[3], e[2] * pixel[3], pixel[3]]);
-    }
+    planes.try_reserve_exact(source.len())?;
+    planes.resize(source.len(), [0.0; 4]);
+    crate::threads::rows(&mut planes, width, |first, band| {
+        for (plane, pixel) in band.iter_mut().zip(&source[first * width..]) {
+            let e = context.coordinates(*pixel, "srgb");
+            *plane = [e[0] * pixel[3], e[1] * pixel[3], e[2] * pixel[3], pixel[3]];
+        }
+    });
     check_cancelled()?;
     let blurred = crate::imageops::blur_planes(&planes, w, h, radius);
     drop(planes);
     check_cancelled()?;
     let blend = mode != "normal" || space != "srgb";
+    // Rows are mixed in parallel; the per-row checkpoints run here first.
+    for _ in 0..source.len().checked_div(width).unwrap_or(0) {
+        check_cancelled()?;
+    }
     let mut pixels = Vec::new();
     pixels.try_reserve_exact(blurred.len())?;
-    for (index, (original, b)) in result.pixels().iter().zip(&blurred).enumerate() {
-        if index % width == 0 {
-            check_cancelled()?;
-        }
-        let ba = b[3].clamp(0.0, 1.0);
-        let mut be = if ba <= 0.0 {
-            [0.0; 3]
-        } else {
-            [b[0] / ba, b[1] / ba, b[2] / ba]
-        };
-        if blend && original[3] > 0.0 && ba > 0.0 {
-            let blurred = context.working_coordinates([be[0], be[1], be[2], 1.0], "srgb");
-            let mixed = context.compose(
-                mode,
-                space,
-                [original[0], original[1], original[2], 1.0],
-                blurred,
-            )?;
-            let mixed = context.coordinates(mixed, "srgb");
-            be = [mixed[0], mixed[1], mixed[2]];
-        }
-        let oa = original[3];
-        let alpha = oa * (1.0 - opacity) + ba * opacity;
-        let encoded = context.coordinates(*original, "srgb");
-        let rgb = std::array::from_fn::<_, 3, _>(|i| {
-            if alpha == 0.0 {
-                0.0
-            } else {
-                (encoded[i] * oa * (1.0 - opacity) + be[i] * ba * opacity) / alpha
+    pixels.resize(blurred.len(), [0.0; 4]);
+    let failure = std::sync::Mutex::new(None);
+    crate::threads::rows(&mut pixels, width, |first, band| {
+        let start = first * width;
+        for ((slot, original), b) in band.iter_mut().zip(&source[start..]).zip(&blurred[start..]) {
+            match mixed(original, b, opacity, blend, mode, space, context) {
+                Ok(pixel) => *slot = pixel,
+                Err(error) => {
+                    failure.lock().unwrap().get_or_insert(error);
+                    return;
+                }
             }
-        });
-        pixels.push(
-            context.working_coordinates([rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0)], "srgb"),
-        );
+        }
+    });
+    if let Some(error) = failure.into_inner().unwrap() {
+        return Err(error);
     }
     *result = LinearSurface::from_pixels(w, h, result.space(), pixels)?;
     Ok(())
+}
+
+/// One blurred pixel mixed onto its original by `opacity`.
+fn mixed(
+    original: &[f64; 4],
+    b: &[f64; 4],
+    opacity: f64,
+    blend: bool,
+    mode: &str,
+    space: &str,
+    context: &LegacyBlendContext,
+) -> Result<[f64; 4]> {
+    let ba = b[3].clamp(0.0, 1.0);
+    let mut be = if ba <= 0.0 {
+        [0.0; 3]
+    } else {
+        [b[0] / ba, b[1] / ba, b[2] / ba]
+    };
+    if blend && original[3] > 0.0 && ba > 0.0 {
+        let blurred = context.working_coordinates([be[0], be[1], be[2], 1.0], "srgb");
+        let mixed = context.compose(
+            mode,
+            space,
+            [original[0], original[1], original[2], 1.0],
+            blurred,
+        )?;
+        let mixed = context.coordinates(mixed, "srgb");
+        be = [mixed[0], mixed[1], mixed[2]];
+    }
+    let oa = original[3];
+    let alpha = oa * (1.0 - opacity) + ba * opacity;
+    let encoded = context.coordinates(*original, "srgb");
+    let rgb = std::array::from_fn::<_, 3, _>(|i| {
+        if alpha == 0.0 {
+            0.0
+        } else {
+            (encoded[i] * oa * (1.0 - opacity) + be[i] * ba * opacity) / alpha
+        }
+    });
+    Ok(context.working_coordinates([rgb[0], rgb[1], rgb[2], alpha.clamp(0.0, 1.0)], "srgb"))
 }
 
 /// Blurred, offset coverage of the source (or its complement for inner kinds).

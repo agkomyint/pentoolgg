@@ -114,6 +114,15 @@ scene compositing and blur run on one thread.
   `std::thread::scope` (no new dependency), as `photo/adjust.rs` already does.
   Results must be byte-identical whatever the thread count; `PENTOOL_THREADS=1`
   forces one thread.
+  _Implemented in `src/threads.rs` (`rows`, `columns`; inline below 64K
+  elements) and used by the box blur, byte `blend::over`, plain sRGB fills in
+  `src/fill.rs` and the composite blur effect. Cancellation checkpoints keep
+  their count and run on the calling thread. Covered by
+  `blur_and_blend_bytes_do_not_depend_on_the_thread_count` (1 against 2, 3,
+  7, 16 threads) and `thread_count_never_changes_rendered_bytes` (export with
+  `PENTOOL_THREADS` 1, 2, 3, 8). Landscape at scale 2: 1315 ms to 1064 ms,
+  identical bytes. Color-managed (working-space) fills stay sequential
+  because their color engine is mutable per call._
 - [ ] **10. Cold start.** Find what the first export after boot spends its
   1.5 s on (font discovery is the suspect) and make it lazy, or cache it in
   `.pentool/`.

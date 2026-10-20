@@ -995,6 +995,11 @@ line gets an error reply and the session continues. Documents are read and
 written exactly as single commands do, with the same locks, history and
 `--if-revision` guards; `serve` and nested sessions are refused.
 
+Rendering splits gradient fills, blurs and layer blending across the CPU's
+cores (at most 16). Each row is computed exactly as on one thread, so the
+bytes never depend on the thread count; `PENTOOL_THREADS=N` sets it, and
+`PENTOOL_THREADS=1` renders on one thread.
+
 ```sh
 printf '%s\n' '["tree","art.pen","--limit","5"]' \
   '{"id":2,"args":["shape","art.pen","rect","badge","--layer","ui","--x","10","--y","10","--w","50","--h","50","--preview"]}' \
