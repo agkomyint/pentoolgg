@@ -770,6 +770,115 @@ fn render_cache_reuses_layers_between_calls_without_changing_bytes() {
     assert_eq!(fs::read(&preview).unwrap(), scaled);
 }
 
+#[test]
+fn render_cache_follows_scale_page_size_fonts_and_linked_files() {
+    let space = Workspace::new("render-cache-keys");
+    let doc = space.document();
+    let path = doc.to_str().unwrap();
+    json(&pentool(&["migrate", path, "--target", "6"], &[]));
+    let photo = space.0.join("photo.png");
+    let pixels = |color: [u8; 4]| image::RgbaImage::from_pixel(40, 20, image::Rgba(color));
+    pixels([200, 40, 40, 255]).save(&photo).unwrap();
+    json(&pentool(
+        &[
+            "image",
+            "add",
+            path,
+            "photo",
+            "--file",
+            "photo.png",
+            "--layer",
+            "content",
+            "--x",
+            "300",
+            "--width",
+            "120",
+            "--height",
+            "60",
+            "--external",
+        ],
+        &[],
+    ));
+    json(&pentool(
+        &[
+            "text",
+            path,
+            "put",
+            "title",
+            "--layer",
+            "content",
+            "--content",
+            "Cache",
+            "--x",
+            "40",
+            "--y",
+            "200",
+            "--size",
+            "48",
+            "--font",
+            "Brand Test",
+        ],
+        &[],
+    ));
+    let render = |name: &str, extra: &[&str], cached: bool| {
+        let out = space.0.join(name);
+        let args = [&["export", path, out.to_str().unwrap()], extra].concat();
+        let args = [&args[..], if cached { &[] } else { &["--no-cache"][..] }].concat();
+        let output = pentool(&args, &[]);
+        (output.status.success(), fs::read(out).ok())
+    };
+    // Every cached render matches a render without the cache.
+    let check = |step: &str, extra: &[&str]| {
+        let warm_up = render(&format!("{step}-cold.png"), extra, true);
+        let cached = render(&format!("{step}-warm.png"), extra, true);
+        let fresh = render(&format!("{step}-fresh.png"), extra, false);
+        assert!(fresh.0, "{step}: the uncached export failed");
+        assert!(
+            warm_up == fresh && cached == fresh,
+            "{step} changed the bytes"
+        );
+        fresh.1.unwrap()
+    };
+
+    let base = check("base", &[]);
+    assert!(!cache_entries(&doc).is_empty());
+    assert_ne!(check("scale", &["--scale", "2"]), base);
+
+    let mut value: Value = serde_json::from_slice(&fs::read(&doc).unwrap()).unwrap();
+    let width = value["pages"][0]["canvas"]["width"].as_f64().unwrap();
+    value["pages"][0]["canvas"]["width"] = (width + 64.0).into();
+    fs::write(&doc, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    let wider = check("page-size", &[]);
+    assert_ne!(wider, base);
+
+    json(&pentool(
+        &[
+            "font",
+            path,
+            "add",
+            "Brand Test",
+            "--file",
+            "assets/fonts/AtkinsonHyperlegible-Bold.ttf",
+        ],
+        &[],
+    ));
+    // Document fonts are part of every cache key; text is never cached.
+    check("font", &[]);
+
+    // A changed linked file is read again, never served from the cache.
+    pixels([40, 40, 200, 255]).save(&photo).unwrap();
+    let relinked_cached = render("linked-warm.png", &[], true);
+    let relinked_fresh = render("linked-fresh.png", &[], false);
+    assert_eq!(relinked_cached, relinked_fresh);
+
+    // An unusable cache directory is only a slower render.
+    let cache = space.0.join(".pentool").join("cache");
+    fs::remove_dir_all(&cache).unwrap();
+    fs::write(&cache, b"not a directory").unwrap();
+    let blocked = render("blocked.png", &[], true);
+    assert_eq!(blocked, render("blocked-fresh.png", &[], false));
+}
+
 fn session(lines: &[String]) -> Vec<Value> {
     use std::io::Write;
     let mut child = Command::new(env!("CARGO_BIN_EXE_pentool"))

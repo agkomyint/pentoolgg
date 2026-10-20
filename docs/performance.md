@@ -336,3 +336,31 @@ PNG SHA-256 matched the default release binary's CPU-reference render:
 `e8d807bebf56bf0d26ab16809134ad13c55f4373ee00a0e608e0379486dca940`. This
 qualifies the current optional GPU resolve path on this device; it does not make
 GPU output normative or replace cross-platform CI measurements.
+
+## Agent loop (v0.24)
+
+`scripts/bench-agent-loop.py --baseline OLD --pentool NEW` times ten steps of
+an agent's loop: add a rectangle, then look at the whole page at 1024 px. The
+baseline runs `shape` then `export --scale` (two processes per step, as an
+agent had to with v0.23.0). The current binary runs the same two commands
+(render cache warm), then one `shape ... --preview` per step, then all ten
+steps through one `pentool session --jsonl`. It uses
+`docs/fixtures/v4-scene.pen` and a generated 55-layer 1200x675 document
+(gradient sky, 18 blurred ellipses, 29 shapes, 6 text labels). Every image is
+compared with the baseline's export of the same state and must be
+byte-identical; the script fails otherwise.
+
+CI runs it in the `binary-size` job on Linux x64, Windows x64 and Apple
+Silicon macOS against the published v0.23.0 binaries and writes the table to
+the job summary. Local result, Windows 11 x64, release build against the
+v0.23.0 release artifact, median of three runs, milliseconds per step
+(2026-10-20):
+
+| Document | v0.23.0 edit+export | edit+export | `--preview` | session |
+| --- | ---: | ---: | ---: | ---: |
+| small | 498 | 406 | 361 | 98 |
+| 55 layers | 780 | 494 | 423 | 300 |
+
+On this machine starting a process costs about 75–110 ms before `main`, so a
+session saves that per step. The 55-layer session step spends most of its
+time rendering the 1024 px page, where the text layers are never cached.

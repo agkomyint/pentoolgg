@@ -117,6 +117,17 @@ jobs:
       - name: Check static 3D CPU render budget
         shell: bash
         run: ./target/release/${{ matrix.binary }} benchmark --scene3d --triangles 100000 --repetitions 1 --max-ms 30000
+      - name: Agent loop against v0.23.0 (byte-identical images, timings in the job summary)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PY=$(command -v python3 || command -v python)
+          gh release download v0.23.0 --pattern "pentool-v0.23.0-${{ matrix.name }}.*" --dir "$RUNNER_TEMP/baseline"
+          "$PY" -c "import glob,shutil,sys; shutil.unpack_archive(glob.glob(sys.argv[1] + '/pentool-*')[0], sys.argv[1] + '/x')" "$RUNNER_TEMP/baseline"
+          baseline=$(find "$RUNNER_TEMP/baseline/x" -name "${{ matrix.binary }}" -type f | head -n 1)
+          chmod +x "$baseline"
+          "$PY" scripts/bench-agent-loop.py --baseline "$baseline" --pentool target/release/${{ matrix.binary }} | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: release-binary-${{ matrix.name }}
