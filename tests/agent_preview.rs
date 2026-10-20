@@ -324,3 +324,66 @@ fn preview_directory_is_bounded() {
         .count();
     assert_eq!(kept, 32);
 }
+
+fn export(doc: &Path, out: &Path, extra: &[&str]) -> Output {
+    let mut args = vec!["export", doc.to_str().unwrap(), out.to_str().unwrap()];
+    args.extend_from_slice(extra);
+    pentool(&args, &[])
+}
+
+#[test]
+fn export_max_size_picks_the_scale_for_the_long_edge() {
+    let space = Workspace::new("max-size");
+    let doc = space.document(); // 320 x 240
+    for (size, short) in [(200, 150), (333, 250), (1000, 750), (2560, 1920)] {
+        let out = space.0.join(format!("max-{size}.png"));
+        let result = json(&export(&doc, &out, &["--max-size", &size.to_string()]));
+        assert_eq!(result["max_size"], size);
+        let image = image::open(&out).unwrap();
+        assert_eq!((image.width(), image.height()), (size, short), "{result}");
+    }
+    // Same pixels as the equivalent --scale export.
+    let by_scale = space.0.join("scale.png");
+    let plain = json(&export(&doc, &by_scale, &["--scale", "0.625"]));
+    assert!(plain.get("scale").is_none() && plain.get("max_size").is_none());
+    assert_eq!(
+        fs::read(&by_scale).unwrap(),
+        fs::read(space.0.join("max-200.png")).unwrap()
+    );
+}
+
+#[test]
+fn export_max_size_works_for_composite_documents() {
+    let space = Workspace::new("max-size-composite");
+    let doc = space.document();
+    json(&pentool(
+        &["migrate", doc.to_str().unwrap(), "--target", "6"],
+        &[],
+    ));
+    let out = space.0.join("out.png");
+    json(&export(&doc, &out, &["--max-size", "500"]));
+    let image = image::open(&out).unwrap();
+    assert_eq!((image.width(), image.height()), (500, 375));
+}
+
+#[test]
+fn export_max_size_rejects_bad_bounds_before_writing() {
+    let space = Workspace::new("max-size-bad");
+    let doc = space.document();
+    let out = space.0.join("out.png");
+    for (args, message) in [
+        (&["--max-size", "10"][..], "[limit-exceeded]"),
+        (&["--max-size", "0"][..], "--max-size must be in"),
+        (&["--max-size", "9000"][..], "--max-size must be in"),
+        (
+            &["--max-size", "100", "--scale", "2"][..],
+            "cannot be used with",
+        ),
+    ] {
+        let output = export(&doc, &out, args);
+        assert!(!output.status.success(), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{args:?}: {stderr}");
+        assert!(!out.exists());
+    }
+}

@@ -3093,6 +3093,10 @@ enum Command {
         report: Option<PathBuf>,
         #[arg(long, default_value_t = 1.0)]
         scale: f32,
+        /// Pick the scale so the longest page edge is at most PX pixels (1 to 8192);
+        /// with --all-pages the largest page decides. Replaces --scale.
+        #[arg(long, value_name = "PX", conflicts_with = "scale")]
+        max_size: Option<u32>,
         /// Convert text to glyph outlines for a font-independent SVG.
         #[arg(long)]
         outline_text: bool,
@@ -10744,7 +10748,8 @@ async fn run() -> Result<()> {
             input,
             output,
             report,
-            scale,
+            mut scale,
+            max_size,
             outline_text,
             all_pages,
             format,
@@ -10752,6 +10757,14 @@ async fn run() -> Result<()> {
             layers,
             renderer,
         } => {
+            if let Some(max_size) = max_size {
+                let raw: serde_json::Value = serde_json::from_slice(
+                    &pentool::resource::read_bounded(&input, 512 * 1024 * 1024)?,
+                )
+                .context("export source is not a valid Pentool document")?;
+                let extent = pentool::preview::page_extent(&raw, selected_page, all_pages)?;
+                scale = pentool::preview::fit_scale(extent, max_size)?;
+            }
             let renderer = match renderer.as_str() {
                 "reference" => pentool::scene3d::node::RendererPreference::Reference,
                 "accelerated" => pentool::scene3d::node::RendererPreference::Accelerated,
@@ -11147,10 +11160,12 @@ async fn run() -> Result<()> {
                     serde_json::json!(report.as_ref().unwrap().display().to_string()),
                 );
             }
-            println!(
-                "{}",
-                serde_json::json!({"exported":output.display().to_string(),"fidelity":fidelity_summary})
-            );
+            let mut result = serde_json::json!({"exported":output.display().to_string(),"fidelity":fidelity_summary});
+            if let Some(max_size) = max_size {
+                result["max_size"] = serde_json::json!(max_size);
+                result["scale"] = serde_json::json!(scale);
+            }
+            println!("{result}");
             Ok(())
         }
     }

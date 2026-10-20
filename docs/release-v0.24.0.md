@@ -17,3 +17,9 @@ are unchanged; new flags and JSON fields are additive.
   newest. A failed preview is reported as `preview.error` and never fails an
   edit that already committed. Without previews every command prints exactly
   the same bytes as before; the Studio server never renders CLI previews.
+- `export --max-size PX` picks the export scale so the longest page edge is at
+  most `PX` pixels (1 to 8192; with `--all-pages` the largest page decides),
+  instead of the agent guessing `--scale`. The result adds `max_size` and the
+  chosen `scale`. It cannot be combined with `--scale`, and a bound that would
+  need a scale below 0.1 fails with `[limit-exceeded]` before anything is
+  written. Exports without it print the same bytes as before.

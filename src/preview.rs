@@ -88,6 +88,59 @@ pub fn preview_scale(width: f64, height: f64, max_edge: Option<u32>, min: f32) -
     Ok((scale as f32).max(min))
 }
 
+/// Longest canvas edge, in document units, of the selected page (the first
+/// page when none is selected) or of every page. Legacy documents without
+/// pages use their top-level canvas.
+pub fn page_extent(value: &Value, page: Option<&str>, all_pages: bool) -> Result<f64> {
+    let edge = |canvas: &Value| -> Option<f64> {
+        let width = canvas.get("width")?.as_f64()?;
+        let height = canvas.get("height")?.as_f64()?;
+        Some(width.max(height))
+    };
+    let pages = value
+        .get("pages")
+        .and_then(Value::as_array)
+        .filter(|pages| !pages.is_empty());
+    let extent = match (pages, page) {
+        (Some(pages), _) if all_pages => pages
+            .iter()
+            .filter_map(|p| p.get("canvas").and_then(edge))
+            .reduce(f64::max),
+        (Some(pages), Some(id)) => pages
+            .iter()
+            .find(|p| p.get("id").and_then(Value::as_str) == Some(id))
+            .with_context(|| format!("[not-found] page not found: {id}"))?
+            .get("canvas")
+            .and_then(edge),
+        (Some(pages), None) => pages[0].get("canvas").and_then(edge),
+        (None, _) => None,
+    };
+    extent
+        .or_else(|| value.get("canvas").and_then(edge))
+        .filter(|extent| extent.is_finite() && *extent > 0.0)
+        .context("[invalid-input] document has no canvas size")
+}
+
+/// Largest export scale (within the renderer's 0.1 to 8 range) at which a
+/// canvas whose longest edge is `extent` renders no more than `max_size`
+/// pixels long, whichever way the renderer rounds.
+pub fn fit_scale(extent: f64, max_size: u32) -> Result<f32> {
+    if !(1..=PREVIEW_MAX_EDGE).contains(&max_size) {
+        anyhow::bail!("[invalid-input] --max-size must be in 1..={PREVIEW_MAX_EDGE}")
+    }
+    let mut scale = ((f64::from(max_size) / extent).min(8.0)) as f32;
+    while scale > 0.0 && (extent * f64::from(scale)).ceil() > f64::from(max_size) {
+        scale = f32::from_bits(scale.to_bits() - 1);
+    }
+    if scale < 0.1 {
+        anyhow::bail!(
+            "[limit-exceeded] --max-size {max_size} needs scale {scale:.4} for a {extent} unit canvas; the smallest export scale is 0.1, so use --max-size {} or more",
+            (extent * 0.1).ceil()
+        )
+    }
+    Ok(scale)
+}
+
 /// Long edge of a CLI preview when `--preview-size` is not given: sized for
 /// model input, not for print.
 pub const DEFAULT_PREVIEW_EDGE: u32 = 1024;
@@ -380,6 +433,37 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_extent_selects_pages_and_falls_back_to_the_canvas() {
+        let doc = json!({"pages": [
+            {"id": "a", "canvas": {"width": 300, "height": 200}},
+            {"id": "b", "canvas": {"width": 100, "height": 900}},
+        ]});
+        assert_eq!(page_extent(&doc, None, false).unwrap(), 300.0);
+        assert_eq!(page_extent(&doc, Some("b"), false).unwrap(), 900.0);
+        assert_eq!(page_extent(&doc, None, true).unwrap(), 900.0);
+        assert!(page_extent(&doc, Some("c"), false).is_err());
+        let legacy = json!({"canvas": {"width": 640, "height": 480}});
+        assert_eq!(page_extent(&legacy, None, false).unwrap(), 640.0);
+        assert!(page_extent(&json!({}), None, false).is_err());
+    }
+
+    #[test]
+    fn fit_scale_never_rounds_past_the_bound() {
+        for extent in [1.0, 3.0, 7.0, 320.0, 333.3, 1199.0, 1200.0, 4096.0] {
+            for max in [1, 7, 100, 333, 1024, 8192] {
+                if let Ok(scale) = fit_scale(extent, max) {
+                    assert!((extent * f64::from(scale)).ceil() <= f64::from(max));
+                    assert!((0.1..=8.0).contains(&scale));
+                }
+            }
+        }
+        assert_eq!(fit_scale(320.0, 200).unwrap(), 0.625);
+        assert_eq!(fit_scale(100.0, 8192).unwrap(), 8.0);
+        assert!(fit_scale(1000.0, 50).is_err());
+        assert!(fit_scale(1000.0, 0).is_err());
+    }
 
     #[test]
     fn preview_joins_json_objects_keeping_their_layout() {

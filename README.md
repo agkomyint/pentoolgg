@@ -933,6 +933,15 @@ the 32 newest are kept and older ones are removed. A preview that cannot be
 rendered or written is reported as `"preview": {"error": ...}`; the edit itself
 still succeeds. Read-only commands print exactly what they print without it.
 
+`export --max-size PX` does the same sizing for exports: it picks the scale so
+the longest page edge is at most `PX` pixels (1 to 8192; with `--all-pages`
+the largest page decides) and reports it as `"scale"` beside `"max_size"`. It
+replaces `--scale`, so the two cannot be combined:
+
+```sh
+pentool export artwork.pen artwork.png --max-size 800
+```
+
 Unknown JSON extension fields follow objects through rename, duplicate, move,
 and reorder. Locked source/target layers reject mutations. Object matching never
 guesses: mutation commands require exact layer and object IDs. Inside a layer,
