@@ -1,6 +1,6 @@
 [package]
 name = "pentool"
-version = "0.24.0"
+version = "0.24.1"
 edition = "2021"
 # Legacy integration tests are grouped into 12 suites under tests/suites/.
 # Milestone-specific integration suites are declared explicitly below so CI
