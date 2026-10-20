@@ -1000,9 +1000,9 @@ cores (at most 16). Each row is computed exactly as on one thread, so the
 bytes never depend on the thread count; `PENTOOL_THREADS=N` sets it, and
 `PENTOOL_THREADS=1` renders on one thread.
 
-On Windows and macOS the list of installed fonts is also kept between calls
-(`%LOCALAPPDATA%\pentool\fonts.bin`, `~/Library/Caches/pentool/fonts.bin`),
-so text renders do not open every system font file. It is used only while a
+On Windows the list of installed fonts is also kept between calls
+(`%LOCALAPPDATA%\pentool\fonts.bin`), so text renders do not open every
+system font file. It is used only while a
 listing of the font files in those folders (names, sizes and times) is
 unchanged, and it is rebuilt for each new `pentool` binary; `--no-cache` and
 `PENTOOL_CACHE=0` skip it. Pages without text never look at installed fonts.

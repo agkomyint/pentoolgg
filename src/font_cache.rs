@@ -1,8 +1,10 @@
 //! Installed font faces kept between CLI calls, so a render after boot does not
 //! open every system font file. The cached list is used only while a listing of
 //! the font folders (every entry's path, size and modification time) matches
-//! the one taken when it was written; any change rescans. Windows and macOS
-//! only: on Linux the folders come from fontconfig's configuration, so it scans.
+//! the one taken when it was written; any change rescans. Windows only: on
+//! Linux the folders come from fontconfig's configuration, and on macOS the
+//! system asset folders change often enough that checking them cost more than
+//! the scan (CI agent loop), so both scan as before.
 use resvg::usvg::fontdb::{Database, FaceInfo, Language, Source, Stretch, Style, Weight};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -57,21 +59,7 @@ fn roots() -> Option<Vec<PathBuf>> {
         }
         Some(roots)
     }
-    #[cfg(target_os = "macos")]
-    {
-        let mut roots = vec![
-            PathBuf::from("/Library/Fonts"),
-            PathBuf::from("/System/Library/Fonts"),
-            // Downloadable fonts live in subfolders of this one.
-            PathBuf::from("/System/Library/AssetsV2"),
-            PathBuf::from("/Network/Library/Fonts"),
-        ];
-        if let Ok(home) = std::env::var("HOME") {
-            roots.push(Path::new(&home).join("Library/Fonts"));
-        }
-        Some(roots)
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     {
         None
     }
@@ -83,12 +71,7 @@ fn location() -> Option<PathBuf> {
         let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
         Some(base.join("pentool").join("fonts.bin"))
     }
-    #[cfg(target_os = "macos")]
-    {
-        let base = Path::new(&std::env::var_os("HOME")?).join("Library/Caches");
-        Some(base.join("pentool").join("fonts.bin"))
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     {
         None
     }

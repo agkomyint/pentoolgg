@@ -1039,13 +1039,9 @@ fn font_list_cache_never_changes_text_rendering() {
     let home = space.0.join("home");
     fs::create_dir_all(&home).unwrap();
     let home = home.to_str().unwrap();
-    let cached = if cfg!(windows) {
-        Some(space.0.join("home").join("pentool").join("fonts.bin"))
-    } else if cfg!(target_os = "macos") {
-        Some(space.0.join("home/Library/Caches/pentool/fonts.bin"))
-    } else {
-        None
-    };
+    let cached = cfg!(windows).then(|| space.0.join("home").join("pentool").join("fonts.bin"));
+    // Other systems scan every time and never write the list.
+    let elsewhere = space.0.join("home/Library/Caches/pentool/fonts.bin");
     let export = |name: &str, extra: &[&str]| {
         let out = space.0.join(name);
         json(&pentool(
@@ -1073,4 +1069,5 @@ fn font_list_cache_never_changes_text_rendering() {
         );
         assert_eq!(export("repaired.png", &[]), scanned);
     }
+    assert!(!elsewhere.exists());
 }

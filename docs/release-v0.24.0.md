@@ -70,10 +70,11 @@ are unchanged; new flags and JSON fields are additive.
 - Faster start for renders. Layers without text no longer build a font
   database, and text layers share one instead of rebuilding it per layer
   (in-process time of a scale-0.1 landscape export: about 50 ms to 37 ms).
-  On Windows and macOS the installed-font list is kept in the per-user cache
-  (`%LOCALAPPDATA%\pentool\fonts.bin`, `~/Library/Caches/pentool/fonts.bin`)
-  and used only while the listing of font files in the font folders is
-  unchanged (other files there are not even looked at): loading it takes
-  about 5 ms against 27–77 ms for a warm scan and about 340 ms for a cold
-  one. Linux keeps scanning, because its font folders come from
-  fontconfig's configuration. Output bytes are unchanged.
+  On Windows the installed-font list is kept in the per-user cache
+  (`%LOCALAPPDATA%\pentool\fonts.bin`) and used only while the listing of
+  font files in the font folders is unchanged (other files there are not
+  even looked at): loading it takes about 5 ms against 27–77 ms for a warm
+  scan and about 340 ms for a cold one. Linux and macOS keep scanning: Linux
+  font folders come from fontconfig's configuration, and on macOS checking
+  the system asset folders cost more than the scan in CI. Output bytes are
+  unchanged.
