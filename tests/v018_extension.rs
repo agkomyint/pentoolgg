@@ -829,3 +829,58 @@ fn unreadable_inputs_carry_a_missing_resource_code() {
         );
     }
 }
+
+#[test]
+fn run_rejects_unknown_pages_and_non_object_args_before_running() {
+    let ws = Workspace::new("run-input");
+    let doc = new_doc(&ws);
+    let out = ws.path("stamp.penext");
+    quiet(
+        &ws,
+        &[
+            "extension",
+            "pack",
+            example_package("stamp").to_str().unwrap(),
+            out.to_str().unwrap(),
+        ],
+    );
+    install(&ws, &out);
+    let before = fs::read(&doc).unwrap();
+    let d = doc.to_str().unwrap();
+
+    let err = fails(
+        &ws,
+        &[
+            "extension",
+            "run",
+            "stamp",
+            d,
+            "--command",
+            "stamp",
+            "--page",
+            "bogus",
+        ],
+    );
+    assert!(
+        err.contains("[missing-resource]") && err.contains("bogus"),
+        "{err}"
+    );
+
+    for bad in ["\"text\"", "[1,2]", "7"] {
+        let err = fails(
+            &ws,
+            &[
+                "extension",
+                "run",
+                "stamp",
+                d,
+                "--command",
+                "stamp",
+                "--args",
+                bad,
+            ],
+        );
+        assert!(err.contains("[invalid-input]"), "{bad}: {err}");
+    }
+    assert_eq!(fs::read(&doc).unwrap(), before);
+}

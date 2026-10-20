@@ -23,3 +23,4 @@ Patch notes. Not published: the next public release is 0.25.0.
 - Unreadable inputs to `import` and `extension add/run` report
   `[missing-resource]` like the other commands (#207).
 - `pentool serve` checks the document exists before binding and never prints "listening" on failure; a busy port reports `[conflict]` with a `--port` hint (#160).
+- `extension run` rejects an unknown `--page` (`[missing-resource]`) and non-object `--args` (`[invalid-input]`) before running the module (#205, #206).

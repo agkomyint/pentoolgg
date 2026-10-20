@@ -464,6 +464,22 @@ pub fn run(req: RunRequest<'_>) -> Result<Value> {
     if !scene::is_scene_document(&working) {
         bail!("[unsupported-capability] extensions need a v4+ scene document; run `pentool migrate` first")
     }
+    if !req.args.is_null() && !req.args.is_object() {
+        bail!("[invalid-input] --args must be a JSON object, e.g. '{{\"text\":\"SALE\"}}'")
+    }
+    if let Some(page) = &req.page {
+        let known = working
+            .get("pages")
+            .and_then(Value::as_array)
+            .is_some_and(|pages| {
+                pages
+                    .iter()
+                    .any(|p| p.get("id").and_then(Value::as_str) == Some(page.as_str()))
+            });
+        if !known {
+            bail!("[missing-resource] page not found: {page}; list pages with `pentool page DOC list`")
+        }
+    }
     let revision = transaction::revision(&bytes);
     if let Some(wanted) = &req.if_revision {
         if *wanted != revision {
