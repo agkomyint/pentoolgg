@@ -1879,7 +1879,17 @@ fn connect(args: &ConnectArgs) -> Result<Value> {
         })?;
     check_endpoint(&endpoint)?;
     let credential = match (&args.credential_env, &args.credential_file) {
-        (Some(name), None) => Credential::Env { name: name.clone() },
+        (Some(name), None) => {
+            if !valid_env_name(name) {
+                // The value is not echoed: it may be a pasted key.
+                return Err(err(
+                    "invalid-credential-env",
+                    "--credential-env must be the NAME of an environment variable, not a key.",
+                    "Export the key in your shell, then pass only its name, e.g. --credential-env GEMINI_API_KEY.",
+                ));
+            }
+            Credential::Env { name: name.clone() }
+        }
         (None, Some(path)) => Credential::File {
             path: path.to_string_lossy().into_owned(),
         },
@@ -2775,6 +2785,14 @@ fn accept(
         "provenance": provenance,
         "dry_run": dry_run,
     }))
+}
+
+/// Environment variable names: ASCII letters, digits and `_`, not starting with a digit.
+fn valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && name.len() <= 128
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[cfg(test)]

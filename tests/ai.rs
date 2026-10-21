@@ -237,6 +237,32 @@ fn raw_keys_on_the_command_line_are_rejected() {
 }
 
 #[test]
+fn a_key_shaped_credential_env_is_rejected_and_never_echoed() {
+    let ws = Workspace::new("keyenv");
+    let out = pentool(
+        &ws,
+        &[
+            "ai",
+            "connect",
+            "--name",
+            "gemini",
+            "--credential-env",
+            KEY,
+            "--json",
+        ],
+    );
+    assert!(!out.status.success());
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("invalid-credential-env"), "{text}");
+    assert!(!text.contains(KEY), "the rejected value was echoed: {text}");
+    assert!(!std::path::Path::new(&ws.path("ai.json")).exists());
+}
+
+#[test]
 fn model_calls_are_gated_and_dry_run_never_connects() {
     let ws = Workspace::new("gate");
     let (base, seen) = mock(vec![]);
