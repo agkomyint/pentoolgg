@@ -146,6 +146,7 @@ pub enum GridAction {
     /// Duplicate an object COUNT times at a fixed offset.
     StepRepeat {
         id: String,
+        /// How many copies to make, from 1 to 1000. Each must get a new ID.
         #[arg(long)]
         count: u64,
         #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]

@@ -4239,6 +4239,7 @@ enum RasterAction {
     SelectLoad {
         id: String,
         name: String,
+        /// How to combine with the current selection: replace, add, subtract or intersect.
         #[arg(long, default_value = "replace")]
         mode: String,
     },

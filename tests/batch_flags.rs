@@ -150,3 +150,22 @@ fn hidden_nodes_are_left_out_of_exports_and_groups_hide_their_children() {
         "a node with visible:false was still rendered"
     );
 }
+
+#[test]
+fn help_states_the_step_repeat_count_range_and_select_load_modes() {
+    let help = |args: &[&str]| {
+        let out = run(args);
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+    let repeat = help(&["layout-grid", "doc.pen", "step-repeat", "--help"]);
+    assert!(repeat.contains("from 1 to 1000"), "{repeat}");
+    let load = help(&["raster", "doc.pen", "select-load", "--help"]);
+    assert!(
+        load.contains("replace, add, subtract or intersect"),
+        "{load}"
+    );
+}

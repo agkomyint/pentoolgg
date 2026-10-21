@@ -26,3 +26,4 @@ Patch notes. Not published: the next public release is 0.25.0.
 - `extension run` rejects an unknown `--page` (`[missing-resource]`) and non-object `--args` (`[invalid-input]`) before running the module (#205, #206).
 - `batch` `put-shape` no longer silently drops a fill or stroke that is not a color string, and `put-path` rejects a paint object that has neither `fallback` nor `ref` (it used to save a shape that rendered with no fill). Both fail with a message and leave the document unchanged. Gradients are written as `{"fallback":{...}}` in `style`.
 - A node with `visible: false` (and everything inside a hidden group) is now left out of PNG, SVG and PDF output for v4 documents instead of being rendered anyway (#396). Layer-level hiding already worked.
+- `layout-grid step-repeat --help` states the count range (1 to 1000) and `raster select-load --help` lists the accepted modes (#388, #380).
