@@ -169,3 +169,31 @@ fn help_states_the_step_repeat_count_range_and_select_load_modes() {
         "{load}"
     );
 }
+
+#[test]
+fn layer_geometry_accepts_negative_positional_numbers() {
+    let ws = Workspace::new("neg-geometry");
+    let doc = ws.path("a.pen");
+    assert!(run(&["new", &doc]).status.success());
+    let ops = ws.path("ops.json");
+    fs::write(
+        &ops,
+        r##"[{"type":"put-shape","id":"r","layer":"layer-1","shape":"rect","x":10,"y":10,"width":5,"height":5,"fill":"#ff0000"}]"##,
+    )
+    .unwrap();
+    assert!(run(&["batch", &doc, &ops]).status.success());
+    for args in [
+        vec!["translate", "3", "-2"],
+        vec!["rotate", "-15"],
+        vec!["scale", "-1", "1"],
+    ] {
+        let mut cmd = vec!["layer-geometry", doc.as_str(), "--layer", "layer-1"];
+        cmd.extend(args.iter().copied());
+        let out = run(&cmd);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

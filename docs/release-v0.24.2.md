@@ -28,3 +28,4 @@ Patch notes. Not published: the next public release is 0.25.0.
 - A node with `visible: false` (and everything inside a hidden group) is now left out of PNG, SVG and PDF output for v4 documents instead of being rendered anyway (#396). Layer-level hiding already worked.
 - `layout-grid step-repeat --help` states the count range (1 to 1000) and `raster select-load --help` lists the accepted modes (#388, #380).
 - `ai connect --credential-env` now rejects a value that is not an environment variable name (such as a pasted key) with `invalid-credential-env`, saves nothing and never echoes it (#357).
+- `layer-geometry` positional numbers (translate, rotate, scale, transform, hit, move-anchor, set-handle) accept negative values without `--` (#394).

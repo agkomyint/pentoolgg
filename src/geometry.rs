@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 pub enum Operation {
     Bounds,
     Nodes,
+    #[command(allow_negative_numbers = true)]
     Hit {
         x: f64,
         y: f64,
@@ -19,6 +20,7 @@ pub enum Operation {
         tolerance: f64,
     },
     /// Affine matrix [a,b,c,d,e,f]: x'=ax+cy+e, y'=bx+dy+f.
+    #[command(allow_negative_numbers = true)]
     Transform {
         a: f64,
         b: f64,
@@ -27,10 +29,12 @@ pub enum Operation {
         e: f64,
         f: f64,
     },
+    #[command(allow_negative_numbers = true)]
     Translate {
         dx: f64,
         dy: f64,
     },
+    #[command(allow_negative_numbers = true)]
     Rotate {
         degrees: f64,
         #[arg(long, default_value_t = 0.0)]
@@ -40,6 +44,7 @@ pub enum Operation {
         #[serde(default)]
         cy: f64,
     },
+    #[command(allow_negative_numbers = true)]
     Scale {
         sx: f64,
         sy: f64,
@@ -51,12 +56,14 @@ pub enum Operation {
         cy: f64,
     },
     /// Set a zero-based anchor position; attached handles follow it.
+    #[command(allow_negative_numbers = true)]
     MoveAnchor {
         index: usize,
         x: f64,
         y: f64,
     },
     /// Set a control point on a normalized element. Handle is 1 or 2.
+    #[command(allow_negative_numbers = true)]
     SetHandle {
         element: usize,
         handle: usize,
@@ -64,6 +71,7 @@ pub enum Operation {
         y: f64,
     },
     /// Split a drawable segment at 0<t<1, preserving its shape.
+    #[command(allow_negative_numbers = true)]
     Split {
         segment: usize,
         t: f64,
