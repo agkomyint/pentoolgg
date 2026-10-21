@@ -2335,8 +2335,10 @@ enum Command {
     },
     /// Generate and measure a large in-memory document.
     Benchmark {
+        /// Layers to generate, from 1 to 1000.
         #[arg(long, default_value_t = 100)]
         layers: usize,
+        /// Objects to generate, from 0 to 100000.
         #[arg(long, default_value_t = 10_000)]
         objects: usize,
         #[arg(long)]
@@ -2892,6 +2894,10 @@ Examples:
         if_revision: Option<String>,
     },
     /// Create a semantic v4 rectangle, ellipse, circle, or line.
+    ///
+    /// Each kind needs its own geometry: rect: --x --y --width --height;
+    /// rrect: the rect options plus --radius; ellipse: --cx --cy --radius-x
+    /// --radius-y; circle: --cx --cy --radius; line: --x1 --y1 --x2 --y2.
     #[command(allow_negative_numbers = true)]
     Shape {
         input: PathBuf,

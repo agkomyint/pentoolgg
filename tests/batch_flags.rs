@@ -197,3 +197,25 @@ fn layer_geometry_accepts_negative_positional_numbers() {
         );
     }
 }
+
+#[test]
+fn shape_and_benchmark_help_state_their_requirements() {
+    let shape = run(&["shape", "--help"]);
+    let shape = String::from_utf8_lossy(&shape.stdout).into_owned();
+    for needle in [
+        "rect: --x --y --width --height",
+        "ellipse: --cx --cy --radius-x --radius-y",
+        "circle: --cx --cy --radius",
+        "line: --x1 --y1 --x2 --y2",
+    ] {
+        assert!(
+            shape.contains(needle),
+            "shape --help lacks {needle:?}:
+{shape}"
+        );
+    }
+    let bench = run(&["benchmark", "--help"]);
+    let bench = String::from_utf8_lossy(&bench.stdout).into_owned();
+    assert!(bench.contains("1 to 1000"), "{bench}");
+    assert!(bench.contains("0 to 100000"), "{bench}");
+}

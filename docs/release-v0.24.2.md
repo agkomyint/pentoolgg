@@ -29,3 +29,4 @@ Patch notes. Not published: the next public release is 0.25.0.
 - `layout-grid step-repeat --help` states the count range (1 to 1000) and `raster select-load --help` lists the accepted modes (#388, #380).
 - `ai connect --credential-env` now rejects a value that is not an environment variable name (such as a pasted key) with `invalid-credential-env`, saves nothing and never echoes it (#357).
 - `layer-geometry` positional numbers (translate, rotate, scale, transform, hit, move-anchor, set-handle) accept negative values without `--` (#394).
+- `shape --help` lists the geometry each kind requires (#399); `benchmark --help` states the layer and object ranges (#350).
