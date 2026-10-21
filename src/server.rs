@@ -166,6 +166,10 @@ fn build_app(
         .route("/api/design/templates", get(design_templates))
         .route("/api/design/template/check", get(design_template_check))
         .route("/api/design/template/fill", post(design_template_fill))
+        .route("/api/ai/status", get(ai_status))
+        .route("/api/ai/connect", post(ai_connect))
+        .route("/api/ai/doctor", post(ai_doctor))
+        .route("/api/ai/remove", post(ai_remove))
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/run", post(extensions_run))
         .route("/api/comments", get(comments_list).post(comments_apply))
@@ -5001,6 +5005,70 @@ fn binary(bytes: Vec<u8>, kind: &'static str, name: &'static str) -> Response {
         HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")).unwrap(),
     );
     response
+}
+
+/// A provider-setup failure keeps the CLI's stable `code` and `fix` next to the
+/// message so the settings panel can show them without parsing text.
+fn ai_problem(error: anyhow::Error) -> Response {
+    let (code, fix) = error
+        .downcast_ref::<crate::ai::AiError>()
+        .map(|e| (Some(e.code), Some(e.fix.clone())))
+        .unwrap_or((None, None));
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": format!("{error:#}"), "code": code, "fix": fix})),
+    )
+        .into_response()
+}
+
+async fn ai_blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| anyhow::anyhow!("provider task failed: {e}"))?
+}
+
+async fn ai_status() -> Response {
+    match ai_blocking(crate::ai::studio_status).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => ai_problem(e),
+    }
+}
+
+async fn ai_connect(Json(body): Json<crate::ai::ConnectRequest>) -> Response {
+    match ai_blocking(move || crate::ai::studio_connect(body)).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => ai_problem(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiDoctorRequest {
+    provider: Option<String>,
+    #[serde(default)]
+    check: bool,
+}
+
+async fn ai_doctor(Json(body): Json<AiDoctorRequest>) -> Response {
+    match ai_blocking(move || crate::ai::studio_doctor(body.provider, body.check)).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => ai_problem(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiRemoveRequest {
+    name: String,
+}
+
+async fn ai_remove(Json(body): Json<AiRemoveRequest>) -> Response {
+    match ai_blocking(move || crate::ai::studio_remove(body.name)).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => ai_problem(e),
+    }
 }
 
 fn problem(error: anyhow::Error) -> Response {

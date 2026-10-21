@@ -1718,6 +1718,60 @@ pub fn run(action: AiAction, page: Option<&str>) -> Result<Value> {
     }
 }
 
+/// Provider setup for Studio. Each call reuses the CLI path of the same name, so
+/// the browser gets the same validation, limits and error codes.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectRequest {
+    pub name: String,
+    pub adapter: Option<String>,
+    pub endpoint: Option<String>,
+    pub credential_env: Option<String>,
+    pub credential_file: Option<String>,
+    pub default_model: Option<String>,
+}
+
+/// Configured providers, the bundled catalog and whether the AI commands are on.
+pub fn studio_status() -> Result<Value> {
+    if disabled() {
+        return Ok(json!({"enabled": false}));
+    }
+    let mut status = provider(&ProviderAction::List)?;
+    status["enabled"] = json!(true);
+    Ok(status)
+}
+
+pub fn studio_connect(request: ConnectRequest) -> Result<Value> {
+    ensure_enabled()?;
+    connect(&ConnectArgs {
+        name: request.name,
+        adapter: request.adapter.filter(|v| !v.trim().is_empty()),
+        endpoint: request.endpoint.filter(|v| !v.trim().is_empty()),
+        credential_env: request.credential_env.filter(|v| !v.trim().is_empty()),
+        credential_file: request
+            .credential_file
+            .filter(|v| !v.trim().is_empty())
+            .map(PathBuf::from),
+        default_model: request.default_model.filter(|v| !v.trim().is_empty()),
+        api_key: None,
+    })
+}
+
+/// Validate one provider; `check` adds the single non-billable model-list call.
+pub fn studio_doctor(provider: Option<String>, check: bool) -> Result<Value> {
+    ensure_enabled()?;
+    doctor(&DoctorArgs {
+        check,
+        provider,
+        ephemeral: false,
+    })
+}
+
+pub fn studio_remove(name: String) -> Result<Value> {
+    ensure_enabled()?;
+    provider(&ProviderAction::Remove { name })
+}
+
 fn profile_summary(name: &str, profile: &Profile) -> Value {
     json!({
         "name": name,

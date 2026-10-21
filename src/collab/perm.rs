@@ -79,6 +79,11 @@ static ROUTES: &[Entry] = &[
     e("/api/design/templates", VIEW, NONE),
     e("/api/design/template/check", VIEW, NONE),
     e("/api/extensions", VIEW, NONE),
+    // provider settings: the editor may see them, only the owner may change them
+    e("/api/ai/status", EDIT, NONE),
+    e("/api/ai/connect", NONE, OWNER),
+    e("/api/ai/doctor", NONE, OWNER),
+    e("/api/ai/remove", NONE, OWNER),
     e("/api/history", VIEW, NONE),
     e("/api/history/version", VIEW, NONE),
     e("/api/history/restore", NONE, EDIT),

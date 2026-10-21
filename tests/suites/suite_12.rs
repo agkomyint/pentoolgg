@@ -68,3 +68,6 @@ mod v018_extension;
 mod v019_design;
 #[path = "../v019_design_ui.rs"]
 mod v019_design_ui;
+
+#[path = "../v025_ai_studio.rs"]
+mod v025_ai_studio;
