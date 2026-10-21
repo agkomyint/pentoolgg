@@ -106,3 +106,47 @@ fn put_path_rejects_a_paint_object_without_fallback_or_ref() {
         "{message}"
     );
 }
+
+#[test]
+fn hidden_nodes_are_left_out_of_exports_and_groups_hide_their_children() {
+    let ws = Workspace::new("hidden-node");
+    let doc = ws.path("hidden.pen");
+    assert!(run(&["new", &doc]).status.success());
+    let ops = ws.path("ops.json");
+    fs::write(
+        &ops,
+        r##"[{"type":"put-shape","shape":"rect","id":"r","layer":"layer-1","x":0,"y":0,"width":100,"height":100,"fill":"#ff0000"},
+             {"type":"put-shape","shape":"circle","id":"c","layer":"layer-1","cx":300,"cy":300,"radius":40,"fill":"#0000ff"},
+             {"type":"create-group","id":"g","layer":"layer-1","children":["c"]}]"##,
+    )
+    .unwrap();
+    assert!(run(&["batch", &doc, &ops]).status.success());
+    let empty = ws.path("empty.pen");
+    assert!(run(&["new", &empty]).status.success());
+    let shown = ws.path("shown.png");
+    assert!(run(&["export", &doc, &shown]).status.success());
+    let blank = ws.path("blank.png");
+    assert!(run(&["export", &empty, &blank]).status.success());
+    assert_ne!(fs::read(&shown).unwrap(), fs::read(&blank).unwrap());
+
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&doc).unwrap()).unwrap();
+    for node in value["pages"][0]["layers"][0]["nodes"]
+        .as_array_mut()
+        .unwrap()
+    {
+        node["visible"] = serde_json::json!(false);
+    }
+    fs::write(&doc, serde_json::to_vec(&value).unwrap()).unwrap();
+    let hidden = ws.path("hidden.png");
+    let out = run(&["export", &doc, &hidden]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        fs::read(&hidden).unwrap(),
+        fs::read(&blank).unwrap(),
+        "a node with visible:false was still rendered"
+    );
+}

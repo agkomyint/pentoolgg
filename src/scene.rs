@@ -3092,6 +3092,10 @@ enum Flat {
 
 fn flatten_node(node: &Value, parent: Affine, out: &mut Vec<Flat>) -> Result<()> {
     let object = node.as_object().context("node must be an object")?;
+    // A hidden node, and everything inside it, never reaches the renderer.
+    if object.get("visible").and_then(Value::as_bool) == Some(false) {
+        return Ok(());
+    }
     if object.contains_key("clip") {
         bail!("v3 flattening does not support clipping")
     }
