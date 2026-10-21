@@ -59,3 +59,50 @@ fn batch_rejects_duplicate_json_keys_without_mutation() {
     );
     assert_eq!(fs::read(&doc).unwrap(), before);
 }
+
+fn batch_error(ws: &Workspace, ops: &str) -> String {
+    let doc = ws.path("scene.pen");
+    fs::copy("docs/fixtures/v4-scene.pen", &doc).unwrap();
+    let ops_path = ws.path("ops.json");
+    fs::write(&ops_path, ops).unwrap();
+    let before = fs::read(&doc).unwrap();
+    let out = run(&["batch", &doc, &ops_path]);
+    assert!(!out.status.success(), "should fail: {ops}");
+    assert_eq!(fs::read(&doc).unwrap(), before, "document changed");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    )
+}
+
+#[test]
+fn put_shape_rejects_a_non_string_fill_instead_of_dropping_it() {
+    let ws = Workspace::new("shape-fill");
+    let message = batch_error(
+        &ws,
+        r#"[{"type":"put-shape","shape":"rect","id":"x1","layer":"content","x":1,"y":1,"width":2,"height":2,"fill":{"kind":"radial","stops":[]}}]"#,
+    );
+    assert!(message.contains("fill must be a color string"), "{message}");
+    let message = batch_error(
+        &ws,
+        r#"[{"type":"put-shape","shape":"line","id":"x2","layer":"content","x1":0,"y1":0,"x2":5,"y2":5,"stroke":7}]"#,
+    );
+    assert!(
+        message.contains("stroke must be a color string"),
+        "{message}"
+    );
+}
+
+#[test]
+fn put_path_rejects_a_paint_object_without_fallback_or_ref() {
+    let ws = Workspace::new("path-paint");
+    let message = batch_error(
+        &ws,
+        r##"[{"type":"put-path","id":"p1","layer":"content","d":"M 0 0 L 5 5","fill":{"kind":"radial","stops":[]}}]"##,
+    );
+    assert!(
+        message.contains("fill needs a \"fallback\" or \"ref\""),
+        "{message}"
+    );
+}

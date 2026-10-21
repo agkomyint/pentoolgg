@@ -1649,14 +1649,8 @@ pub fn apply_batch_at(
                             y1: n("y1"),
                             x2: n("x2"),
                             y2: n("y2"),
-                            fill: operation
-                                .get("fill")
-                                .and_then(Value::as_str)
-                                .map(Into::into),
-                            stroke: operation
-                                .get("stroke")
-                                .and_then(Value::as_str)
-                                .map(Into::into),
+                            fill: color_string(operation, "fill")?,
+                            stroke: color_string(operation, "stroke")?,
                             stroke_width: n("stroke_width"),
                         },
                     )?;
@@ -1845,6 +1839,15 @@ pub fn apply_batch_at(
     Ok(changes)
 }
 
+/// A put-shape paint must be a color string; anything else used to be dropped without a word.
+fn color_string(operation: &Value, key: &str) -> Result<Option<String>> {
+    match operation.get(key) {
+        None => Ok(None),
+        Some(Value::String(color)) => Ok(Some(color.clone())),
+        Some(_) => bail!("{key} must be a color string, e.g. \"#2b3fa8\""),
+    }
+}
+
 fn normalize_batch_style(object: &mut Map<String, Value>, operation: &str) -> Result<()> {
     let mut style = object
         .remove("style")
@@ -1869,6 +1872,11 @@ fn normalize_batch_style(object: &mut Map<String, Value>, operation: &str) -> Re
             style.insert(
                 (*key).into(),
                 if value.is_object() {
+                    if value.get("fallback").is_none() && value.get("ref").is_none() {
+                        bail!(
+                            "{key} needs a \"fallback\" or \"ref\" entry, e.g. {{\"fallback\":\"#2b3fa8\"}}"
+                        )
+                    }
                     value
                 } else {
                     json!({"fallback": value})

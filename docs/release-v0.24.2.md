@@ -24,3 +24,4 @@ Patch notes. Not published: the next public release is 0.25.0.
   `[missing-resource]` like the other commands (#207).
 - `pentool serve` checks the document exists before binding and never prints "listening" on failure; a busy port reports `[conflict]` with a `--port` hint (#160).
 - `extension run` rejects an unknown `--page` (`[missing-resource]`) and non-object `--args` (`[invalid-input]`) before running the module (#205, #206).
+- `batch` `put-shape` no longer silently drops a fill or stroke that is not a color string, and `put-path` rejects a paint object that has neither `fallback` nor `ref` (it used to save a shape that rendered with no fill). Both fail with a message and leave the document unchanged. Gradients are written as `{"fallback":{...}}` in `style`.
