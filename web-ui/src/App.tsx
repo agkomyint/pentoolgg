@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Box, Brush, Camera, Download, FilePlus2, FolderOpen, Home, Image, Layers3, MessagesSquare, Moon, Newspaper, Search, Keyboard, Palette, Printer, Puzzle, Redo2, RefreshCw, Save, Shapes, SlidersHorizontal, Sun, Undo2, Users, PanelRightClose, PanelRightOpen, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Box, Brush, Camera, Download, FilePlus2, FolderOpen, Home, Image, Layers3, MessagesSquare, Moon, Newspaper, Search, Keyboard, Palette, Printer, Puzzle, Redo2, Sparkles, RefreshCw, Save, Shapes, SlidersHorizontal, Sun, Undo2, Users, PanelRightClose, PanelRightOpen, MoreHorizontal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { LATEST_FORMAT, collectIds, useStudio } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { DesignSystemsPanel } from "@/workspaces/DesignSystemsPanel";
 import { StatsPanel } from "@/workspaces/StatsPanel";
 import { CollabPanel } from "@/workspaces/CollabPanel";
 import { ExtensionsPanel } from "@/workspaces/ExtensionsPanel";
+import { AiPanel } from "@/workspaces/AiPanel";
 import { CommandPalette, ShortcutSheet } from "@/components/CommandPalette";
 import { PhotoPanel } from "@/workspaces/PhotoPanel";
 import { PhotoStage } from "@/workspaces/PhotoStage";
@@ -67,6 +68,7 @@ const PANELS: Panel[] = [
   { id: "collab", label: "Collaboration", icon: MessagesSquare, hint: "People, comments, reviews and merge conflicts" },
   { id: "stats", label: "Stats", icon: Users, hint: "Contribution stats from the operation log" },
   { id: "extensions", label: "Extensions", icon: Puzzle, hint: "Sandboxed WebAssembly extensions" },
+  { id: "ai", label: "AI", icon: Sparkles, hint: "Connect and validate an image-model provider" },
   { id: "photo", label: "Photo", icon: Camera, hint: "Catalog, culling and RAW development (focus view)", focus: true },
   { id: "3d", label: "Packaging and 3D", icon: Box, hint: "Dielines, folding and 3D mockups (focus view)", focus: true },
 ];
@@ -106,6 +108,8 @@ function WorkspaceBody() {
       return <Scene3dPanel />;
     case "extensions":
       return <div className="-m-3"><ExtensionsPanel /></div>;
+    case "ai":
+      return <div className="-m-3"><AiPanel /></div>;
     case "collab":
       return <div className="-m-3"><CollabPanel /></div>;
     case "stats":
