@@ -715,3 +715,33 @@ fn raster_layers_separate_like_images() {
     let result = separate(&raw).expect("raster layers are separable");
     assert_eq!(result.objects, 1);
 }
+
+#[test]
+fn spot_only_composite_uses_configured_or_explicit_output() {
+    let raw = doc(vec![rect("spot", 2, 2, spot_fill("alpha", 1.0), json!({}))]);
+    for explicit in [false, true] {
+        let mut options = Options {
+            destination: None,
+            intent: None,
+            scale: 1.0,
+            auto_trap: None,
+        };
+        if explicit {
+            options.destination = Some(
+                pentool::color::value::Destination::parse(
+                    &json!({"space":"icc-cmyk","profile":"press"}),
+                )
+                .unwrap(),
+            );
+        }
+        let result = separation::separate(&raw, Path::new(DOCUMENT), None, &options).unwrap();
+        assert!(result.plates[..4]
+            .iter()
+            .all(|p| p.samples.iter().all(|v| *v == 0.0)));
+        let (png, _) = result.composite_preview(&raw, Path::new(DOCUMENT)).unwrap();
+        let image = image::load_from_memory(&png).unwrap().to_rgb8();
+        let paper = image.get_pixel(6, 0).0;
+        assert!(paper.iter().all(|v| *v > 200));
+        assert_ne!(image.get_pixel(3, 0).0, paper);
+    }
+}

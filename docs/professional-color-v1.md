@@ -1115,6 +1115,8 @@ plate directory (never replacing a file) and reports it under
 to 8 bits) are read through the separation's ICC output profile to PCS and on to
 the document display role, as `color proof-image` does. Every spot plate is then
 laid over the result as a multiply of its ink's sRGB alternate at the plate's tint.
+Spot-only pages use the configured output role or explicit destination to preview
+uninked process paper beneath their spots (#397).
 The spot step is an approximation: there is no spectral or paper model, and
 spot inks whose alternate is not `srgb` are refused with
 `[unsupported-capability]`. Previews above 4,000,000 pixels are refused with

@@ -892,12 +892,16 @@ pub fn separate(
             )
         })
         .collect::<Result<Vec<_>>>()?;
+    // Spot-only jobs need no process conversion, but their optional composite
+    // still needs the selected output profile to evaluate uninked paper.
+    // Keep plain spot separation usable without a CMYK output role.
+    let preview_process = process.or_else(|| cmyk_destination(raw, options).ok());
     Ok(Separations {
         width,
         height,
         scale: options.scale,
-        destination: process.as_ref().map(|(d, _)| d.clone()),
-        intent: process.as_ref().map(|(_, i)| *i),
+        destination: preview_process.as_ref().map(|(d, _)| d.clone()),
+        intent: preview_process.as_ref().map(|(_, i)| *i),
         plates,
         objects: items.len(),
         flattened_scene3d_objects: items
