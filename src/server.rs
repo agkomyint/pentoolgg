@@ -21,6 +21,7 @@ struct Shared {
     project_root: PathBuf,
     gate: Arc<Mutex<()>>,
     previews: Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+    ai_jobs: Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
     /// Bypass the photo preview cache (`serve --no-cache`).
     no_cache: bool,
     /// Open `/api/document/events` streams, bounded by [`MAX_DOCUMENT_STREAMS`].
@@ -170,6 +171,13 @@ fn build_app(
         .route("/api/ai/connect", post(ai_connect))
         .route("/api/ai/doctor", post(ai_doctor))
         .route("/api/ai/remove", post(ai_remove))
+        .route("/api/ai/generate", post(ai_generate))
+        .route("/api/ai/keyout", post(ai_keyout))
+        .route("/api/ai/cancel", post(ai_cancel))
+        .route("/api/ai/runs", get(ai_runs))
+        .route("/api/ai/runs/:id/candidates/:n", get(ai_candidate))
+        .route("/api/ai/runs/:id/accept", post(ai_accept))
+        .route("/api/ai/runs/:id/discard", post(ai_discard))
         .route("/api/extensions", get(extensions_list))
         .route("/api/extensions/run", post(extensions_run))
         .route("/api/comments", get(comments_list).post(comments_apply))
@@ -208,6 +216,7 @@ fn build_app(
             project_root: std::env::current_dir()?,
             gate: Arc::new(Mutex::new(())),
             previews: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            ai_jobs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             no_cache,
             document_streams: Arc::default(),
         });
@@ -5264,6 +5273,7 @@ mod tests {
             project_root: root.clone(),
             gate: std::sync::Arc::new(std::sync::Mutex::new(())),
             previews: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            ai_jobs: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             no_cache: false,
             document_streams: std::sync::Arc::default(),
         };
@@ -7191,4 +7201,122 @@ async fn layout_command(State(state): State<Shared>, Json(body): Json<LayoutRequ
         Ok(value) => Json(value).into_response(),
         Err(error) => problem(error),
     }
+}
+
+async fn ai_generate(
+    State(state): State<Shared>,
+    Json(mut body): Json<crate::ai::studio::GenerateRequest>,
+) -> Response {
+    let Some(file) = state.file.clone() else {
+        return problem(anyhow::anyhow!(
+            "Save and open a shared document before generating images"
+        ));
+    };
+    let job = body.job.take();
+    let mut state = state;
+    state.previews = state.ai_jobs.clone();
+    match run_job(&state, job, "ai", move || {
+        crate::ai::studio::generate_request(file, body)
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => ai_problem(error),
+    }
+}
+async fn ai_runs(State(state): State<Shared>) -> Response {
+    let Some(file) = state.file else {
+        return Json(serde_json::json!({"runs":[]})).into_response();
+    };
+    match ai_blocking(move || crate::ai::studio::runs(file)).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => ai_problem(error),
+    }
+}
+async fn ai_candidate(
+    State(state): State<Shared>,
+    axum::extract::Path((id, n)): axum::extract::Path<(String, usize)>,
+) -> Response {
+    let Some(file) = state.file else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match ai_blocking(move || crate::ai::studio::candidate(&file, &id, n)).await {
+        Ok(bytes) => {
+            let mut response = binary(bytes, "image/png", "candidate.png");
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(error) => ai_problem(error),
+    }
+}
+async fn ai_accept(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(mut body): Json<crate::ai::studio::AcceptRequest>,
+) -> Response {
+    let Some(file) = state.file else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match ai_blocking(move || {
+        let _guard = state
+            .gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        let bytes = std::fs::read(&file)?;
+        let raw = serde_json::from_slice(&bytes)?;
+        require_revision(Some(&body.if_revision), &raw)?;
+        body.if_revision = crate::transaction::revision(&bytes);
+        crate::ai::studio::accept_request(file, id, body)
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => ai_problem(error),
+    }
+}
+async fn ai_discard(
+    State(state): State<Shared>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    let Some(file) = state.file else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match ai_blocking(move || crate::ai::studio::discard(file, id)).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => ai_problem(error),
+    }
+}
+
+async fn ai_keyout(
+    State(state): State<Shared>,
+    Json(mut body): Json<crate::ai::studio::KeyoutRequest>,
+) -> Response {
+    let Some(file) = state.file else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match ai_blocking(move || {
+        let _guard = state
+            .gate
+            .lock()
+            .map_err(|_| anyhow::anyhow!("document lock failed"))?;
+        let bytes = std::fs::read(&file)?;
+        let raw = serde_json::from_slice(&bytes)?;
+        require_revision(Some(&body.if_revision), &raw)?;
+        body.if_revision = crate::transaction::revision(&bytes);
+        crate::ai::studio::keyout_request(file, body)
+    })
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => ai_problem(error),
+    }
+}
+
+/// AI jobs have a separate registry: viewer-authorized preview cancellation
+/// must never cancel an editor's model request.
+async fn ai_cancel(State(mut state): State<Shared>, body: Json<CancelRequest>) -> Response {
+    state.previews = state.ai_jobs.clone();
+    composite_cancel(State(state), body).await
 }

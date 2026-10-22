@@ -73,6 +73,12 @@ jobs:
       - name: Smoke test CLI rendering
         shell: bash
         run: $BIN export examples/eye.pen smoke.png
+      - name: Smoke test Studio AI with a local mock provider
+        shell: bash
+        run: python3 scripts/ai-studio-smoke.py "$BIN" || python scripts/ai-studio-smoke.py "$BIN"
+      - name: Smoke test spot-only composite previews
+        shell: bash
+        run: python3 scripts/spot-composite-smoke.py "$BIN" || python scripts/spot-composite-smoke.py "$BIN"
       - name: Smoke test native typography
         shell: bash
         run: $BIN export examples/text-demo.pen text-smoke.png
@@ -199,6 +205,6 @@ jobs:
         run: cd artifacts && sha256sum *.zip *.tar.gz > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          draft: false
+          draft: true
           generate_release_notes: true
           files: artifacts/*

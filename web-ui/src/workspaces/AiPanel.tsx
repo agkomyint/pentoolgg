@@ -13,6 +13,7 @@ import {
   type DoctorReport,
   type ProviderForm,
 } from "@/lib/aiProvider";
+import { AiGenerate } from "./AiGenerate";
 import { useStudio } from "@/store";
 
 // Provider setup for generative AI. Everything here goes through `/api/ai/*`, which reuses the
@@ -139,12 +140,12 @@ export function AiPanel() {
       </div>
       <p className="text-xs text-muted-foreground">
         Connect an image model to generate and edit images. Pentool never stores or shows your key: put it in an
-        environment variable (or a key file) on this machine and enter only its name. Nothing goes online until you test a
-        connection, and testing only lists models.
+        environment variable (or a key file) on this machine and enter only its name. Testing lists models; generation requires a separate confirmation.
       </p>
       {error && <p className="text-xs text-red-600">{error}</p>}
       {status && !status.enabled && <p className="text-xs text-amber-600">AI is turned off for this server (PENTOOL_AI=off).</p>}
 
+      {status?.enabled && <AiGenerate status={status} />}
       {status?.enabled && (
         <>
           <section aria-label="Connected providers" className="space-y-2">

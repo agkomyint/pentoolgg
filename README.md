@@ -51,6 +51,15 @@ Build from source:
 cargo install --path .
 ```
 
+## Studio AI (v0.25.0)
+
+Open a saved document with `pentool serve FILE` and choose **AI**. Connect an optional
+image provider by naming its key environment variable or file, review a generation
+request offline, then confirm the paid call. Preview candidates and accept one as a
+new image or replace the selected image, with revision guards and undo history.
+Gemini also supports variations and background removal. `PENTOOL_AI=off` hides AI.
+See [the AI guide](docs/ai.md) for setup, limits and cancellation behavior.
+
 ## CLI
 
 **v0.3.0** adds searchable object discovery, targeted partial edits, recoverable

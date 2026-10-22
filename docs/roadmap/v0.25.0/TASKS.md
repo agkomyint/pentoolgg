@@ -1,7 +1,8 @@
 # v0.25.0 — Generative AI in Pentool Studio
 
-> Status: planned. Nothing below is implemented; boxes are ticked only when
-> implementation, tests, docs and cross-platform evidence exist.
+> Status: implemented for release validation. Checkboxes remain pending until
+> implementation, tests, docs and cross-platform evidence are recorded.
+> See `docs/release-v0.25.0.md` for the shipped scope and cancellation limits.
 
 0.25.0 ships the accumulated 0.24.x internal patches (see `docs/release-v0.24.2.md`)
 together with the first generative-AI workflow in Studio. The engine already exists

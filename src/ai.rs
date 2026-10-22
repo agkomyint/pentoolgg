@@ -1738,6 +1738,7 @@ pub fn studio_status() -> Result<Value> {
     }
     let mut status = provider(&ProviderAction::List)?;
     status["enabled"] = json!(true);
+    status["limits"] = studio_doctor(None, false)?["limits"].clone();
     Ok(status)
 }
 
@@ -2186,6 +2187,7 @@ fn doctor(args: &DoctorArgs) -> Result<Value> {
             "enabled": true,
             "ephemeral": ephemeral_mode,
             "providers": [],
+            "limits": { "max_calls": max_calls().ok(), "max_pixels": max_pixels().ok(), "problems": limit_problems },
             "problems": [{"code":"no-provider","fix":"Run `pentool ai setup --from-env --json` or `pentool ai connect ...`."}],
         }));
     }
@@ -2306,6 +2308,7 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
     let mut usage = Vec::new();
     let mut coverage: Vec<f64> = Vec::new();
     for _ in 0..plan.candidates {
+        crate::composite::check_cancelled()?;
         let request = Request {
             prompt: &plan.prompt,
             aspect: plan.aspect.as_deref(),
@@ -2313,6 +2316,7 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
             sources: &sources,
         };
         let output = call_model(plan.resolved, &key, &request)?;
+        crate::composite::check_cancelled()?;
         let mut validated = validate_output(output.bytes)?;
         if let Some(key_color) = plan.key {
             let (_, pixels) = crate::image::decode_source_pixels(&validated.bytes)?;
@@ -2363,6 +2367,7 @@ fn execute(document: &Path, plan: &Plan<'_>, allow: bool, dry_run: bool) -> Resu
         "warnings": warnings,
         "keyout_transparent_coverage": coverage,
     });
+    crate::composite::check_cancelled()?;
     let id = store_run(document, &mut record, &accepted)?;
     Ok(json!({
         "run": id,
@@ -2833,3 +2838,6 @@ mod tests {
         assert!(!valid_model_id("m?key=x"));
     }
 }
+
+/// Browser workflows share the CLI engine and run store.
+pub mod studio;

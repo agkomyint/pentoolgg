@@ -17,6 +17,9 @@ jobs:
       - name: Install locked Studio dependencies
         working-directory: web-ui
         run: bun install --frozen-lockfile
+      - name: Test Studio state and helpers
+        working-directory: web-ui
+        run: bun test
       - name: Typecheck and build embedded Studio UI
         working-directory: web-ui
         run: bun run build

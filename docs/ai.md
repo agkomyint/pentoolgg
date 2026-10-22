@@ -85,6 +85,36 @@ Models do not return alpha. Two supported routes:
 
 ## Not in 0.9.0
 
-Inpaint/outpaint with masks, recipe/regenerate, the editor "Connect a provider" UI, the
+Inpaint/outpaint with masks, recipe/regenerate, the
 AI SDK bridge and external-adapter protocol, OS keyring storage, and a spend budget
 (`PENTOOL_AI_MAX_COST`) are planned and not implemented.
+
+## Studio (v0.25.0)
+
+Open a saved document with `pentool serve FILE`, then choose **AI** in the rail.
+Connect a provider using an environment variable name or key file path. The browser
+never handles the key itself. **Test connection** makes one model-list request;
+**Save and validate** checks settings offline.
+
+Save pending document edits before generating or accepting images. Choose a provider,
+model, prompt, aspect ratio (Gemini) or size (OpenAI compatible), and candidate count.
+**Review request** is offline. It shows the provider, model, host, call count, prompt
+hash and source hashes. **Confirm and generate** explicitly authorizes the paid call.
+If those details changed since review, review again. Provider limits and errors are
+shown in the panel. **Cancel generation** prevents subsequent calls and candidate
+storage after the current request returns; an already sent request may still be billed
+and runs until its configured timeout.
+
+Candidates stay beside the document across reloads (newest 16 runs). Thumbnails are
+bounded to 512 pixels per edge. **Accept as new image** creates an image in the selected
+layer; **Replace selected image** keeps its placement and effects. Both use the shared
+transaction/history path and current document revision. Stale revisions, changed source
+images, and locked targets are rejected. Undo an acceptance with the editor Undo action, or restore it through document history.
+**Discard run** removes its candidates without changing accepted document images.
+Accepted images show a provider/model provenance badge when selected in the AI panel.
+
+For selected images, Gemini also offers **Create variations** and **Remove background**.
+The latter asks for a magenta background and keys it out locally. **Remove magenta
+background (offline)** applies that cutout directly to the selected image without a
+provider. Masked inpaint/outpaint remains deferred. `PENTOOL_AI=off` hides the AI rail
+and command-palette entry and disables AI operations on the server.

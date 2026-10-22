@@ -33,7 +33,7 @@ import { nextId, pageParent } from "@/workspaces/layout/layoutModel";
 import { findNode, isScene, pageOf, pagesOf } from "@/lib/model";
 import { exportAs } from "@/lib/actions";
 import { cn } from "@/lib/utils";
-import { layoutOps } from "@/lib/api";
+import { getJson, layoutOps } from "@/lib/api";
 import { useRenderStats } from "@/lib/wasmCore";
 import { Welcome } from "@/components/Welcome";
 import { ActivityToast, HistoryButton, HistoryPanel, RecentActors, VersionPreviewBar } from "@/components/Presence";
@@ -68,7 +68,7 @@ const PANELS: Panel[] = [
   { id: "collab", label: "Collaboration", icon: MessagesSquare, hint: "People, comments, reviews and merge conflicts" },
   { id: "stats", label: "Stats", icon: Users, hint: "Contribution stats from the operation log" },
   { id: "extensions", label: "Extensions", icon: Puzzle, hint: "Sandboxed WebAssembly extensions" },
-  { id: "ai", label: "AI", icon: Sparkles, hint: "Connect and validate an image-model provider" },
+  { id: "ai", label: "AI", icon: Sparkles, hint: "Generate, review and accept images" },
   { id: "photo", label: "Photo", icon: Camera, hint: "Catalog, culling and RAW development (focus view)", focus: true },
   { id: "3d", label: "Packaging and 3D", icon: Box, hint: "Dielines, folding and 3D mockups (focus view)", focus: true },
 ];
@@ -194,7 +194,7 @@ function Dock({ mobileOpen, collapsed, onCollapse }: { mobileOpen: boolean; coll
 }
 
 /** Panel switcher at the window edge, like Photoshop's panel icons or Blender's property tabs. */
-function PanelRail({ open, onOpen, onToggle }: { open: boolean; onOpen: () => void; onToggle: () => void }) {
+function PanelRail({ open, onOpen, onToggle, aiEnabled }: { open: boolean; onOpen: () => void; onToggle: () => void; aiEnabled: boolean }) {
   const { workspaceId, setWorkspace, doc } = useStudio();
   const choose = (panel: Panel) => {
     if (panel.id === workspaceId && open && !panel.focus) return onToggle();
@@ -205,7 +205,7 @@ function PanelRail({ open, onOpen, onToggle }: { open: boolean; onOpen: () => vo
     onOpen();
   };
   return <nav aria-label="Panels" className="studio-panelrail">
-    {PANELS.map((panel, index) => <div key={panel.id} className="contents">
+    {PANELS.filter((panel) => panel.id !== "ai" || aiEnabled).map((panel, index) => <div key={panel.id} className="contents">
       {panel.focus && !PANELS[index - 1]?.focus && <span aria-hidden="true" className="studio-toolrail-divider" />}
       <Tip label={`${panel.label}: ${panel.hint}`} side="left">
         <button type="button" aria-label={panel.label} aria-pressed={workspaceId === panel.id && (open || panel.focus)} onClick={() => choose(panel)}
@@ -219,6 +219,8 @@ function PanelRail({ open, onOpen, onToggle }: { open: boolean; onOpen: () => vo
 
 export default function App() {
   const s = useStudio();
+  const [aiEnabled, setAiEnabled] = useState(false);
+  useEffect(() => { void getJson<{ enabled: boolean }>("/api/ai/status").then((status) => setAiEnabled(status.enabled)).catch(() => {}); }, []);
   const render = useRenderStats();
   const paint = usePaint();
   const openInput = useRef<HTMLInputElement>(null);
@@ -363,7 +365,7 @@ export default function App() {
         />
       ) : (
       <div className="studio-shell flex h-full flex-col bg-background text-foreground">
-        <CommandPalette open={palette} onClose={() => setPalette(false)} openPanel={openPanel} panels={PANELS} />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} openPanel={openPanel} panels={PANELS.filter((panel) => panel.id !== "ai" || aiEnabled)} />
         <ShortcutSheet open={sheet} onClose={() => setSheet(false)} />
         <ActivityToast />
         <HistoryPanel />
@@ -461,7 +463,7 @@ export default function App() {
             {stage !== "photo" && <PageStrip />}
           </div>
           <Dock mobileOpen={mobilePanelsOpen} collapsed={panelsCollapsed} onCollapse={() => { setPanelsCollapsed(true); setMobilePanelsOpen(false); }} />
-          <PanelRail open={narrow ? mobilePanelsOpen : !panelsCollapsed}
+          <PanelRail aiEnabled={aiEnabled} open={narrow ? mobilePanelsOpen : !panelsCollapsed}
             onOpen={() => { if (narrow) setMobilePanelsOpen(true); else setPanelsCollapsed(false); }}
             onToggle={() => { if (narrow) setMobilePanelsOpen((value) => !value); else setPanelsCollapsed((value) => !value); }} />
         </div>

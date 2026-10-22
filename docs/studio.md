@@ -529,3 +529,10 @@ cut paths, and only marks present in the current dieline are drawn. Each product
 ink: export refuses a dieline that assigns one ink name to multiple roles, such
 as cut and crease, rather than merging distinct finishing instructions onto a
 single plate.
+
+## Optional image generation (v0.25.0)
+
+The AI rail panel supports provider setup, offline request review, explicit paid-call
+confirmation, candidate previews, accept/replace/discard, variations, and background
+removal. Save pending edits first. Acceptance is guarded by the document revision and
+undoable through document history. See [AI workflows](ai.md#studio-v0250).

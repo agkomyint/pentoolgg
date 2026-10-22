@@ -12,7 +12,7 @@ export type Provider = {
   capabilities: string[];
 };
 export type CatalogEntry = { name: string; adapter: string; endpoint: string; env: string[]; default_model: string; capabilities: string[] };
-export type AiStatus = { enabled: false } | { enabled: true; configured: Provider[]; catalog: CatalogEntry[]; defaults: Record<string, string> };
+export type AiStatus = { enabled: false } | { enabled: true; configured: Provider[]; catalog: CatalogEntry[]; limits: { max_calls: number | null; problems: Problem[] }; defaults: Record<string, string> };
 export type Problem = { code: string; fix?: string; message?: string };
 export type DoctorProvider = Provider & {
   ready: boolean;

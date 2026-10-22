@@ -46,6 +46,8 @@ type State = {
   expectOwnChange: () => void;
   /** Adopt the served document now, merging unsaved edits (as a live update does). */
   pull: () => Promise<void>;
+  /** Keep a completed server mutation available to the editor's normal Undo. */
+  rememberServerChange: (before: Doc) => void;
   shared: boolean;
   dirty: boolean;
   version: string | null;
@@ -246,6 +248,14 @@ export const useStudio = create<State>((set, get) => {
       ownUntil = Date.now() + 4000;
     },
     pull: () => followDisk("", null),
+    rememberServerChange: (before) => {
+      const state = get();
+      // A local edit made while the request was pending must keep its own
+      // history. Clean server adoption clears past, so add exactly one step.
+      if (!state.dirty && state.doc && JSON.stringify(state.doc) !== JSON.stringify(before)) {
+        set({ past: [JSON.stringify(before)], future: [] });
+      }
+    },
     async restoreVersion(hash) {
       if (get().dirty && !window.confirm("Restoring replaces your unsaved changes. Continue?")) return;
       try {
