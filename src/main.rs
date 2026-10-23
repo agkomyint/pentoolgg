@@ -3817,6 +3817,13 @@ fn user_error_message(error: &anyhow::Error) -> String {
         };
         message.replace_range(start..start + end + 1, "");
     }
+    let missing = error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::NotFound);
+    if missing && !message.contains('[') {
+        message = format!("[missing-resource] {message}; check that the path exists");
+    }
     let denied = error
         .chain()
         .filter_map(|cause| cause.downcast_ref::<std::io::Error>())

@@ -81,8 +81,12 @@ fn collect(
 
 /// Pack `dir` (containing `extension.json` and its files) into a `.penext`.
 pub fn pack(dir: &Path, output: &Path) -> Result<Value> {
-    let manifest_bytes = fs::read(dir.join(MANIFEST_FILE))
-        .with_context(|| format!("{} has no {MANIFEST_FILE}", dir.display()))?;
+    let manifest_bytes = fs::read(dir.join(MANIFEST_FILE)).with_context(|| {
+        format!(
+            "[missing-resource] {} has no {MANIFEST_FILE}",
+            dir.display()
+        )
+    })?;
     let manifest = Manifest::parse(&manifest_bytes)?;
     let mut files = BTreeMap::new();
     let mut total = 0;

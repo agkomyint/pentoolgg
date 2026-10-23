@@ -629,3 +629,16 @@ fn image_add_external_accepts_an_absolute_path_inside_the_document_directory() {
     let _ = std::fs::remove_file(&outside);
     assert!(err.contains("inside the document directory"), "{err}");
 }
+
+#[test]
+fn bare_missing_file_errors_carry_a_code_and_a_hint() {
+    let dir = Dir::new("missing-file");
+    let err = dir.fail(&["info", "NOPE.pen"]);
+    assert!(
+        err.contains("[missing-resource]") && err.contains("check that the path"),
+        "{err}"
+    );
+    std::fs::create_dir(dir.0.join("empty")).unwrap();
+    let err = dir.fail(&["extension", "pack", "empty", "out.penext"]);
+    assert!(err.contains("[missing-resource]"), "{err}");
+}
