@@ -58,3 +58,25 @@ fn scene3d_and_pack_help_name_their_subcommands() {
         assert!(pack.contains(word), "pack help lacks {word}: {pack}");
     }
 }
+
+#[test]
+fn analyze_runs_without_a_clap_panic() {
+    // #234: the local `compare` flag shared an id with the global `--compare`.
+    let dir = std::env::temp_dir().join(format!("pentool-analyze-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let doc = dir.join("a.pen");
+    let bin = env!("CARGO_BIN_EXE_pentool");
+    assert!(Command::new(bin)
+        .args(["new", doc.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
+    let out = Command::new(bin)
+        .args(["analyze", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(101), "{text}");
+    assert!(!text.contains("Mismatch between definition"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

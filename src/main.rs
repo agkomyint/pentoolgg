@@ -258,7 +258,8 @@ struct AnalyzeArgs {
     samples: String,
     /// Also compare the scope against itself with effects disabled and masks
     /// stripped (effects-on vs effects-off, not a diff between files).
-    #[arg(long)]
+    /// (`--compare` is the global preview option, so this flag has its own name.)
+    #[arg(long = "compare-effects", id = "compare_effects")]
     compare: bool,
     /// Explicitly create color tokens from the reported palette.
     #[arg(long)]
