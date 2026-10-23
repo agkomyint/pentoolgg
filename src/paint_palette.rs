@@ -85,27 +85,62 @@ pub struct Source {
     pub origin: [u32; 2],
 }
 
-fn render_scope(
+/// Render `page`, `node:ID` (any node), `group:ID` (a group node) or `layer:ID`
+/// (a page layer container; a non-group node id is still accepted for compatibility).
+pub(crate) fn render_scope(
     raw: &Value,
     document: &Path,
     page: Option<&str>,
     scope: &str,
 ) -> Result<RgbaImage> {
-    match scope {
-        "page" => crate::composite::render(raw, document, page, 1.0),
-        s => {
-            let id = s
-                .strip_prefix("node:")
-                .or_else(|| s.strip_prefix("layer:"))
-                .or_else(|| s.strip_prefix("group:"))
-                .with_context(|| {
-                    format!(
-                        "[invalid-input] scope {s:?} must be page, node:ID, layer:ID or group:ID"
-                    )
-                })?;
-            crate::composite::node_pixels(raw, document, page, id, 1.0)
-        }
+    if scope == "page" {
+        return crate::composite::render(raw, document, page, 1.0);
     }
+    if let Some(id) = scope.strip_prefix("node:") {
+        return crate::composite::node_pixels(raw, document, page, id, 1.0);
+    }
+    if let Some(id) = scope.strip_prefix("group:") {
+        let (node, _) = crate::composite::node_ref(raw, page, id)?;
+        ensure!(
+            node["kind"] == "group",
+            "[invalid-input] scope group:{id} is not a group; use node:{id}"
+        );
+        return crate::composite::node_pixels(raw, document, page, id, 1.0);
+    }
+    let id = scope.strip_prefix("layer:").with_context(|| {
+        format!("[invalid-input] scope {scope:?} must be page, node:ID, layer:ID or group:ID")
+    })?;
+    let page_value = match page {
+        Some(p) => raw["pages"]
+            .as_array()
+            .and_then(|pages| pages.iter().find(|v| v["id"] == p)),
+        None => raw["pages"].as_array().and_then(|pages| pages.first()),
+    };
+    let index = page_value
+        .and_then(|p| p["layers"].as_array())
+        .and_then(|layers| layers.iter().position(|l| l["id"] == id));
+    if let Some(index) = index {
+        let mut only = raw.clone();
+        let target = match page {
+            Some(p) => only["pages"]
+                .as_array_mut()
+                .and_then(|pages| pages.iter_mut().find(|v| v["id"] == p)),
+            None => only["pages"]
+                .as_array_mut()
+                .and_then(|pages| pages.first_mut()),
+        }
+        .context("[not-found] page not found")?;
+        let layer = target["layers"][index].clone();
+        target["layers"] = serde_json::json!([layer]);
+        return crate::composite::render(&only, document, page, 1.0);
+    }
+    let (node, _) = crate::composite::node_ref(raw, page, id)
+        .with_context(|| format!("[not-found] layer:{id} is neither a layer nor a node"))?;
+    ensure!(
+        node["kind"] != "group",
+        "[invalid-input] scope layer:{id} is a group; use group:{id}"
+    );
+    crate::composite::node_pixels(raw, document, page, id, 1.0)
 }
 
 pub fn source(

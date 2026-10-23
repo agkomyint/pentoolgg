@@ -46,24 +46,7 @@ pub(crate) fn hash_image(image: &RgbaImage) -> String {
     format!("sha256:{}", hex::encode(h.finalize()))
 }
 
-fn render_scope(
-    raw: &Value,
-    document: &Path,
-    page: Option<&str>,
-    scope: &str,
-) -> Result<RgbaImage> {
-    if scope == "page" {
-        return crate::composite::render(raw, document, page, 1.0);
-    }
-    let id = scope
-        .strip_prefix("node:")
-        .or_else(|| scope.strip_prefix("layer:"))
-        .or_else(|| scope.strip_prefix("group:"))
-        .with_context(|| {
-            format!("[invalid-request] scope {scope:?} must be page, node:ID, layer:ID or group:ID")
-        })?;
-    crate::composite::node_pixels(raw, document, page, id, 1.0)
-}
+use crate::paint_palette::render_scope;
 
 /// Render a scope and crop it to `rect` (default: the opaque bounds of a node,
 /// or the whole page).

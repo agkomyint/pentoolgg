@@ -1046,3 +1046,58 @@ fn paint_plan_rejects_unknown_and_missing_pass_args() {
         );
     }
 }
+
+#[test]
+fn paint_scopes_distinguish_layer_group_and_node() {
+    let dir = Dir::new("scopes");
+    dir.ok(&["new", "d.pen"]);
+    let args = |extra: &[&str]| {
+        let mut v = vec!["shape", "--layer", "layer-1", "d.pen"];
+        v.extend_from_slice(extra);
+        v.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+    };
+    let run = |v: Vec<String>| {
+        let refs: Vec<&str> = v.iter().map(String::as_str).collect();
+        dir.ok(&refs)
+    };
+    run(args(&[
+        "rect", "a", "--x", "0", "--y", "0", "--width", "100", "--height", "100", "--fill",
+        "#e11d48",
+    ]));
+    run(args(&[
+        "rect", "b", "--x", "100", "--y", "0", "--width", "100", "--height", "100", "--fill",
+        "#0ea5e9",
+    ]));
+    dir.ok(&[
+        "group",
+        "--layer",
+        "layer-1",
+        "d.pen",
+        "create",
+        "g1",
+        "--children",
+        "a,b",
+    ]);
+    dir.ok(&["migrate", "d.pen", "--target", "6"]);
+    let sample = |scope: &str| {
+        dir.run(&[
+            "paint-palette",
+            "d.pen",
+            "sample",
+            "--scope",
+            scope,
+            "--x",
+            "50",
+            "--y",
+            "50",
+            "--json",
+        ])
+    };
+    assert!(sample("layer:layer-1").status.success());
+    assert!(sample("group:g1").status.success());
+    assert!(sample("node:g1").status.success());
+    let bad = sample("group:a");
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("not a group"));
+    assert!(!sample("layer:g1").status.success());
+}
