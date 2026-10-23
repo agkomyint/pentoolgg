@@ -581,3 +581,51 @@ fn photo_info_reports_a_rendered_source_instead_of_tiff_error() {
     assert!(out.contains("rendered"), "{out}");
     assert!(!out.contains("TIFF"), "{out}");
 }
+
+#[test]
+fn image_add_external_accepts_an_absolute_path_inside_the_document_directory() {
+    let dir = Dir::new("image-external-abs");
+    dir.ok(&["new", "a.pen", "--width", "40", "--height", "30"]);
+    image::RgbImage::from_pixel(4, 4, image::Rgb([255, 0, 255]))
+        .save(dir.0.join("magenta.png"))
+        .unwrap();
+    let inside = dir.0.join("magenta.png");
+    dir.ok(&[
+        "image",
+        "add",
+        "a.pen",
+        "pic",
+        "--file",
+        inside.to_str().unwrap(),
+        "--layer",
+        "layer-1",
+        "--width",
+        "16",
+        "--height",
+        "16",
+        "--external",
+    ]);
+    let doc = std::fs::read_to_string(dir.0.join("a.pen")).unwrap();
+    assert!(doc.contains("\"path\": \"magenta.png\""), "{doc}");
+    let outside = std::env::temp_dir().join(format!("pentool-outside-{}.png", std::process::id()));
+    image::RgbImage::from_pixel(2, 2, image::Rgb([0, 0, 0]))
+        .save(&outside)
+        .unwrap();
+    let err = dir.fail(&[
+        "image",
+        "add",
+        "a.pen",
+        "pic2",
+        "--file",
+        outside.to_str().unwrap(),
+        "--layer",
+        "layer-1",
+        "--width",
+        "16",
+        "--height",
+        "16",
+        "--external",
+    ]);
+    let _ = std::fs::remove_file(&outside);
+    assert!(err.contains("inside the document directory"), "{err}");
+}

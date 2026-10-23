@@ -6752,8 +6752,22 @@ async fn execute(cli: Cli) -> Result<()> {
             } => {
                 let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
                 let (source_path, storage) = if external {
-                    let relative = pentool::resource::safe_relative_path(&file)?;
                     let root = pentool::resource::document_root(&input).canonicalize()?;
+                    let relative = if file.is_absolute() {
+                        let absolute = file
+                            .canonicalize()
+                            .with_context(|| format!("[missing-resource] {}", file.display()))?;
+                        let inside = absolute.strip_prefix(&root).map_err(|_| {
+                            anyhow::anyhow!(
+                                "[unsafe-path] external image {} must be inside the document directory {}",
+                                file.display(),
+                                root.display()
+                            )
+                        })?;
+                        PathBuf::from(inside.to_string_lossy().replace('\\', "/"))
+                    } else {
+                        pentool::resource::safe_relative_path(&file)?
+                    };
                     let source = root.join(&relative).canonicalize().with_context(|| {
                         format!("[missing-resource] {}", root.join(&relative).display())
                     })?;
