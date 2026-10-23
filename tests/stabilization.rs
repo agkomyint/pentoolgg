@@ -271,3 +271,12 @@ fn negative_zero_field_params_hash_like_zero() {
         hash(r#"{"method":"angle","degrees":-0.0}"#)
     );
 }
+
+#[test]
+fn link_images_errors_when_nothing_can_be_linked() {
+    // #12: `--link-images` on a document without images silently did nothing.
+    let dir = Dir::new("linkimg");
+    dir.fixture("v5-image-embedded.pen");
+    let message = dir.fail(&["export", "v5-image-embedded.pen", "a.svg", "--link-images"]);
+    assert!(message.contains("--link-images"), "{message}");
+}
