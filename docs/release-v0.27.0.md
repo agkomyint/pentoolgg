@@ -25,10 +25,23 @@ deterministic. Guide: [Selecting and cutting out](selecting-and-cutting-out.md).
 - **Studio:** wand sample/gradient, selection modifier buttons, Refine edge, and
   Copy/Cut to layer in the Raster panel.
 
+## Also new
+
+- **Lab wand distance:** `--perceptual` on `select-wand`, `fill` and `cutout` measures
+  colour difference in CIE Lab (so lightness matters more than the largest channel).
+- **`select-modify smooth-edge`:** rounds a jagged outline but keeps a soft edge.
+- **`raster DOC delete-pixels ID`:** erases the selected pixels (also in batch and
+  `/api/raster`).
+- **Studio canvas crop tool:** drag eight handles, aspect presets, Enter/Esc; the
+  pixels stay put and the frame and crop window change as one undoable edit. Works
+  on image nodes with Fit: fill and no rotation or scale. "Delete selected" and
+  "Smooth edge" buttons in the Raster panel.
+
 ## Not included
 
-- A canvas crop tool with drag handles, a `cutout` mask source, `--preview` on
-  cutout (use the global `--preview`), and learned subject detection.
+- A `cutout` mask source, `--preview` on cutout (use the global `--preview`), moving
+  or transforming the selection outline in Studio, keyboard nudge, and learned
+  subject detection.
 - `cutout` is not in the shared dispatcher; it needs the document's folder to bake
   image nodes.
 

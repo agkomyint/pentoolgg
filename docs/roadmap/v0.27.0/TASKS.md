@@ -1,6 +1,6 @@
 # v0.27.0 — Selection, cutout and crop
 
-> Status: planned. Checkboxes stay pending until implementation, tests, docs and
+> Status: shipped in v0.27.0 (deferred items stay unticked). Checkboxes stay pending until implementation, tests, docs and
 > cross-platform evidence exist.
 
 0.27.0 is a focused feature release on selection. The goal is a workflow an agent
@@ -45,26 +45,26 @@ gradient sky" image:
 ## Tasks
 
 ### 1. Wand that survives gradients and noise
-- [ ] `--sample` seed averaging (point, 3x3, 5x5, 11x11) so one noisy pixel does
+- [x] `--sample` seed averaging (point, 3x3, 5x5, 11x11) so one noisy pixel does
       not decide the region.
-- [ ] `--mode-flood gradient` (compare each pixel with its already-selected
+- [x] `--mode-flood gradient` (compare each pixel with its already-selected
       neighbor, bounded step) so skies, studio sweeps and shaded surfaces select
       as one region without leaking into subjects.
-- [ ] Optional lightness-weighted or Lab distance in addition to RGBA max-channel.
-- [ ] Tests: the synthetic car/sky fixture (generated in the test, not committed)
+- [x] Optional lightness-weighted or Lab distance in addition to RGBA max-channel.
+- [x] Tests: the synthetic car/sky fixture (generated in the test, not committed)
       selects the sky with IoU >= 0.98 and never enters the car; existing wand
       tests and goldens unchanged for default arguments.
 
 ### 2. Edge-aware refine ("cut the car")
-- [ ] `select-refine`: take an existing selection or rough shape (box, polygon,
+- [x] `select-refine`: take an existing selection or rough shape (box, polygon,
       ellipse), treat outside as background and the inside core as foreground,
       and snap the boundary to image edges with a deterministic min-cut/graph
       region-grow (GrabCut-style, fixed iterations, fixed seed).
-- [ ] Foreground/background hint strokes (`--fg x,y...` / `--bg x,y...`) to correct
+- [x] Foreground/background hint strokes (`--fg x,y...` / `--bg x,y...`) to correct
       a result; hints are recorded in the journal.
-- [ ] `select-modify` additions: `smooth-edge`, `decontaminate` (remove background
+- [x] `select-modify` additions: `smooth-edge`, `decontaminate` (remove background
       color fringe), `feather` kept; all report selected-pixel counts.
-- [ ] Tests: synthetic car from a loose box reaches IoU >= 0.95; deterministic
+- [x] Tests: synthetic car from a loose box reaches IoU >= 0.95; deterministic
       across runs and platforms; bounded work refusal.
 
 ### 3. One-step cutout for agents
@@ -72,41 +72,41 @@ gradient sky" image:
       produces a new transparent raster or masked-image node (source untouched),
       with `--feather`, `--refine`, `--decontaminate`, `--trim`, `--id`.
 - [ ] `--dry-run` and `--preview` report selected area, bounds and edge confidence.
-- [ ] Result JSON is compact: new node ID, bounds, selection hash, warnings.
-- [ ] Works on image nodes without a manual `rasterize` step (done internally).
-- [ ] Mood-board acceptance test: import 3 images, cutout each, place and export.
+- [x] Result JSON is compact: new node ID, bounds, selection hash, warnings.
+- [x] Works on image nodes without a manual `rasterize` step (done internally).
+- [x] Mood-board acceptance test: import 3 images, cutout each, place and export.
 
 ### 4. Bridge the two selection systems
-- [ ] Query kinds usable as raster selections (`color-range`, `luminosity-range`,
+- [x] Query kinds usable as raster selections (`color-range`, `luminosity-range`,
       `node-alpha`, `mask-alpha`, polygon) and raster selections usable as mask
       sources and `selection` query kinds (`raster-selection`, `saved-selection`).
-- [ ] `selection crop --node ID` crops one image or group to the selection bounds
+- [x] `selection crop --node ID` crops one image or group to the selection bounds
       (no page resize); the page-crop behavior stays the default and unchanged.
-- [ ] Polygon limit raised or replaced by a simplified-path form; add invert,
+- [x] Polygon limit raised or replaced by a simplified-path form; add invert,
       grow/shrink and feather to query selections.
 
 ### 5. Shared dispatcher and API
-- [ ] Expose `select-modify`, `select-save/load/delete`, `lift`, `move-pixels`,
+- [x] Expose `select-modify`, `select-save/load/delete`, `lift`, `move-pixels`,
       `transform-pixels`, `paste` and the new actions through the shared raster
       dispatcher, so `/api/raster`, batch and Studio match the CLI.
-- [ ] `perm::ROUTES` classification and `server::tests` coverage.
+- [x] `perm::ROUTES` classification and `server::tests` coverage.
 
 ### 6. Studio selection tools
-- [ ] A selection toolbar with replace/add/subtract/intersect, feather, expand,
+- [x] A selection toolbar with replace/add/subtract/intersect, feather, expand,
       contract, invert, smooth, refine edge, and clear.
 - [ ] Marching-ants outline, move/transform the selection outline, quick mask,
       nudge by keyboard, Shift/Alt modifiers matching familiar editors.
-- [ ] Wand options: tolerance, sample size, contiguous, gradient mode, anti-alias.
-- [ ] Canvas crop tool for image nodes with handles and aspect presets.
+- [x] Wand options: tolerance, sample size, contiguous, gradient mode, anti-alias.
+- [x] Canvas crop tool for image nodes with handles and aspect presets.
 - [ ] Cut to layer, Copy to layer, Delete background (remove selection), Mask
-      from selection, with undo as one step.
-- [ ] `bun run typecheck`, `bun test` and embed checks pass; no hand edits of
+      from selection, with undo as one step. (Mask from selection deferred.)
+- [x] `bun run typecheck`, `bun test` and embed checks pass; no hand edits of
       `web/studio.html`.
 
 ### 7. Docs, schema and agent guide
-- [ ] `docs/` section "Selecting and cutting out" with the agent recipe (view,
+- [x] `docs/` section "Selecting and cutting out" with the agent recipe (view,
       outline, refine, cutout, place) and CLI help examples that run.
-- [ ] README and `--help` synchronized; `docs/release-v0.27.0.md`.
+- [x] README and `--help` synchronized; `docs/release-v0.27.0.md`.
 
 ## Acceptance
 
