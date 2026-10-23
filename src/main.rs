@@ -10191,8 +10191,10 @@ async fn execute(cli: Cli) -> Result<()> {
                 .query
                 .as_deref()
                 .map(serde_json::from_str)
-                .transpose()?;
-            let samples: Vec<[u32; 2]> = serde_json::from_str(&args.samples)?;
+                .transpose()
+                .context("[invalid-input] --query must be a JSON object")?;
+            let samples: Vec<[u32; 2]> = serde_json::from_str(&args.samples)
+                .context("[invalid-input] --samples must be a JSON array of [x,y] integer pairs")?;
             let analysis = pentool::inspect::analyze(
                 &raw,
                 &args.input,

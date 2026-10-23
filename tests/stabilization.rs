@@ -1439,3 +1439,14 @@ fn composite_version_error_names_the_migration() {
     assert!(!out.status.success());
     assert!(err.contains("migrate FILE --target 6"), "{err}");
 }
+
+#[test]
+fn analyze_names_a_malformed_samples_argument() {
+    let dir = Dir::new("analyze-samples");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&["migrate", "d.pen", "--target", "6"]);
+    let out = dir.run(&["analyze", "d.pen", "--samples", "{oops"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("--samples must be a JSON array"), "{err}");
+}
