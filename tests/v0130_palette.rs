@@ -157,6 +157,17 @@ fn extraction_orders_roles_and_hashes_sources() {
             && colors.iter().any(|c| c.starts_with("#0000ff")),
         "{colors:?}"
     );
+    // A color's share is of the scope, so it does not change with --count.
+    let one = ok(&[
+        "paint-palette",
+        &doc,
+        "extract",
+        "--scope",
+        "node:paint",
+        "--count",
+        "1",
+    ]);
+    assert!(one["colors"][0]["share"].as_f64().unwrap() < 1.0, "{one}");
     assert!(out["source_hash"].as_str().unwrap().starts_with("sha256:"));
     assert!(out["palette_hash"].as_str().unwrap().starts_with("sha256:"));
     // Blue is darker than red in the protocol luma, so it is the shadow color.

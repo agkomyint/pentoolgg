@@ -460,6 +460,14 @@ pub fn score(before: &Value, after: &Value, layer: &str, goal: &Value) -> Result
         .context("the layer must exist in the before document")?;
     let a = raster::layer_surface(after, layer)
         .context("the layer must exist in the after document")?;
+    ensure!(
+        (b.width, b.height) == (a.width, a.height),
+        "[invalid-request] layer {layer} is {}x{} before and {}x{} after; score needs equal dimensions",
+        b.width,
+        b.height,
+        a.width,
+        a.height
+    );
     let region = goal
         .region
         .unwrap_or([0, 0, a.width.max(1), a.height.max(1)]);

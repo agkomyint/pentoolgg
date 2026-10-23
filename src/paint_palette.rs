@@ -379,13 +379,14 @@ pub fn extract(src: &Source, scope: &str, role: &str, count: usize) -> Result<Va
         "[invalid-input] count must be between 1 and {MAX_COLORS}"
     );
     let px = pixels_for_role(src, role);
+    let scope_total: u64 = px.iter().map(|p| p.w).sum();
     let colors: Vec<([u8; 4], u64)> = if role == "median" {
         median_cut(px, count)
     } else {
         dominant(&px, count)
     };
     let list: Vec<[u8; 4]> = colors.iter().map(|c| c.0).collect();
-    let total: u64 = colors.iter().map(|c| c.1).sum();
+    let total = scope_total;
     Ok(json!({
         "algorithm": ALGORITHM,
         "role": role,

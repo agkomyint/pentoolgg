@@ -558,8 +558,8 @@ pub fn diff_plans(before: &Value, after: &Value) -> Result<Value> {
         },
         "limits_changed": before.get("limits") != after.get("limits"),
         "header_changed": keys_changed(
-            &json!({"engine": before["engine"], "page": before["page"]}),
-            &json!({"engine": after["engine"], "page": after["page"]}),
+            &json!({"engine": before["engine"], "page": before["page"], "id": before["id"], "description": before["description"]}),
+            &json!({"engine": after["engine"], "page": after["page"], "id": after["id"], "description": after["description"]}),
         ),
     }))
 }

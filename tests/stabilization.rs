@@ -913,3 +913,67 @@ fn diff_visual_out_places_the_artifacts_in_the_requested_directory() {
     assert!(dir.0.join("art/png/b.diff-before.png").exists());
     assert!(!dir.0.join("b.diff-before.png").exists());
 }
+
+#[test]
+fn paint_diff_plans_names_id_and_description_changes() {
+    let dir = Dir::new("plan-header");
+    let base = r#"{"schema":1,"engine":1,"id":"p1","passes":[{"id":"x","target":"R","action":"stroke","args":{"samples":[[1,1]],"brush":{"size":5}}}]}"#;
+    std::fs::write(dir.0.join("a.json"), base).unwrap();
+    std::fs::write(
+        dir.0.join("b.json"),
+        base.replace(r#""id":"p1""#, r#""id":"p2""#),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.0.join("c.json"),
+        base.replace(r#""id":"p1""#, r#""id":"p1","description":"hi""#),
+    )
+    .unwrap();
+    for (file, field) in [("b.json", "id"), ("c.json", "description")] {
+        let out = dir.ok(&["paint-diff", "a.json", file, "--plans", "--json"]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v["header_changed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == field),
+            "{v}"
+        );
+    }
+}
+
+#[test]
+fn paint_score_rejects_layers_of_different_sizes() {
+    let dir = Dir::new("score-size");
+    dir.ok(&["new", "big.pen"]);
+    dir.ok(&["new", "small.pen"]);
+    dir.ok(&[
+        "raster", "big.pen", "add", "R", "--width", "64", "--height", "64",
+    ]);
+    dir.ok(&[
+        "raster",
+        "small.pen",
+        "add",
+        "R",
+        "--width",
+        "32",
+        "--height",
+        "32",
+    ]);
+    let out = dir.run(&[
+        "paint-score",
+        "big.pen",
+        "small.pen",
+        "--layer",
+        "R",
+        "--goal",
+        r#"{"coverage":[0.1,0.9]}"#,
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("equal dimensions"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
