@@ -178,3 +178,46 @@ fn dry_run_batch_reports_but_does_not_write() {
     assert_eq!(out["result"]["operations"], 1, "{out}");
     assert_eq!(before, fs::read(&doc).unwrap());
 }
+
+#[test]
+fn batch_runs_selection_modifiers_saves_and_pixel_moves() {
+    let ws = Workspace::new("select-actions");
+    let doc = ws.document("s.pen");
+    ok(&[
+        "raster",
+        &doc,
+        "stroke",
+        "p",
+        "--samples",
+        "[[30,30]]",
+        "--brush",
+        r#"{"size":20,"hardness":1,"flow":1}"#,
+        "--color",
+        "#FF0000",
+    ]);
+    let ops = write(
+        &ws,
+        "ops.json",
+        &serde_json::json!([
+            {"action":"select-marquee","id":"p","args":{"x":20,"y":20,"width":20,"height":20}},
+            {"action":"select-modify","id":"p","args":{"op":"expand","amount":2}},
+            {"action":"select-save","id":"p","args":{"name":"red"}},
+            {"action":"lift","id":"p","args":{"new_id":"lifted"}},
+            {"action":"move-pixels","id":"p","args":{"dx":10,"dy":0,"copy":true}},
+            {"action":"transform-pixels","id":"p","args":{"scale":1.0,"rotate":0.0,"dx":1.0}},
+            {"action":"select-clear","id":"p"},
+            {"action":"select-load","id":"p","args":{"name":"red"}},
+            {"action":"select-delete","id":"p","args":{"name":"red"}},
+            {"action":"paste","id":"p","args":{"source":"lifted","x":50,"y":5}}
+        ]),
+    );
+    let out = ok(&["raster", &doc, "batch", &ops]);
+    assert_eq!(out["result"]["operations"], 10, "{out}");
+    let modified = &out["result"]["results"][1]["result"];
+    assert!(
+        modified["selected_pixels"].as_u64().unwrap() > 400,
+        "{modified}"
+    );
+    let info = ok(&["raster", &doc, "info", "lifted"]);
+    assert!(info["tile_map_sha256"].is_string());
+}

@@ -229,8 +229,66 @@ pub fn apply(
             &flood(),
         super::SelectionMode::parse(&text("mode", "replace"))?,
         )?,
+        "select-modify" => super::select_modify(
+            raw,
+            page,
+            id,
+            super::SelectionOp::parse(&text("op", ""))?,
+            args["amount"].as_u64().unwrap_or(1).min(u64::from(u32::MAX)) as u32,
+            args["tolerance"].as_u64().unwrap_or(32).min(255) as u8,
+        )?,
+        "select-save" => super::select_save(raw, page, id, &text("name", ""))?,
+        "select-load" => super::select_load(
+            raw,
+            page,
+            id,
+            &text("name", ""),
+            super::SelectionMode::parse(&text("mode", "replace"))?,
+        )?,
+        "select-delete" => super::select_delete(raw, id, &text("name", ""))?,
+        "lift" => super::lift_pixels(
+            raw,
+            page,
+            id,
+            &text("new_id", ""),
+            args["cut"].as_bool().unwrap_or(false),
+        )?,
+        "move-pixels" => super::move_pixels(
+            raw,
+            page,
+            id,
+            num("dx")? as i64,
+            num("dy")? as i64,
+            args["copy"].as_bool().unwrap_or(false),
+        )?,
+        "transform-pixels" => {
+            let scale = args["scale"].as_f64().unwrap_or(1.0);
+            super::transform_pixels(
+                raw,
+                page,
+                id,
+                &super::PixelTransform {
+                    scale_x: scale,
+                    scale_y: args["scale_y"].as_f64().unwrap_or(scale),
+                    rotate: args["rotate"].as_f64().unwrap_or(0.0),
+                    dx: args["dx"].as_f64().unwrap_or(0.0),
+                    dy: args["dy"].as_f64().unwrap_or(0.0),
+                    nearest: args["nearest"].as_bool().unwrap_or(false),
+                    copy: args["copy"].as_bool().unwrap_or(false),
+                },
+            )?
+        }
+        "paste" => super::paste_pixels(
+            raw,
+            page,
+            id,
+            &text("source", ""),
+            num("x")? as i64,
+            num("y")? as i64,
+            args["opacity"].as_f64().unwrap_or(1.0),
+        )?,
         other => bail!(
-            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-refine, select-info or select-clear"
+            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-refine, select-modify, select-save, select-load, select-delete, select-info, select-clear, lift, move-pixels, transform-pixels or paste"
         ),
     };
     Ok(result)
