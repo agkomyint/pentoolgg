@@ -424,3 +424,55 @@ fn package_verify_rejects_trailing_bytes_and_names_a_missing_file() {
     let err = dir.fail(&["package", "verify", "missing.penpkg"]);
     assert!(err.contains("missing.penpkg"), "{err}");
 }
+
+#[test]
+fn asset_preview_regenerates_a_corrupt_cache_entry() {
+    let dir = Dir::new("asset-preview-cache");
+    dir.ok(&["new", "h.pen", "--width", "50", "--height", "50"]);
+    dir.ok(&[
+        "shape", "h.pen", "rect", "r", "--layer", "layer-1", "--x", "1", "--y", "1", "--width",
+        "5", "--height", "5", "--fill", "#ff0000",
+    ]);
+    dir.ok(&[
+        "asset", "create", "--id", "a/r", "--name", "R", "h.pen", "r.pen",
+    ]);
+    let out = dir.ok(&["asset", "preview", "r.pen", "--output", "first.png"]);
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let cache = dir.0.join(report["cache"].as_str().unwrap());
+    let cache = if cache.exists() {
+        cache
+    } else {
+        PathBuf::from(report["cache"].as_str().unwrap())
+    };
+    std::fs::write(&cache, b"garbage").unwrap();
+    dir.ok(&["asset", "preview", "r.pen", "--output", "second.png"]);
+    let png = std::fs::read(dir.0.join("second.png")).unwrap();
+    assert!(png.starts_with(b"\x89PNG"), "{} bytes", png.len());
+}
+
+#[test]
+fn library_refresh_skips_history_snapshots() {
+    let dir = Dir::new("library-history");
+    dir.ok(&["new", "h.pen", "--width", "50", "--height", "50"]);
+    dir.ok(&[
+        "shape", "h.pen", "rect", "r", "--layer", "layer-1", "--x", "1", "--y", "1", "--width",
+        "5", "--height", "5", "--fill", "#ff0000",
+    ]);
+    std::fs::create_dir_all(dir.0.join("lib")).unwrap();
+    dir.ok(&[
+        "asset",
+        "create",
+        "--id",
+        "a/r",
+        "--name",
+        "R",
+        "h.pen",
+        "lib/r.pen",
+    ]);
+    let snapshots = dir.0.join("lib/.pentool/history/r.pen");
+    std::fs::create_dir_all(&snapshots).unwrap();
+    std::fs::copy(dir.0.join("lib/r.pen"), snapshots.join("old.pen")).unwrap();
+    dir.ok(&["library", "add", "--name", "l", "lib"]);
+    let out = dir.ok(&["library", "refresh"]);
+    assert!(!out.contains("duplicate_asset_id"), "{out}");
+}

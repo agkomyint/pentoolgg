@@ -6953,12 +6953,16 @@ async fn execute(cli: Cli) -> Result<()> {
                         scale,
                         extension
                     ));
-                    if !cache.exists() {
+                    if !asset_preview_cache_is_valid(&cache) {
                         if let Some(parent) = cache.parent() {
                             fs::create_dir_all(parent)?;
                         }
                         let doc = read_document(&path, None)?;
-                        render::write_export_options(&doc, &cache, scale, false)?;
+                        // Render beside the cache entry, then rename, so an
+                        // interrupted write never leaves a partial entry.
+                        let staging = cache.with_extension(format!("tmp.{extension}"));
+                        render::write_export_options(&doc, &staging, scale, false)?;
+                        fs::rename(&staging, &cache)?;
                     }
                     if let Some(parent) = output.parent() {
                         fs::create_dir_all(parent)?;
@@ -11801,6 +11805,25 @@ fn all_indexes(root: &Path) -> Result<library::AssetIndex> {
         Some(&library::project_index(root)),
         library::user_index().ok().as_deref(),
     )
+}
+/// A cached asset preview is reused only if it still looks like the file kind
+/// it was written as; a corrupt entry is regenerated (#229).
+fn asset_preview_cache_is_valid(cache: &Path) -> bool {
+    let Ok(bytes) = fs::read(cache) else {
+        return false;
+    };
+    match cache.extension().and_then(|e| e.to_str()) {
+        Some("png") => {
+            bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a])
+                && bytes.len() >= 45
+                && &bytes[bytes.len() - 8..bytes.len() - 4] == b"IEND"
+        }
+        Some("svg") => {
+            let text = String::from_utf8_lossy(&bytes);
+            text.contains("<svg") && text.trim_end().ends_with("</svg>")
+        }
+        _ => !bytes.is_empty(),
+    }
 }
 fn resolve_asset_path(root: &Path, spec: &str) -> Result<PathBuf> {
     let direct = PathBuf::from(spec);

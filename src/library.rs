@@ -218,7 +218,12 @@ pub fn refresh(root: &Path, config: &Path, index_path: &Path, only: Option<&str>
                 .push(json!({"library":lib.name,"code":"missing_folder","path":folder}));
             continue;
         }
-        for entry in WalkDir::new(&folder).follow_links(false).into_iter() {
+        // `.pentool` holds history snapshots and caches, never library assets.
+        let walker = WalkDir::new(&folder)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || e.file_name() != ".pentool");
+        for entry in walker {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
