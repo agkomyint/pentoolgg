@@ -4059,7 +4059,7 @@ fn uv_layout_on_a_dieline_preview_is_refused_not_a_panic() {
 
 #[test]
 fn low_min_ppi_never_lowers_synthesized_bleed_below_300() {
-    let out = Command::new(env!("CARGO_BIN_EXE_pentool"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_pentool"))
         .args([
             "pack",
             "docs/fixtures/v11-product-packaging.pen",
