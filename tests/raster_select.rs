@@ -684,3 +684,36 @@ fn agent_builds_a_three_image_mood_board_from_cutouts() {
     let board = image::open(&png).unwrap().to_rgba8();
     assert!(board.width() > 0 && fs::metadata(&png).unwrap().len() > 0);
 }
+
+#[test]
+fn cutout_decontaminate_recolors_the_soft_edge_from_the_subject() {
+    let ws = Workspace::new("decon");
+    let doc = ws.document("d.pen");
+    let args = |id: &'static str, extra: &[&'static str]| {
+        let mut a = vec![
+            "raster",
+            doc.as_str(),
+            "--dry-run",
+            "cutout",
+            "p",
+            "--id",
+            id,
+            "--box",
+            "14",
+            "14",
+            "32",
+            "32",
+            "--refine",
+            "6",
+            "--feather",
+            "3",
+        ];
+        a.extend(extra);
+        ok(&a)["result"].clone()
+    };
+    let plain = args("a", &[]);
+    let clean = args("b", &["--decontaminate"]);
+    assert_eq!(plain["decontaminated_pixels"], 0);
+    assert!(clean["decontaminated_pixels"].as_u64().unwrap() > 0);
+    assert_eq!(plain["bounds"], clean["bounds"]);
+}

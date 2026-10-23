@@ -118,6 +118,57 @@ fn commit(
     Ok(hash)
 }
 
+/// Replace the color of every partly transparent pixel with the mean color of the
+/// fully opaque pixels within `radius` of it, so a cutout edge carries subject
+/// color instead of the old background. Pixels with no opaque neighbor keep their
+/// color. Returns the number of edge pixels recolored.
+pub(super) fn decontaminate(
+    raw: &mut Value,
+    page: Option<&str>,
+    id: &str,
+    radius: u32,
+) -> Result<u64> {
+    let node = locate(&mut raw.clone(), page, id)?.clone();
+    let mut surface = Surface::load(raw, &node)?;
+    let (w, h) = (surface.width, surface.height);
+    let r = i64::from(radius.clamp(1, 8));
+    let source = surface.clone();
+    let mut changed = 0u64;
+    for y in 0..h {
+        for x in 0..w {
+            let p = source.pixel(x, y);
+            if p[3] == 0 || p[3] == 255 {
+                continue;
+            }
+            let (mut sum, mut n) = ([0u32; 3], 0u32);
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let (nx, ny) = (i64::from(x) + dx, i64::from(y) + dy);
+                    if nx < 0 || ny < 0 || nx >= i64::from(w) || ny >= i64::from(h) {
+                        continue;
+                    }
+                    let q = source.pixel(nx as u32, ny as u32);
+                    if q[3] == 255 {
+                        for c in 0..3 {
+                            sum[c] += u32::from(q[c]);
+                        }
+                        n += 1;
+                    }
+                }
+            }
+            if n > 0 {
+                let m = |v: u32| ((v + n / 2) / n) as u8;
+                surface.set_pixel(x, y, [m(sum[0]), m(sum[1]), m(sum[2]), p[3]]);
+                changed += 1;
+            }
+        }
+    }
+    let mut node = node;
+    commit_surface(raw, &mut node, &surface, "decontaminate")?;
+    *locate(raw, page, id)? = node;
+    Ok(changed)
+}
+
 /// Copy (or cut) the selected pixels into a new raster layer directly above the
 /// source, positioned over the selection's bounds.
 pub fn lift(

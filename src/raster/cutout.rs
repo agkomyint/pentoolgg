@@ -49,6 +49,8 @@ pub struct Request {
     /// Pull the edge in by this many pixels to drop a background fringe.
     pub shrink: u32,
     pub feather: u32,
+    /// Recolor the soft edge from the opaque interior (removes a background fringe).
+    pub decontaminate: bool,
 }
 
 pub fn cutout(
@@ -146,7 +148,15 @@ pub fn cutout(
     if summary["selected_pixels"] == 0 {
         bail!("[invalid-selection] nothing was selected; check the coordinates, or raise the wand tolerance")
     }
-    let lifted = lift_pixels(&mut next, page, &work, &request.new_id, false)?;
+    let mut lifted = lift_pixels(&mut next, page, &work, &request.new_id, false)?;
+    let recolored = if request.decontaminate {
+        let n = super::pixels::decontaminate(&mut next, page, &request.new_id, 3)?;
+        let node = locate(&mut next.clone(), page, &request.new_id)?.clone();
+        lifted["tile_map_sha256"] = json!(Surface::load(&next, &node)?.tile_map_hash());
+        n
+    } else {
+        0
+    };
 
     let mut warnings = Vec::new();
     if let Some(b) = summary["bounds"].as_array() {
@@ -184,6 +194,7 @@ pub fn cutout(
         "selection_tile_map_sha256": summary["tile_map_sha256"],
         "tile_map_sha256": lifted["tile_map_sha256"],
         "refined": request.refine.is_some(),
+        "decontaminated_pixels": recolored,
         "warnings": warnings,
     }))
 }

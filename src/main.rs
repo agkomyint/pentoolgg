@@ -4426,6 +4426,9 @@ enum RasterAction {
         /// Soften the edge by N pixels.
         #[arg(long, default_value_t = 0)]
         feather: u32,
+        /// Recolor soft edge pixels from the opaque interior (removes a background fringe).
+        #[arg(long)]
+        decontaminate: bool,
     },
     /// Snap the active (rough) selection to image edges: pixels deeper than --band
     /// inside are subject, farther than --band outside are background, the ring
@@ -8844,6 +8847,7 @@ async fn execute(cli: Cli) -> Result<()> {
                     bg,
                     shrink,
                     feather,
+                    decontaminate,
                 } => {
                     let read = |text: &Option<String>| -> Result<Vec<[f64; 2]>> {
                         let Some(text) = text else {
@@ -8888,6 +8892,7 @@ async fn execute(cli: Cli) -> Result<()> {
                         bg: read(&bg)?,
                         shrink,
                         feather,
+                        decontaminate,
                     };
                     (
                         "raster-cutout",
