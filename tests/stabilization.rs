@@ -244,3 +244,30 @@ fn paint_field_width_is_limited_to_4096_cells() {
     ]);
     assert!(message.contains("limit-exceeded"), "{message}");
 }
+
+#[test]
+fn negative_zero_field_params_hash_like_zero() {
+    // #136: `-0` and `0` produced different field hashes.
+    let dir = Dir::new("negzero");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "rasterA", "--width", "64", "--height", "64",
+    ]);
+    let hash = |field: &str| {
+        let out = dir.ok(&[
+            "paint-fields",
+            "d.pen",
+            "preview",
+            "rasterA",
+            "--field",
+            field,
+            "--json",
+        ]);
+        let start = out.find("sha256:").unwrap();
+        out[start..start + 71].to_owned()
+    };
+    assert_eq!(
+        hash(r#"{"method":"angle","degrees":0}"#),
+        hash(r#"{"method":"angle","degrees":-0.0}"#)
+    );
+}

@@ -459,7 +459,7 @@ pub fn build(raw: &Value, id: &str, spec: &FieldSpec) -> Result<Field> {
     } else {
         "none".to_owned()
     };
-    let params = spec.describe();
+    let params = normalize_negative_zero(spec.describe());
     let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
     let header = format!(
         "pentool-stroke-field-v{ALGORITHM}\n{params}\n{source_hash}\n{rect:?}\n{}\n{cols}x{rows}\n",
@@ -644,6 +644,23 @@ impl Params {
             },
             "min_length": self.min_length,
         })
+    }
+}
+
+/// The protocol normalizes negative zero to zero before hashing, so `-0` and `0`
+/// describe the same field.
+fn normalize_negative_zero(value: Value) -> Value {
+    match value {
+        Value::Number(n) if n.as_f64() == Some(0.0) && n.is_f64() => json!(0.0),
+        Value::Array(items) => {
+            Value::Array(items.into_iter().map(normalize_negative_zero).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, v)| (key, normalize_negative_zero(v)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 
