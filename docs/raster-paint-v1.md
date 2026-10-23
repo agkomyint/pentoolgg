@@ -315,22 +315,30 @@ Selection algorithm 1. Every command works on the layer's selection plane and ta
   Path costs ignore the image's own noise floor (90th percentile of neighbor
   differences in the certain regions).
 - `cutout ID --id NEW (--box X Y W H | --polygon POINTS | --wand X Y | --selection)
-  [--refine BAND] [--core N] [--invert] [--fg P] [--bg P] [--shrink N] [--feather N]`
+  [--refine BAND] [--core N] [--invert] [--fg P] [--bg P] [--shrink N] [--feather N]
+  [--decontaminate]`
   lifts the subject into a new transparent raster layer `NEW`, trimmed to its
   bounds. `ID` may be a raster layer or an image node (baked internally; the source
   is never changed). Wand sources accept `--tolerance`, `--sample`, `--gradient`
-  and `--leash`; combine `--wand` with `--invert` to cut a subject out of a plain
+  and `--leash`, plus `--perceptual` (CIE Lab distance instead of the largest RGBA
+  channel difference; 255 is a delta E of 100); combine `--wand` with `--invert` to cut a subject out of a plain
   backdrop. Coordinates are page units. The result reports the new id, bounds,
   selected/fully selected pixel counts, selection and layer tile-map hashes and
-  warnings (selection reaches the image edge, tiny subject). `--dry-run` plans
-  without writing.
+  warnings (selection reaches the image edge, tiny subject). `--decontaminate`
+  recolors partly transparent edge pixels from nearby opaque subject pixels (radius
+  3) and reports `decontaminated_pixels`. `--dry-run` plans without writing.
+  Document selection queries (`pentool selection`) accept `raster-selection`
+  (`layer`, optional saved `name`), `invert`, and `grow`/`shrink`/`feather`
+  (`amount` 1..64); `selection crop --node IMAGE` crops one `fit: fill` image.
 - `select-quickmask ID --samples ... [--brush ...] [--erase]` paints coverage with
   the brush engine: the same dabs, hardness, flow and dynamics as a color stroke, but
   into the selection plane. Textured tips are not supported.
 - `select-modify ID --op OP [--amount N] [--tolerance T]` changes the existing
   selection (an error when nothing is selected):
   `feather` (three box blurs of radius ceil(N/2), N 1-256, edge clamped), `smooth`
-  (box blur of radius N, then threshold at 50%), `expand`/`contract` (square
+  (box blur of radius N, then threshold at 50%), `smooth-edge` (the same blur, then a
+  steep ramp around 50% so the outline is smoothed but keeps a soft anti-aliased edge),
+  `expand`/`contract` (square
   structuring element, N 1-64; a contraction also eats in from the layer border),
   `border` (a band N pixels wide centered on the edge), `invert`, `grow` (add
   4-connected neighbors whose color is within T of the selected pixel they were

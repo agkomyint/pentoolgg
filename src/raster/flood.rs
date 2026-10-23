@@ -42,6 +42,9 @@ pub struct Options {
     pub gradient: u8,
     /// With `gradient`, the largest difference from the seed any pixel may have.
     pub leash: u8,
+    /// Measure color distance in CIE Lab (scaled so 255 is a delta E of 100) instead of
+    /// the largest RGBA channel difference; steadier on shaded or tinted regions.
+    pub perceptual: bool,
 }
 
 impl Options {
@@ -59,6 +62,7 @@ impl Options {
             sample: 1,
             gradient: 0,
             leash: 255,
+            perceptual: false,
         }
     }
 }
@@ -102,6 +106,52 @@ fn seed_color(surface: &Surface, x: u32, y: u32, sample: u32) -> [u8; 4] {
 }
 
 pub(super) fn candidate(p: [u8; 4], seed: [u8; 4], tolerance: u8, barrier: bool) -> bool {
+    candidate_by(p, seed, tolerance, barrier, false)
+}
+
+fn lab(c: [u8; 4]) -> [f64; 3] {
+    let lin = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (lin(c[0]), lin(c[1]), lin(c[2]));
+    let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+    let f = |t: f64| {
+        if t > 216.0 / 24389.0 {
+            t.cbrt()
+        } else {
+            (24389.0 / 27.0 * t + 16.0) / 116.0
+        }
+    };
+    let (fx, fy, fz) = (f(x), f(y), f(z));
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+/// [`candidate`] with an optional perceptual (CIE76 Lab) color distance.
+pub(super) fn candidate_by(
+    p: [u8; 4],
+    seed: [u8; 4],
+    tolerance: u8,
+    barrier: bool,
+    perceptual: bool,
+) -> bool {
+    if !perceptual || p[3] == 0 || seed[3] == 0 {
+        return candidate_rgba(p, seed, tolerance, barrier);
+    }
+    let (a, b) = (lab(p), lab(seed));
+    let delta =
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() * 2.55;
+    let diff = delta.round().min(255.0) as u8;
+    diff.max(p[3].abs_diff(seed[3])) <= tolerance
+}
+
+fn candidate_rgba(p: [u8; 4], seed: [u8; 4], tolerance: u8, barrier: bool) -> bool {
     if p[3] == 0 && seed[3] == 0 {
         return true;
     }
@@ -186,11 +236,12 @@ pub fn region(surface: &Surface, options: &Options) -> Result<Surface> {
         for y in 0..h {
             for x in 0..w {
                 let p = surface.pixel(x as u32, y as u32);
-                cand[y * w + x] = u8::from(candidate(
+                cand[y * w + x] = u8::from(candidate_by(
                     p,
                     seed,
                     options.tolerance,
                     options.transparent_barrier,
+                    options.perceptual,
                 ));
             }
         }
@@ -207,8 +258,16 @@ pub fn region(surface: &Surface, options: &Options) -> Result<Surface> {
         let step = |from: usize, to: usize| {
             let at = |i: usize| surface.pixel((i % w) as u32, (i / w) as u32);
             let p = at(to);
-            candidate(p, at(from), options.gradient, options.transparent_barrier)
-                && candidate(p, seed, options.leash, options.transparent_barrier)
+            let by = |reference, tolerance| {
+                candidate_by(
+                    p,
+                    reference,
+                    tolerance,
+                    options.transparent_barrier,
+                    options.perceptual,
+                )
+            };
+            by(at(from), options.gradient) && by(seed, options.leash)
         };
         let mut stack = vec![start];
         inside[start] = 1;
@@ -600,5 +659,25 @@ mod tests {
         o.sample = 5;
         o.tolerance = 30;
         assert_eq!(selected(&region(&s, &o).unwrap()), 81);
+    }
+
+    #[test]
+    fn perceptual_distance_follows_lightness_not_the_largest_channel() {
+        // Same largest-channel difference (40), very different perceived distance.
+        let seed = [128, 128, 128, 255];
+        let red = [168, 128, 128, 255];
+        let green = [128, 168, 128, 255];
+        assert!(candidate_by(red, seed, 40, false, false));
+        assert!(candidate_by(green, seed, 40, false, false));
+        assert!(candidate_by(red, seed, 60, false, true), "delta E 17");
+        assert!(!candidate_by(green, seed, 60, false, true), "delta E 29");
+        assert!(candidate_by(seed, seed, 0, false, true));
+        assert!(!candidate_by(
+            [0, 0, 0, 255],
+            [255, 255, 255, 255],
+            200,
+            false,
+            true
+        ));
     }
 }

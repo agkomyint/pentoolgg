@@ -11,6 +11,7 @@ The guides below contain the longer examples previously included in the project 
 | --- | --- | --- |
 | Drawing, text, fonts, and pages | [Drawing guide](guide-drawing.md) | [Scene authoring](authoring-v0.6.2.md) |
 | Object discovery, safe editing, previews, and HTTP rendering | [Agent and CLI guide](guide-agents.md) | [Protocol](PROTOCOL.md) |
+| Selecting, cutting out and cropping subjects | [Selecting and cutting out](selecting-and-cutting-out.md) | [Raster painting](raster-paint-v1.md) |
 | Images, DNG photography, brushes, and paint plans | [Image and painting guide](guide-images-and-paint.md) | [Images](image-workflow.md) · [Photography](photography-v1.md) · [Raster painting](raster-paint-v1.md) |
 | Optional AI image generation and editing | [AI guide](ai.md) | [v0.25.0 release](release-v0.25.0.md) |
 | Page layout, data merge, books, and InDesign interchange | [Publishing guide](guide-publishing.md) | [Layout](layout-v1.md) · [IDML mapping](idml-mapping-v1.md) |

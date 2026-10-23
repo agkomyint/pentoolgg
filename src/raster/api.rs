@@ -41,6 +41,7 @@ pub fn apply(
             .min(u64::from(u32::MAX)) as u32,
         gradient: args["gradient"].as_u64().unwrap_or(0).min(255) as u8,
         leash: args["leash"].as_u64().unwrap_or(255).min(255) as u8,
+        perceptual: args["perceptual"].as_bool().unwrap_or(false),
     };
     if args["scope"].as_str().is_some_and(|scope| scope != "layer")
         || args["layer"].as_str() == Some("below")

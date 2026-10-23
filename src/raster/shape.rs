@@ -24,6 +24,8 @@ pub enum Op {
     Expand,
     Contract,
     Smooth,
+    /// Smooth the outline but keep a soft (anti-aliased) edge.
+    SmoothEdge,
     Border,
     Grow,
     Similar,
@@ -37,11 +39,12 @@ impl Op {
             "expand" => Self::Expand,
             "contract" => Self::Contract,
             "smooth" => Self::Smooth,
+            "smooth-edge" => Self::SmoothEdge,
             "border" => Self::Border,
             "grow" => Self::Grow,
             "similar" => Self::Similar,
             "invert" => Self::Invert,
-            other => bail!("[invalid-selection] op {other:?} must be feather, expand, contract, smooth, border, grow, similar or invert"),
+            other => bail!("[invalid-selection] op {other:?} must be feather, expand, contract, smooth, smooth-edge, border, grow, similar or invert"),
         })
     }
 }
@@ -176,7 +179,7 @@ pub(super) fn morph(plane: &[u8], w: usize, h: usize, r: usize, grow: bool) -> V
 fn check_amount(op: Op, amount: u32) -> Result<()> {
     let max = match op {
         Op::Expand | Op::Contract | Op::Border => MAX_MORPH,
-        Op::Feather | Op::Smooth | Op::Grow => MAX_BLUR,
+        Op::Feather | Op::Smooth | Op::SmoothEdge | Op::Grow => MAX_BLUR,
         Op::Similar | Op::Invert => return Ok(()),
     };
     if amount == 0 || amount > max {
@@ -217,6 +220,10 @@ pub fn modify_plane(
         Op::Smooth => box_blur(plane, w, h, r)
             .into_iter()
             .map(|v| if v >= 128 { 255 } else { 0 })
+            .collect(),
+        Op::SmoothEdge => box_blur(plane, w, h, r)
+            .into_iter()
+            .map(|v| ((i32::from(v) - 128) * 3 + 128).clamp(0, 255) as u8)
             .collect(),
         Op::Border => {
             let solid: Vec<u8> = plane
@@ -676,6 +683,15 @@ mod tests {
         assert!(soft[8 * w + 3] > 0 && soft[8 * w + 3] < 255);
         let smooth = modify_plane(&plane, w, h, Op::Smooth, 2, 0, None).unwrap();
         assert!(smooth.iter().all(|v| *v == 0 || *v == 255));
+        let soft_edge = modify_plane(&plane, w, h, Op::SmoothEdge, 2, 0, None).unwrap();
+        assert!(
+            soft_edge.iter().any(|v| *v > 0 && *v < 255),
+            "keeps a soft edge"
+        );
+        assert_eq!(
+            soft_edge,
+            modify_plane(&plane, w, h, Op::SmoothEdge, 2, 0, None).unwrap()
+        );
         assert!(modify_plane(&plane, w, h, Op::Feather, 0, 0, None).is_err());
     }
 

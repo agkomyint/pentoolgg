@@ -52,6 +52,7 @@ fn action_keys(action: &str) -> (&'static [&'static str], &'static [&'static str
                 "sample",
                 "gradient",
                 "leash",
+                "perceptual",
             ],
             &["x", "y", "color"],
         ),

@@ -4021,6 +4021,9 @@ struct FloodArgs {
     /// With --gradient, the largest difference from the seed any pixel may have.
     #[arg(long, default_value_t = 255)]
     leash: u8,
+    /// Measure color distance in CIE Lab (255 = delta E 100) instead of the largest RGBA channel difference.
+    #[arg(long)]
+    perceptual: bool,
     /// Measure the region on `layer` (default) or on the visible page `composite`.
     #[arg(long, default_value = "layer", value_parser = ["layer", "composite"])]
     scope: String,
@@ -4052,6 +4055,7 @@ impl FloodArgs {
             sample: self.sample,
             gradient: self.gradient,
             leash: self.leash,
+            perceptual: self.perceptual,
         }
     }
 }
@@ -4364,7 +4368,7 @@ enum RasterAction {
         #[arg(long, default_value_t = 0)]
         feather: u32,
     },
-    /// Change the selection: feather, expand, contract, smooth, border, grow,
+    /// Change the selection: feather, expand, contract, smooth, smooth-edge, border, grow,
     /// similar or invert.
     SelectModify {
         id: String,
@@ -4408,6 +4412,9 @@ enum RasterAction {
         /// With --gradient, the largest drift from the seed.
         #[arg(long, default_value_t = 255)]
         leash: u8,
+        /// Measure wand color distance in CIE Lab instead of RGBA.
+        #[arg(long)]
+        perceptual: bool,
         /// Snap to image edges with this undecided band in pixels (1-64).
         #[arg(long)]
         refine: Option<u32>,
@@ -8843,6 +8850,7 @@ async fn execute(cli: Cli) -> Result<()> {
                     sample,
                     gradient,
                     leash,
+                    perceptual,
                     refine,
                     core,
                     invert,
@@ -8878,6 +8886,7 @@ async fn execute(cli: Cli) -> Result<()> {
                             sample,
                             gradient,
                             leash,
+                            perceptual,
                             ..raster::FloodOptions::at(wand[0], wand[1], tolerance)
                         })
                     } else if selection {
