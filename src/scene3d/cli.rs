@@ -2876,12 +2876,17 @@ pub(crate) fn add(
     raw["models"][&digest] = record;
     // A model-only document must still validate; load it as the renderer will.
     let probe = json!({"models": raw["models"].clone()});
-    let model = node::load_model(&probe, &doc_dir, &digest).with_context(|| {
-        if external {
-            "model import failed".to_string()
+    let model = node::load_model(&probe, &doc_dir, &digest).map_err(|error| {
+        let detail = format!("{error:#}").to_lowercase();
+        let sidecar = ["buffer", "texture", "image", "uri", "missing-resource"]
+            .iter()
+            .any(|word| detail.contains(word));
+        if external || !sidecar {
+            error.context("model import failed")
         } else {
-            "model import failed (models with sidecar buffers or textures need --external)"
-                .to_string()
+            error.context(
+                "model import failed (models with sidecar buffers or textures need --external)",
+            )
         }
     })?;
     if external {

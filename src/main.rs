@@ -8109,7 +8109,19 @@ async fn execute(cli: Cli) -> Result<()> {
             dry_run,
             if_revision,
             action,
-        } => pentool::scene3d::cli::run(&input, dry_run, if_revision.as_deref(), action),
+        } => {
+            if let Some(page) = selected_page {
+                let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+                if let Some(pages) = raw["pages"].as_array() {
+                    anyhow::ensure!(
+                        pages.iter().any(|p| p["id"] == page),
+                        "[missing-resource] page `{page}` does not exist in {}",
+                        input.display()
+                    );
+                }
+            }
+            pentool::scene3d::cli::run(&input, dry_run, if_revision.as_deref(), action)
+        }
         Command::Scene3dCache { server, action } => {
             pentool::scene3d::cli::run_cache_command(&server, action)
         }

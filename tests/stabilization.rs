@@ -1201,3 +1201,23 @@ fn paint_score_scores_the_protect_goal() {
     assert!(score < 1.0, "{v}");
     assert!(v["after"]["score"].as_f64().unwrap() < 1.0, "{v}");
 }
+
+#[test]
+fn scene3d_reports_a_missing_page_and_only_hints_external_for_sidecars() {
+    let dir = Dir::new("scene3d-misc");
+    dir.ok(&["new", "v.pen"]);
+    dir.ok(&["migrate", "v.pen", "--target", "10"]);
+    std::fs::write(dir.0.join("bad.glb"), "garbage").unwrap();
+    let out = dir.run(&[
+        "scene3d", "v.pen", "add", "b1", "--model", "bad.glb", "--layer", "layer-1",
+    ]);
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        !out.status.success() && !err.contains("--external"),
+        "{err}"
+    );
+    let out = dir.run(&["scene3d", "v.pen", "list", "--page", "nosuchpage"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("nosuchpage"));
+    dir.ok(&["scene3d", "v.pen", "list"]);
+}
