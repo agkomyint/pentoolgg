@@ -1450,3 +1450,19 @@ fn analyze_names_a_malformed_samples_argument() {
     assert!(!out.status.success());
     assert!(err.contains("--samples must be a JSON array"), "{err}");
 }
+
+#[test]
+fn import_stdout_omits_fidelity_items_without_a_report() {
+    let dir = Dir::new("import-items");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    std::fs::copy(root.join("docs/fixtures/v4-scene.pen"), dir.0.join("a.pen")).unwrap();
+    let fig = root.join("docs/fixtures/figma-weather-now-v15.fig");
+    let out = dir.ok(&["import", "a.pen", fig.to_str().unwrap()]);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert!(
+        v["fidelity"].get("items").is_none(),
+        "items should be omitted"
+    );
+    assert!(v["fidelity"]["items_omitted"].as_u64().unwrap() > 0);
+    assert!(out.len() < 5000, "{} bytes", out.len());
+}

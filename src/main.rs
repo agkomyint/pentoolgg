@@ -9194,13 +9194,32 @@ async fn execute(cli: Cli) -> Result<()> {
                     }
                 }
                 let mut fidelity = serde_json::to_value(&fidelity_report)?;
-                if let (Some(report), false) = (&report, dry_run) {
-                    if let Some(object) = fidelity.as_object_mut() {
-                        object.remove("items");
-                        object.insert(
-                            "report_path".into(),
-                            serde_json::json!(report.display().to_string()),
-                        );
+                if let Some(object) = fidelity.as_object_mut() {
+                    let total = object
+                        .get("items")
+                        .and_then(serde_json::Value::as_array)
+                        .map_or(0, Vec::len)
+                        + object
+                            .get("items_omitted")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0) as usize;
+                    object.remove("items");
+                    match (&report, dry_run) {
+                        (Some(report), false) => {
+                            object.insert(
+                                "report_path".into(),
+                                serde_json::json!(report.display().to_string()),
+                            );
+                        }
+                        _ => {
+                            object.insert("items_omitted".into(), serde_json::json!(total));
+                            object.insert(
+                                "report_hint".into(),
+                                serde_json::json!(
+                                    "run without --dry-run and pass --report PATH to write detailed fidelity items"
+                                ),
+                            );
+                        }
                     }
                 }
                 println!(
