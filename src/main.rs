@@ -10465,6 +10465,9 @@ async fn execute(cli: Cli) -> Result<()> {
                 operation,
                 scene::GroupOperation::Promote | scene::GroupOperation::Instantiate
             ) {
+                if matches!(operation, scene::GroupOperation::Instantiate) && id_new.is_some() {
+                    bail!("[invalid-input] group instantiate does not take --id; the positional ID is the new instance ID");
+                }
                 let result = match operation {
                     scene::GroupOperation::Promote => scene::promote_component(
                         &mut raw,

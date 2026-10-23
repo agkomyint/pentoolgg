@@ -585,7 +585,10 @@ pub fn add_stack(raw: &mut Value, stack: &str, selection: &Selection) -> Result<
     new_id(stack, "stack ID")?;
     let ids = selection.resolve(raw)?;
     if ids.len() < 2 {
-        bail!("[invalid-input] a stack needs at least two photos")
+        bail!(
+            "[invalid-input] stack {stack} resolved {} photo(s) but needs at least two; PHOTOS is one comma-separated value, for example \"hero,detail\"",
+            ids.len()
+        )
     }
     let catalog = catalog(raw)?;
     if catalog["stacks"].get(stack).is_some() {

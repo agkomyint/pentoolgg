@@ -157,3 +157,23 @@ fn negative_numbers_reach_value_validation_in_nested_commands() {
     ]);
     assert!(!message.contains("unexpected argument"), "{message}");
 }
+
+#[test]
+fn group_instantiate_rejects_ignored_id_flag() {
+    // #91: `group instantiate ... --id NEW` silently dropped --id.
+    let dir = Dir::new("instid");
+    dir.fixture("v4-scene.pen");
+    let message = dir.fail(&[
+        "group",
+        "v4-scene.pen",
+        "instantiate",
+        "card",
+        "--layer",
+        "content",
+        "--component",
+        "c",
+        "--id",
+        "other",
+    ]);
+    assert!(message.contains("--id"), "{message}");
+}
