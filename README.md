@@ -86,7 +86,14 @@ Advanced workflows have their own format requirements and limits. Find the relev
 After cloning this repository, open the editable example with
 `pentool serve examples/eye.pen`. More artwork and scripts live in [examples/](examples/).
 
-## New in v0.25.0: Studio AI
+## New in v0.27.0: select, cut out and crop
+
+Select a subject with a box, polygon or an improved magic wand, snap it to image
+edges and cut it into a new transparent layer, from the CLI or Studio:
+`pentool raster DOC cutout PHOTO --id car --box 120 140 400 190 --refine 25`.
+See [Selecting and cutting out](docs/selecting-and-cutting-out.md).
+
+## Studio AI (v0.25.0)
 
 Generate images, preview candidates, and place or replace an image from Studio's
 **AI** panel. Gemini also supports image variations and background removal.
