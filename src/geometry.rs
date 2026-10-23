@@ -9,8 +9,11 @@ use serde_json::{json, Value};
 #[derive(Debug, Clone, Serialize, Deserialize, Subcommand)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Operation {
+    /// Bounding box of the object (legacy v1-v3 and v4 scenes).
     Bounds,
+    /// List path anchors and handles (legacy v1-v3 documents only).
     Nodes,
+    /// Distance and hit test at a point (legacy v1-v3 documents only).
     #[command(allow_negative_numbers = true)]
     Hit {
         x: f64,
@@ -30,10 +33,7 @@ pub enum Operation {
         f: f64,
     },
     #[command(allow_negative_numbers = true)]
-    Translate {
-        dx: f64,
-        dy: f64,
-    },
+    Translate { dx: f64, dy: f64 },
     #[command(allow_negative_numbers = true)]
     Rotate {
         degrees: f64,
@@ -55,14 +55,10 @@ pub enum Operation {
         #[serde(default)]
         cy: f64,
     },
-    /// Set a zero-based anchor position; attached handles follow it.
+    /// Set a zero-based anchor position; attached handles follow it (legacy v1-v3 documents only).
     #[command(allow_negative_numbers = true)]
-    MoveAnchor {
-        index: usize,
-        x: f64,
-        y: f64,
-    },
-    /// Set a control point on a normalized element. Handle is 1 or 2.
+    MoveAnchor { index: usize, x: f64, y: f64 },
+    /// Set a control point on a normalized element. Handle is 1 or 2 (legacy v1-v3 documents only).
     #[command(allow_negative_numbers = true)]
     SetHandle {
         element: usize,
@@ -70,12 +66,9 @@ pub enum Operation {
         x: f64,
         y: f64,
     },
-    /// Split a drawable segment at 0<t<1, preserving its shape.
+    /// Split a drawable segment at 0<t<1, preserving its shape (legacy v1-v3 documents only).
     #[command(allow_negative_numbers = true)]
-    Split {
-        segment: usize,
-        t: f64,
-    },
+    Split { segment: usize, t: f64 },
 }
 fn tolerance() -> f64 {
     4.0

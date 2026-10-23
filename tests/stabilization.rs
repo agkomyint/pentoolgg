@@ -211,3 +211,14 @@ fn library_writes_leave_no_numbered_backups() {
         .collect();
     assert!(backups.is_empty(), "{backups:?}");
 }
+
+#[test]
+fn geometry_help_names_the_legacy_only_subcommands() {
+    // #88: help advertised subcommands that v4 scenes reject without saying so.
+    let dir = Dir::new("geohelp");
+    let help = dir.ok(&["geometry", "--help"]);
+    assert!(
+        help.matches("legacy v1-v3 documents only").count() >= 5,
+        "{help}"
+    );
+}
