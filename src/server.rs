@@ -6854,7 +6854,7 @@ mod tests {
         let plan = json!({
             "schema": 1, "engine": 1, "id": "pal",
             "passes": [{"id": "a", "target": "p", "action": "fill",
-                        "args": {"color": "#cc3322"}}]
+                        "args": {"x": 0, "y": 0, "color": "#cc3322"}}]
         });
         crate::paint_plan::execute(&mut raw, None, &plan).unwrap();
         let before = raw.clone();
