@@ -48,6 +48,15 @@ default. Add `"mode":"replace"` to an operation, or pass `--upsert` to `batch`, 
 replace the node in place (stacking position is kept; groups are never replaced).
 Re-running the same batch with `--upsert` is therefore idempotent.
 
+To bind a fill or stroke to a style token, add `fill_ref` / `stroke_ref` to `put-shape`,
+`put-path` or `put-text`; the literal `fill`/`stroke` stays as the fallback:
+
+```json
+[{"type":"put-shape","shape":"rect","id":"card","layer":"main","x":0,"y":0,"width":5,"height":5,"fill":"#ff0000","fill_ref":"accent"}]
+```
+
+`style set accent --value ...` then recolors every bound node and `style usage accent` lists them.
+
 ### See the result in the same call
 
 Add `--preview` to any command that changes a document, or to its `--dry-run`.
