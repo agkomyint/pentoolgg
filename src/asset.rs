@@ -1,6 +1,6 @@
 //! Reusable `.pen` asset metadata and extraction.
 use crate::{document::Document, editing, geometry};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -506,6 +506,38 @@ pub fn property_remove(
     let change =
         crate::transaction::commit_value(path, "asset-property-remove", dry_run, expected, &raw)?;
     Ok(json!({"ok":true,"dry_run":dry_run,"asset_id":asset_id,"removed":name,"change":change}))
+}
+
+/// The existing definition of `name` with a new default and/or label, for
+/// `property set` calls that do not retarget the property.
+pub fn property_updated_definition(
+    path: &Path,
+    asset_id: &str,
+    name: &str,
+    default: Option<&str>,
+    label: Option<&str>,
+) -> Result<Value> {
+    ensure!(
+        default.is_some() || label.is_some(),
+        "[invalid-input] property set needs --default or --label to update, or --target and --field to retarget"
+    );
+    let raw: Value = serde_json::from_slice(&fs::read(path)?)?;
+    checked_manifest(&raw, asset_id)?;
+    let mut definition = raw["asset"]["properties"]
+        .get(name)
+        .cloned()
+        .with_context(|| format!("exposed property not found: {name}"))?;
+    if let Some(label) = label {
+        definition["label"] = Value::String(label.to_owned());
+    }
+    if let Some(default) = default {
+        let field = definition["targets"][0]["property"]
+            .as_str()
+            .context("exposed property has no target field; pass --field")?
+            .to_owned();
+        definition["default"] = parse_property_value(&field, default)?;
+    }
+    Ok(definition)
 }
 
 pub fn property_definition(

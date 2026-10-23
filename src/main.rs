@@ -7062,13 +7062,24 @@ async fn execute(cli: Cli) -> Result<()> {
                             dry_run,
                             if_revision,
                         } => {
-                            let definition = asset::property_definition(
-                                schema.as_deref(),
-                                target.as_deref(),
-                                field.as_deref(),
-                                default.as_deref(),
-                                label.as_deref(),
-                            )?;
+                            let definition =
+                                if schema.is_none() && target.is_none() && field.is_none() {
+                                    asset::property_updated_definition(
+                                        &input,
+                                        &asset_id,
+                                        &name,
+                                        default.as_deref(),
+                                        label.as_deref(),
+                                    )?
+                                } else {
+                                    asset::property_definition(
+                                        schema.as_deref(),
+                                        target.as_deref(),
+                                        field.as_deref(),
+                                        default.as_deref(),
+                                        label.as_deref(),
+                                    )?
+                                };
                             asset::property_write(
                                 &input,
                                 &asset_id,

@@ -714,3 +714,63 @@ fn stroke_path_of_one_degenerate_segment_is_an_empty_success() {
     assert!(out.contains("\"dabs\""), "{out}");
     let _ = before;
 }
+
+#[test]
+fn asset_property_set_updates_default_without_retargeting() {
+    let dir = Dir::new("property-set-default");
+    dir.ok(&["new", "h.pen", "--width", "50", "--height", "50"]);
+    dir.ok(&[
+        "shape", "h.pen", "rect", "nib", "--layer", "layer-1", "--x", "1", "--y", "1", "--width",
+        "5", "--height", "5", "--fill", "#ff0000",
+    ]);
+    dir.ok(&[
+        "asset",
+        "create",
+        "--id",
+        "brand/logo",
+        "--name",
+        "L",
+        "h.pen",
+        "logo.pen",
+    ]);
+    dir.ok(&[
+        "asset",
+        "property",
+        "add",
+        "logo.pen",
+        "brand/logo",
+        "accent",
+        "--target",
+        "nib",
+        "--field",
+        "fill",
+        "--default",
+        "#ff0000",
+    ]);
+    dir.ok(&[
+        "asset",
+        "property",
+        "set",
+        "logo.pen",
+        "brand/logo",
+        "accent",
+        "--default",
+        "#00ff00",
+        "--label",
+        "Accent",
+    ]);
+    let doc = std::fs::read_to_string(dir.0.join("logo.pen")).unwrap();
+    assert!(
+        doc.contains("#00ff00") && doc.contains("Accent") && doc.contains("\"nib\""),
+        "{doc}"
+    );
+    let err = dir.fail(&[
+        "asset",
+        "property",
+        "set",
+        "logo.pen",
+        "brand/logo",
+        "accent",
+    ]);
+    assert!(err.contains("--default or --label"), "{err}");
+}
