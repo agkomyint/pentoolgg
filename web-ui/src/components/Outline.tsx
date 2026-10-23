@@ -8,7 +8,7 @@ import type { SceneNode } from "@/lib/api";
 import { useStudio } from "@/store";
 import { usePaint } from "@/workspaces/rasterStore";
 import { cn } from "@/lib/utils";
-import { addLayer, deleteSelected, duplicateSelected, groupSelected, moveInStack, patchLayer, removeLayer, renameNode, runScene } from "@/lib/actions";
+import { addLayer, deleteSelected, duplicateSelected, groupSelected, moveInStack, patchLayer, reorderSelected, removeLayer, renameNode, runScene } from "@/lib/actions";
 import { children, findNode, isScene, layerNodes, nodeKind, pageOf } from "@/lib/model";
 import {
   ADJUSTMENTS, BLEND_MODES, COMPOSITE_VERSION, addAdjustment, adjustmentLabel, clipBaseOf, hasFill, maskWithShape, previewComposite,
@@ -183,6 +183,8 @@ function Row({ node, depth, layerId, locked, isBase }: { node: SceneNode; depth:
   const menuItems = (): MenuItem[] => [
     { label: clipped ? "Release clipping mask" : "Create clipping mask", run: () => toggleClip(node.id), disabled: locked || !scene },
     "-",
+    { label: "Bring layer forward", run: () => { select(node.id); reorderSelected("forward"); }, disabled: locked },
+    { label: "Send layer backward", run: () => { select(node.id); reorderSelected("backward"); }, disabled: locked },
     { label: "Duplicate layer", run: () => { select(node.id); duplicateSelected(); }, disabled: locked },
     { label: "Group layers", run: () => { if (!chosen) select(node.id); groupSelected(); }, disabled: locked || !scene },
     { label: hidden ? "Show layer" : "Hide layer", run: () => toggleVisible(node.id), disabled: locked },
