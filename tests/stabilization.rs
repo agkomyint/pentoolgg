@@ -1429,3 +1429,13 @@ fn object_set_validates_colors_and_path_data_on_v3_documents() {
         "object", "d.pen", "set", "sidebar", "--layer", "chrome", "--fill", "#102030",
     ]);
 }
+
+#[test]
+fn composite_version_error_names_the_migration() {
+    let dir = Dir::new("composite-hint");
+    dir.ok(&["new", "d.pen"]);
+    let out = dir.run(&["analyze", "d.pen"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(err.contains("migrate FILE --target 6"), "{err}");
+}

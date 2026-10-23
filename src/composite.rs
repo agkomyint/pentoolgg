@@ -2710,7 +2710,7 @@ fn render_scene(
 ) -> Result<SceneRender> {
     crate::scene::validate(raw)?;
     if !is_document(raw) {
-        bail!("compositing requires document version 6")
+        bail!("[unsupported-version] compositing requires document version 6; run `pentool migrate FILE --target 6` first")
     }
     let materialized = crate::typeset::materialize(raw)?;
     let raw = materialized.as_ref().unwrap_or(raw);
