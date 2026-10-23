@@ -540,3 +540,16 @@ fn instance_set_rejects_an_invalid_color_value() {
         "logo.pen",
     ]);
 }
+
+#[test]
+fn preset_and_fill_help_state_the_v6_prerequisite() {
+    let dir = Dir::new("help-v6");
+    let help = dir.ok(&["--help"]);
+    for command in ["fill", "preset"] {
+        let line = help
+            .lines()
+            .find(|l| l.trim_start().starts_with(command) && l.contains("v6"))
+            .unwrap_or_default();
+        assert!(!line.is_empty(), "{command}: {help}");
+    }
+}

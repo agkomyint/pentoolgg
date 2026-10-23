@@ -2973,7 +2973,7 @@ Examples:
     Clip(Box<ClipArgs>),
     /// Edit an immutable-source affine/projective transform stack.
     Transform(Box<TransformArgs>),
-    /// Add or edit a solid, linear/radial/conic gradient, or pattern fill node.
+    /// Add or edit a solid, linear/radial/conic gradient, or pattern fill node (needs a v6+ document; `pentool migrate FILE --target 6`).
     Fill(Box<FillArgs>),
     /// Edit an ordered shadow, glow, stroke, overlay, or blur effect stack.
     Effect(Box<EffectArgs>),
@@ -3044,7 +3044,7 @@ Examples:
     },
     /// Maintain verified linked sources and collect portable projects offline.
     Linked(Box<LinkedArgs>),
-    /// Save data-only appearance presets or copy/paste named appearances.
+    /// Save data-only appearance presets or copy/paste named appearances (needs a v6+ document; `pentool migrate FILE --target 6`).
     Preset(Box<PresetArgs>),
     /// List, create, edit, and rebind named document design tokens.
     Style(Box<StyleArgs>),
