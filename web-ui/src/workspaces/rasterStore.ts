@@ -15,6 +15,11 @@ type State = {
   mode: string;
   shape: string;
   tolerance: number;
+  /** Wand seed-averaging window (odd pixels) and neighbor-step tolerance (0 = off). */
+  sample: number;
+  gradient: number;
+  /** Pixels for feather, expand, contract and smooth. */
+  amount: number;
   /** Active selection bounds from the engine, in layer pixels [x0, y0, x1, y1]. */
   selection: number[] | null;
   rulers: boolean;
@@ -40,6 +45,9 @@ export const usePaint = create<State>((set) => ({
   mode: "replace",
   shape: "rect",
   tolerance: 32,
+  sample: 1,
+  gradient: 0,
+  amount: 2,
   selection: null,
   rulers: false,
   snap: false,

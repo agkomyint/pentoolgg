@@ -47,6 +47,31 @@ export function RasterPanel() {
     }
   };
 
+  const selectionAction = async (action: string, args: Record<string, unknown>, done: string) => {
+    const { doc, pageId, replaceDoc } = useStudio.getState();
+    if (!doc || !layer || p.busy) return;
+    p.set({ busy: true });
+    try {
+      const body = await postJson<{ document: Doc; result?: { bounds?: number[] | null; selection?: { bounds?: number[] | null } } }>("/api/raster", { document: doc, page: pageId, id: layer.id, action, args });
+      replaceDoc(body.document);
+      const bounds = body.result?.bounds ?? body.result?.selection?.bounds;
+      if (action !== "lift") p.set({ selection: bounds ?? null });
+      p.set({ status: done });
+    } catch (e) {
+      p.set({ status: e instanceof Error ? e.message : "Request rejected." });
+      useStudio.getState().notify(e instanceof Error ? e.message : "Request rejected.", true);
+    } finally {
+      p.set({ busy: false });
+    }
+  };
+  const modify = (op: string) => void selectionAction("select-modify", { op, amount: p.amount }, `Selection ${op} applied.`);
+  const toNewLayer = (cut: boolean) => {
+    const taken = new Set(layers.map((n) => n.id));
+    let n = 1;
+    while (taken.has(`cutout-${n}`)) n += 1;
+    void selectionAction("lift", { new_id: `cutout-${n}`, cut }, cut ? `Cut to layer cutout-${n}.` : `Copied to layer cutout-${n}.`);
+  };
+
   const tool = p.tool;
   const paints = ["brush", "eraser", "clone", "heal", "quickmask"].includes(tool);
   const selecting = ["marquee", "lasso", "wand", "quickmask"].includes(tool);
@@ -103,7 +128,45 @@ export function RasterPanel() {
               </select>
             </label>
           )}
-          {tool === "wand" && <Range label="Tolerance" value={p.tolerance} min={0} max={255} onChange={(tolerance) => p.set({ tolerance })} />}
+          {tool === "wand" && (
+            <>
+              <Range label="Tolerance" value={p.tolerance} min={0} max={255} onChange={(tolerance) => p.set({ tolerance })} />
+              <label className="block space-y-1">
+                <span className="text-muted-foreground">Sample size</span>
+                <select className={field} value={p.sample} onChange={(e) => p.set({ sample: Number(e.target.value) })}>
+                  {[1, 3, 5, 11].map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? "Point" : `${n} x ${n} average`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Range label="Gradient" value={p.gradient} min={0} max={64} onChange={(gradient) => p.set({ gradient })} />
+              <p className="text-muted-foreground">Gradient follows slow color changes, so a sky or studio sweep selects as one region. 0 compares with the clicked pixel.</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {selecting && (
+        <div className="space-y-1">
+          <Range label="Amount" value={p.amount} min={1} max={64} onChange={(amount) => p.set({ amount })} />
+          <div className="flex flex-wrap gap-1">
+            {["invert", "feather", "expand", "contract", "smooth"].map((op) => (
+              <Button key={op} size="sm" variant="outline" disabled={!p.selection || p.busy} onClick={() => modify(op)}>
+                {op[0].toUpperCase() + op.slice(1)}
+              </Button>
+            ))}
+            <Button size="sm" variant="outline" disabled={!p.selection || p.busy} title="Snap a rough selection to the edges of the subject" onClick={() => void selectionAction("select-refine", { band: Math.min(64, Math.max(1, p.amount * 3)) }, "Selection snapped to image edges.")}>
+              Refine edge
+            </Button>
+            <Button size="sm" variant="outline" disabled={!p.selection || p.busy} onClick={() => toNewLayer(false)}>
+              Copy to layer
+            </Button>
+            <Button size="sm" variant="outline" disabled={!p.selection || p.busy} onClick={() => toNewLayer(true)}>
+              Cut to layer
+            </Button>
+          </div>
         </div>
       )}
 

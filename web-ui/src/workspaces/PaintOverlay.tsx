@@ -397,7 +397,7 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
       return;
     }
     if (s.tool === "wand") {
-      void call("select-wand", { x: Math.max(0, Math.round(q.x)), y: Math.max(0, Math.round(q.y)), tolerance: s.tolerance, mode: s.mode });
+      void call("select-wand", { x: Math.max(0, Math.round(q.x)), y: Math.max(0, Math.round(q.y)), tolerance: s.tolerance, sample: s.sample, gradient: s.gradient, mode: s.mode });
       return;
     }
     if (s.tool === "lasso") {
@@ -519,4 +519,7 @@ const STATUS: Record<string, string> = {
   "select-lasso": "Selection made. Brush strokes stay inside it; Ctrl+D deselects.",
   "select-wand": "Selection made. Brush strokes stay inside it; Ctrl+D deselects.",
   "select-clear": "Selection cleared.",
+  "select-modify": "Selection changed.",
+  "select-refine": "Selection snapped to image edges.",
+  lift: "Pixels copied to a new layer.",
 };
