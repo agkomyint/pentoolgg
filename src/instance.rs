@@ -86,7 +86,7 @@ pub fn inspect(raw: &Value, id: &str) -> Result<Value> {
         .cloned()
         .context("instance not found")
 }
-pub fn detach(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
+pub fn detach(file: &Path, id: &str, dry_run: bool, if_revision: Option<&str>) -> Result<Value> {
     let bytes = fs::read(file)?;
     let mut raw: Value = serde_json::from_slice(&bytes)?;
     let arr = raw
@@ -98,7 +98,7 @@ pub fn detach(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
     if arr.len() == before {
         bail!("instance not found")
     };
-    crate::transaction::commit_value(file, "instance-detach", dry_run, None, &raw)?;
+    crate::transaction::commit_value(file, "instance-detach", dry_run, if_revision, &raw)?;
     Ok(json!({"ok":true,"dry_run":dry_run,"instance":id,"detached":true}))
 }
 
@@ -109,6 +109,7 @@ pub fn set_property(
     name: &str,
     value: &str,
     dry_run: bool,
+    if_revision: Option<&str>,
 ) -> Result<Value> {
     let definition = manifest
         .properties
@@ -181,7 +182,7 @@ pub fn set_property(
     record["overrides"][name] = override_value.clone();
     record["property_definitions"][name] = definition.clone();
     record["materialized_hash"] = Value::String(accepted_hash);
-    crate::transaction::commit_value(file, "instance-set", dry_run, None, &raw)?;
+    crate::transaction::commit_value(file, "instance-set", dry_run, if_revision, &raw)?;
     Ok(json!({"ok":true,"dry_run":dry_run,"instance":id,"property":name,"value":value}))
 }
 fn set_object_property(
@@ -650,7 +651,13 @@ fn constraints_accept(constraints: Option<&Value>, value: &Value) -> bool {
         .is_none_or(|allowed| allowed.contains(value))
 }
 
-pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Value> {
+pub fn update(
+    file: &Path,
+    id: &str,
+    source: &Path,
+    dry_run: bool,
+    if_revision: Option<&str>,
+) -> Result<Value> {
     let destination_bytes = fs::read(file)?;
     let destination: Value = serde_json::from_slice(&destination_bytes)?;
     let source_bytes = fs::read(source)?;
@@ -666,7 +673,7 @@ pub fn update(file: &Path, id: &str, source: &Path, dry_run: bool) -> Result<Val
         return Ok(json!({"ok":true,"dry_run":true,"plan":plan}));
     }
     let (updated, result) = apply_update(destination, id, source_raw, &source_bytes)?;
-    crate::transaction::commit_value(file, "instance-update", false, None, &updated)?;
+    crate::transaction::commit_value(file, "instance-update", false, if_revision, &updated)?;
     Ok(result)
 }
 
@@ -676,6 +683,7 @@ pub fn update_resolved(
     source: &Path,
     resolutions_file: &Path,
     dry_run: bool,
+    if_revision: Option<&str>,
 ) -> Result<Value> {
     let destination_bytes = fs::read(file)?;
     let mut destination: Value = serde_json::from_slice(&destination_bytes)?;
@@ -690,7 +698,7 @@ pub fn update_resolved(
                 file,
                 "instance-resolution-detach",
                 false,
-                None,
+                if_revision,
                 &destination,
             )?;
         }
@@ -707,8 +715,13 @@ pub fn update_resolved(
         return Ok(json!({"ok":true,"dry_run":true,"plan":plan}));
     }
     let (updated, mut summary) = apply_update(destination, id, source_raw, &source_bytes)?;
-    let change =
-        crate::transaction::commit_value(file, "instance-update-resolved", false, None, &updated)?;
+    let change = crate::transaction::commit_value(
+        file,
+        "instance-update-resolved",
+        false,
+        if_revision,
+        &updated,
+    )?;
     summary["change"] = serde_json::to_value(change)?;
     summary["resolutions"] = resolutions;
     Ok(summary)
@@ -956,6 +969,7 @@ pub fn update_bulk(
     continue_on_conflict: bool,
     resolutions_file: Option<&Path>,
     dry_run: bool,
+    if_revision: Option<&str>,
 ) -> Result<Value> {
     let before = fs::read(file)?;
     let mut document: Value = serde_json::from_slice(&before)?;
@@ -1073,7 +1087,7 @@ pub fn update_bulk(
             file,
             "instance-update-bulk",
             false,
-            None,
+            if_revision,
             &document,
         )?)?
     };
@@ -1090,7 +1104,7 @@ pub fn update_bulk(
     }))
 }
 
-pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
+pub fn rollback(file: &Path, id: &str, dry_run: bool, if_revision: Option<&str>) -> Result<Value> {
     let bytes = fs::read(file)?;
     let mut raw: Value = serde_json::from_slice(&bytes)?;
     let record_value = inspect(&raw, id)?;
@@ -1171,7 +1185,7 @@ pub fn rollback(file: &Path, id: &str, dry_run: bool) -> Result<Value> {
         .unwrap_or_else(|| json!([]));
     record["previous"].as_array_mut().unwrap().pop();
     let rolled_back_to = record["asset_version"].clone();
-    crate::transaction::commit_value(file, "instance-rollback", false, None, &raw)?;
+    crate::transaction::commit_value(file, "instance-rollback", false, if_revision, &raw)?;
     Ok(json!({"ok":true,"instance":id,"rolled_back_to":rolled_back_to}))
 }
 fn page_mut<'a>(raw: &'a mut Value, page_id: &str) -> Result<&'a mut Value> {

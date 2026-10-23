@@ -3469,16 +3469,25 @@ enum InstanceAction {
         resolutions: Option<PathBuf>,
         #[arg(long)]
         dry_run: bool,
+        /// Refuse the change unless the document is at this revision.
+        #[arg(long)]
+        if_revision: Option<String>,
     },
     Rollback {
         id: String,
         #[arg(long)]
         dry_run: bool,
+        /// Refuse the change unless the document is at this revision.
+        #[arg(long)]
+        if_revision: Option<String>,
     },
     Detach {
         id: String,
         #[arg(long)]
         dry_run: bool,
+        /// Refuse the change unless the document is at this revision.
+        #[arg(long)]
+        if_revision: Option<String>,
     },
     Set {
         id: String,
@@ -3490,6 +3499,9 @@ enum InstanceAction {
         source: PathBuf,
         #[arg(long)]
         dry_run: bool,
+        /// Refuse the change unless the document is at this revision.
+        #[arg(long)]
+        if_revision: Option<String>,
     },
 }
 #[derive(Subcommand)]
@@ -7344,6 +7356,7 @@ async fn execute(cli: Cli) -> Result<()> {
                 continue_on_conflict,
                 resolutions,
                 dry_run,
+                if_revision,
             } => {
                 if let Some(expected) = to {
                     let raw: serde_json::Value = serde_json::from_slice(&fs::read(&source)?)?;
@@ -7368,27 +7381,56 @@ async fn execute(cli: Cli) -> Result<()> {
                         continue_on_conflict,
                         resolutions.as_deref(),
                         dry_run,
+                        if_revision.as_deref(),
                     )?
                 } else {
                     let id = id.as_deref().context("instance ID is required")?;
                     if let Some(resolutions) = resolutions {
-                        instance::update_resolved(&input, id, &source, &resolutions, dry_run)?
+                        instance::update_resolved(
+                            &input,
+                            id,
+                            &source,
+                            &resolutions,
+                            dry_run,
+                            if_revision.as_deref(),
+                        )?
                     } else {
-                        instance::update(&input, id, &source, dry_run)?
+                        instance::update(&input, id, &source, dry_run, if_revision.as_deref())?
                     }
                 };
                 println!("{}", json_pretty(result)?);
                 Ok(())
             }
-            InstanceAction::Rollback { id, dry_run } => {
+            InstanceAction::Rollback {
+                id,
+                dry_run,
+                if_revision,
+            } => {
                 println!(
                     "{}",
-                    json_pretty(instance::rollback(&input, &id, dry_run)?)?
+                    json_pretty(instance::rollback(
+                        &input,
+                        &id,
+                        dry_run,
+                        if_revision.as_deref()
+                    )?)?
                 );
                 Ok(())
             }
-            InstanceAction::Detach { id, dry_run } => {
-                println!("{}", json_pretty(instance::detach(&input, &id, dry_run)?)?);
+            InstanceAction::Detach {
+                id,
+                dry_run,
+                if_revision,
+            } => {
+                println!(
+                    "{}",
+                    json_pretty(instance::detach(
+                        &input,
+                        &id,
+                        dry_run,
+                        if_revision.as_deref()
+                    )?)?
+                );
                 Ok(())
             }
             InstanceAction::Set {
@@ -7397,13 +7439,20 @@ async fn execute(cli: Cli) -> Result<()> {
                 value,
                 source,
                 dry_run,
+                if_revision,
             } => {
                 let raw: serde_json::Value = serde_json::from_slice(&fs::read(source)?)?;
                 let m = asset::manifest(&raw)?.context("source lacks asset metadata")?;
                 println!(
                     "{}",
                     json_pretty(instance::set_property(
-                        &input, &id, &m, &property, &value, dry_run
+                        &input,
+                        &id,
+                        &m,
+                        &property,
+                        &value,
+                        dry_run,
+                        if_revision.as_deref()
                     )?)?
                 );
                 Ok(())

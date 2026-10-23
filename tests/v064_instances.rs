@@ -100,6 +100,7 @@ fn six_pages_update_atomically_preserving_overrides_and_stack() {
         false,
         None,
         true,
+        None,
     )
     .unwrap();
     assert_eq!(preview["counts"]["skipped"], 0, "{preview:#}");
@@ -116,6 +117,7 @@ fn six_pages_update_atomically_preserving_overrides_and_stack() {
         false,
         None,
         false,
+        None,
     )
     .unwrap();
     assert_eq!(result["counts"]["skipped"], 0, "{result:#}");

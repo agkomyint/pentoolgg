@@ -341,3 +341,29 @@ fn fonts_scan_ignores_adjustment_nodes() {
     ]);
     dir.ok(&["fonts", "r.pen"]);
 }
+
+#[test]
+fn instance_mutations_accept_and_enforce_if_revision() {
+    let dir = Dir::new("instance-if-revision");
+    dir.ok(&["new", "d.pen"]);
+    let path = dir.0.join("d.pen");
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    doc["instances"] = serde_json::json!([{"id": "i1"}]);
+    std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let err = dir.fail(&[
+        "instance",
+        "d.pen",
+        "detach",
+        "i1",
+        "--if-revision",
+        "sha256:stale",
+    ]);
+    assert!(err.contains("revision mismatch"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    for sub in ["update", "rollback", "set"] {
+        let help = dir.ok(&["instance", "d.pen", sub, "--help"]);
+        assert!(help.contains("--if-revision"), "{sub}: {help}");
+    }
+}
