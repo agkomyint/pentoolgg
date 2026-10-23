@@ -1406,3 +1406,26 @@ fn image_analyze_centers_the_focal_suggestion_on_pixel_centers() {
         "{out}"
     );
 }
+
+#[test]
+fn object_set_validates_colors_and_path_data_on_v3_documents() {
+    let dir = Dir::new("v3-object-set");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/multipage-ai-chat.pen");
+    std::fs::copy(&fixture, dir.0.join("d.pen")).unwrap();
+    let before = std::fs::read(dir.0.join("d.pen")).unwrap();
+    for args in [
+        ["--fill", "zzz"],
+        ["--fill", ""],
+        ["--stroke", "zzz"],
+        ["--d", " "],
+    ] {
+        let mut full = vec!["object", "d.pen", "set", "sidebar", "--layer", "chrome"];
+        full.extend_from_slice(&args);
+        let out = dir.run(&full);
+        assert!(!out.status.success(), "{args:?} should fail");
+    }
+    assert_eq!(before, std::fs::read(dir.0.join("d.pen")).unwrap());
+    dir.ok(&[
+        "object", "d.pen", "set", "sidebar", "--layer", "chrome", "--fill", "#102030",
+    ]);
+}

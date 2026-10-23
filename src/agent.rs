@@ -216,6 +216,16 @@ pub fn apply(doc: &mut Document, action: &ObjectAction) -> Result<Value> {
                 {
                     bail!("[unsupported-capability] compositing properties require document format version 6")
                 }
+                for (slot, value) in [("fill", fill), ("stroke", stroke)] {
+                    if let Some(color) = value.as_deref() {
+                        if !crate::scene::is_valid_color(color) {
+                            bail!("[invalid-input] object {source_id} has invalid {slot} color {color:?}; use none, #RGB, #RGBA, #RRGGBB or #RRGGBBAA; nothing was written");
+                        }
+                    }
+                }
+                if d.as_deref().is_some_and(|v| v.trim().is_empty()) {
+                    bail!("[invalid-input] object {source_id}: path data `d` cannot be empty; nothing was written");
+                }
                 match kind {
                     ObjectKind::Path => {
                         if [
