@@ -478,8 +478,25 @@ pub fn score(before: &Value, after: &Value, layer: &str, goal: &Value) -> Result
             .transpose()
     };
     let (rb, ra) = (reference(before)?, reference(after)?);
-    let sb = criteria(&b, region, &goal, rb.as_ref());
-    let sa = criteria(&a, region, &goal, ra.as_ref());
+    let mut sb = criteria(&b, region, &goal, rb.as_ref());
+    let mut sa = criteria(&a, region, &goal, ra.as_ref());
+    let diagnostics = diagnose(&b, &a, &goal.options);
+    if !goal.options.protect.is_empty() {
+        let protected = (0..a.height)
+            .flat_map(|y| (0..a.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| goal.options.protect.iter().any(|r| inside(r, x, y)))
+            .count() as f64;
+        let violations = diagnostics["measured"]["protected_violations"]
+            .as_u64()
+            .unwrap_or(0) as f64;
+        let after = if protected == 0.0 {
+            1.0
+        } else {
+            1.0 - (violations / protected).min(1.0)
+        };
+        sb["protect_score"] = json!(1.0);
+        sa["protect_score"] = json!(r4(after));
+    }
     let (cb, ca) = (composite(&sb), composite(&sa));
     let delta = match (cb, ca) {
         (Some(x), Some(y)) => Some(r4(y - x)),
@@ -501,7 +518,7 @@ pub fn score(before: &Value, after: &Value, layer: &str, goal: &Value) -> Result
             "trend": trend,
             "note": "scores are equal-weight means of the declared criteria; accepting, reverting or continuing is the caller's decision",
         },
-        "diagnostics": diagnose(&b, &a, &goal.options),
+        "diagnostics": diagnostics,
         "applied": false,
     }))
 }

@@ -1159,3 +1159,45 @@ fn constrained_strokes_record_the_mask_hash_in_the_journal() {
     );
     assert!(last["constraints"]["spec_hash"].is_string(), "{last}");
 }
+
+#[test]
+fn paint_score_scores_the_protect_goal() {
+    let dir = Dir::new("score-protect");
+    dir.ok(&["new", "before.pen"]);
+    dir.ok(&[
+        "raster",
+        "before.pen",
+        "add",
+        "R",
+        "--width",
+        "64",
+        "--height",
+        "64",
+    ]);
+    std::fs::copy(dir.0.join("before.pen"), dir.0.join("after.pen")).unwrap();
+    dir.ok(&[
+        "raster",
+        "after.pen",
+        "stroke",
+        "R",
+        "--samples",
+        "[[10,10],[40,40]]",
+        "--brush",
+        r#"{"size":12}"#,
+        "--color",
+        "#cc3333",
+    ]);
+    let out = dir.ok(&[
+        "paint-score",
+        "before.pen",
+        "after.pen",
+        "--layer",
+        "R",
+        "--goal",
+        r#"{"coverage":[0,1],"protect":[[0,0,64,64]]}"#,
+    ]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let score = v["after"]["criteria"]["protect_score"].as_f64().unwrap();
+    assert!(score < 1.0, "{v}");
+    assert!(v["after"]["score"].as_f64().unwrap() < 1.0, "{v}");
+}
