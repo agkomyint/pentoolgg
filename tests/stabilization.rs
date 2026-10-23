@@ -222,3 +222,25 @@ fn geometry_help_names_the_legacy_only_subcommands() {
         "{help}"
     );
 }
+
+#[test]
+fn paint_field_width_is_limited_to_4096_cells() {
+    // #137: only the total-cell bound was enforced, not 4,096 cells per dimension.
+    let dir = Dir::new("fielddim");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "dimL", "--width", "16384", "--height", "64",
+    ]);
+    let message = dir.fail(&[
+        "paint-fields",
+        "d.pen",
+        "preview",
+        "dimL",
+        "--field",
+        r#"{"method":"angle","degrees":45,"cell":1,"rect":[0,0,16384,64]}"#,
+        "--max-vectors",
+        "0",
+        "--json",
+    ]);
+    assert!(message.contains("limit-exceeded"), "{message}");
+}

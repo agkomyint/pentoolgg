@@ -14,6 +14,7 @@ use super::*;
 
 pub const ALGORITHM: u32 = 1;
 pub const MAX_FIELD_CELLS: u64 = 1_048_576;
+pub const MAX_FIELD_DIM: u32 = 4_096;
 pub const MAX_FIELD_STROKES: usize = 512;
 pub const MAX_STROKE_SAMPLES: usize = 512;
 const MAX_VECTOR_POINTS: usize = 256;
@@ -320,6 +321,14 @@ pub fn build(raw: &Value, id: &str, spec: &FieldSpec) -> Result<Field> {
         ));
     }
     let (cols, rows) = (rect[2].div_ceil(spec.cell), rect[3].div_ceil(spec.cell));
+    if cols > MAX_FIELD_DIM || rows > MAX_FIELD_DIM {
+        return Err(bad(
+            "limit-exceeded",
+            format!(
+                "the field is {cols}x{rows} cells; width and height are limited to {MAX_FIELD_DIM} cells each; raise cell"
+            ),
+        ));
+    }
     if u64::from(cols) * u64::from(rows) > MAX_FIELD_CELLS {
         return Err(bad(
             "limit-exceeded",
