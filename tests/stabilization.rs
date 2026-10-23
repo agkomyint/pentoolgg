@@ -902,3 +902,14 @@ fn fonts_lists_embedded_faces_with_their_removable_ids() {
     assert_eq!(embedded[0]["source"], "embedded");
     dir.ok(&["font", "f.pen", "remove", "brand-font"]);
 }
+
+#[test]
+fn diff_visual_out_places_the_artifacts_in_the_requested_directory() {
+    let dir = Dir::new("diff-out");
+    dir.ok(&["new", "a.pen"]);
+    dir.ok(&["new", "b.pen"]);
+    let out = dir.ok(&["diff", "a.pen", "b.pen", "--visual", "--out", "art/png"]);
+    assert!(out.contains("diff-before.png"), "{out}");
+    assert!(dir.0.join("art/png/b.diff-before.png").exists());
+    assert!(!dir.0.join("b.diff-before.png").exists());
+}

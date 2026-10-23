@@ -531,6 +531,9 @@ struct DiffArgs {
     /// Isolate the selected node's appearance in v6 visual artifacts.
     #[arg(long, requires = "visual")]
     node: Option<String>,
+    /// Directory for the visual artifacts (created if missing); defaults to beside NEW.
+    #[arg(long, requires = "visual")]
+    out: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -10898,7 +10901,12 @@ async fn execute(cli: Cli) -> Result<()> {
                     .file_stem()
                     .and_then(|value| value.to_str())
                     .unwrap_or("document");
-                let directory = args.new.parent().unwrap_or_else(|| Path::new("."));
+                let directory = args
+                    .out
+                    .as_deref()
+                    .or_else(|| args.new.parent())
+                    .unwrap_or_else(|| Path::new("."));
+                fs::create_dir_all(directory)?;
                 let old_png = directory.join(format!("{base}.diff-before.png"));
                 let new_png = directory.join(format!("{base}.diff-after.png"));
                 let raster = |raw: &serde_json::Value, path: &PathBuf| -> Result<Vec<u8>> {
