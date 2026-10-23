@@ -4472,8 +4472,23 @@ where
     if ai::disabled() {
         command = command.mut_subcommand("ai", |sub| sub.hide(true));
     }
+    command = allow_negative_numbers_everywhere(command);
     let matches = command.try_get_matches_from(args)?;
     Cli::from_arg_matches(&matches)
+}
+
+/// clap applies `allow_negative_numbers` per command, so nested subcommands would
+/// otherwise reject `--size -5` with a parser error instead of the range error.
+fn allow_negative_numbers_everywhere(command: clap::Command) -> clap::Command {
+    let names: Vec<String> = command
+        .get_subcommands()
+        .map(|sub| sub.get_name().to_owned())
+        .collect();
+    let mut command = command.allow_negative_numbers(true);
+    for name in names {
+        command = command.mut_subcommand(name, allow_negative_numbers_everywhere);
+    }
+    command
 }
 
 /// `pentool session --jsonl`: run one command per stdin line and print one

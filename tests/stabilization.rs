@@ -137,3 +137,23 @@ fn pdf_export_honors_page_and_rejects_unknown_pages() {
     let message = dir.fail(&["export", "a.pen", "bogus.pdf", "--page", "bogus"]);
     assert!(message.contains("page not found"), "{message}");
 }
+
+#[test]
+fn negative_numbers_reach_value_validation_in_nested_commands() {
+    // #61: `text put --size -5` died in clap instead of reporting the range.
+    let dir = Dir::new("negative");
+    dir.ok(&["new", "a.pen"]);
+    let message = dir.fail(&[
+        "text",
+        "a.pen",
+        "put",
+        "t1",
+        "--layer",
+        "layer-1",
+        "--content",
+        "hi",
+        "--size",
+        "-5",
+    ]);
+    assert!(!message.contains("unexpected argument"), "{message}");
+}
