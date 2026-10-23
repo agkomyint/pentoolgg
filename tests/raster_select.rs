@@ -626,3 +626,61 @@ fn cutout_bakes_an_image_node_and_keeps_it_unchanged() {
     );
     assert!(after.contains("photo") && before.contains("photo"));
 }
+
+#[test]
+fn agent_builds_a_three_image_mood_board_from_cutouts() {
+    let ws = Workspace::new("moodboard");
+    let doc = ws.document("board.pen");
+    let colors = [[200u8, 20, 30], [20, 160, 40], [30, 40, 210]];
+    for (i, c) in colors.iter().enumerate() {
+        let mut image = image::RgbaImage::from_pixel(60, 60, image::Rgba([240, 240, 240, 255]));
+        for y in 20..40 {
+            for x in 20..40 {
+                image.put_pixel(x, y, image::Rgba([c[0], c[1], c[2], 255]));
+            }
+        }
+        let src = ws.0.join(format!("src{i}.png"));
+        image.save(&src).unwrap();
+        let (x, name) = (100 + i * 70, format!("photo{i}"));
+        ok(&[
+            "image",
+            "add",
+            &doc,
+            &name,
+            "--file",
+            src.to_str().unwrap(),
+            "--layer",
+            "content",
+            "--x",
+            &x.to_string(),
+            "--y",
+            "100",
+            "--width",
+            "60",
+            "--height",
+            "60",
+            "--embed",
+        ]);
+        let out = ok(&[
+            "raster",
+            &doc,
+            "cutout",
+            &name,
+            "--id",
+            &format!("cut{i}"),
+            "--box",
+            &(x as i32 + 10).to_string(),
+            "110",
+            "40",
+            "40",
+            "--refine",
+            "5",
+        ]);
+        let b = page_bounds(&out["result"]);
+        assert!(b[2] >= 16 && b[2] <= 24, "cut {i}: {b:?}");
+    }
+    let png = ws.0.join("board.png");
+    ok(&["export", &doc, png.to_str().unwrap()]);
+    let board = image::open(&png).unwrap().to_rgba8();
+    assert!(board.width() > 0 && fs::metadata(&png).unwrap().len() > 0);
+}
