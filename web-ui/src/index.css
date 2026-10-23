@@ -248,6 +248,8 @@ input[type="range"], input[type="checkbox"] { accent-color: var(--primary); }
 @media (max-width: 767px) { .studio-pagestrip { height: 80px; } .studio-focusbar > span:last-child { display: none; } }
 .studio-pagestrip.studio-pagestrip-compact { height: 36px; }
 @media (max-width: 1023px) { #mobile-panels.studio-dock { top: 0; bottom: 0; right: 3rem; z-index: 20; box-shadow: -8px 0 24px oklch(0 0 0 / 18%); } }
+/* Tablet widths: the open panel takes its own column so it never covers artwork (#282). Only phones overlay. */
+@media (min-width: 640px) and (max-width: 1023px) { #mobile-panels.studio-dock { position: relative !important; top: auto; right: auto; bottom: auto; box-shadow: none; width: min(320px, 45vw) !important; } }
 
 /* Live presence: who changed the shared document, and its version history. */
 .remote-cursor { transition: transform 750ms cubic-bezier(.22, .9, .25, 1); }
