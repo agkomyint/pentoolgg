@@ -4010,8 +4010,8 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             .get("version")
             .and_then(serde_json::Value::as_u64)
             .context("[invalid-input] the document has no version")?;
-        if !(4..=11).contains(&body.target) {
-            bail!("[invalid-input] migration target must be between 4 and 11");
+        if !(4..=12).contains(&body.target) {
+            bail!("[invalid-input] migration target must be between 4 and 12");
         }
         if body.target <= from {
             bail!(
@@ -4019,6 +4019,7 @@ async fn migrate_document(Json(body): Json<MigrateRequest>) -> Response {
             );
         }
         let migrated = match body.target {
+            12 => crate::scene::migrate_to_v12(body.document)?,
             11 => crate::scene3d::node::migrate_to_v11(body.document)?,
             10 => crate::scene3d::node::migrate(crate::scene3d::node::to_v10(body.document)?)?,
             9 => crate::spreads::migrate(body.document)?,
@@ -5091,6 +5092,19 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn api_migrate_reaches_the_newest_format() {
+        // The cap stopped at v11 after v12 shipped, so Studio could not
+        // upgrade a document to the format it creates new ones in.
+        let document = serde_json::to_value(crate::scene::new_document(80, 60)).unwrap();
+        let response = super::migrate_document(axum::Json(super::MigrateRequest {
+            document,
+            target: 12,
+        }))
+        .await;
+        assert_eq!(response.status(), 200);
+    }
+
     #[test]
     fn studio_tracks_the_newest_format() {
         // Studio creates documents at LATEST_FORMAT and renders them locally
