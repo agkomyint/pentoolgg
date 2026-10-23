@@ -1,6 +1,6 @@
 //! Offline-safe component instance metadata over materialized imported layers.
 use crate::asset::AssetManifest;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -256,6 +256,12 @@ fn parse_override_value(definition: &Value, value: &str) -> Result<Value> {
         return serde_json::Number::from_f64(number)
             .map(Value::Number)
             .context("number must be finite");
+    }
+    if kinds.iter().all(|kind| matches!(*kind, "fill" | "stroke")) {
+        ensure!(
+            crate::scene::is_valid_color(value),
+            "[invalid-input] {value:?} is not a color; use none, #RGB, #RGBA, #RRGGBB or #RRGGBBAA"
+        );
     }
     if kinds
         .iter()

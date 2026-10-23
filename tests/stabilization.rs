@@ -476,3 +476,67 @@ fn library_refresh_skips_history_snapshots() {
     let out = dir.ok(&["library", "refresh"]);
     assert!(!out.contains("duplicate_asset_id"), "{out}");
 }
+
+#[test]
+fn instance_set_rejects_an_invalid_color_value() {
+    let dir = Dir::new("instance-set-color");
+    dir.ok(&["new", "h.pen", "--width", "50", "--height", "50"]);
+    dir.ok(&[
+        "shape", "h.pen", "rect", "nib", "--layer", "layer-1", "--x", "1", "--y", "1", "--width",
+        "5", "--height", "5", "--fill", "#ff0000",
+    ]);
+    dir.ok(&[
+        "asset",
+        "create",
+        "--id",
+        "brand/logo",
+        "--name",
+        "L",
+        "h.pen",
+        "logo.pen",
+    ]);
+    dir.ok(&[
+        "asset",
+        "property",
+        "add",
+        "logo.pen",
+        "brand/logo",
+        "accent",
+        "--target",
+        "nib",
+        "--field",
+        "fill",
+        "--default",
+        "#ff0000",
+    ]);
+    dir.ok(&["new", "d.pen", "--width", "50", "--height", "50"]);
+    dir.ok(&["migrate", "d.pen", "--target", "3"]);
+    dir.ok(&["add", "d.pen", "logo.pen", "--mode", "instance"]);
+    let before = std::fs::read(dir.0.join("d.pen")).unwrap();
+    let err = dir.fail(&[
+        "instance",
+        "d.pen",
+        "set",
+        "instance-1",
+        "--property",
+        "accent",
+        "--value",
+        "notacolor",
+        "--source",
+        "logo.pen",
+    ]);
+    assert!(err.contains("not a color"), "{err}");
+    assert_eq!(std::fs::read(dir.0.join("d.pen")).unwrap(), before);
+    dir.ok(&[
+        "instance",
+        "d.pen",
+        "set",
+        "instance-1",
+        "--property",
+        "accent",
+        "--value",
+        "#00ff00",
+        "--source",
+        "logo.pen",
+    ]);
+}
