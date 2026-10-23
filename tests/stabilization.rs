@@ -323,3 +323,21 @@ fn group_instantiate_honors_the_id_flag() {
     assert!(doc.contains("\"chosen\""), "{doc}");
     assert!(!doc.contains("\"card-copy\""), "{doc}");
 }
+
+#[test]
+fn fonts_scan_ignores_adjustment_nodes() {
+    let dir = Dir::new("fonts-adjustment");
+    dir.ok(&["new", "r.pen"]);
+    dir.ok(&["migrate", "r.pen", "--target", "6"]);
+    dir.ok(&[
+        "adjustment",
+        "add",
+        "r.pen",
+        "ad1",
+        "--kind",
+        "brightness-contrast",
+        "--params",
+        r#"{"brightness":0.2,"contrast":0.2}"#,
+    ]);
+    dir.ok(&["fonts", "r.pen"]);
+}

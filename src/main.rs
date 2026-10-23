@@ -9165,7 +9165,7 @@ async fn execute(cli: Cli) -> Result<()> {
         }
         Command::Fonts { input } => {
             let doc = match input {
-                Some(path) => read_render_document(&path, selected_page)?,
+                Some(path) => read_font_document(&path, selected_page)?,
                 None => Document::new(1, 1),
             };
             println!("{}", fonts::list(&doc)?);
@@ -11689,6 +11689,35 @@ fn read_render_document(path: &PathBuf, page: Option<&str>) -> Result<Document> 
     let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
     let raw: serde_json::Value = serde_json::from_slice(&bytes).context("invalid .pen document")?;
     let flattened = if scene::is_scene_document(&raw) {
+        scene::flatten_to_v3(&raw)?
+    } else {
+        raw
+    };
+    let mut doc: Document = serde_json::from_value(flattened).context("invalid .pen document")?;
+    select_page(&mut doc, page)?;
+    Ok(doc)
+}
+
+/// Like `read_render_document`, but drops adjustment nodes first: they carry
+/// no text, and the v3 flattening cannot represent them (#218).
+fn read_font_document(path: &PathBuf, page: Option<&str>) -> Result<Document> {
+    editing::recover_interrupted_write(path)?;
+    let bytes = fs::read(path).with_context(|| format!("could not read {}", path.display()))?;
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&bytes).context("invalid .pen document")?;
+    fn strip(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Array(items) => {
+                items
+                    .retain(|item| item.get("kind").and_then(|k| k.as_str()) != Some("adjustment"));
+                items.iter_mut().for_each(strip);
+            }
+            serde_json::Value::Object(map) => map.values_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let flattened = if scene::is_scene_document(&raw) {
+        strip(&mut raw);
         scene::flatten_to_v3(&raw)?
     } else {
         raw
