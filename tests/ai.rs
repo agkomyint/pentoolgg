@@ -530,3 +530,30 @@ fn keyout_makes_the_key_colour_transparent_without_a_model() {
     assert_eq!(result["model_call"], false);
     assert_eq!(result["transparent_pixels"], 16 * 16 - 8 * 8);
 }
+
+#[test]
+fn malformed_model_listing_keeps_the_cached_models() {
+    let ws = Workspace::new("malformed-listing");
+    let good = json!({"models":[{"name":"models/gemini-test-image","supportedGenerationMethods":["generateContent"]}]}).to_string();
+    let bad = json!({"error":"gateway returned an unexpected success envelope"}).to_string();
+    let (base, _) = mock(vec![(200, good), (200, bad)]);
+    connect(&ws, &base);
+    let first = ok(
+        &ws,
+        &["ai", "model", "refresh", "--provider", "gemini", "--json"],
+    );
+    assert_eq!(first["models"], json!(["gemini-test-image"]), "{first}");
+    let second = fail(
+        &ws,
+        &["ai", "model", "refresh", "--provider", "gemini", "--json"],
+    );
+    assert!(
+        second.to_string().contains("malformed-response"),
+        "{second}"
+    );
+    let listed = ok(
+        &ws,
+        &["ai", "model", "list", "--provider", "gemini", "--json"],
+    );
+    assert!(listed.to_string().contains("gemini-test-image"), "{listed}");
+}

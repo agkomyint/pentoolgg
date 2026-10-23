@@ -212,6 +212,8 @@ export function Properties() {
 
       {kind !== "adjustment" && <AlignBar count={1} />}
 
+      {/* Locked layers reject edits; disable the fields so they cannot show values that Save would drop (#401). */}
+      <fieldset disabled={locked} className="m-0 min-w-0 space-y-3 border-0 p-0">
       <Field label="Name">
         <input
           className={input}
@@ -338,6 +340,8 @@ export function Properties() {
           </div>
         </section>
       )}
+
+      </fieldset>
 
       <details className="text-xs" open={jsonOpen} onToggle={(event) => setJsonOpen(event.currentTarget.open)}>
         <summary className="cursor-pointer text-muted-foreground">Advanced object data</summary>

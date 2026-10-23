@@ -2076,7 +2076,26 @@ fn list_models(profile: &Profile) -> Result<Vec<String>> {
     if !(200..300).contains(&response.status) {
         return Err(status_error(&response, &secrets));
     }
-    let value: Value = serde_json::from_slice(&response.body)?;
+    let value: Value = serde_json::from_slice(&response.body).map_err(|_| {
+        err(
+            "malformed-response",
+            "the provider's model listing was not JSON.",
+            "Check the endpoint serves a models listing; the cached models were kept.",
+        )
+    })?;
+    // A success envelope without the listing array must not replace the last good cache (#359).
+    let listing_key = if profile.adapter == "gemini" {
+        "models"
+    } else {
+        "data"
+    };
+    if !value[listing_key].is_array() {
+        return Err(err(
+            "malformed-response",
+            format!("the provider's model listing has no `{listing_key}` array."),
+            "Check the endpoint serves a models listing; the cached models were kept.",
+        ));
+    }
     let mut ids: Vec<String> = if profile.adapter == "gemini" {
         value["models"]
             .as_array()
