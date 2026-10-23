@@ -774,3 +774,36 @@ fn asset_property_set_updates_default_without_retargeting() {
     ]);
     assert!(err.contains("--default or --label"), "{err}");
 }
+
+#[test]
+fn batch_accepts_inline_json_stdin_and_at_file() {
+    let dir = Dir::new("batch-inline");
+    dir.ok(&["new", "b.pen"]);
+    let op = |id: &str| {
+        format!(
+            r##"[{{"type":"put-shape","id":"{id}","layer":"layer-1","shape":"rect","x":1,"y":1,"width":5,"height":5,"fill":"#ff0000"}}]"##
+        )
+    };
+    dir.ok(&["batch", "b.pen", &op("inline")]);
+    std::fs::write(dir.0.join("ops.json"), op("fromfile")).unwrap();
+    dir.ok(&["batch", "b.pen", "@ops.json"]);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .current_dir(&dir.0)
+        .args(["batch", "b.pen", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), op("piped").as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let doc = std::fs::read_to_string(dir.0.join("b.pen")).unwrap();
+    for id in ["inline", "fromfile", "piped"] {
+        assert!(doc.contains(id), "{id} missing: {doc}");
+    }
+}

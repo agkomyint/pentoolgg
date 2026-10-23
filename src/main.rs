@@ -2793,6 +2793,7 @@ enum Command {
     /// Apply a JSON array of object operations as one recoverable transaction.
     Batch {
         input: PathBuf,
+        /// JSON file, @file, `-` for stdin, or an inline JSON array.
         operations: PathBuf,
         #[arg(long)]
         dry_run: bool,
@@ -3811,6 +3812,27 @@ fn main() {
         eprintln!("Error: {}", user_error_message(&error));
         std::process::exit(1);
     }
+}
+
+/// OPERATIONS of `batch`: a file path, `@file`, `-` for stdin, or an inline JSON array.
+fn read_batch_operations(operations: &Path) -> Result<Vec<u8>> {
+    let text = operations.to_string_lossy();
+    if text == "-" {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut bytes)
+            .context("[missing-resource] could not read operations from stdin")?;
+        return Ok(bytes);
+    }
+    let path = text.strip_prefix('@').map_or(operations, Path::new);
+    if text.trim_start().starts_with('[') && !path.is_file() {
+        return Ok(text.as_bytes().to_vec());
+    }
+    fs::read(path).with_context(|| {
+        format!(
+            "[missing-resource] could not read {}; pass a file, @file, - for stdin or an inline JSON array",
+            path.display()
+        )
+    })
 }
 
 /// The error chain without raw `(os error N)` suffixes, naming a fix for permission failures.
@@ -7939,8 +7961,7 @@ async fn execute(cli: Cli) -> Result<()> {
             let bytes =
                 fs::read(&input).with_context(|| format!("could not read {}", input.display()))?;
             let mut raw: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let operation_bytes = fs::read(&operations)
-                .with_context(|| format!("could not read {}", operations.display()))?;
+            let operation_bytes = read_batch_operations(&operations)?;
             json::reject_duplicate_keys(&operation_bytes)?;
             let changes = if scene::is_scene_document(&raw) {
                 let mut actions: Vec<serde_json::Value> = serde_json::from_slice(&operation_bytes)?;
