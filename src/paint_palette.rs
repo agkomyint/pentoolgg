@@ -281,12 +281,17 @@ fn edge_mask(src: &Source) -> Vec<bool> {
     out
 }
 
+/// Pixels below this alpha (about 6%) are ignored by palette extraction.
+const MIN_VISIBLE_ALPHA: u8 = 16;
+
 fn pixels_for_role(src: &Source, role: &str) -> Vec<Px> {
     let edges = (role == "edge").then(|| edge_mask(src));
     let mut out = Vec::new();
     for (i, p) in src.rgba.iter().enumerate() {
         let w = (u64::from(src.coverage[i]) * u64::from(p[3]) + 127) / 255;
-        if w == 0 {
+        // Near-transparent pixels carry no visible colour; skip them so a
+        // large faint region cannot outrank the visible one.
+        if w == 0 || p[3] < MIN_VISIBLE_ALPHA {
             continue;
         }
         let l = luma(*p);

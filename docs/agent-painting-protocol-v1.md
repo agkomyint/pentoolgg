@@ -126,6 +126,7 @@ depend on a disposable cache.
   coverage plane with the dimensions.
 - Point sampling returns the weighted mean of a square of radius `0..64`; fully
   transparent or unselected samples report `empty: true`, never an invented color.
+- Pixels with alpha below 16 are ignored by every role.
 - Roles: `dominant` ranks 5-bit-per-channel bins by alpha*coverage weight (ties by
   bin key) and reports each bin's pixel mean; `median` is weighted median cut
   (heaviest box, widest channel, ties by channel order); `shadow` (luma <= 85),
@@ -179,7 +180,7 @@ Field methods: `contour`, `gradient` (integer Sobel on alpha-weighted luma),
 `tensor` (smoothed structure tensor, `radius` 1-8, follows the contour),
 `vanishing` (`point`), `radial` (`center`, tangents), `angle` (`degrees`) and
 `vectors` (`points` `[x,y,degrees]`, nearest anchor wins, lowest index on ties).
-`cell` is 1-64 px and `rect` bounds the field; at most 1,048,576 cells.
+`cell` is 1-512 px and `rect` bounds the field; at most 1,048,576 cells.
 Distance and tensor fields require at most 16,777,216 layer pixels. Fields are
 undirected orientations: interpolation sign-aligns neighbours and a stroke picks
 the sign that continues its heading.

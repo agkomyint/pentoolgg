@@ -1221,3 +1221,69 @@ fn scene3d_reports_a_missing_page_and_only_hints_external_for_sidecars() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("nosuchpage"));
     dir.ok(&["scene3d", "v.pen", "list"]);
 }
+
+#[test]
+fn paint_palette_ignores_near_transparent_pixels() {
+    let dir = Dir::new("palette-faint");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "R", "--width", "128", "--height", "128",
+    ]);
+    dir.ok(&["migrate", "d.pen", "--target", "6"]);
+    dir.ok(&[
+        "raster",
+        "d.pen",
+        "stroke",
+        "R",
+        "--samples",
+        "[[10,64],[118,64]]",
+        "--brush",
+        r#"{"size":100,"hardness":1,"opacity":0.1,"flow":0.1}"#,
+        "--color",
+        "#993333",
+    ]);
+    dir.ok(&[
+        "raster",
+        "d.pen",
+        "stroke",
+        "R",
+        "--samples",
+        "[[60,64],[68,64]]",
+        "--brush",
+        r#"{"size":8,"hardness":1}"#,
+        "--color",
+        "#0000ff",
+    ]);
+    let out = dir.ok(&[
+        "paint-palette",
+        "d.pen",
+        "extract",
+        "--scope",
+        "node:R",
+        "--count",
+        "1",
+        "--json",
+    ]);
+    assert!(out.contains("#0000ff"), "{out}");
+    assert!(!out.contains("#993333"), "{out}");
+}
+
+#[test]
+fn field_cell_range_matches_between_preview_and_stroke_field() {
+    let dir = Dir::new("cell-range");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "R", "--width", "600", "--height", "600",
+    ]);
+    let out = dir.run(&[
+        "raster",
+        "d.pen",
+        "stroke-field",
+        "R",
+        "--field",
+        r#"{"method":"contour","cell":300}"#,
+        "--dry-run",
+    ]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("1-64"), "{err}");
+}

@@ -85,8 +85,8 @@ impl FieldSpec {
             None => 8,
             Some(v) => v
                 .as_u64()
-                .filter(|c| (1..=64).contains(c))
-                .ok_or_else(|| bad("invalid-request", "field cell must be 1-64 pixels"))?
+                .filter(|c| (1..=512).contains(c))
+                .ok_or_else(|| bad("invalid-request", "field cell must be 1-512 pixels"))?
                 as u32,
         };
         let rect = match object.get("rect") {
