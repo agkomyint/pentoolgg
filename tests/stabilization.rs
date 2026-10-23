@@ -280,3 +280,12 @@ fn link_images_errors_when_nothing_can_be_linked() {
     let message = dir.fail(&["export", "v5-image-embedded.pen", "a.svg", "--link-images"]);
     assert!(message.contains("--link-images"), "{message}");
 }
+
+#[test]
+fn preview_honors_the_global_preview_out_flag() {
+    // #219: `preview DOC --preview-out PATH` wrote to .pentool/preview instead.
+    let dir = Dir::new("previewout");
+    dir.ok(&["new", "doc.pen"]);
+    dir.ok(&["preview", "doc.pen", "--preview-out", "requested.png"]);
+    assert!(dir.0.join("requested.png").exists());
+}

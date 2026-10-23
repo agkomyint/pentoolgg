@@ -11060,7 +11060,7 @@ async fn execute(cli: Cli) -> Result<()> {
                 &input,
                 pentool::preview::Settings {
                     enabled: true,
-                    out,
+                    out: out.or_else(|| cli.preview_out.clone()),
                     max_edge: max_size.or(cli.preview_size),
                     page: cli.page.clone(),
                     no_focus: cli.focus.is_empty(),
