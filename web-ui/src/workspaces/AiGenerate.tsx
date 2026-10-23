@@ -29,6 +29,8 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [task, setTask] = useState("");
+  const [elapsed, setElapsed] = useState(0);
   const job = useRef<string | null>(null);
   const cancelled = useRef(new Set<string>());
   const configured = status.configured.find((p) => p.name === provider) ?? status.configured[0];
@@ -40,11 +42,18 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  // Show that work is in progress: a ticking timer tells "slow" from "frozen".
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return; }
+    const start = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
   useEffect(() => { setPlan(null); }, [provider, model, prompt, name, count, aspect, size, mode, selectedId, pageId]);
   useEffect(() => () => { if (job.current) void postJson("/api/ai/cancel", { job: job.current }).catch(() => {}); }, []);
 
   async function review() {
-    setBusy(true); setError(null);
+    setTask("Checking the request (nothing is sent to the provider yet)"); setBusy(true); setError(null);
     try {
       const body = { name, provider: configured?.name, model: model || undefined, prompt,
         candidates: count, page: pageId,
@@ -58,7 +67,7 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
   }
   async function generate() {
     if (!plan) return;
-    setBusy(true); setError(null);
+    setTask("Waiting for the image provider"); setBusy(true); setError(null);
     const id = uid("ai"); job.current = id;
     try {
       const result = await postJson<{ warnings?: string[] }>("/api/ai/generate", { ...plan.body, reviewed_disclosure: plan.report.disclosure, allow_model_call: true, job: id });
@@ -76,7 +85,7 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
     } catch (e) { setError(errorMessage(e)); }
   }
   async function accept(run: Run, candidate: number, replace: boolean) {
-    setBusy(true); setError(null);
+    setTask("Adding the image to your document"); setBusy(true); setError(null);
     try {
       studio.expectOwnChange();
       await postJson(`/api/ai/runs/${run.run}/accept`, {
@@ -90,7 +99,7 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
     finally { setBusy(false); }
   }
   async function keyout() {
-    setBusy(true); setError(null);
+    setTask("Removing the magenta background"); setBusy(true); setError(null);
     try {
       studio.expectOwnChange();
       await postJson("/api/ai/keyout", { source: selectedId, id: uid("cutout"), page: pageId, if_revision: revision });
@@ -101,13 +110,18 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
     finally { setBusy(false); }
   }
   async function discard(run: Run) {
-    setBusy(true); setError(null);
+    setTask("Discarding the run"); setBusy(true); setError(null);
     try { await postJson(`/api/ai/runs/${run.run}/discard`, {}); await refresh(); }
     catch (e) { setError(errorMessage(e)); }
     finally { setBusy(false); }
   }
   return <section aria-label="Generate images" className="space-y-3 border-y py-3 text-xs" aria-busy={busy}>
     <h4 className="font-semibold">Generate and edit images</h4>
+    {busy && <div role="status" className="flex items-center gap-2 rounded border border-primary/40 bg-primary/10 p-2">
+      <span aria-hidden="true" className="size-3 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <span>{task || "Working"}… {elapsed} s. The form is locked until this finishes.{job.current && elapsed > 20 ? " Image models can take a minute or two." : ""}</span>
+    </div>}
+    {busy && job.current && <Button variant="outline" onClick={() => void cancelGeneration()}>Cancel generation</Button>}
     {blocked && <div className="space-y-2 text-muted-foreground">
       <p>{!shared ? "Open a document served by pentool serve before using AI." : dirty ? "You have unsaved edits. Save them to use AI." : "Waiting for the document revision. Refresh Studio if this persists."}</p>
       {shared && dirty && <Button variant="outline" onClick={() => void studio.save()}>Save now</Button>}
@@ -145,8 +159,6 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
       <Button disabled={busy || blocked} onClick={() => void generate()}>Confirm and generate</Button>
       <Button variant="ghost" disabled={busy} onClick={() => setPlan(null)}>Back</Button>
     </div>}
-    {busy && <p role="status">{job.current ? "Waiting for the image provider…" : "Working…"}</p>}
-    {busy && job.current && <Button variant="outline" onClick={() => void cancelGeneration()}>Cancel generation</Button>}
     {error && <div role="alert"><p className="text-destructive">{error}</p><Button variant="ghost" disabled={busy} onClick={() => void refresh()}>Refresh candidates</Button></div>}
     <h4 className="font-semibold">Candidates</h4>
     {loading ? <p role="status">Loading saved runs…</p> : runs.length === 0 && <p className="text-muted-foreground">No saved runs. Review a request to generate your first image.</p>}
