@@ -10473,9 +10473,6 @@ async fn execute(cli: Cli) -> Result<()> {
                 operation,
                 scene::GroupOperation::Promote | scene::GroupOperation::Instantiate
             ) {
-                if matches!(operation, scene::GroupOperation::Instantiate) && id_new.is_some() {
-                    bail!("[invalid-input] group instantiate does not take --id; the positional ID is the new instance ID");
-                }
                 let result = match operation {
                     scene::GroupOperation::Promote => scene::promote_component(
                         &mut raw,
@@ -10488,7 +10485,7 @@ async fn execute(cli: Cli) -> Result<()> {
                         selected_page,
                         &layer.context("--layer is required for group instantiate")?,
                         &component.context("--component is required for group instantiate")?,
-                        &id,
+                        id_new.as_deref().unwrap_or(&id),
                         dx,
                         dy,
                     )?,

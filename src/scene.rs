@@ -1363,6 +1363,49 @@ pub fn put_shape(
         }
         Ok(value)
     };
+    let needed: Vec<(&str, bool)> = match kind {
+        ShapeKind::Rect => vec![
+            ("x", input.x.is_none()),
+            ("y", input.y.is_none()),
+            ("width", input.width.is_none()),
+            ("height", input.height.is_none()),
+        ],
+        ShapeKind::Rrect => vec![
+            ("x", input.x.is_none()),
+            ("y", input.y.is_none()),
+            ("width", input.width.is_none()),
+            ("height", input.height.is_none()),
+            ("radius", input.radius.is_none()),
+        ],
+        ShapeKind::Ellipse => vec![
+            ("cx", input.cx.is_none()),
+            ("cy", input.cy.is_none()),
+            ("radius-x", input.radius_x.is_none()),
+            ("radius-y", input.radius_y.is_none()),
+        ],
+        ShapeKind::Circle => vec![
+            ("cx", input.cx.is_none()),
+            ("cy", input.cy.is_none()),
+            ("radius", input.radius.is_none()),
+        ],
+        ShapeKind::Line => vec![
+            ("x1", input.x1.is_none()),
+            ("y1", input.y1.is_none()),
+            ("x2", input.x2.is_none()),
+            ("y2", input.y2.is_none()),
+        ],
+    };
+    let missing: Vec<String> = needed
+        .into_iter()
+        .filter(|(_, absent)| *absent)
+        .map(|(name, _)| format!("--{name}"))
+        .collect();
+    if missing.len() > 1 {
+        bail!(
+            "[invalid-input] this shape needs {} (all are required)",
+            missing.join(", ")
+        )
+    }
     let node = match kind {
         ShapeKind::Rect | ShapeKind::Rrect => {
             let radius = if matches!(kind, ShapeKind::Rrect) {

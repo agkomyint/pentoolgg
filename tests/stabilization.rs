@@ -159,26 +159,6 @@ fn negative_numbers_reach_value_validation_in_nested_commands() {
 }
 
 #[test]
-fn group_instantiate_rejects_ignored_id_flag() {
-    // #91: `group instantiate ... --id NEW` silently dropped --id.
-    let dir = Dir::new("instid");
-    dir.fixture("v4-scene.pen");
-    let message = dir.fail(&[
-        "group",
-        "v4-scene.pen",
-        "instantiate",
-        "card",
-        "--layer",
-        "content",
-        "--component",
-        "c",
-        "--id",
-        "other",
-    ]);
-    assert!(message.contains("--id"), "{message}");
-}
-
-#[test]
 fn selection_query_rejects_duplicate_keys() {
     // #75: duplicate JSON keys silently collapsed (last wins).
     let dir = Dir::new("dupkeys");
@@ -301,4 +281,45 @@ fn library_doctor_reports_a_missing_enabled_library_folder() {
     let report = dir.ok(&["library", "doctor"]);
     assert!(report.contains("missing_folder"), "{report}");
     assert!(report.contains("\"ok\": false"), "{report}");
+}
+
+#[test]
+fn shape_reports_every_missing_geometry_option_at_once() {
+    // #222: ellipse reported --cx, then --cy, then --radius-x, one run at a time.
+    let dir = Dir::new("ellipse");
+    dir.ok(&["new", "a.pen"]);
+    let message = dir.fail(&["shape", "a.pen", "ellipse", "e1", "--layer", "layer-1"]);
+    for name in ["--cx", "--cy", "--radius-x", "--radius-y"] {
+        assert!(message.contains(name), "{message}");
+    }
+}
+
+#[test]
+fn group_instantiate_honors_the_id_flag() {
+    // #91: `group instantiate ... --id NEW` silently dropped --id.
+    let dir = Dir::new("instid");
+    dir.fixture("v4-scene.pen");
+    dir.ok(&[
+        "group",
+        "v4-scene.pen",
+        "promote",
+        "card",
+        "--component",
+        "c",
+    ]);
+    dir.ok(&[
+        "group",
+        "v4-scene.pen",
+        "instantiate",
+        "card-copy",
+        "--layer",
+        "content",
+        "--component",
+        "c",
+        "--id",
+        "chosen",
+    ]);
+    let doc = std::fs::read_to_string(dir.0.join("v4-scene.pen")).unwrap();
+    assert!(doc.contains("\"chosen\""), "{doc}");
+    assert!(!doc.contains("\"card-copy\""), "{doc}");
 }
