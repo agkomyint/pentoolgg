@@ -215,6 +215,11 @@ export const useStudio = create<State>((set, get) => {
     };
     connect();
   };
+  /** Dirty only when `doc` differs from the last saved document, so no-op edits and undo back to saved state stay clean (#305, #400). */
+  const differsFromSaved = (doc: Doc) => {
+    const { base } = get();
+    return !base || JSON.stringify(doc) !== JSON.stringify(base);
+  };
   const adopt = (doc: Doc, extra: Partial<State> = {}) => {
     const page = pageOf(doc, get().pageId);
     const layer = page?.layers?.find((l) => l.id === get().layerId)?.id ?? page?.layers?.[0]?.id;
@@ -332,7 +337,8 @@ export const useStudio = create<State>((set, get) => {
       const next = clone(doc);
       mutate(next, { pageId });
       const nextPast = [...past, JSON.stringify(doc)].slice(-HISTORY_LIMIT);
-      adopt(next, { past: nextPast, future: [], dirty: true, versionPreview: null });
+      if (JSON.stringify(next) === JSON.stringify(doc)) return; // a blocked or no-op edit leaves no history step and no unsaved mark (#400)
+      adopt(next, { past: nextPast, future: [], dirty: differsFromSaved(next), versionPreview: null });
       void label;
     },
     replaceDoc(next) {
@@ -413,13 +419,13 @@ export const useStudio = create<State>((set, get) => {
       const { doc, past, future } = get();
       const last = past.at(-1);
       if (!doc || !last) return;
-      adopt(JSON.parse(last) as Doc, { past: past.slice(0, -1), future: [...future, JSON.stringify(doc)], dirty: true });
+      adopt(JSON.parse(last) as Doc, { past: past.slice(0, -1), future: [...future, JSON.stringify(doc)], dirty: differsFromSaved(JSON.parse(last) as Doc) });
     },
     redo() {
       const { doc, past, future } = get();
       const next = future.at(-1);
       if (!doc || !next) return;
-      adopt(JSON.parse(next) as Doc, { past: [...past, JSON.stringify(doc)], future: future.slice(0, -1), dirty: true });
+      adopt(JSON.parse(next) as Doc, { past: [...past, JSON.stringify(doc)], future: future.slice(0, -1), dirty: differsFromSaved(JSON.parse(next) as Doc) });
     },
     setPage: (pageId) => {
       const doc = get().doc;

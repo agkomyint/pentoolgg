@@ -34,3 +34,22 @@ test("an edit made during server acceptance keeps its local undo history", () =>
   expect(useStudio.getState().past).toEqual(past);
   expect(useStudio.getState().doc).toEqual(after);
 });
+
+test("undo back to the saved document clears the unsaved mark (#305)", () => {
+  const saved = doc([{ id: "a", kind: "rect" }]);
+  useStudio.setState({ doc: saved, base: JSON.parse(JSON.stringify(saved)) as Doc, dirty: false, past: [], future: [], pageId: "p" });
+  useStudio.getState().edit("add", (d) => { d.pages![0].layers![0].nodes!.push({ id: "b", kind: "rect" }); });
+  expect(useStudio.getState().dirty).toBe(true);
+  useStudio.getState().undo();
+  expect(useStudio.getState().dirty).toBe(false);
+  useStudio.getState().redo();
+  expect(useStudio.getState().dirty).toBe(true);
+});
+
+test("an edit that changes nothing neither dirties the document nor adds history (#400)", () => {
+  const saved = doc([{ id: "a", kind: "rect" }]);
+  useStudio.setState({ doc: saved, base: JSON.parse(JSON.stringify(saved)) as Doc, dirty: false, past: [], future: [], pageId: "p" });
+  useStudio.getState().edit("blocked", () => {});
+  expect(useStudio.getState().dirty).toBe(false);
+  expect(useStudio.getState().past).toHaveLength(0);
+});
