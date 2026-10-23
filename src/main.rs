@@ -4009,6 +4009,15 @@ struct FloodArgs {
     /// Never let fully transparent pixels join an opaque seed's region.
     #[arg(long)]
     transparent_barrier: bool,
+    /// Average an odd N x N window around the seed (1-51) so one noisy pixel does not decide.
+    #[arg(long, default_value_t = 1)]
+    sample: u32,
+    /// Follow gradients: a pixel joins when within N of its selected neighbor (contiguous, no gap).
+    #[arg(long, default_value_t = 0)]
+    gradient: u8,
+    /// With --gradient, the largest difference from the seed any pixel may have.
+    #[arg(long, default_value_t = 255)]
+    leash: u8,
     /// Measure the region on `layer` (default) or on the visible page `composite`.
     #[arg(long, default_value = "layer", value_parser = ["layer", "composite"])]
     scope: String,
@@ -4037,6 +4046,9 @@ impl FloodArgs {
             antialias: !self.no_antialias,
             gap: self.gap,
             transparent_barrier: self.transparent_barrier,
+            sample: self.sample,
+            gradient: self.gradient,
+            leash: self.leash,
         }
     }
 }

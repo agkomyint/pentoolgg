@@ -10,6 +10,12 @@
 //! back inside the original candidates. Anti-aliasing turns the one-pixel edge
 //! into partial coverage with a 3x3 box average. Work is bounded before anything
 //! is allocated, and nothing is committed until the whole region is known.
+//!
+//! Two options make the wand usable on photographs. `sample` averages an odd
+//! square of pixels around the seed so one noisy pixel does not decide the region.
+//! `gradient` switches contiguous growth from "close to the seed" to "close to the
+//! neighbor it grew from" (a step tolerance), so a sky, studio sweep or shaded
+//! surface selects as one region; `leash` still caps the distance from the seed.
 use super::selection::set_coverage;
 use super::*;
 
@@ -17,6 +23,8 @@ pub const ALGORITHM: u64 = 1;
 /// Largest layer area the fill allocates working planes for.
 pub const MAX_PIXELS: u64 = 32 * 1024 * 1024;
 pub const MAX_GAP: u32 = 8;
+/// Largest seed-averaging window edge in pixels (odd).
+pub const MAX_SAMPLE: u32 = 51;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -28,6 +36,69 @@ pub struct Options {
     pub antialias: bool,
     pub gap: u32,
     pub transparent_barrier: bool,
+    /// Edge of the square averaged around the seed (odd, 1 = the seed pixel only).
+    pub sample: u32,
+    /// Step tolerance between neighbors; 0 keeps the classic seed-relative test.
+    pub gradient: u8,
+    /// With `gradient`, the largest difference from the seed any pixel may have.
+    pub leash: u8,
+}
+
+impl Options {
+    /// Classic wand/fill options: seed pixel, no gradient following.
+    pub fn at(x: u32, y: u32, tolerance: u8) -> Self {
+        Options {
+            x,
+            y,
+            tolerance,
+            diagonal: false,
+            contiguous: true,
+            antialias: true,
+            gap: 0,
+            transparent_barrier: false,
+            sample: 1,
+            gradient: 0,
+            leash: 255,
+        }
+    }
+}
+
+/// The reference color of a region: the seed pixel, or the mean of the odd
+/// `sample` x `sample` window around it (color over visible pixels, alpha over all).
+fn seed_color(surface: &Surface, x: u32, y: u32, sample: u32) -> [u8; 4] {
+    if sample <= 1 {
+        return surface.pixel(x, y);
+    }
+    let r = i64::from(sample / 2);
+    let (mut sum, mut seen, mut alpha, mut total) = ([0u64; 3], 0u64, 0u64, 0u64);
+    for dy in -r..=r {
+        for dx in -r..=r {
+            let (nx, ny) = (i64::from(x) + dx, i64::from(y) + dy);
+            if nx < 0 || ny < 0 || nx >= i64::from(surface.width) || ny >= i64::from(surface.height)
+            {
+                continue;
+            }
+            let p = surface.pixel(nx as u32, ny as u32);
+            total += 1;
+            alpha += u64::from(p[3]);
+            if p[3] > 0 {
+                seen += 1;
+                for c in 0..3 {
+                    sum[c] += u64::from(p[c]);
+                }
+            }
+        }
+    }
+    if seen == 0 {
+        return [0, 0, 0, 0];
+    }
+    let mean = |v: u64, n: u64| ((v + n / 2) / n) as u8;
+    [
+        mean(sum[0], seen),
+        mean(sum[1], seen),
+        mean(sum[2], seen),
+        mean(alpha, total),
+    ]
 }
 
 pub(super) fn candidate(p: [u8; 4], seed: [u8; 4], tolerance: u8, barrier: bool) -> bool {
@@ -103,17 +174,25 @@ pub fn region(surface: &Surface, options: &Options) -> Result<Surface> {
     if options.gap > 0 && !options.contiguous {
         bail!("[invalid-fill] gap only applies to contiguous fills")
     }
-    let seed = surface.pixel(options.x, options.y);
+    if options.sample == 0 || options.sample % 2 == 0 || options.sample > MAX_SAMPLE {
+        bail!("[invalid-fill] sample must be an odd window edge of 1-{MAX_SAMPLE} pixels")
+    }
+    if options.gradient > 0 && (!options.contiguous || options.gap > 0) {
+        bail!("[invalid-fill] gradient only applies to contiguous fills without a gap")
+    }
+    let seed = seed_color(surface, options.x, options.y, options.sample);
     let mut cand = vec![0u8; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let p = surface.pixel(x as u32, y as u32);
-            cand[y * w + x] = u8::from(candidate(
-                p,
-                seed,
-                options.tolerance,
-                options.transparent_barrier,
-            ));
+    if options.gradient == 0 {
+        for y in 0..h {
+            for x in 0..w {
+                let p = surface.pixel(x as u32, y as u32);
+                cand[y * w + x] = u8::from(candidate(
+                    p,
+                    seed,
+                    options.tolerance,
+                    options.transparent_barrier,
+                ));
+            }
         }
     }
     let gap = options.gap as usize;
@@ -124,7 +203,35 @@ pub fn region(surface: &Surface, options: &Options) -> Result<Surface> {
     };
     let start = options.y as usize * w + options.x as usize;
     let mut inside = vec![0u8; w * h];
-    if options.contiguous {
+    if options.gradient > 0 {
+        let step = |from: usize, to: usize| {
+            let at = |i: usize| surface.pixel((i % w) as u32, (i / w) as u32);
+            let p = at(to);
+            candidate(p, at(from), options.gradient, options.transparent_barrier)
+                && candidate(p, seed, options.leash, options.transparent_barrier)
+        };
+        let mut stack = vec![start];
+        inside[start] = 1;
+        while let Some(at) = stack.pop() {
+            let (x, y) = ((at % w) as i64, (at / w) as i64);
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    if (dx, dy) == (0, 0) || (!options.diagonal && dx != 0 && dy != 0) {
+                        continue;
+                    }
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                        continue;
+                    }
+                    let n = ny as usize * w + nx as usize;
+                    if inside[n] == 0 && step(at, n) {
+                        inside[n] = 1;
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+    } else if options.contiguous {
         if walls[start] == 0 {
             bail!("[invalid-fill] the seed lies within a gap of {gap} pixels; lower gap or seed inside the area")
         }
@@ -335,14 +442,8 @@ mod tests {
 
     fn options(x: u32, y: u32) -> Options {
         Options {
-            x,
-            y,
-            tolerance: 10,
-            diagonal: false,
-            contiguous: true,
             antialias: false,
-            gap: 0,
-            transparent_barrier: false,
+            ..Options::at(x, y, 10)
         }
     }
 
@@ -410,5 +511,94 @@ mod tests {
         o.transparent_barrier = true;
         assert_eq!(selected(&region(&s, &o).unwrap()), 2);
         assert_eq!(selected(&region(&s, &options(5, 0)).unwrap()), 4);
+    }
+
+    /// A 60x40 sky that darkens by 60 levels top to bottom, with +-3 noise and a
+    /// red 20x12 car; returns the surface and the car's pixel count.
+    fn sky_and_car() -> (Surface, u32) {
+        let mut s = Surface::empty(60, 40);
+        let mut noise = 7u64;
+        let mut car = 0;
+        for y in 0..40u32 {
+            for x in 0..60u32 {
+                noise = splitmix64(&mut noise);
+                let n = (noise % 7) as i32 - 3;
+                let sky = [
+                    200 - 60 * y as i32 / 40 + n,
+                    215 - 50 * y as i32 / 40 + n,
+                    235 + n,
+                ];
+                let in_car = (20..40).contains(&x) && (22..34).contains(&y);
+                car += u32::from(in_car);
+                let c = if in_car {
+                    [190, 30, 35]
+                } else {
+                    sky.map(|v| v.clamp(0, 255) as u8)
+                };
+                s.set_pixel(x, y, [c[0], c[1], c[2], 255]);
+            }
+        }
+        (s, car)
+    }
+
+    #[test]
+    fn gradient_flood_selects_a_noisy_gradient_sky_without_entering_the_car() {
+        let (s, car) = sky_and_car();
+        let sky = 60 * 40 - car;
+        // Seed-relative tolerance cannot do it: tight stops early, loose leaks.
+        let tight = selected(&region(&s, &options(2, 2)).unwrap());
+        assert!(
+            tight < sky,
+            "tight tolerance stops partway down the gradient"
+        );
+        let mut loose = options(2, 2);
+        loose.tolerance = 220;
+        assert!(
+            selected(&region(&s, &loose).unwrap()) > sky,
+            "loose floods the car"
+        );
+        let mut o = options(2, 2);
+        o.gradient = 20;
+        o.sample = 3;
+        let grown = region(&s, &o).unwrap();
+        assert_eq!(selected(&grown), sky);
+        assert_eq!(coverage_at(&grown, 30, 28), 0, "the car stays unselected");
+    }
+
+    #[test]
+    fn gradient_and_sample_are_validated() {
+        let (s, _) = sky_and_car();
+        let mut o = options(2, 2);
+        o.gradient = 10;
+        o.contiguous = false;
+        assert!(region(&s, &o).is_err());
+        o.contiguous = true;
+        o.gap = 1;
+        assert!(region(&s, &o).is_err());
+        let mut o = options(2, 2);
+        o.sample = 4;
+        assert!(region(&s, &o).is_err());
+        o.sample = MAX_SAMPLE + 2;
+        assert!(region(&s, &o).is_err());
+    }
+
+    #[test]
+    fn sample_averaging_ignores_a_noisy_seed_pixel() {
+        let mut s = Surface::empty(9, 9);
+        for y in 0..9 {
+            for x in 0..9 {
+                s.set_pixel(x, y, [100, 100, 100, 255]);
+            }
+        }
+        s.set_pixel(4, 4, [130, 100, 100, 255]);
+        let mut o = options(4, 4);
+        assert_eq!(
+            selected(&region(&s, &o).unwrap()),
+            1,
+            "the odd seed stands alone"
+        );
+        o.sample = 5;
+        o.tolerance = 30;
+        assert_eq!(selected(&region(&s, &o).unwrap()), 81);
     }
 }

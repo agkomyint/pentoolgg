@@ -35,6 +35,12 @@ pub fn apply(
         antialias: args["antialias"].as_bool().unwrap_or(true),
         gap: count("gap"),
         transparent_barrier: args["transparent_barrier"].as_bool().unwrap_or(false),
+        sample: args["sample"]
+            .as_u64()
+            .unwrap_or(1)
+            .min(u64::from(u32::MAX)) as u32,
+        gradient: args["gradient"].as_u64().unwrap_or(0).min(255) as u8,
+        leash: args["leash"].as_u64().unwrap_or(255).min(255) as u8,
     };
     if args["scope"].as_str().is_some_and(|scope| scope != "layer")
         || args["layer"].as_str() == Some("below")
