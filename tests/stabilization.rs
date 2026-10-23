@@ -692,3 +692,25 @@ fn studio_scene_operations_use_the_type_key() {
         "/api/scene operations key on `type`, not `kind`: {hits:?}"
     );
 }
+
+#[test]
+fn stroke_path_of_one_degenerate_segment_is_an_empty_success() {
+    let dir = Dir::new("degenerate-stroke");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&["migrate", "d.pen", "--target", "6"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "rasterA", "--width", "64", "--height", "64",
+    ]);
+    let before = std::fs::read(dir.0.join("d.pen")).unwrap();
+    let out = dir.ok(&[
+        "raster",
+        "d.pen",
+        "stroke-path",
+        "rasterA",
+        "--path",
+        "M 10 10 L 10 10",
+        "--json",
+    ]);
+    assert!(out.contains("\"dabs\""), "{out}");
+    let _ = before;
+}

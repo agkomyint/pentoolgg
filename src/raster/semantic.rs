@@ -306,7 +306,9 @@ fn flatten(path: &str, flatness: f64) -> Result<(usize, Vec<Point>)> {
         }
     }
     points.dedup();
-    if points.len() < 2 || points.len() > MAX_FLATTENED_POINTS {
+    // Coincident endpoints are a zero-length line: one point, painted as nothing.
+    let minimum = if source_segments > 0 { 1 } else { 2 };
+    if points.len() < minimum || points.len() > MAX_FLATTENED_POINTS {
         bail!(
             "[limit-exceeded] path flattening produced {} points; allowed 2-{MAX_FLATTENED_POINTS}",
             points.len()
@@ -323,6 +325,14 @@ pub fn paint_path(
 ) -> Result<Value> {
     let curves = Curves::parse(&request.curves)?;
     let (source_segments, points) = flatten(&request.path, request.flatness)?;
+    if points.len() == 1 {
+        return Ok(json!({
+            "constraints": Value::Null,
+            "source": {"path": request.path, "segments": source_segments, "flatness": request.flatness},
+            "generated": {"points": 1, "samples": 0, "strokes": 0, "dabs": 0},
+            "strokes": Vec::<String>::new()
+        }));
+    }
     let mut lengths = Vec::with_capacity(points.len());
     lengths.push(0.0);
     for pair in points.windows(2) {
