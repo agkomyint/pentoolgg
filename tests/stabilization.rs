@@ -192,3 +192,22 @@ fn selection_query_rejects_duplicate_keys() {
     ]);
     assert!(message.contains("duplicate key"), "{message}");
 }
+
+#[test]
+fn library_writes_leave_no_numbered_backups() {
+    // #87: every library write used to leave a new `.bak.N` file in `.pentool`.
+    let dir = Dir::new("libbak");
+    std::fs::create_dir_all(dir.0.join("lib")).unwrap();
+    dir.ok(&["library", "add", "--name", "bak", "lib"]);
+    for _ in 0..3 {
+        dir.ok(&["library", "refresh"]);
+        dir.ok(&["library", "disable", "bak"]);
+        dir.ok(&["library", "enable", "bak"]);
+    }
+    let backups: Vec<_> = std::fs::read_dir(dir.0.join(".pentool"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().contains(".bak."))
+        .collect();
+    assert!(backups.is_empty(), "{backups:?}");
+}

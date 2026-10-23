@@ -368,12 +368,10 @@ pub fn atomic_new(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Write derived metadata (library lists, indexes, locks) by replacing the file
+/// through a temporary sibling; no numbered `.bak.N` copies accumulate.
 pub fn atomic_new_replace(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
-        editing::transactional_write(path, bytes).map(|_| ())
-    } else {
-        atomic_new(path, bytes)
-    }
+    atomic_new(path, bytes)
 }
 
 pub fn inspect(path: &Path) -> Result<Value> {
