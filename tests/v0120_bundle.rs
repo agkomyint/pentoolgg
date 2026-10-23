@@ -93,6 +93,14 @@ fn package_contains_every_dependency_and_verifies_offline() {
     let ok = bundle::verify(&out).unwrap();
     assert_eq!(ok["ok"], true, "{ok}");
 
+    // A file smuggled in beside the manifest is reported, not ignored.
+    std::fs::write(out.join("extra-evil.txt"), b"smuggled").unwrap();
+    let extra = bundle::verify(&out).unwrap();
+    assert_eq!(extra["ok"], false, "{extra}");
+    assert_eq!(extra["problems"][0]["path"], "extra-evil.txt");
+    assert_eq!(extra["problems"][0]["problem"], "unlisted");
+    std::fs::remove_file(out.join("extra-evil.txt")).unwrap();
+
     // Tampering with any packaged file is detected.
     std::fs::write(out.join("output.pdf"), b"tampered").unwrap();
     let bad = bundle::verify(&out).unwrap();

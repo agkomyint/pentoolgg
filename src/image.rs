@@ -2085,8 +2085,8 @@ pub fn analyze(raw: &Value, page_id: Option<&str>, document: &Path, id: &str) ->
         [0.5, 0.5]
     } else {
         [
-            (sx / sum as f64 / f64::from(info.pixel_width) * 1000.0).round() / 1000.0,
-            (sy / sum as f64 / f64::from(info.pixel_height) * 1000.0).round() / 1000.0,
+            ((sx / sum as f64 + 0.5) / f64::from(info.pixel_width) * 1000.0).round() / 1000.0,
+            ((sy / sum as f64 + 0.5) / f64::from(info.pixel_height) * 1000.0).round() / 1000.0,
         ]
     };
     Ok(serde_json::json!({

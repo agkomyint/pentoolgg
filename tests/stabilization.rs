@@ -1382,3 +1382,27 @@ fn scene3d_dry_run_is_accepted_after_the_subcommand() {
         "{help}"
     );
 }
+
+#[test]
+fn image_analyze_centers_the_focal_suggestion_on_pixel_centers() {
+    let dir = Dir::new("focal-center");
+    let mut img = ::image::RgbaImage::from_pixel(16, 16, ::image::Rgba([255, 0, 255, 255]));
+    for y in 6..10 {
+        for x in 6..10 {
+            img.put_pixel(x, y, ::image::Rgba([0, 255, 0, 255]));
+        }
+    }
+    img.save(dir.0.join("s.png")).unwrap();
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "image", "add", "d.pen", "src", "--file", "s.png", "--layer", "layer-1", "--width", "16",
+        "--height", "16", "--embed",
+    ]);
+    let out = dir.ok(&["image", "analyze", "d.pen", "src", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        v["focal_suggestion"]["position"],
+        serde_json::json!([0.5, 0.5]),
+        "{out}"
+    );
+}

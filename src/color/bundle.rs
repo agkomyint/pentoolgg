@@ -259,6 +259,7 @@ pub fn verify(directory: &Path) -> Result<Value> {
     );
     let mut problems = Vec::new();
     let mut checked = 0usize;
+    let mut listed = std::collections::BTreeSet::new();
     for item in manifest["files"]
         .as_array()
         .context("manifest files missing")?
@@ -273,6 +274,7 @@ pub fn verify(directory: &Path) -> Result<Value> {
             "[invalid-input] unsafe package path {path}"
         );
         checked += 1;
+        listed.insert(path.to_string());
         match std::fs::read(directory.join(path)) {
             Err(_) => problems.push(json!({"path":path,"problem":"missing"})),
             Ok(bytes) => {
@@ -284,5 +286,32 @@ pub fn verify(directory: &Path) -> Result<Value> {
             }
         }
     }
+    let mut found = Vec::new();
+    unlisted_files(directory, directory, &mut found)?;
+    for path in found {
+        if path != MANIFEST && !listed.contains(&path) {
+            problems.push(json!({"path":path,"problem":"unlisted"}));
+        }
+    }
     Ok(json!({"ok":problems.is_empty(),"checked":checked,"problems":problems}))
+}
+
+/// Relative `/`-separated paths of every file below `dir`, sorted for stable output.
+fn unlisted_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<std::io::Result<_>>()?;
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            unlisted_files(root, &path, out)?;
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            out.push(
+                rel.components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            );
+        }
+    }
+    Ok(())
 }
