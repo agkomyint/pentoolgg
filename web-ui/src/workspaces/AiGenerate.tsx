@@ -64,12 +64,14 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
       const result = await postJson<{ warnings?: string[] }>("/api/ai/generate", { ...plan.body, reviewed_disclosure: plan.report.disclosure, allow_model_call: true, job: id });
       if (!cancelled.current) { setPlan(null); await refresh(); studio.notify(["Candidates ready. Choose an image to accept.", ...(result.warnings ?? [])].join(" ")); }
     } catch (e) { if (!cancelled.current) setError(errorMessage(e)); }
-    finally { job.current = null; setBusy(false); }
+    finally { if (job.current === id) { job.current = null; setBusy(false); } }
   }
   async function cancelGeneration() {
     try {
       const result = await postJson<{ cancelled: boolean }>("/api/ai/cancel", { job: job.current });
       cancelled.current = result.cancelled;
+      // The provider call may take a while to unwind; do not leave the form disabled meanwhile.
+      if (result.cancelled) { job.current = null; setBusy(false); }
       studio.notify(result.cancelled ? "Cancelled. A request already sent may still be billed." : "Cancellation was not acknowledged. Retry if the request is still running.");
     } catch (e) { setError(errorMessage(e)); }
   }
@@ -106,7 +108,10 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
   }
   return <section aria-label="Generate images" className="space-y-3 border-y py-3 text-xs" aria-busy={busy}>
     <h4 className="font-semibold">Generate and edit images</h4>
-    {blocked && <p className="text-muted-foreground">Save and open a shared document, then save pending edits before using AI.</p>}
+    {blocked && <div className="space-y-2 text-muted-foreground">
+      <p>{!shared ? "Open a document served by pentool serve before using AI." : dirty ? "You have unsaved edits. Save them to use AI." : "Waiting for the document revision. Refresh Studio if this persists."}</p>
+      {shared && dirty && <Button variant="outline" onClick={() => void studio.save()}>Save now</Button>}
+    </div>}
     {selected?.ai && typeof selected.ai === "object" ? <Badge variant="outline">AI: {String((selected.ai as Record<string, unknown>).provider)}/{String((selected.ai as Record<string, unknown>).model)}</Badge> : null}
     {imageSelected && <Button variant="outline" disabled={busy || blocked} onClick={() => void keyout()}>Remove magenta background (offline)</Button>}
     {(status.limits?.problems ?? []).map((problem) => <p key={problem.code} role="alert" className="text-destructive">{problem.message ?? problem.code} {problem.fix}</p>)}
