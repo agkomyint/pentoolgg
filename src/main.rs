@@ -4374,6 +4374,59 @@ enum RasterAction {
         #[arg(long, default_value_t = 32)]
         tolerance: u8,
     },
+    /// Cut a subject out of an image or raster layer into a new transparent raster
+    /// layer (the source is untouched). Coordinates are page units, as in a render.
+    Cutout {
+        id: String,
+        /// Id of the new cutout layer.
+        #[arg(long = "id")]
+        new_id: String,
+        /// Rough box: X Y WIDTH HEIGHT.
+        #[arg(long, num_args = 4, allow_negative_numbers = true, value_names = ["X", "Y", "WIDTH", "HEIGHT"], conflicts_with_all = ["polygon", "wand", "selection"])]
+        r#box: Vec<f64>,
+        /// Rough outline as JSON [[x,y],...] (or @file).
+        #[arg(long, conflicts_with_all = ["wand", "selection"])]
+        polygon: Option<String>,
+        /// Magic-wand seed: X Y.
+        #[arg(long, num_args = 2, value_names = ["X", "Y"], conflicts_with = "selection")]
+        wand: Vec<u32>,
+        /// Use the selection already stored on this raster layer.
+        #[arg(long)]
+        selection: bool,
+        /// Wand tolerance (0-255).
+        #[arg(long, default_value_t = 32)]
+        tolerance: u8,
+        /// Wand seed averaging window (odd, 1-51).
+        #[arg(long, default_value_t = 1)]
+        sample: u32,
+        /// Wand gradient step; follows shaded regions (0 = off).
+        #[arg(long, default_value_t = 0)]
+        gradient: u8,
+        /// With --gradient, the largest drift from the seed.
+        #[arg(long, default_value_t = 255)]
+        leash: u8,
+        /// Snap to image edges with this undecided band in pixels (1-64).
+        #[arg(long)]
+        refine: Option<u32>,
+        /// Certain-subject depth for --refine (default: derived from the box, else the band).
+        #[arg(long, default_value_t = 0)]
+        core: u32,
+        /// Cut out everything except the chosen shape (select the background, keep the rest).
+        #[arg(long)]
+        invert: bool,
+        /// Foreground hint stroke as JSON [[x,y],...] (needs --refine).
+        #[arg(long)]
+        fg: Option<String>,
+        /// Background hint stroke as JSON [[x,y],...] (needs --refine).
+        #[arg(long)]
+        bg: Option<String>,
+        /// Pull the edge in by N pixels to drop a background fringe.
+        #[arg(long, default_value_t = 0)]
+        shrink: u32,
+        /// Soften the edge by N pixels.
+        #[arg(long, default_value_t = 0)]
+        feather: u32,
+    },
     /// Snap the active (rough) selection to image edges: pixels deeper than --band
     /// inside are subject, farther than --band outside are background, the ring
     /// between is decided by edges and color. --fg/--bg pin pixels.
@@ -4382,6 +4435,10 @@ enum RasterAction {
         /// Width in pixels of the undecided ring on each side of the rough edge (1-64).
         #[arg(long, default_value_t = 8)]
         band: u32,
+        /// How far inside the rough edge the certain subject starts (default: the band);
+        /// use it for a loose box, whose corners are background.
+        #[arg(long, default_value_t = 0)]
+        core: u32,
         /// Foreground hint stroke as JSON [[x,y],...] (or @file); one point is a 3x3 dab.
         #[arg(long)]
         fg: Option<String>,
@@ -8769,7 +8826,81 @@ async fn execute(cli: Cli) -> Result<()> {
                         tolerance,
                     )?,
                 ),
-                RasterAction::SelectRefine { id, band, fg, bg } => {
+                RasterAction::Cutout {
+                    id,
+                    new_id,
+                    r#box,
+                    polygon,
+                    wand,
+                    selection,
+                    tolerance,
+                    sample,
+                    gradient,
+                    leash,
+                    refine,
+                    core,
+                    invert,
+                    fg,
+                    bg,
+                    shrink,
+                    feather,
+                } => {
+                    let read = |text: &Option<String>| -> Result<Vec<[f64; 2]>> {
+                        let Some(text) = text else {
+                            return Ok(Vec::new());
+                        };
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                if fs::metadata(path)?.len() > 16 << 20 {
+                                    bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.clone(),
+                        };
+                        serde_json::from_str(&body).map_err(|e| {
+                            anyhow::anyhow!("[invalid-input] expected a JSON array of [x, y]: {e}")
+                        })
+                    };
+                    let source = if !r#box.is_empty() {
+                        raster::CutoutSource::Box([r#box[0], r#box[1], r#box[2], r#box[3]])
+                    } else if polygon.is_some() {
+                        raster::CutoutSource::Polygon(read(&polygon)?)
+                    } else if !wand.is_empty() {
+                        raster::CutoutSource::Wand(raster::FloodOptions {
+                            sample,
+                            gradient,
+                            leash,
+                            ..raster::FloodOptions::at(wand[0], wand[1], tolerance)
+                        })
+                    } else if selection {
+                        raster::CutoutSource::Selection
+                    } else {
+                        bail!("[invalid-input] choose where to cut from: --box X Y W H, --polygon JSON, --wand X Y or --selection")
+                    };
+                    let request = raster::CutoutRequest {
+                        source,
+                        new_id,
+                        refine,
+                        core,
+                        invert,
+                        fg: read(&fg)?,
+                        bg: read(&bg)?,
+                        shrink,
+                        feather,
+                    };
+                    (
+                        "raster-cutout",
+                        raster::cutout(&mut raw, &input, page, &id, &request)?,
+                    )
+                }
+                RasterAction::SelectRefine {
+                    id,
+                    band,
+                    core,
+                    fg,
+                    bg,
+                } => {
                     let read = |text: &Option<String>| -> Result<Vec<[f64; 2]>> {
                         let Some(text) = text else {
                             return Ok(Vec::new());
@@ -8791,7 +8922,15 @@ async fn execute(cli: Cli) -> Result<()> {
                     };
                     (
                         "raster-select-refine",
-                        raster::select_refine(&mut raw, page, &id, band, &read(&fg)?, &read(&bg)?)?,
+                        raster::select_refine(
+                            &mut raw,
+                            page,
+                            &id,
+                            band,
+                            core,
+                            &read(&fg)?,
+                            &read(&bg)?,
+                        )?,
                     )
                 }
                 RasterAction::SelectQuickmask {

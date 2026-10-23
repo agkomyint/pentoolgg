@@ -10,6 +10,11 @@
 //! the boundary settles on the nearest edge. Only integer arithmetic, a
 //! tie-broken priority queue and 4-connected steps are used, so the result is
 //! identical on every platform.
+//!
+//! A loose box is a poor trimap because its corners are background: `core` pulls
+//! the certain-subject area further in than `band`, and two cleansing rounds then
+//! demote core pixels whose color is far more typical of the certain background
+//! than of the rest of the core.
 use super::flood::MAX_PIXELS;
 use super::selection;
 use super::shape::{box_blur, ensure_plane, from_plane, layer_size, morph, to_plane};
@@ -82,18 +87,24 @@ pub fn stroke_pixels(points: &[[f64; 2]], w: u32, h: u32) -> Result<Vec<usize>> 
 
 /// Refine `plane` (coverage 0-255, `w` x `h`) against the pixels of `surface`.
 /// Returns the refined plane and the number of undecided pixels that were resolved.
+#[allow(clippy::too_many_arguments)]
 pub fn refine_plane(
     surface: &Surface,
     plane: &[u8],
     w: usize,
     h: usize,
     band: u32,
+    core: u32,
     fg_hint: &[usize],
     bg_hint: &[usize],
 ) -> Result<(Vec<u8>, u64)> {
     if band == 0 || band > MAX_BAND {
         bail!("[invalid-selection] band must be 1-{MAX_BAND} pixels")
     }
+    if core > MAX_BAND {
+        bail!("[invalid-selection] core must be 0-{MAX_BAND} pixels (0 uses the band)")
+    }
+    let core = if core == 0 { band } else { core.max(band) };
     let solid: Vec<u8> = plane
         .iter()
         .map(|v| if *v >= 128 { 255 } else { 0 })
@@ -102,11 +113,11 @@ pub fn refine_plane(
         bail!("[invalid-selection] the selection is empty; there is nothing to refine")
     }
     let b = band as usize;
-    let core = morph(&solid, w, h, b, false);
+    let inner = morph(&solid, w, h, core as usize, false);
     let reach = morph(&solid, w, h, b, true);
     let mut label = vec![0u8; w * h];
     for i in 0..w * h {
-        if core[i] == 255 {
+        if inner[i] == 255 {
             label[i] = FOREGROUND;
         } else if reach[i] == 0 {
             label[i] = BACKGROUND;
@@ -128,18 +139,44 @@ pub fn refine_plane(
     if count(BACKGROUND) == 0 {
         bail!("[invalid-selection] no certain background remains {band} pixels outside the selection; lower --band or add --bg hints")
     }
-    let undecided = label.iter().filter(|v| **v == 0).count() as u64;
-
     let pixels: Vec<[u8; 4]> = (0..w * h)
         .map(|i| surface.pixel((i % w) as u32, (i / w) as u32))
         .collect();
-    let mut histogram = [vec![0u64; 4096], vec![0u64; 4096]];
-    let mut totals = [0u64; 2];
-    for (i, l) in label.iter().enumerate() {
-        if *l != 0 {
-            let side = usize::from(*l - 1);
-            histogram[side][bin(pixels[i])] += 1;
-            totals[side] += 1;
+    let build = |label: &[u8]| {
+        let mut histogram = [vec![0u64; 4096], vec![0u64; 4096]];
+        let mut totals = [0u64; 2];
+        for (i, l) in label.iter().enumerate() {
+            if *l != 0 {
+                let side = usize::from(*l - 1);
+                histogram[side][bin(pixels[i])] += 1;
+                totals[side] += 1;
+            }
+        }
+        (histogram, totals)
+    };
+    let (mut histogram, mut totals) = build(&label);
+    if core > band {
+        for _ in 0..2 {
+            let mut demoted = false;
+            for i in 0..w * h {
+                if label[i] != FOREGROUND || fg_hint.binary_search(&i).is_ok() {
+                    continue;
+                }
+                let k = bin(pixels[i]);
+                if u128::from(histogram[1][k]) * u128::from(totals[0])
+                    >= 4 * u128::from(histogram[0][k]) * u128::from(totals[1])
+                {
+                    label[i] = 0;
+                    demoted = true;
+                }
+            }
+            if !demoted {
+                break;
+            }
+            (histogram, totals) = build(&label);
+        }
+        if !label.contains(&FOREGROUND) {
+            bail!("[invalid-selection] the subject core is indistinguishable from the background; add --fg hints")
         }
     }
     // Pixels that look like the other side's colors pay a penalty to join.
@@ -150,6 +187,36 @@ pub fn refine_plane(
             > u128::from(mine) * u128::from(totals[1 - side])
     };
 
+    // Sensor noise or texture must not look like an edge: measure how much
+    // neighboring pixels differ inside the certain regions and charge only for
+    // differences above that floor (the 90th percentile).
+    let floor = {
+        let mut counts = [0u64; 256];
+        for y in 0..h {
+            for x in 0..w {
+                let i = y * w + x;
+                if label[i] == 0 {
+                    continue;
+                }
+                for n in [i + 1, i + w] {
+                    let inside = if n == i + 1 { x + 1 < w } else { y + 1 < h };
+                    if inside && label[n] == label[i] {
+                        counts[diff(pixels[i], pixels[n]) as usize] += 1;
+                    }
+                }
+            }
+        }
+        let total: u64 = counts.iter().sum();
+        let mut seen = 0;
+        counts
+            .iter()
+            .position(|c| {
+                seen += c;
+                seen * 10 >= total * 9
+            })
+            .unwrap_or(0) as u32
+    };
+    let undecided = label.iter().filter(|v| **v == 0).count() as u64;
     let race = |side: usize| -> Vec<u32> {
         let own = side as u8 + 1;
         let mut dist = vec![u32::MAX; w * h];
@@ -171,7 +238,7 @@ pub fn refine_plane(
                 if l != 0 && l != own {
                     return;
                 }
-                let mut step = 1 + EDGE_WEIGHT * diff(pixels[at], pixels[n]);
+                let mut step = 1 + EDGE_WEIGHT * diff(pixels[at], pixels[n]).saturating_sub(floor);
                 if l == 0 && looks_like(n, side) {
                     step += MODEL_PENALTY;
                 }
@@ -216,6 +283,7 @@ pub fn refine(
     page: Option<&str>,
     id: &str,
     band: u32,
+    core: u32,
     fg_points: &[[f64; 2]],
     bg_points: &[[f64; 2]],
 ) -> Result<Value> {
@@ -240,6 +308,7 @@ pub fn refine(
         w as usize,
         h as usize,
         band,
+        core,
         &fg,
         &bg,
     )?;
@@ -253,6 +322,7 @@ pub fn refine(
     result["id"] = json!(id);
     result["algorithm"] = json!(ALGORITHM);
     result["band"] = json!(band);
+    result["core"] = json!(core.max(band));
     result["undecided_pixels"] = json!(undecided);
     result["foreground_hint_pixels"] = json!(fg.len());
     result["background_hint_pixels"] = json!(bg.len());
@@ -311,12 +381,12 @@ mod tests {
             iou(&loose, &truth) < 0.9,
             "the rough shape is visibly loose"
         );
-        let (refined, undecided) = refine_plane(&s, &loose, w, h, 9, &[], &[]).unwrap();
+        let (refined, undecided) = refine_plane(&s, &loose, w, h, 9, 0, &[], &[]).unwrap();
         assert!(undecided > 0);
         let score = iou(&refined, &truth);
         assert!(score >= 0.95, "iou {score}");
         // Deterministic: a second run is identical.
-        let again = refine_plane(&s, &loose, w, h, 9, &[], &[]).unwrap().0;
+        let again = refine_plane(&s, &loose, w, h, 9, 0, &[], &[]).unwrap().0;
         assert_eq!(refined, again);
     }
 
@@ -327,11 +397,11 @@ mod tests {
         let loose = morph(&truth, w, h, 5, true);
         let spot = stroke_pixels(&[[48.0, 34.0]], 96, 64).unwrap();
         assert_eq!(spot.len(), 9);
-        assert!(refine_plane(&s, &loose, w, h, 9, &spot, &spot).is_err());
+        assert!(refine_plane(&s, &loose, w, h, 9, 0, &spot, &spot).is_err());
         let line = stroke_pixels(&[[10.0, 10.0], [14.0, 10.0]], 96, 64).unwrap();
         assert_eq!(line.len(), 5);
         let bg = stroke_pixels(&[[48.0, 34.0]], 96, 64).unwrap();
-        let (forced, _) = refine_plane(&s, &loose, w, h, 9, &[], &bg).unwrap();
+        let (forced, _) = refine_plane(&s, &loose, w, h, 9, 0, &[], &bg).unwrap();
         assert_eq!(forced[34 * w + 48], 0, "a background hint wins");
     }
 
@@ -339,10 +409,10 @@ mod tests {
     fn empty_selections_and_oversized_bands_are_refused() {
         let (s, truth) = scene();
         let (w, h) = (96, 64);
-        assert!(refine_plane(&s, &vec![0; w * h], w, h, 5, &[], &[]).is_err());
-        assert!(refine_plane(&s, &truth, w, h, 0, &[], &[]).is_err());
-        assert!(refine_plane(&s, &truth, w, h, MAX_BAND + 1, &[], &[]).is_err());
+        assert!(refine_plane(&s, &vec![0; w * h], w, h, 5, 0, &[], &[]).is_err());
+        assert!(refine_plane(&s, &truth, w, h, 0, 0, &[], &[]).is_err());
+        assert!(refine_plane(&s, &truth, w, h, MAX_BAND + 1, 0, &[], &[]).is_err());
         // Everything selected: no certain background exists.
-        assert!(refine_plane(&s, &vec![255; w * h], w, h, 5, &[], &[]).is_err());
+        assert!(refine_plane(&s, &vec![255; w * h], w, h, 5, 0, &[], &[]).is_err());
     }
 }

@@ -310,6 +310,20 @@ Selection algorithm 1. Every command works on the layer's selection plane and ta
   stroke `[[x,y],...]` (a single point is a 3x3 dab) that pins pixels; the same
   pixel in both is an error. The result reports `undecided_pixels` and the hint
   sizes. Also available as the `select-refine` action of the shared dispatcher.
+  `--core N` (default 0) is the depth of certain subject; when larger than `band`,
+  core pixels whose color is clearly more typical of the background are demoted.
+  Path costs ignore the image's own noise floor (90th percentile of neighbor
+  differences in the certain regions).
+- `cutout ID --id NEW (--box X Y W H | --polygon POINTS | --wand X Y | --selection)
+  [--refine BAND] [--core N] [--invert] [--fg P] [--bg P] [--shrink N] [--feather N]`
+  lifts the subject into a new transparent raster layer `NEW`, trimmed to its
+  bounds. `ID` may be a raster layer or an image node (baked internally; the source
+  is never changed). Wand sources accept `--tolerance`, `--sample`, `--gradient`
+  and `--leash`; combine `--wand` with `--invert` to cut a subject out of a plain
+  backdrop. Coordinates are page units. The result reports the new id, bounds,
+  selected/fully selected pixel counts, selection and layer tile-map hashes and
+  warnings (selection reaches the image edge, tiny subject). `--dry-run` plans
+  without writing.
 - `select-quickmask ID --samples ... [--brush ...] [--erase]` paints coverage with
   the brush engine: the same dabs, hardness, flow and dynamics as a color stroke, but
   into the selection plane. Textured tips are not supported.

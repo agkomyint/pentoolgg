@@ -217,6 +217,7 @@ pub fn apply(
                 page,
                 id,
                 args["band"].as_u64().unwrap_or(8).min(u64::from(u32::MAX)) as u32,
+                args["core"].as_u64().unwrap_or(0).min(u64::from(u32::MAX)) as u32,
                 &points("fg")?,
                 &points("bg")?,
             )?

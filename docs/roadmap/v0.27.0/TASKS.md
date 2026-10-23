@@ -68,7 +68,7 @@ gradient sky" image:
       across runs and platforms; bounded work refusal.
 
 ### 3. One-step cutout for agents
-- [ ] `pentool cutout DOC IMAGE_ID --from <box|polygon|wand|selection|mask>`:
+- [ ] `pentool raster DOC cutout ID --box|--polygon|--wand|--selection` (mask source pending):
       produces a new transparent raster or masked-image node (source untouched),
       with `--feather`, `--refine`, `--decontaminate`, `--trim`, `--id`.
 - [ ] `--dry-run` and `--preview` report selected area, bounds and edge confidence.

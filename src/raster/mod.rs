@@ -30,6 +30,7 @@ mod api;
 mod clone;
 mod compose;
 pub mod constraints;
+mod cutout;
 pub mod fields;
 mod flood;
 mod heal;
@@ -55,6 +56,7 @@ pub use clone::{
 pub use compose::{
     flatten, merge_visible, orient, sample_page, snapshot_below, stamp_visible, Orient, Scope,
 };
+pub use cutout::{cutout, Request as CutoutRequest, Source as CutoutSource};
 pub use flood::{
     fill, fill_sampled, wand as select_wand, wand_sampled as select_wand_sampled,
     Options as FloodOptions,

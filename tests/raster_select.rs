@@ -475,3 +475,154 @@ fn refine_snaps_a_loose_marquee_to_the_subject_edge() {
     fail(&["raster", &doc, "select-refine", "p", "--band", "0"]);
     assert_eq!(fs::read(&doc).unwrap(), before);
 }
+
+fn page_bounds(layer: &Value) -> Vec<i64> {
+    layer["bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect()
+}
+
+#[test]
+fn cutout_lifts_a_refined_subject_without_touching_the_source() {
+    let ws = Workspace::new("cutout-raster");
+    let doc = ws.document("cut.pen");
+    let before = ok(&["raster", &doc, "info", "p"]);
+    let dry = ok(&[
+        "raster",
+        &doc,
+        "--dry-run",
+        "cutout",
+        "p",
+        "--id",
+        "car",
+        "--box",
+        "10",
+        "10",
+        "40",
+        "40",
+        "--refine",
+        "8",
+    ]);
+    assert_eq!(dry["dry_run"], true);
+    let untouched = fs::read(&doc).unwrap();
+
+    let cut = ok(&[
+        "raster", &doc, "cutout", "p", "--id", "car", "--box", "10", "10", "40", "40", "--refine",
+        "8",
+    ]);
+    let result = &cut["result"];
+    assert_eq!(result["id"], "car");
+    assert_eq!(result["from"], "box");
+    assert_eq!(result["refined"], true);
+    assert_eq!(result["warnings"], serde_json::json!([]));
+    let b = page_bounds(result);
+    assert!(
+        (18..=22).contains(&b[0]) && (18..=22).contains(&b[1]) && b[2] <= 24 && b[3] <= 24,
+        "the cutout hugs the red disc: {b:?}"
+    );
+    assert_ne!(fs::read(&doc).unwrap(), untouched);
+    let after = ok(&["raster", &doc, "info", "p"]);
+    assert_eq!(
+        before["result"]["tile_map_sha256"],
+        after["result"]["tile_map_sha256"]
+    );
+    assert!(info_has_no_selection(&doc));
+
+    // Wand + invert cuts the subject out of its plain backdrop.
+    let again = ok(&[
+        "raster",
+        &doc,
+        "cutout",
+        "p",
+        "--id",
+        "car2",
+        "--wand",
+        "2",
+        "2",
+        "--tolerance",
+        "20",
+        "--invert",
+    ]);
+    let b = page_bounds(&again["result"]);
+    assert!(b[0] >= 17 && b[0] <= 21 && b[2] <= 26, "{b:?}");
+
+    // Bad requests fail and leave the document alone.
+    let kept = fs::read(&doc).unwrap();
+    for args in [
+        vec!["raster", &doc, "cutout", "p", "--id", "car"],
+        vec!["raster", &doc, "cutout", "p", "--id", "x", "--selection"],
+        vec![
+            "raster", &doc, "cutout", "p", "--id", "x", "--box", "0", "0", "5", "5", "--fg",
+            "[[1,1]]",
+        ],
+        vec![
+            "raster", &doc, "cutout", "p", "--id", "x", "--wand", "999", "999",
+        ],
+    ] {
+        fail(&args);
+    }
+    assert_eq!(fs::read(&doc).unwrap(), kept);
+}
+
+fn info_has_no_selection(doc: &str) -> bool {
+    let info = ok(&["raster", doc, "select-info", "p"]);
+    info["result"]["selected_pixels"].as_u64().unwrap_or(0) == 0
+}
+
+#[test]
+fn cutout_bakes_an_image_node_and_keeps_it_unchanged() {
+    let ws = Workspace::new("cutout-image");
+    let doc = ws.document("img.pen");
+    let mut image = image::RgbaImage::from_pixel(100, 60, image::Rgba([255, 255, 255, 255]));
+    for y in 20..40 {
+        for x in 30..50 {
+            image.put_pixel(x, y, image::Rgba([200, 20, 30, 255]));
+        }
+    }
+    let source = ws.0.join("subject.png");
+    image.save(&source).unwrap();
+    ok(&[
+        "image",
+        "add",
+        &doc,
+        "photo",
+        "--file",
+        source.to_str().unwrap(),
+        "--layer",
+        "content",
+        "--x",
+        "0",
+        "--y",
+        "0",
+        "--width",
+        "100",
+        "--height",
+        "60",
+        "--embed",
+    ]);
+    let tree = |doc: &str| {
+        let out = run(&["tree", doc, "--limit", "50"]);
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let before = tree(&doc);
+    let cut = ok(&[
+        "raster", &doc, "cutout", "photo", "--id", "subject", "--box", "20", "10", "40", "40",
+        "--refine", "6",
+    ]);
+    assert_eq!(cut["result"]["source"], "photo");
+    let b = page_bounds(&cut["result"]);
+    assert!(
+        (28..=32).contains(&b[0]) && (18..=22).contains(&b[1]) && b[2] <= 24,
+        "{b:?}"
+    );
+    let after = tree(&doc);
+    assert!(after.contains("subject"), "{after}");
+    assert!(
+        !after.contains("cutout-source"),
+        "temporary layer removed: {after}"
+    );
+    assert!(after.contains("photo") && before.contains("photo"));
+}
