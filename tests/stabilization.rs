@@ -367,3 +367,27 @@ fn instance_mutations_accept_and_enforce_if_revision() {
         assert!(help.contains("--if-revision"), "{sub}: {help}");
     }
 }
+
+#[test]
+fn add_accepts_an_explicit_asset_path() {
+    let dir = Dir::new("add-by-path");
+    dir.ok(&["new", "host.pen", "--width", "100", "--height", "100"]);
+    dir.ok(&[
+        "shape", "host.pen", "rect", "r", "--layer", "layer-1", "--x", "2", "--y", "2", "--width",
+        "20", "--height", "20", "--fill", "#ff0000",
+    ]);
+    dir.ok(&[
+        "asset", "create", "--id", "lib/r", "--name", "R", "host.pen", "r.pen",
+    ]);
+    dir.ok(&["new", "dest.pen", "--width", "100", "--height", "100"]);
+    dir.ok(&["migrate", "dest.pen", "--target", "3"]);
+    // r.pen is not in any registered library; the path alone must resolve.
+    let out = dir.ok(&["add", "dest.pen", "r.pen", "--mode", "copy", "--dry-run"]);
+    assert!(
+        out.contains("\"dry_run\": true") || out.contains("dry_run"),
+        "{out}"
+    );
+    dir.ok(&["add", "dest.pen", "r.pen", "--mode", "copy"]);
+    let tree = dir.ok(&["tree", "dest.pen"]);
+    assert!(tree.contains("lib-r") || tree.contains("r-"), "{tree}");
+}

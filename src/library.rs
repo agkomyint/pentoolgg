@@ -252,6 +252,12 @@ pub fn refresh(root: &Path, config: &Path, index_path: &Path, only: Option<&str>
     )
 }
 
+/// Index one asset file that is not part of any registered library, so
+/// commands can accept an explicit asset path as well as a library ID.
+pub fn index_standalone(path: &Path) -> Result<IndexedAsset> {
+    index_file("local", path.parent().unwrap_or(Path::new("")), path)
+}
+
 fn index_file(library: &str, root: &Path, path: &Path) -> Result<IndexedAsset> {
     const MAX: u64 = 64 * 1024 * 1024;
     let meta = fs::metadata(path)?;

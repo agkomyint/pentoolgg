@@ -7221,7 +7221,14 @@ async fn execute(cli: Cli) -> Result<()> {
             }
             let cwd = std::env::current_dir()?;
             let idx = all_indexes(&cwd)?;
-            let item = library::resolve(&idx, &spec)?;
+            let standalone;
+            let item = if Path::new(&spec).is_file() {
+                standalone = library::index_standalone(Path::new(&spec))
+                    .with_context(|| format!("{spec} is not a valid asset file"))?;
+                &standalone
+            } else {
+                library::resolve(&idx, &spec)?
+            };
             let source_bytes = fs::read(&item.path)?;
             let source_raw: serde_json::Value = serde_json::from_slice(&source_bytes)?;
             let manifest =
