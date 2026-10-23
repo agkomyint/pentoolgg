@@ -391,3 +391,36 @@ fn add_accepts_an_explicit_asset_path() {
     let tree = dir.ok(&["tree", "dest.pen"]);
     assert!(tree.contains("lib-r") || tree.contains("r-"), "{tree}");
 }
+
+#[test]
+fn package_verify_rejects_trailing_bytes_and_names_a_missing_file() {
+    let dir = Dir::new("package-trailing");
+    dir.ok(&["new", "h.pen", "--width", "50", "--height", "50"]);
+    dir.ok(&[
+        "shape", "h.pen", "rect", "r", "--layer", "layer-1", "--x", "1", "--y", "1", "--width",
+        "5", "--height", "5", "--fill", "#ff0000",
+    ]);
+    dir.ok(&["package", "init", "kit", "--name", "kit"]);
+    dir.ok(&[
+        "asset",
+        "create",
+        "--id",
+        "kit/r",
+        "--name",
+        "R",
+        "h.pen",
+        "kit/assets/r.pen",
+    ]);
+    dir.ok(&["package", "pack", "kit", "--output", "k.penpkg"]);
+    dir.ok(&["package", "verify", "k.penpkg"]);
+    let mut bytes = std::fs::read(dir.0.join("k.penpkg")).unwrap();
+    bytes.push(b'x');
+    std::fs::write(dir.0.join("k.penpkg"), bytes).unwrap();
+    let err = dir.fail(&["package", "verify", "k.penpkg"]);
+    assert!(
+        err.contains("unexpected bytes after the ZIP end record"),
+        "{err}"
+    );
+    let err = dir.fail(&["package", "verify", "missing.penpkg"]);
+    assert!(err.contains("missing.penpkg"), "{err}");
+}

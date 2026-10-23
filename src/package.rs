@@ -1,6 +1,6 @@
 //! Deterministic, data-only `.penpkg` packages and filesystem registries.
 use crate::asset;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use ed25519_dalek::{Signer, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -470,12 +470,47 @@ fn native(path: &str) -> PathBuf {
     PathBuf::from(path.replace('/', std::path::MAIN_SEPARATOR_STR))
 }
 
+/// A package must end exactly at the ZIP end-of-central-directory record
+/// (plus its comment); appended bytes would change the package hash while
+/// still passing archive checks (#228).
+fn reject_trailing_bytes(path: &Path, size: u64) -> Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    let window = size.min(22 + 65_535);
+    let mut file = fs::File::open(path)?;
+    file.seek(SeekFrom::Start(size - window))?;
+    let mut tail = vec![0u8; window as usize];
+    file.read_exact(&mut tail)?;
+    let end = (0..tail.len().saturating_sub(21))
+        .rev()
+        .find(|&i| tail[i..i + 4] == [0x50, 0x4b, 0x05, 0x06]);
+    let Some(i) = end else {
+        return Ok(()); // not a ZIP we can judge here; the archive reader reports it
+    };
+    let comment = u16::from_le_bytes([tail[i + 20], tail[i + 21]]) as usize;
+    ensure!(
+        i + 22 + comment == tail.len(),
+        "[invalid-package] {} has {} unexpected bytes after the ZIP end record",
+        path.display(),
+        tail.len() - (i + 22 + comment)
+    );
+    Ok(())
+}
+
 pub fn verify(path: &Path) -> Result<Value> {
     const MAX_ARCHIVE: u64 = 512 * 1024 * 1024;
     const MAX_EXPANDED: u64 = 1024 * 1024 * 1024;
-    if fs::metadata(path)?.len() > MAX_ARCHIVE {
+    let size = fs::metadata(path)
+        .with_context(|| {
+            format!(
+                "[missing-resource] could not read package {}",
+                path.display()
+            )
+        })?
+        .len();
+    if size > MAX_ARCHIVE {
         bail!("package exceeds 512 MiB")
     };
+    reject_trailing_bytes(path, size)?;
     let mut zip = ZipArchive::new(fs::File::open(path)?)?;
     let mut expanded = 0u64;
     let mut entries = HashSet::new();
