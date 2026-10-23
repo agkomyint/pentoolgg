@@ -1820,6 +1820,28 @@ pub fn info_validated(
     variant_id: &str,
 ) -> Result<Value> {
     let (develop, bytes, profiles) = find(raw, document, photo_id, variant_id)?;
+    let source = raw["photography"]["photos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|photo| photo["id"] == photo_id)
+        .and_then(|photo| photo["source"].as_str())
+        .unwrap_or_default();
+    let asset = &raw["photography"]["assets"][source];
+    if asset["kind"] == "rendered" {
+        // JPEG/PNG sources have no RAW frame to resolve; report what the
+        // catalog knows instead of reading them as TIFF.
+        return Ok(json!({
+            "photo": photo_id,
+            "variant": variant_id,
+            "source": "rendered",
+            "media_type": asset["media_type"],
+            "pixel_width": asset["pixel_width"],
+            "pixel_height": asset["pixel_height"],
+            "orientation": asset["orientation"],
+            "raw_only_fields": "absent (lens steps and calibration apply to DNG sources)"
+        }));
+    }
     let dng = Dng::inspect(&bytes)?;
     let loader = profile_loader(document, profiles);
     let plan = super::pipeline::plan(&dng, develop, &loader)?;

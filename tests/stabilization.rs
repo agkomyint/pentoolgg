@@ -553,3 +553,31 @@ fn preset_and_fill_help_state_the_v6_prerequisite() {
         assert!(!line.is_empty(), "{command}: {help}");
     }
 }
+
+#[test]
+fn photo_info_reports_a_rendered_source_instead_of_tiff_error() {
+    let dir = Dir::new("photo-info-rendered");
+    dir.ok(&["new", "p.pen", "--width", "40", "--height", "30"]);
+    dir.ok(&["migrate", "p.pen", "--target", "6"]);
+    let pixels =
+        image::RgbImage::from_fn(8, 6, |x, y| image::Rgb([x as u8 * 30, y as u8 * 40, 90]));
+    let mut jpeg = std::io::Cursor::new(Vec::new());
+    pixels
+        .write_to(&mut jpeg, image::ImageFormat::Jpeg)
+        .unwrap();
+    let path = dir.0.join("p.pen");
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    pentool::photo::catalog::add_rendered(
+        &mut raw,
+        "beach",
+        "beach.jpg",
+        jpeg.get_ref(),
+        pentool::image::embedded_storage(jpeg.get_ref()),
+    )
+    .unwrap();
+    std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+    let out = dir.ok(&["photo", "info", "p.pen", "beach"]);
+    assert!(out.contains("rendered"), "{out}");
+    assert!(!out.contains("TIFF"), "{out}");
+}
