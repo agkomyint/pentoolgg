@@ -4430,10 +4430,23 @@ fn error_hint(error: &anyhow::Error) -> String {
         .filter(|v| !v.is_empty())
     {
         format!("This needs a v{version} or newer document. Run `pentool migrate FILE --target {version}` first.")
-    } else if lower.contains("is not in the catalog") || lower.contains("photo") {
-        "Check photo IDs with `pentool photo search FILE`; for unsupported camera files, convert to a supported DNG first.".into()
+    } else if let Some(version) = lower
+        .split("migration to v")
+        .nth(1)
+        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .filter(|v| !v.is_empty())
+    {
+        format!("Run `pentool migrate FILE --target {version}` first, then repeat the command.")
     } else if lower.contains("icc") && lower.contains("[unsupported-capability]") {
         "Pick a rendering intent the profile provides (`pentool color profile inspect FILE` lists its tags), or use another profile.".into()
+    } else if lower.contains("[unsupported-capability]")
+        && ["dng", "cfa", "bayer", "raw", "x-trans"]
+            .iter()
+            .any(|word| lower.contains(word))
+    {
+        "Convert the camera file to a supported DNG (2x2 Bayer, supported compression) and add that instead.".into()
+    } else if lower.contains("is not in the catalog") || lower.contains("photo") {
+        "Check photo IDs with `pentool photo search FILE`; for unsupported camera files, convert to a supported DNG first.".into()
     } else if lower.contains("[unsafe-path]") {
         "Keep file paths inside the document's folder: use a relative path without `..` or a drive/root prefix.".into()
     } else if lower.contains("crops differ in size") {
@@ -11896,6 +11909,10 @@ mod error_mapping_tests {
         let icc = anyhow::anyhow!("[unsupported-capability] ICC requested A2B1 is missing");
         assert_eq!(error_code(&icc), "unsupported_capability");
         assert!(error_hint(&icc).contains("rendering intent"));
+        let preset = anyhow::anyhow!("appearance presets require explicit migration to v6");
+        assert!(error_hint(&preset).contains("migrate FILE --target 6"));
+        let dng = anyhow::anyhow!("[unsupported-capability] CFARepeatPatternDim [6, 6]; X-Trans");
+        assert!(error_hint(&dng).contains("supported DNG"));
         let crops = anyhow::anyhow!("[invalid-request] crops differ in size: 4x4 versus 8x8");
         assert!(error_hint(&crops).contains("same pixel size"));
     }
