@@ -2440,10 +2440,13 @@ enum Command {
     },
     /// Static 3D and v11 product forms: import models, generate forms, camera, lights, inspect.
     Scene3d {
+        /// Path of the .pen document (format v10 or newer).
         input: PathBuf,
-        #[arg(long)]
+        /// Plan and report without writing the document; may follow any subcommand.
+        #[arg(long, global = true)]
         dry_run: bool,
-        #[arg(long)]
+        /// Reject the write if the document revision no longer matches this value.
+        #[arg(long, global = true)]
         if_revision: Option<String>,
         #[command(subcommand)]
         action: pentool::scene3d::cli::Scene3dAction,
@@ -4498,7 +4501,7 @@ fn ai_error_json(error: &anyhow::Error) -> serde_json::Value {
     if let Some(ai) = error.chain().find_map(|e| e.downcast_ref::<ai::AiError>()) {
         return serde_json::json!({"code":ai.code,"message":ai.message,"fix":ai.fix});
     }
-    serde_json::json!({"code":error_code(error),"message":error.to_string(),"context":format!("{error:#}"),"suggestions":error_suggestions(error),"hint":error_hint(error)})
+    serde_json::json!({"code":error_code(error),"message":format!("{error:#}"),"context":format!("{error:#}"),"suggestions":error_suggestions(error),"hint":error_hint(error)})
 }
 
 /// Recovery guidance chosen from the error's domain, so agents are not sent to check scene IDs

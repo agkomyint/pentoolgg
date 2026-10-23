@@ -105,6 +105,7 @@ pub enum UvIslandAction {
         #[arg(long, default_value_t = 0)]
         primitive: usize,
         #[arg(long)]
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[arg(long, default_value_t = 0)]
         uv_set: usize,
@@ -122,6 +123,7 @@ pub enum UvIslandAction {
     Set {
         #[arg(long, default_value_t = 0)]
         primitive: usize,
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[arg(long)]
         uv_set: Option<usize>,
@@ -139,6 +141,7 @@ pub enum UvIslandAction {
     Remove {
         #[arg(long, default_value_t = 0)]
         primitive: usize,
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
     },
     /// Deterministically pack each editable UV set into the unit square.
@@ -180,6 +183,7 @@ pub enum FormAction {
     /// Generate a parametric product form and place it on a v11 page.
     Add {
         /// Stable scene node ID.
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         /// Stable product form catalog ID.
         #[arg(long)]
@@ -196,6 +200,7 @@ pub enum FormAction {
         /// Optional comma-separated stable material slot IDs.
         #[arg(long)]
         slots: Option<String>,
+        /// Page layer that receives the node.
         #[arg(long)]
         layer: String,
         #[arg(long)]
@@ -294,6 +299,7 @@ pub enum GraphicAction {
 pub enum Scene3dAction {
     /// Add, edit, inspect or remove live source-linked surface graphics.
     Graphic {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[command(subcommand)]
         action: GraphicAction,
@@ -310,13 +316,16 @@ pub enum Scene3dAction {
     },
     /// UV inspection, projection and layout export.
     Uv {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[command(subcommand)]
         action: UvAction,
     },
     /// Import a .glb, .gltf or .obj model and place it as a scene3d node.
     Add {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
+        /// Path of the .glb, .gltf or .obj model to import.
         #[arg(long)]
         model: PathBuf,
         #[arg(long)]
@@ -341,11 +350,15 @@ pub enum Scene3dAction {
     },
     /// Aim the camera: orbit angles, projection, or an explicit eye/target.
     Camera {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
+        /// Orbit angle around the model in degrees.
         #[arg(long, allow_hyphen_values = true)]
         azimuth: Option<f64>,
+        /// Orbit angle above the horizon in degrees.
         #[arg(long, allow_hyphen_values = true)]
         elevation: Option<f64>,
+        /// Vertical field of view in degrees (1-170).
         #[arg(long)]
         fov: Option<f64>,
         /// `perspective` or `orthographic`.
@@ -354,14 +367,19 @@ pub enum Scene3dAction {
         /// Orthographic view height in world units.
         #[arg(long)]
         height: Option<f64>,
+        /// Camera position as `x,y,z`.
         #[arg(long, allow_hyphen_values = true)]
         eye: Option<String>,
+        /// Point the camera looks at, as `x,y,z`.
         #[arg(long, allow_hyphen_values = true)]
         target: Option<String>,
+        /// Up vector as `x,y,z`.
         #[arg(long, allow_hyphen_values = true)]
         up: Option<String>,
+        /// Near clip distance in world units.
         #[arg(long)]
         near: Option<f64>,
+        /// Far clip distance in world units.
         #[arg(long)]
         far: Option<f64>,
         /// Drop every camera setting and frame the model automatically.
@@ -392,6 +410,7 @@ pub enum Scene3dAction {
     },
     /// Frame the complete model and store the resulting explicit camera.
     Frame {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[arg(long, default_value_t = 30.0, allow_hyphen_values = true)]
         azimuth: f64,
@@ -406,18 +425,21 @@ pub enum Scene3dAction {
     },
     /// Edit the light rig.
     Light {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[command(subcommand)]
         action: LightAction,
     },
     /// Edit per-node PBR material overrides without changing the source model.
     Material {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[command(subcommand)]
         action: MaterialAction,
     },
     /// Set the sky/ground gradient environment.
     Environment {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[arg(long)]
         sky: Option<String>,
@@ -428,6 +450,7 @@ pub enum Scene3dAction {
     },
     /// Frame, background, exposure and quality settings.
     Set {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[arg(long)]
         background: Option<String>,
@@ -454,6 +477,7 @@ pub enum Scene3dAction {
     },
     /// Report the model (counts, bounds, instances, unsupported features).
     Inspect {
+        /// Scene3d node ID (list them with `scene3d DOC list`).
         id: String,
         #[arg(long, default_value_t = 0)]
         offset: usize,
@@ -4083,7 +4107,15 @@ pub fn run(
                 "[invalid-input] inspect limit must be 1..=256"
             );
             let n = scene3d_node(&mut raw, &id)?.clone();
-            let digest = n["model"].as_str().unwrap_or_default().to_string();
+            let digest = n
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            ensure!(
+                !digest.is_empty() && raw.get("models").and_then(|m| m.get(&digest)).is_some(),
+                "[unsupported] scene3d node {id} has no imported model (it is a product form or dieline preview); inspect only reads imported models. Use `scene3d render-report` for it"
+            );
             let model = node::load_model(&raw, &doc_dir, &digest)?;
             let (scene, options) = node::scene_for(&n, Some(&model))?;
             let mut report = node::inspect(&model, offset, limit);

@@ -131,13 +131,13 @@ This is a minor release: it adds format data, commands and editor features.
 ## CLI direction
 
 ```sh
-pentool scene3d add DOC model.glb --layer art --width 800 --height 600
-pentool scene3d camera DOC hero --fov 35 --position 0,1,4 --target 0,0.5,0
-pentool scene3d camera DOC hero --focal-length 50 --sensor 36x24 --aperture 4 --focus-distance 4
-pentool scene3d light DOC hero add --kind directional --direction -1,-2,-1
-pentool scene3d uv DOC hero show --limit 50
-pentool scene3d uv DOC hero project --mesh body --kind box --set uv1
-pentool scene3d uv DOC hero layout --mesh body --out body-uv.svg
+pentool scene3d DOC add hero --model model.glb --layer art --width 800 --height 600
+pentool scene3d DOC camera hero --fov 35 --eye 0,1,4 --target 0,0.5,0
+pentool scene3d DOC camera hero --focal-length 50 --sensor 36x24 --aperture 4 --focus-distance 4
+pentool scene3d DOC light hero add --kind directional --direction -1,-2,-1
+pentool scene3d DOC uv hero show --limit 50
+pentool scene3d DOC uv hero project --mesh body --kind box --set uv1
+pentool scene3d DOC uv hero layout --mesh body --out body-uv.svg
 pentool scene3d inspect DOC hero --limit 50
 pentool export DOC out.png --renderer reference   # or accelerated
 ```

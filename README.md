@@ -75,6 +75,7 @@ For automation, start with [object discovery, safe edits, and previews](docs/gui
 - **Image compositions:** placed images, non-destructive adjustments, masks, and raster painting.
 - **Reusable designs:** assets, components, design tokens, brand kits, and templates.
 - **Larger projects:** page layouts, photography catalogs, 3D product mockups, and packaging previews.
+- **3D scenes:** see [docs/scene3d-v1.md](docs/scene3d-v1.md) and `pentool scene3d --help`.
 - **Shared work:** browser editing, comments, review states, and collaboration tools.
 
 Advanced workflows have their own format requirements and limits. Find the relevant

@@ -1319,3 +1319,66 @@ fn paint_diff_reports_added_removed_layers_and_journal_changes() {
     let v: serde_json::Value = serde_json::from_str(&back).unwrap();
     assert_eq!(v["layers_removed"], serde_json::json!(["rB"]), "{back}");
 }
+
+#[test]
+fn scene3d_inspect_rejects_product_forms_without_panicking() {
+    let dir = Dir::new("inspect-product");
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/fixtures/v11-product-packaging.pen");
+    std::fs::copy(&fixture, dir.0.join("p.pen")).unwrap();
+    let out = dir.run(&["scene3d", "p.pen", "inspect", "perfume-preview"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(!err.contains("panicked"), "{err}");
+    assert!(err.contains("no imported model"), "{err}");
+}
+
+#[test]
+fn json_errors_carry_the_root_cause_in_message() {
+    let dir = Dir::new("json-message");
+    dir.ok(&["new", "v.pen"]);
+    std::fs::write(
+        dir.0.join("cube.obj"),
+        "v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+",
+    )
+    .unwrap();
+    dir.ok(&["migrate", "v.pen", "--target", "10"]);
+    dir.ok(&[
+        "scene3d", "v.pen", "add", "h", "--model", "cube.obj", "--layer", "layer-1",
+    ]);
+    let out = dir.run(&["scene3d", "v.pen", "camera", "h", "--fov", "500", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    let v: serde_json::Value = serde_json::from_str(err.trim()).unwrap();
+    let message = v["error"]["message"].as_str().unwrap();
+    assert!(message.contains("must be within 1..=170"), "{message}");
+}
+
+#[test]
+fn scene3d_dry_run_is_accepted_after_the_subcommand() {
+    let dir = Dir::new("scene3d-dry");
+    dir.ok(&["new", "v.pen"]);
+    std::fs::write(dir.0.join("t.obj"), "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+    dir.ok(&["migrate", "v.pen", "--target", "10"]);
+    let before = std::fs::read(dir.0.join("v.pen")).unwrap();
+    dir.ok(&[
+        "scene3d",
+        "v.pen",
+        "add",
+        "d",
+        "--model",
+        "t.obj",
+        "--layer",
+        "layer-1",
+        "--dry-run",
+    ]);
+    assert_eq!(before, std::fs::read(dir.0.join("v.pen")).unwrap());
+    let help = dir.ok(&["scene3d", "v.pen", "camera", "--help"]);
+    assert!(
+        help.contains("<INPUT>") && help.contains("Vertical field of view"),
+        "{help}"
+    );
+}
