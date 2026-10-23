@@ -46,6 +46,45 @@ pub(super) fn set_coverage(selection: &mut Surface, x: u32, y: u32, value: u8) {
     selection.set_pixel(x, y, if value == 0 { [0; 4] } else { [0, 0, 0, value] });
 }
 
+/// A raster layer's active (or saved) selection as a page-sized coverage plane
+/// (row-major, `width` x `height` page pixels), so document selection queries can
+/// use it. Pixels outside the layer are unselected.
+pub fn page_plane(
+    raw: &Value,
+    page: Option<&str>,
+    id: &str,
+    saved: Option<&str>,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>> {
+    let node = super::locate(&mut raw.clone(), page, id)?.clone();
+    if !super::is_raster(&node) {
+        bail!("[invalid-input] {id} is not a raster layer")
+    }
+    let (ox, oy) = super::layer::integer_offset(&node, "raster")?;
+    let surface = match saved {
+        None => active(raw, id)?
+            .with_context(|| format!("[invalid-selection] {id} has no active selection"))?,
+        Some(name) => {
+            let entry = raw["raster_selections"]["saved"][id]
+                .get(name)
+                .with_context(|| format!("[not-found] {id} has no saved selection {name:?}"))?;
+            from_json(raw, entry)?
+        }
+    };
+    let mut plane = vec![0u8; width as usize * height as usize];
+    for y in 0..surface.height {
+        for x in 0..surface.width {
+            let (px, py) = (i64::from(x) + ox, i64::from(y) + oy);
+            if px < 0 || py < 0 || px >= i64::from(width) || py >= i64::from(height) {
+                continue;
+            }
+            plane[py as usize * width as usize + px as usize] = surface.pixel(x, y)[3];
+        }
+    }
+    Ok(plane)
+}
+
 /// A selection stored for `id`, or `None` when nothing was ever selected.
 pub fn active(raw: &Value, id: &str) -> Result<Option<Surface>> {
     let Some(entry) = raw

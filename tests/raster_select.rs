@@ -771,3 +771,40 @@ fn selection_crop_node_crops_one_image_without_resizing_the_page() {
     );
     fail(&["selection", "query", &doc, "--query", q, "--node", "pic"]);
 }
+
+#[test]
+fn document_queries_can_use_raster_selections_and_modifiers() {
+    let ws = Workspace::new("bridge");
+    let doc = ws.document("b.pen");
+    marquee(&doc, ["10", "10", "40", "30"], &[]);
+    let count = |q: &str| {
+        ok(&["selection", "query", &doc, "--query", q])["result"]["selected_pixels"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(count(r#"{"kind":"raster-selection","layer":"p"}"#), 1200);
+    let canvas: u64 = 320 * 240;
+    assert_eq!(
+        count(r#"{"kind":"invert","a":{"kind":"raster-selection","layer":"p"}}"#),
+        canvas - 1200
+    );
+    assert!(
+        count(r#"{"kind":"grow","amount":2,"a":{"kind":"raster-selection","layer":"p"}}"#) > 1200
+    );
+    assert!(
+        count(r#"{"kind":"shrink","amount":2,"a":{"kind":"raster-selection","layer":"p"}}"#) < 1200
+    );
+    ok(&["raster", &doc, "select-save", "p", "box"]);
+    assert_eq!(
+        count(r#"{"kind":"raster-selection","layer":"p","name":"box"}"#),
+        1200
+    );
+    let err = fail(&[
+        "selection",
+        "query",
+        &doc,
+        "--query",
+        r#"{"kind":"raster-selection","layer":"nope"}"#,
+    ]);
+    assert!(err.contains("nope"), "{err}");
+}

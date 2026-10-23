@@ -86,6 +86,9 @@ fn validate(q: &Value, depth: usize, count: &mut usize) -> Result<()> {
         "luminosity-range" => &["kind", "min", "max"],
         "node-alpha" => &["kind", "node"],
         "mask-alpha" => &["kind", "mask"],
+        "raster-selection" => &["kind", "layer", "name"],
+        "invert" => &["kind", "a"],
+        "grow" | "shrink" | "feather" => &["kind", "a", "amount"],
         "add" | "subtract" | "intersect" => &["kind", "a", "b"],
         _ => bail!("unknown selection kind {kind}"),
     };
@@ -138,6 +141,21 @@ fn validate(q: &Value, depth: usize, count: &mut usize) -> Result<()> {
         "mask-alpha" => {
             q["mask"].as_str().context("mask-alpha mask missing")?;
         }
+        "raster-selection" => {
+            q["layer"]
+                .as_str()
+                .context("raster-selection layer missing")?;
+            if !q.get("name").is_none_or(Value::is_string) {
+                bail!("raster-selection name must be a string")
+            }
+        }
+        "invert" => validate(&q["a"], depth + 1, count)?,
+        "grow" | "shrink" | "feather" => {
+            if !(1.0..=64.0).contains(&number(q, "amount", 1.0)?) {
+                bail!("selection amount must be in 1..64")
+            }
+            validate(&q["a"], depth + 1, count)?
+        }
         _ => {
             validate(&q["a"], depth + 1, count)?;
             validate(&q["b"], depth + 1, count)?;
@@ -179,6 +197,38 @@ pub fn coverage(
                 };
             }
             return Ok(a);
+        }
+        if kind == "invert" {
+            let mut a = evaluate(raw, document, page, &q["a"], pixels)?;
+            a.iter_mut().for_each(|v| *v = 255 - *v);
+            return Ok(a);
+        }
+        if matches!(kind, "grow" | "shrink" | "feather") {
+            let a = evaluate(raw, document, page, &q["a"], pixels)?;
+            let op = match kind {
+                "grow" => crate::raster::SelectionOp::Expand,
+                "shrink" => crate::raster::SelectionOp::Contract,
+                _ => crate::raster::SelectionOp::Feather,
+            };
+            return crate::raster::select_modify_plane(
+                &a,
+                pixels.width() as usize,
+                pixels.height() as usize,
+                op,
+                number(q, "amount", 1.0)? as u32,
+                0,
+                None,
+            );
+        }
+        if kind == "raster-selection" {
+            return crate::raster::selection_page_plane(
+                raw,
+                page,
+                q["layer"].as_str().unwrap(),
+                q.get("name").and_then(Value::as_str),
+                pixels.width(),
+                pixels.height(),
+            );
         }
         if kind == "node-alpha" {
             return Ok(crate::composite::node_pixels(

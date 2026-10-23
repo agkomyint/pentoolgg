@@ -81,12 +81,15 @@ pub use preset::{
 pub use recovery::{repair, replay, verify, RepairStrategy};
 pub use refine::refine as select_refine;
 pub use retouch::Tool;
-pub use selection::{clear_op as select_clear, info_op as select_info, Mode as SelectionMode};
+pub use selection::{
+    clear_op as select_clear, info_op as select_info, page_plane as selection_page_plane,
+    Mode as SelectionMode,
+};
 pub use semantic::{paint_path, PathRequest};
 pub use shape::{
     delete as select_delete, lasso as select_lasso, load as select_load, marquee as select_marquee,
-    modify as select_modify, quickmask as select_quickmask, save as select_save, Marquee,
-    Op as SelectionOp,
+    modify as select_modify, modify_plane as select_modify_plane, quickmask as select_quickmask,
+    save as select_save, Marquee, Op as SelectionOp,
 };
 pub use tip::{load_tip, resolve_tip, tip_add, tip_from_image, tip_list, tip_remove, TipSource};
 
