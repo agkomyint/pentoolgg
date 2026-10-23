@@ -666,3 +666,29 @@ fn info_revision_and_history_expose_the_current_revision() {
         history["revision"].as_str().unwrap(),
     ]);
 }
+
+#[test]
+fn studio_scene_operations_use_the_type_key() {
+    fn scan(dir: &Path, hits: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan(&path, hits);
+            } else if path.extension().is_some_and(|e| e == "ts" || e == "tsx") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                if text.contains("{ kind: \"mask-") {
+                    hits.push(path.display().to_string());
+                }
+            }
+        }
+    }
+    let mut hits = Vec::new();
+    scan(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("web-ui/src"),
+        &mut hits,
+    );
+    assert!(
+        hits.is_empty(),
+        "/api/scene operations key on `type`, not `kind`: {hits:?}"
+    );
+}

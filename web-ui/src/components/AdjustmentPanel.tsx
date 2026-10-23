@@ -314,7 +314,7 @@ export function MaskPanel({ node, locked }: { node: SceneNode; locked: boolean }
     <section className={locked ? "pointer-events-none space-y-2 opacity-60" : "space-y-2"}>
       <div className="flex items-center justify-between">
         <h4 className={heading}>Mask</h4>
-        <Button variant="ghost" size="sm" onClick={() => void runScene([{ kind: "mask-detach", id: node.id }])}>Delete mask</Button>
+        <Button variant="ghost" size="sm" onClick={() => void runScene([{ type: "mask-detach", id: node.id }])}>Delete mask</Button>
       </div>
       <Slider label="Density %" value={Math.round(num(mask.density, 1) * 100)} min={0} max={100} neutral={100}
         onLive={(v) => previewComposite(node.id, change({ density: v / 100 }))}

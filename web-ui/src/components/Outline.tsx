@@ -189,7 +189,7 @@ function Row({ node, depth, layerId, locked, isBase }: { node: SceneNode; depth:
     "-",
     { label: shape ? "Mask with selected shape" : "Mask with shape (also select a shape)", run: () => void (shape && maskWithShape(node.id, shape)), disabled: locked || !shape || !scene },
     { label: "Invert mask", run: () => setComposite(node.id, { mask: { ...mask, invert: !mask?.invert } }, "Invert mask"), disabled: locked || !mask },
-    { label: "Delete mask", run: () => void runScene([{ kind: "mask-detach", id: node.id }]), disabled: locked || !mask },
+    { label: "Delete mask", run: () => void runScene([{ type: "mask-detach", id: node.id }]), disabled: locked || !mask },
     "-",
     { label: "Delete layer", run: () => { select(node.id); deleteSelected(); }, disabled: locked, danger: true },
   ];

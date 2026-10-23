@@ -294,8 +294,8 @@ export async function maskWithShape(target: string, shape: string): Promise<void
   for (let n = 2; name in masks; n++) name = `mask-${target}-${n}`;
   const { runScene } = await import("@/lib/actions");
   const done = await runScene([
-    { kind: "mask-create", name, from: `vector:${shape}` },
-    { kind: "mask-attach", id: target, name },
+    { type: "mask-create", name, from: `vector:${shape}` },
+    { type: "mask-attach", id: target, name },
   ]);
   if (done) state().select(target);
 }
