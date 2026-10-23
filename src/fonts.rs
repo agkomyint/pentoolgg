@@ -126,7 +126,22 @@ pub fn ensure_family(db: &Database, family: &str, weight: u16, italic: bool) -> 
 pub fn list(doc: &Document) -> Result<Value> {
     let db = database(doc, true)?;
     let faces:Vec<_>=db.faces().map(|f|json!({"family":f.families.first().map(|(name,_)|name),"weight":f.weight.0,"italic":matches!(f.style,Style::Italic|Style::Oblique)})).collect();
-    Ok(json!({"default_family":DEFAULT_FAMILY,"faces":faces}))
+    // Faces embedded in the document, with the ID `font remove` needs.
+    let mut embedded = Vec::new();
+    for asset in &doc.fonts {
+        let mut one = Database::new();
+        one.load_font_data(decode(asset)?);
+        for face in one.faces() {
+            embedded.push(json!({
+                "id": asset.id,
+                "family": face.families.first().map(|(name, _)| name),
+                "weight": face.weight.0,
+                "italic": matches!(face.style, Style::Italic | Style::Oblique),
+                "source": "embedded"
+            }));
+        }
+    }
+    Ok(json!({"default_family":DEFAULT_FAMILY,"faces":faces,"embedded":embedded}))
 }
 
 pub fn asset(id: String, bytes: Vec<u8>) -> Result<FontAsset> {

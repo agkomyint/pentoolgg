@@ -880,3 +880,25 @@ fn object_set_addresses_a_grouped_child() {
     let doc = std::fs::read_to_string(dir.0.join("v4-scene.pen")).unwrap();
     assert!(doc.contains("Nested"), "{doc}");
 }
+
+#[test]
+fn fonts_lists_embedded_faces_with_their_removable_ids() {
+    let dir = Dir::new("fonts-embedded");
+    dir.ok(&["new", "f.pen"]);
+    let ttf =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/AtkinsonHyperlegible-Regular.ttf");
+    dir.ok(&[
+        "font",
+        "f.pen",
+        "add",
+        "brand-font",
+        "--file",
+        ttf.to_str().unwrap(),
+    ]);
+    let listing: serde_json::Value = serde_json::from_str(&dir.ok(&["fonts", "f.pen"])).unwrap();
+    let embedded = listing["embedded"].as_array().unwrap();
+    assert_eq!(embedded.len(), 1, "{listing}");
+    assert_eq!(embedded[0]["id"], "brand-font");
+    assert_eq!(embedded[0]["source"], "embedded");
+    dir.ok(&["font", "f.pen", "remove", "brand-font"]);
+}
