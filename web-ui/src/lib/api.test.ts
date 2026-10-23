@@ -58,3 +58,20 @@ test("a failed preview can retry instead of caching the error", async () => {
   await api.renderPng(doc, "page", 768);
   expect(calls).toBe(2);
 });
+
+test("postJson gives up on a hung server with a clear error", async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = ((_u: unknown, init?: RequestInit) => new Promise((_res, rej) => {
+    if (init?.signal?.aborted) return rej(init.signal.reason);
+    init?.signal?.addEventListener("abort", () => rej(init.signal!.reason));
+  })) as typeof fetch;
+  const realTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = () => AbortSignal.abort(new DOMException("t", "TimeoutError"));
+  try {
+    const { postJson } = await import("./api");
+    await expect(postJson("/api/x", {})).rejects.toThrow(/did not answer/);
+  } finally {
+    globalThis.fetch = real;
+    AbortSignal.timeout = realTimeout;
+  }
+});

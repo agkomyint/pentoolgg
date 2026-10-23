@@ -73,6 +73,8 @@ export function formProblem(form: ProviderForm, catalog: CatalogEntry[]): string
   if (form.credentialKind === "env" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(credential)) {
     return "That looks like a key, not a variable name. Paste the key into your environment and enter only its name.";
   }
+  const prefix = /^([^/]+)\//.exec(form.defaultModel.trim())?.[1];
+  if (prefix && prefix !== form.name.trim()) return `The model prefix "${prefix}/" must match the provider name "${form.name.trim()}", or be left out.`;
   const model = form.defaultModel.trim().replace(/^[^/]+\//, "");
   if (model && !/^[A-Za-z0-9._:-]{1,96}$/.test(model)) return "Model ids use letters, digits, '.', '-', '_' and ':'.";
   return null;

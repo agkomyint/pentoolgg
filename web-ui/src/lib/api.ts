@@ -58,12 +58,27 @@ export async function getJson<T>(url: string): Promise<T> {
   return (await check(await fetch(url))).json();
 }
 
+/** Paid model calls can legitimately run for minutes; everything else should answer quickly. */
+const POST_TIMEOUT_MS = 60_000;
+const LONG_POST_TIMEOUT_MS = 10 * 60_000;
+
 export async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  // A hung server must not leave panels disabled forever: give up and say so.
+  const limit = url === "/api/ai/generate" ? LONG_POST_TIMEOUT_MS : POST_TIMEOUT_MS;
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(limit),
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "TimeoutError") {
+      throw new ApiError(`The server did not answer within ${Math.round(limit / 1000)} s. Check that pentool serve is still running, then retry.`);
+    }
+    throw e;
+  }
   return (await check(r)).json();
 }
 

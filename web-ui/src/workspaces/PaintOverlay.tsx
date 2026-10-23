@@ -351,6 +351,8 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
         if ((action.startsWith("select-") && action !== "select-clear") || action === "quickmask") usePaint.getState().set({ selection: bounds ?? null });
         if (action === "select-clear") usePaint.getState().set({ selection: null });
         usePaint.getState().set({ status: STATUS[action] ?? "Done." });
+        // A successful edit supersedes an earlier error (e.g. "Choose a clone source first").
+        if (useStudio.getState().message?.error) useStudio.setState({ message: null });
       } catch (e) {
         usePaint.getState().set({ status: e instanceof Error ? e.message : "The paint engine rejected this edit." });
         useStudio.getState().notify(e instanceof Error ? e.message : "The paint engine rejected this edit.", true);

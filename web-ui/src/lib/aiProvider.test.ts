@@ -42,3 +42,10 @@ test("a key file is accepted as a path and sent as credential_file", () => {
   expect(body.credential_file).toBe("C:/Users/me/key.txt");
   expect(body.credential_env).toBeUndefined();
 });
+
+test("a model prefix must match the provider name before submitting (#339)", () => {
+  const form = { ...formFromCatalog(catalog[0]!), defaultModel: "openai/model-x" };
+  expect(formProblem(form, catalog)).toContain('must match the provider name "gemini"');
+  expect(formProblem({ ...form, defaultModel: "gemini/model-x" }, catalog)).toBeNull();
+  expect(formProblem({ ...form, defaultModel: "model-x" }, catalog)).toBeNull();
+});
