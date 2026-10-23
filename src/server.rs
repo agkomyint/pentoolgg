@@ -261,7 +261,7 @@ pub async fn serve_with(
                 "[conflict] could not listen on {address}; the port may already be in use, try another with --port"
             )
         })?;
-    println!("Pentool listening on http://{address}");
+    println!("Pentool listening on http://{}", listener.local_addr()?);
     serve_listener(listener, file, no_cache, collab).await
 }
 

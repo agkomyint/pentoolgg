@@ -4566,7 +4566,7 @@ async fn run() -> Result<()> {
 
 /// Run one parsed command.
 async fn execute(cli: Cli) -> Result<()> {
-    let _json_output = cli.json;
+    let json_output = cli.json;
     pentool::collab::set_actor_flags(pentool::collab::ActorSpec {
         kind: cli.actor_kind.clone(),
         id: cli.actor_id.clone(),
@@ -9434,12 +9434,24 @@ async fn execute(cli: Cli) -> Result<()> {
                 editing::atomic_write(&output, &serde_json::to_vec_pretty(&doc)?)
                     .with_context(|| format!("could not write {}", output.display()))?;
             }
-            println!("Created {}", output.display());
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::json!({"created":output.display().to_string(),"version":doc["version"]})
+                );
+            } else {
+                println!("Created {}", output.display());
+            }
             Ok(())
         }
         Command::Info { input } => {
             let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
             transaction::validate_value(&raw)?;
+            if let (Some(id), Some(pages)) = (selected_page, raw["pages"].as_array()) {
+                if !pages.iter().any(|page| page["id"] == id) {
+                    bail!("[missing-resource] page not found: {id}; list pages with `pentool tree {}`", input.display())
+                }
+            }
             println!("{}", serde_json::to_string_pretty(&raw)?);
             Ok(())
         }
@@ -11033,6 +11045,7 @@ async fn execute(cli: Cli) -> Result<()> {
             layers,
             renderer,
         } => {
+            let scale_requested = scale != 1.0 || max_size.is_some();
             if let Some(max_size) = max_size {
                 let raw: serde_json::Value = serde_json::from_slice(
                     &pentool::resource::read_bounded(&input, 512 * 1024 * 1024)?,
@@ -11076,6 +11089,20 @@ async fn execute(cli: Cli) -> Result<()> {
                 .is_some_and(|extension| {
                     extension.eq_ignore_ascii_case("pdf") || extension.eq_ignore_ascii_case("ai")
                 });
+            let wants_svg = output
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"));
+            if scale_requested && (wants_svg || wants_pdf) {
+                bail!(
+                    "[unsupported-capability] --scale and --max-size apply only to raster output; SVG and PDF are resolution independent"
+                );
+            }
+            if outline_text && wants_pdf {
+                bail!(
+                    "[unsupported-capability] --outline-text applies only to SVG; PDF text is embedded as fonts"
+                );
+            }
             let wants_psd = output
                 .extension()
                 .and_then(|value| value.to_str())

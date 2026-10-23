@@ -80,3 +80,42 @@ fn analyze_runs_without_a_clap_panic() {
     assert!(!text.contains("Mismatch between definition"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn run_in(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn small_cli_contract_fixes() {
+    let dir = std::env::temp_dir().join(format!("pentool-contract-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // #43: `new --json` prints JSON.
+    let created = run_in(&dir, &["new", "a.pen", "--json"]);
+    let value: serde_json::Value = serde_json::from_slice(&created.stdout).unwrap();
+    assert_eq!(value["created"], "a.pen");
+    // #4: info rejects an unknown page like tree/search/export.
+    let info = run_in(&dir, &["info", "a.pen", "--page", "nope"]);
+    assert!(!info.status.success());
+    assert!(String::from_utf8_lossy(&info.stderr).contains("page not found"));
+    // #14/#15: options that SVG/PDF cannot honor are rejected, not ignored.
+    for args in [
+        vec!["export", "a.pen", "o.svg", "--scale", "2"],
+        vec!["export", "a.pen", "o.pdf", "--scale", "2"],
+        vec!["export", "a.pen", "o.pdf", "--outline-text"],
+    ] {
+        let out = run_in(&dir, &args);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("unsupported-capability"),
+            "{args:?}"
+        );
+    }
+    assert!(run_in(&dir, &["export", "a.pen", "o.png", "--scale", "2"])
+        .status
+        .success());
+    let _ = std::fs::remove_dir_all(&dir);
+}
