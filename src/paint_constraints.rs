@@ -58,6 +58,11 @@ pub fn run(input: &PathBuf, action: ConstraintAction) -> Result<()> {
     } = action;
     let spec = Spec::parse(&read_json(&spec)?)?;
     let resolved = constraints::resolve(&raw, &id, &spec)?;
+    ensure!(
+        resolved.summary["allowed_pixels"].as_u64() != Some(0),
+        "[empty-constraint] the constraints leave no paintable pixel; relax inside/avoid/barriers (mask {})",
+        resolved.summary["mask_hash"]
+    );
     let mut result = json!({"layer": id, "mask": resolved.summary});
     if let Some(follow) = spec.follow {
         result["field"] = match follow {

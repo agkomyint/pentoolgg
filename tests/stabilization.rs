@@ -994,3 +994,25 @@ fn paint_plan_value_range_uses_the_protocol_luma() {
     let compact: String = out.split_whitespace().collect();
     assert!(compact.contains("\"value_range\":[73,73]"), "{out}");
 }
+
+#[test]
+fn paint_constraints_preview_rejects_an_empty_mask_without_writing() {
+    let dir = Dir::new("empty-mask");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "R", "--width", "64", "--height", "64",
+    ]);
+    let out = dir.run(&[
+        "paint-constraints",
+        "d.pen",
+        "preview",
+        "R",
+        "--spec",
+        r#"{"barriers":[{"kind":"alpha","min":0,"max":255}]}"#,
+        "--out",
+        "mask.png",
+    ]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("empty-constraint"));
+    assert!(!dir.0.join("mask.png").exists());
+}
