@@ -1287,3 +1287,35 @@ fn field_cell_range_matches_between_preview_and_stroke_field() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!err.contains("1-64"), "{err}");
 }
+
+#[test]
+fn paint_diff_reports_added_removed_layers_and_journal_changes() {
+    let dir = Dir::new("diff-layers");
+    dir.ok(&["new", "d1.pen"]);
+    dir.ok(&[
+        "raster", "d1.pen", "add", "rA", "--width", "64", "--height", "64",
+    ]);
+    dir.ok(&[
+        "raster",
+        "d1.pen",
+        "stroke",
+        "rA",
+        "--samples",
+        "[[10,10],[40,40]]",
+        "--brush",
+        r#"{"size":10}"#,
+        "--color",
+        "#cc3333",
+    ]);
+    std::fs::copy(dir.0.join("d1.pen"), dir.0.join("d2.pen")).unwrap();
+    dir.ok(&[
+        "raster", "d2.pen", "add", "rB", "--width", "64", "--height", "64",
+    ]);
+    let out = dir.ok(&["paint-diff", "d1.pen", "d2.pen", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["layers_added"], serde_json::json!(["rB"]), "{out}");
+    assert_eq!(v["layers_removed"], serde_json::json!([]), "{out}");
+    let back = dir.ok(&["paint-diff", "d2.pen", "d1.pen", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&back).unwrap();
+    assert_eq!(v["layers_removed"], serde_json::json!(["rB"]), "{back}");
+}

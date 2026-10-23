@@ -1612,6 +1612,15 @@ pub fn raster_ids(raw: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Number of journal entries recorded on raster layer `id` (0 when absent).
+pub fn journal_len(raw: &Value, id: &str) -> usize {
+    all_rasters(raw)
+        .into_iter()
+        .find(|node| node["id"] == id)
+        .and_then(|node| node["journal"].as_array().map(Vec::len))
+        .unwrap_or(0)
+}
+
 pub fn layer_surface(raw: &Value, id: &str) -> Result<Surface> {
     let node = all_rasters(raw)
         .into_iter()

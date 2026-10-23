@@ -564,6 +564,16 @@ pub fn diff_plans(before: &Value, after: &Value) -> Result<Value> {
     }))
 }
 
+/// Raster layer ids present in `side` but not in `other`; a rename shows up as
+/// one removed and one added id.
+fn layer_ids_only_in(side: &Value, other: &Value) -> Vec<String> {
+    let known = raster::raster_ids(other);
+    raster::raster_ids(side)
+        .into_iter()
+        .filter(|id| !known.contains(id))
+        .collect()
+}
+
 fn layer_impact(before: &Value, after: &Value) -> Result<Vec<Value>> {
     let ids_b = raster::raster_ids(before);
     let ids_a = raster::raster_ids(after);
@@ -593,12 +603,17 @@ fn layer_impact(before: &Value, after: &Value) -> Result<Vec<Value>> {
             }
         }
         let resized = sb.width != sa.width || sb.height != sa.height;
-        if changed > 0 || resized {
+        let (jb, ja) = (
+            raster::journal_len(before, id),
+            raster::journal_len(after, id),
+        );
+        if changed > 0 || resized || jb != ja {
             out.push(json!({
                 "layer": id,
                 "changed_tiles": changed,
                 "tile_bounds": bounds,
                 "size_changed": resized,
+                "journal_entries": {"before": jb, "after": ja},
                 "before_tile_map": sb.tile_map_hash(),
                 "after_tile_map": sa.tile_map_hash(),
             }));
@@ -638,5 +653,7 @@ pub fn run_diff(args: DiffArgs) -> Result<()> {
         "sections": sections,
         "plan_changes": plan_changes,
         "layers": layer_impact(&b, &a)?,
+        "layers_added": layer_ids_only_in(&a, &b),
+        "layers_removed": layer_ids_only_in(&b, &a),
     }))
 }
