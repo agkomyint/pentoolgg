@@ -420,3 +420,58 @@ fn bad_requests_leave_the_document_unchanged() {
     assert_eq!(dry["dry_run"], true);
     assert_eq!(fs::read(&doc).unwrap(), with_selection);
 }
+
+#[test]
+fn refine_snaps_a_loose_marquee_to_the_subject_edge() {
+    let ws = Workspace::new("refine");
+    let doc = ws.document("refine.pen");
+    let before = fs::read(&doc).unwrap();
+    let error = fail(&["raster", &doc, "select-refine", "p"]);
+    assert!(error.contains("no selection to refine"), "{error}");
+    assert_eq!(fs::read(&doc).unwrap(), before);
+
+    marquee(&doc, ["14", "14", "32", "32"], &["--shape", "ellipse"]);
+    let loose = info(&doc);
+    let rough = fs::read(&doc).unwrap();
+    let dry = ok(&[
+        "raster",
+        &doc,
+        "--dry-run",
+        "select-refine",
+        "p",
+        "--band",
+        "6",
+    ]);
+    assert_eq!(dry["dry_run"], true);
+    assert_eq!(fs::read(&doc).unwrap(), rough);
+
+    let refined = ok(&["raster", &doc, "select-refine", "p", "--band", "6"]);
+    let result = &refined["result"];
+    assert_eq!(result["algorithm"], 2);
+    assert!(result["undecided_pixels"].as_u64().unwrap() > 0);
+    let area = result["fully_selected_pixels"].as_u64().unwrap();
+    assert!(
+        (190..=330).contains(&area),
+        "the red disc is ~314 px, got {area}"
+    );
+    let bounds: Vec<i64> = result["bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert!(
+        bounds[0] >= 18 && bounds[1] >= 18 && bounds[2] <= 42,
+        "{bounds:?}"
+    );
+    assert_ne!(
+        loose["result"]["tile_map_sha256"],
+        result["tile_map_sha256"]
+    );
+
+    // A background hint inside the subject is honored, and bad hints are refused.
+    let before = fs::read(&doc).unwrap();
+    fail(&["raster", &doc, "select-refine", "p", "--fg", "not json"]);
+    fail(&["raster", &doc, "select-refine", "p", "--band", "0"]);
+    assert_eq!(fs::read(&doc).unwrap(), before);
+}

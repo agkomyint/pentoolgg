@@ -73,7 +73,7 @@ pub(super) fn from_plane(width: u32, height: u32, plane: &[u8]) -> Surface {
     out
 }
 
-fn layer_size(raw: &Value, page: Option<&str>, id: &str) -> Result<(u32, u32)> {
+pub(super) fn layer_size(raw: &Value, page: Option<&str>, id: &str) -> Result<(u32, u32)> {
     let node = locate(&mut raw.clone(), page, id)?.clone();
     if !is_raster(&node) {
         bail!("[invalid-input] {id} is not a raster layer")
@@ -111,7 +111,7 @@ fn install(
     Ok(result)
 }
 
-fn box_blur(plane: &[u8], w: usize, h: usize, r: usize) -> Vec<u8> {
+pub(super) fn box_blur(plane: &[u8], w: usize, h: usize, r: usize) -> Vec<u8> {
     let n = (2 * r + 1) as u32;
     let clamp = |v: i64, max: usize| v.clamp(0, max as i64 - 1) as usize;
     let pass = |input: &[u8], horizontal: bool| -> Vec<u8> {
@@ -140,7 +140,7 @@ fn box_blur(plane: &[u8], w: usize, h: usize, r: usize) -> Vec<u8> {
     pass(&pass(plane, true), false)
 }
 
-fn morph(plane: &[u8], w: usize, h: usize, r: usize, grow: bool) -> Vec<u8> {
+pub(super) fn morph(plane: &[u8], w: usize, h: usize, r: usize, grow: bool) -> Vec<u8> {
     let pass = |input: &[u8], horizontal: bool| -> Vec<u8> {
         let mut out = vec![0u8; input.len()];
         let (lines, len) = if horizontal { (h, w) } else { (w, h) };

@@ -4374,6 +4374,21 @@ enum RasterAction {
         #[arg(long, default_value_t = 32)]
         tolerance: u8,
     },
+    /// Snap the active (rough) selection to image edges: pixels deeper than --band
+    /// inside are subject, farther than --band outside are background, the ring
+    /// between is decided by edges and color. --fg/--bg pin pixels.
+    SelectRefine {
+        id: String,
+        /// Width in pixels of the undecided ring on each side of the rough edge (1-64).
+        #[arg(long, default_value_t = 8)]
+        band: u32,
+        /// Foreground hint stroke as JSON [[x,y],...] (or @file); one point is a 3x3 dab.
+        #[arg(long)]
+        fg: Option<String>,
+        /// Background hint stroke as JSON [[x,y],...] (or @file).
+        #[arg(long)]
+        bg: Option<String>,
+    },
     /// Quick-mask painting: a brush stroke adds to (or with --erase, removes from)
     /// the selection.
     SelectQuickmask {
@@ -8754,6 +8769,31 @@ async fn execute(cli: Cli) -> Result<()> {
                         tolerance,
                     )?,
                 ),
+                RasterAction::SelectRefine { id, band, fg, bg } => {
+                    let read = |text: &Option<String>| -> Result<Vec<[f64; 2]>> {
+                        let Some(text) = text else {
+                            return Ok(Vec::new());
+                        };
+                        let body = match text.strip_prefix('@') {
+                            Some(path) => {
+                                if fs::metadata(path)?.len() > 16 << 20 {
+                                    bail!("[limit-exceeded] {path} is larger than 16 MiB")
+                                }
+                                fs::read_to_string(path)?
+                            }
+                            None => text.clone(),
+                        };
+                        serde_json::from_str(&body).map_err(|e| {
+                            anyhow::anyhow!(
+                                "[invalid-selection] hints must be a JSON array of [x, y]: {e}"
+                            )
+                        })
+                    };
+                    (
+                        "raster-select-refine",
+                        raster::select_refine(&mut raw, page, &id, band, &read(&fg)?, &read(&bg)?)?,
+                    )
+                }
                 RasterAction::SelectQuickmask {
                     id,
                     samples,

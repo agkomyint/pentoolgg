@@ -41,6 +41,7 @@ pub use math::splitmix64;
 mod pixels;
 mod preset;
 mod recovery;
+mod refine;
 mod retouch;
 mod selection;
 mod semantic;
@@ -76,6 +77,7 @@ pub use preset::{
     preset_list, preset_remove, preset_show, resolve_preset,
 };
 pub use recovery::{repair, replay, verify, RepairStrategy};
+pub use refine::refine as select_refine;
 pub use retouch::Tool;
 pub use selection::{clear_op as select_clear, info_op as select_info, Mode as SelectionMode};
 pub use semantic::{paint_path, PathRequest};

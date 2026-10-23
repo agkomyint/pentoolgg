@@ -302,6 +302,14 @@ Selection algorithm 1. Every command works on the layer's selection plane and ta
   rule). Edges are rasterized with 4x4 sub-pixel sampling, so they carry partial
   coverage; shapes partly outside the layer are clipped, and shapes wholly outside
   are an error.
+- `select-refine ID [--band N] [--fg POINTS] [--bg POINTS]` (selection algorithm 2)
+  snaps a rough selection to image edges. Pixels more than `band` (1-64, default 8)
+  inside the selection are certain subject, pixels more than `band` outside are
+  certain background, and the ring between is decided by a deterministic
+  edge-and-color path race (integer math, 4-connected). `--fg`/`--bg` take a JSON
+  stroke `[[x,y],...]` (a single point is a 3x3 dab) that pins pixels; the same
+  pixel in both is an error. The result reports `undecided_pixels` and the hint
+  sizes. Also available as the `select-refine` action of the shared dispatcher.
 - `select-quickmask ID --samples ... [--brush ...] [--erase]` paints coverage with
   the brush engine: the same dabs, hardness, flow and dynamics as a color stroke, but
   into the selection plane. Textured tips are not supported.

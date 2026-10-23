@@ -204,6 +204,23 @@ pub fn apply(
                 count("feather"),
             )?
         }
+        "select-refine" => {
+            let points = |k: &str| -> Result<Vec<[f64; 2]>> {
+                if args[k].is_null() {
+                    return Ok(Vec::new());
+                }
+                serde_json::from_value(args[k].clone())
+                    .context(format!("[invalid-input] args.{k} must be [[x,y],...]"))
+            };
+            super::select_refine(
+                raw,
+                page,
+                id,
+                args["band"].as_u64().unwrap_or(8).min(u64::from(u32::MAX)) as u32,
+                &points("fg")?,
+                &points("bg")?,
+            )?
+        }
         "select-wand" => super::select_wand(
             raw,
             page,
@@ -212,7 +229,7 @@ pub fn apply(
         super::SelectionMode::parse(&text("mode", "replace"))?,
         )?,
         other => bail!(
-            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-info or select-clear"
+            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-refine, select-info or select-clear"
         ),
     };
     Ok(result)
