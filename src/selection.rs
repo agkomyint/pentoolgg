@@ -318,6 +318,93 @@ pub fn save(
     *raw = candidate;
     Ok(result)
 }
+/// Crop one image node to the bounds of the selection without resizing the page:
+/// the frame shrinks to the part of the image the selection covers and the
+/// non-destructive `crop` window narrows to match. Needs `fit: fill` and an
+/// untransformed image so the page rectangle maps straight onto the source.
+pub fn crop_node(
+    raw: &mut Value,
+    document: &Path,
+    page: Option<&str>,
+    query: &Value,
+    node_id: &str,
+) -> Result<Value> {
+    let pixels = crate::composite::render(raw, document, page, 1.0)?;
+    let coverage = coverage(raw, document, page, query, &pixels)?;
+    let [bx, by, bw, bh] = bounds(&coverage, pixels.width(), pixels.height())
+        .context("[empty-selection] nothing to crop")?;
+    let node = crate::scene::page_mut(raw, page)?;
+    let mut found = None;
+    fn walk(nodes: &[Value], id: &str, out: &mut Option<Value>) {
+        for n in nodes {
+            if n["id"] == id {
+                *out = Some(n.clone());
+            }
+            if let Some(c) = n.get("children").and_then(Value::as_array) {
+                walk(c, id, out);
+            }
+        }
+    }
+    for layer in node["layers"].as_array().into_iter().flatten() {
+        walk(
+            layer["nodes"].as_array().map_or(&[][..], |v| v),
+            node_id,
+            &mut found,
+        );
+    }
+    let node = found.with_context(|| format!("[not-found] image node {node_id} not found"))?;
+    if node["kind"] != "image" {
+        bail!("[invalid-input] {node_id} is not an image node; selection crop --node crops images")
+    }
+    if node["fit"] != "fill" {
+        bail!("[invalid-input] {node_id} uses fit {}; set `image set --fit fill` first so the crop maps exactly", node["fit"])
+    }
+    if node["transform"].as_array().is_some_and(|t| {
+        t.iter()
+            .map(|v| v.as_f64().unwrap_or(f64::NAN))
+            .collect::<Vec<_>>()
+            != [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    }) {
+        bail!("[invalid-input] {node_id} has a transform; crop is only defined for untransformed images")
+    }
+    let n = |k: &str| node[k].as_f64().unwrap_or(0.0);
+    let (x, y, w, h) = (n("x"), n("y"), n("width"), n("height"));
+    let (x0, y0) = (f64::from(bx).max(x), f64::from(by).max(y));
+    let (x1, y1) = (
+        (f64::from(bx + bw)).min(x + w),
+        (f64::from(by + bh)).min(y + h),
+    );
+    if x1 <= x0 || y1 <= y0 || w <= 0.0 || h <= 0.0 {
+        bail!("[empty-selection] the selection does not overlap {node_id}")
+    }
+    let crop: Vec<f64> = (0..4)
+        .map(|i| {
+            node["crop"][i]
+                .as_f64()
+                .unwrap_or(if i < 2 { 0.0 } else { 1.0 })
+        })
+        .collect();
+    let (fx0, fy0, fx1, fy1) = ((x0 - x) / w, (y0 - y) / h, (x1 - x) / w, (y1 - y) / h);
+    let new_crop = [
+        crop[0] + crop[2] * fx0,
+        crop[1] + crop[3] * fy0,
+        crop[2] * (fx1 - fx0),
+        crop[3] * (fy1 - fy0),
+    ];
+    let update = crate::image::Update {
+        x: Some(x0),
+        y: Some(y0),
+        width: Some(x1 - x0),
+        height: Some(y1 - y0),
+        crop: Some(new_crop),
+        ..Default::default()
+    };
+    let mut candidate = raw.clone();
+    crate::image::set(&mut candidate, page, node_id, &update)?;
+    crate::scene::validate(&candidate)?;
+    *raw = candidate;
+    Ok(json!({"node": node_id, "frame": [x0, y0, x1 - x0, y1 - y0], "crop": new_crop}))
+}
 pub fn crop(raw: &mut Value, document: &Path, page: Option<&str>, query: &Value) -> Result<Value> {
     let pixels = crate::composite::render(raw, document, page, 1.0)?;
     let coverage = coverage(raw, document, page, query, &pixels)?;

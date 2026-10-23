@@ -245,6 +245,9 @@ struct SelectionArgs {
     dry_run: bool,
     #[arg(long)]
     if_revision: Option<String>,
+    /// With `crop`: crop only this image node to the selection bounds instead of the page.
+    #[arg(long)]
+    node: Option<String>,
 }
 
 #[derive(Args)]
@@ -10311,6 +10314,9 @@ async fn execute(cli: Cli) -> Result<()> {
         Command::Selection(args) => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
             let query = pentool::selection::parse_query(&args.query)?;
+            if args.node.is_some() && args.operation != "crop" {
+                anyhow::bail!("--node applies only to selection crop")
+            }
             let result = match args.operation.as_str() {
                 "query" => {
                     if args.name.is_some() || args.dry_run || args.if_revision.is_some() {
@@ -10341,7 +10347,18 @@ async fn execute(cli: Cli) -> Result<()> {
                     if args.name.is_some() {
                         anyhow::bail!("selection crop does not accept --name")
                     }
-                    pentool::selection::crop(&mut raw, &args.input, selected_page, &query)?
+                    match &args.node {
+                        Some(node) => pentool::selection::crop_node(
+                            &mut raw,
+                            &args.input,
+                            selected_page,
+                            &query,
+                            node,
+                        )?,
+                        None => {
+                            pentool::selection::crop(&mut raw, &args.input, selected_page, &query)?
+                        }
+                    }
                 }
                 _ => anyhow::bail!("selection operation must be query, save, or crop"),
             };

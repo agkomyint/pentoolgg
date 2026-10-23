@@ -717,3 +717,57 @@ fn cutout_decontaminate_recolors_the_soft_edge_from_the_subject() {
     assert!(clean["decontaminated_pixels"].as_u64().unwrap() > 0);
     assert_eq!(plain["bounds"], clean["bounds"]);
 }
+
+#[test]
+fn selection_crop_node_crops_one_image_without_resizing_the_page() {
+    let ws = Workspace::new("cropnode");
+    let doc = ws.0.join("c.pen").to_string_lossy().into_owned();
+    fs::copy("docs/fixtures/v4-scene.pen", &doc).unwrap();
+    ok(&["migrate", &doc, "--target", "6"]);
+    let image = image::RgbaImage::from_pixel(100, 60, image::Rgba([10, 120, 200, 255]));
+    let src = ws.0.join("s.png");
+    image.save(&src).unwrap();
+    let add = |fit: &str| {
+        ok(&[
+            "image",
+            "add",
+            &doc,
+            "pic",
+            "--file",
+            src.to_str().unwrap(),
+            "--layer",
+            "content",
+            "--x",
+            "0",
+            "--y",
+            "0",
+            "--width",
+            "100",
+            "--height",
+            "60",
+            "--fit",
+            fit,
+            "--embed",
+        ])
+    };
+    add("cover");
+    let q = r#"{"kind":"rectangle","x":20,"y":10,"width":40,"height":30}"#;
+    let err = fail(&["selection", "crop", &doc, "--query", q, "--node", "pic"]);
+    assert!(err.contains("fit fill"), "{err}");
+    ok(&["image", "set", &doc, "pic", "--fit", "fill"]);
+    let canvas = ok(&["info", &doc])["pages"][0]["canvas"].clone();
+    let out = ok(&["selection", "crop", &doc, "--query", q, "--node", "pic"]);
+    assert_eq!(
+        out["result"]["frame"],
+        serde_json::json!([20.0, 10.0, 40.0, 30.0])
+    );
+    let crop = out["result"]["crop"].as_array().unwrap();
+    assert!((crop[0].as_f64().unwrap() - 0.2).abs() < 1e-9);
+    assert!((crop[3].as_f64().unwrap() - 0.5).abs() < 1e-9);
+    assert_eq!(
+        ok(&["info", &doc])["pages"][0]["canvas"],
+        canvas,
+        "page size unchanged"
+    );
+    fail(&["selection", "query", &doc, "--query", q, "--node", "pic"]);
+}
