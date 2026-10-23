@@ -3814,6 +3814,45 @@ fn main() {
     }
 }
 
+/// `export DOC -`: render to a private temporary file by re-running this export,
+/// then stream its bytes to stdout. `--format png|svg|pdf` names the format.
+fn export_to_stdout(format: Option<&str>, all_pages: bool) -> Result<()> {
+    let extension = match format {
+        Some(value @ ("png" | "svg" | "pdf")) => value,
+        _ => bail!("[invalid-input] export to stdout needs --format png, svg or pdf"),
+    };
+    if all_pages && extension != "pdf" {
+        bail!("[invalid-input] --all-pages writes a directory of files; it cannot stream to stdout (PDF only)");
+    }
+    let dir = std::env::temp_dir().join(format!("pentool-stdout-{}", std::process::id()));
+    fs::create_dir_all(&dir)?;
+    let target = dir.join(format!("out.{extension}"));
+    let mut args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let position = args
+        .iter()
+        .position(|arg| arg == "-")
+        .context("[invalid-input] export output `-` must be a separate argument")?;
+    args[position] = target.clone().into_os_string();
+    let outcome = std::process::Command::new(std::env::current_exe()?)
+        .args(&args)
+        .output();
+    let result = outcome.map_err(anyhow::Error::from).and_then(|out| {
+        if !out.status.success() {
+            bail!(
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+                    .trim_start_matches("Error: ")
+                    .trim()
+            );
+        }
+        let bytes = fs::read(&target).context("[operation-failed] export wrote no output")?;
+        std::io::Write::write_all(&mut std::io::stdout().lock(), &bytes)?;
+        Ok(())
+    });
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
 /// OPERATIONS of `batch`: a file path, `@file`, `-` for stdin, or an inline JSON array.
 fn read_batch_operations(operations: &Path) -> Result<Vec<u8>> {
     let text = operations.to_string_lossy();
@@ -11239,6 +11278,9 @@ async fn execute(cli: Cli) -> Result<()> {
             layers,
             renderer,
         } => {
+            if output.as_os_str() == "-" {
+                return export_to_stdout(format.as_deref(), all_pages);
+            }
             let scale_requested = scale != 1.0 || max_size.is_some();
             if let Some(max_size) = max_size {
                 let raw: serde_json::Value = serde_json::from_slice(

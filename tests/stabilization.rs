@@ -807,3 +807,26 @@ fn batch_accepts_inline_json_stdin_and_at_file() {
         assert!(doc.contains(id), "{id} missing: {doc}");
     }
 }
+
+#[test]
+fn export_dash_streams_the_rendered_bytes_to_stdout() {
+    let dir = Dir::new("export-stdout");
+    dir.ok(&["new", "e.pen", "--width", "20", "--height", "10"]);
+    let out = dir.run(&["export", "e.pen", "-", "--format", "svg"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .trim_start()
+            .starts_with("<svg"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let png = dir.run(&["export", "e.pen", "-", "--format", "png"]);
+    assert_eq!(&png.stdout[..4], b"\x89PNG");
+    let err = dir.fail(&["export", "e.pen", "-"]);
+    assert!(err.contains("--format"), "{err}");
+}
