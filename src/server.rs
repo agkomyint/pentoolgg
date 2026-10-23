@@ -210,6 +210,7 @@ fn build_app(
             .layer(axum::Extension(ctx));
     }
     let app = app
+        .layer(axum::middleware::map_response(json_problem_body))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
         .with_state(Shared {
             file,
@@ -221,6 +222,33 @@ fn build_app(
             document_streams: Arc::default(),
         });
     Ok(app)
+}
+
+/// Unrouted paths and wrong methods get an empty body from the router; answer
+/// them with the same JSON error object the CLI prints with `--json`.
+async fn json_problem_body(response: Response) -> Response {
+    let status = response.status();
+    let empty = !response.headers().contains_key(header::CONTENT_TYPE);
+    if empty && (status == StatusCode::NOT_FOUND || status == StatusCode::METHOD_NOT_ALLOWED) {
+        let (code, message) = if status == StatusCode::NOT_FOUND {
+            (
+                "not-found",
+                "no such route; see docs/PROTOCOL.md for the API",
+            )
+        } else {
+            (
+                "method-not-allowed",
+                "this route does not accept that HTTP method",
+            )
+        };
+        let body = serde_json::json!({"ok": false, "error": {"code": code, "message": message}});
+        let mut out = (status, axum::Json(body)).into_response();
+        if let Some(allow) = response.headers().get(header::ALLOW) {
+            out.headers_mut().insert(header::ALLOW, allow.clone());
+        }
+        return out;
+    }
+    response
 }
 
 /// Options for `serve --collab`.
@@ -5092,6 +5120,32 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn empty_404_and_405_responses_get_json_bodies() {
+        use axum::response::IntoResponse;
+        for (status, code) in [
+            (axum::http::StatusCode::NOT_FOUND, "not-found"),
+            (
+                axum::http::StatusCode::METHOD_NOT_ALLOWED,
+                "method-not-allowed",
+            ),
+        ] {
+            let response = super::json_problem_body(status.into_response()).await;
+            assert_eq!(response.status(), status);
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["ok"], false);
+            assert_eq!(body["error"]["code"], code);
+        }
+        // Responses that already carry a body are left alone.
+        let own = (axum::http::StatusCode::NOT_FOUND, "No shared document").into_response();
+        let kept = super::json_problem_body(own).await;
+        let bytes = axum::body::to_bytes(kept.into_body(), 4096).await.unwrap();
+        assert_eq!(&bytes[..], b"No shared document");
+    }
+
     #[tokio::test]
     async fn api_migrate_reaches_the_newest_format() {
         // The cap stopped at v11 after v12 shipped, so Studio could not
