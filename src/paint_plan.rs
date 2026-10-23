@@ -33,6 +33,86 @@ const ACTIONS: &[&str] = &[
     "heal",
 ];
 
+/// Keys the matching `raster` command accepts for each plan action, and the ones it
+/// requires. A misspelled key must fail instead of silently painting a default.
+fn action_keys(action: &str) -> (&'static [&'static str], &'static [&'static str]) {
+    match action {
+        "fill" => (
+            &[
+                "x",
+                "y",
+                "color",
+                "opacity",
+                "tolerance",
+                "diagonal",
+                "contiguous",
+                "antialias",
+                "gap",
+                "transparent_barrier",
+            ],
+            &["x", "y", "color"],
+        ),
+        "stroke" => (
+            &["samples", "brush", "preset", "color", "blend", "seed"],
+            &["samples"],
+        ),
+        "stroke-path" => (
+            &[
+                "path",
+                "flatness",
+                "brush",
+                "preset",
+                "color",
+                "blend",
+                "seed",
+                "curves",
+                "constraints",
+            ],
+            &["path"],
+        ),
+        "stroke-field" => (
+            &[
+                "field",
+                "params",
+                "brush",
+                "preset",
+                "color",
+                "blend",
+                "seed",
+                "constraints",
+            ],
+            &["field"],
+        ),
+        "clone" | "heal" => (
+            &[
+                "samples", "brush", "preset", "seed", "aligned", "angle", "scale",
+            ],
+            &["samples"],
+        ),
+        _ => (&[], &[]),
+    }
+}
+
+fn check_pass_args(pass: &str, action: &str, args: &Value) -> Result<()> {
+    let (allowed, required) = action_keys(action);
+    let empty = Map::new();
+    let map = args.as_object().unwrap_or(&empty);
+    if let Some(key) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
+        bail!(
+            "[invalid-request] pass {pass}: unknown {action} arg {key:?}; use {}",
+            if allowed.is_empty() {
+                "no args".to_owned()
+            } else {
+                allowed.join(", ")
+            }
+        );
+    }
+    if let Some(key) = required.iter().find(|k| !map.contains_key(**k)) {
+        bail!("[invalid-request] pass {pass}: {action} needs args.{key}");
+    }
+    Ok(())
+}
+
 #[derive(clap::Args, Debug)]
 pub struct PlanArgs {
     /// `.pen` document to paint into.
@@ -244,6 +324,7 @@ impl Plan {
                 args.is_null() || args.is_object(),
                 "[invalid-request] pass {pass_id}: args must be an object"
             );
+            check_pass_args(&pass_id, action, &args)?;
             let description = match object.get("description") {
                 None | Some(Value::Null) => None,
                 Some(Value::String(text)) if text.len() <= 1024 => Some(text.clone()),

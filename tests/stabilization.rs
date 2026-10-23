@@ -1016,3 +1016,33 @@ fn paint_constraints_preview_rejects_an_empty_mask_without_writing() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("empty-constraint"));
     assert!(!dir.0.join("mask.png").exists());
 }
+
+#[test]
+fn paint_plan_rejects_unknown_and_missing_pass_args() {
+    let dir = Dir::new("plan-args");
+    dir.ok(&["new", "f.pen"]);
+    dir.ok(&[
+        "raster", "f.pen", "add", "R", "--width", "32", "--height", "32",
+    ]);
+    for (name, args, needle) in [
+        ("typo", r##"{"x":5,"y":5,"colour":"#ff0000"}"##, "colour"),
+        ("noargs", "null", "args.x"),
+        (
+            "extra",
+            r##"{"x":5,"y":5,"color":"#ff0000","bogus_safety":true}"##,
+            "bogus_safety",
+        ),
+    ] {
+        let plan = format!(
+            r#"{{"schema":1,"engine":1,"id":"p1","passes":[{{"id":"a","target":"R","action":"fill","args":{args}}}]}}"#
+        );
+        std::fs::write(dir.0.join("plan.json"), plan).unwrap();
+        let out = dir.run(&["paint-plan", "f.pen", "plan.json", "--dry-run", "--json"]);
+        assert!(!out.status.success(), "{name} should fail");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(needle),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
