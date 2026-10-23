@@ -2898,8 +2898,13 @@ Examples:
         #[arg(long)]
         overwrite: bool,
     },
-    /// Print document metadata as JSON.
-    Info { input: PathBuf },
+    /// Print document metadata as JSON; `--revision` prints only the revision
+    /// to pass to `--if-revision`, plus the history depth.
+    Info {
+        input: PathBuf,
+        #[arg(long)]
+        revision: bool,
+    },
     /// Explicitly migrate between compatible v3 through v12 document formats.
     Migrate {
         input: PathBuf,
@@ -9587,13 +9592,27 @@ async fn execute(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Command::Info { input } => {
-            let raw: serde_json::Value = serde_json::from_slice(&fs::read(&input)?)?;
+        Command::Info { input, revision } => {
+            let bytes = fs::read(&input)?;
+            let raw: serde_json::Value = serde_json::from_slice(&bytes)?;
             transaction::validate_value(&raw)?;
             if let (Some(id), Some(pages)) = (selected_page, raw["pages"].as_array()) {
                 if !pages.iter().any(|page| page["id"] == id) {
                     bail!("[missing-resource] page not found: {id}; list pages with `pentool tree {}`", input.display())
                 }
+            }
+            if revision {
+                let depth = history::list(&input)?["entries"]
+                    .as_array()
+                    .map_or(0, Vec::len);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "revision": transaction::revision(&bytes),
+                        "history_depth": depth
+                    }))?
+                );
+                return Ok(());
             }
             println!("{}", serde_json::to_string_pretty(&raw)?);
             Ok(())

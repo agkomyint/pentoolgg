@@ -642,3 +642,27 @@ fn bare_missing_file_errors_carry_a_code_and_a_hint() {
     let err = dir.fail(&["extension", "pack", "empty", "out.penext"]);
     assert!(err.contains("[missing-resource]"), "{err}");
 }
+
+#[test]
+fn info_revision_and_history_expose_the_current_revision() {
+    let dir = Dir::new("current-revision");
+    dir.ok(&["new", "r.pen"]);
+    dir.ok(&["page", "r.pen", "add", "p2"]);
+    let info: serde_json::Value =
+        serde_json::from_str(&dir.ok(&["info", "r.pen", "--revision"])).unwrap();
+    let revision = info["revision"].as_str().unwrap().to_owned();
+    assert_eq!(info["history_depth"], 1);
+    let history: serde_json::Value = serde_json::from_str(&dir.ok(&["history", "r.pen"])).unwrap();
+    assert_eq!(history["revision"], revision);
+    dir.ok(&["undo", "r.pen"]);
+    let history: serde_json::Value = serde_json::from_str(&dir.ok(&["history", "r.pen"])).unwrap();
+    assert_ne!(history["revision"], revision);
+    dir.ok(&[
+        "migrate",
+        "r.pen",
+        "--target",
+        "6",
+        "--if-revision",
+        history["revision"].as_str().unwrap(),
+    ]);
+}

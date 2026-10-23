@@ -172,7 +172,10 @@ pub fn record(document: &Path, operation: &str, before: &[u8], after: &[u8]) -> 
 pub fn list(document: &Path) -> Result<serde_json::Value> {
     let root = root(document)?;
     let manifest = load(&root)?;
-    Ok(serde_json::json!({"cursor":manifest.cursor,"entries":manifest.entries}))
+    let revision = fs::read(document)
+        .ok()
+        .map(|bytes| crate::transaction::revision(&bytes));
+    Ok(serde_json::json!({"cursor":manifest.cursor,"revision":revision,"entries":manifest.entries}))
 }
 
 /// History revisions are SHA-256 digests; anything else could name a path.
