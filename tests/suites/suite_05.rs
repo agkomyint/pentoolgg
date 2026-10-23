@@ -3,6 +3,9 @@
 // (and keep autotests disabled in Cargo.toml) instead of adding a new
 // top-level tests/*.rs binary. Generated grouping: see git history.
 
+#[path = "../stabilization.rs"]
+mod stabilization;
+
 #[path = "../cli_help.rs"]
 mod cli_help;
 

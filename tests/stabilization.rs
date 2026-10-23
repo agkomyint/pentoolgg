@@ -1,0 +1,139 @@
+//! Regression tests for stabilization fixes that are CLI-visible and need no helpers.
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+struct Dir(PathBuf);
+
+impl Dir {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("pentool-stab-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_pentool"))
+            .current_dir(&self.0)
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    fn ok(&self, args: &[&str]) -> String {
+        let out = self.run(args);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn fail(&self, args: &[&str]) -> String {
+        let out = self.run(args);
+        assert!(!out.status.success(), "{args:?} should fail");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    }
+
+    fn fixture(&self, name: &str) -> PathBuf {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("docs/fixtures")
+            .join(name);
+        let target = self.0.join(name);
+        std::fs::copy(source, &target).unwrap();
+        target
+    }
+}
+
+impl Drop for Dir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn locked_layers_reject_shape_and_path_writes() {
+    // #16: shape and path put used to bypass a locked layer.
+    let dir = Dir::new("locked");
+    dir.fixture("v4-scene.pen");
+    dir.ok(&[
+        "layer",
+        "v4-scene.pen",
+        "set",
+        "content",
+        "--locked",
+        "true",
+    ]);
+    let before = std::fs::read(dir.0.join("v4-scene.pen")).unwrap();
+    let shape = dir.fail(&[
+        "shape",
+        "v4-scene.pen",
+        "rect",
+        "zz",
+        "--layer",
+        "content",
+        "--x",
+        "0",
+        "--y",
+        "0",
+        "--width",
+        "5",
+        "--height",
+        "5",
+        "--fill",
+        "#000000",
+    ]);
+    assert!(shape.contains("locked"), "{shape}");
+    let path = dir.fail(&[
+        "path",
+        "v4-scene.pen",
+        "put",
+        "--layer",
+        "content",
+        "--d",
+        "M0 0L5 5",
+        "pz",
+    ]);
+    assert!(path.contains("locked"), "{path}");
+    assert_eq!(before, std::fs::read(dir.0.join("v4-scene.pen")).unwrap());
+}
+
+#[test]
+fn path_put_refuses_to_replace_a_group() {
+    // #17: `path put` over a group ID destroyed the group and its children.
+    let dir = Dir::new("pathgroup");
+    dir.fixture("v4-scene.pen");
+    let before = std::fs::read(dir.0.join("v4-scene.pen")).unwrap();
+    let message = dir.fail(&[
+        "path",
+        "v4-scene.pen",
+        "put",
+        "--layer",
+        "content",
+        "--d",
+        "M0 0L10 10",
+        "card",
+    ]);
+    assert!(message.contains("not a path"), "{message}");
+    assert_eq!(before, std::fs::read(dir.0.join("v4-scene.pen")).unwrap());
+}
+
+#[test]
+fn pdf_export_honors_page_and_rejects_unknown_pages() {
+    // #11: PDF export ignored --page and always wrote every page.
+    let dir = Dir::new("pdfpage");
+    dir.ok(&["new", "a.pen"]);
+    dir.ok(&["page", "a.pen", "add", "second"]);
+    dir.ok(&["export", "a.pen", "all.pdf"]);
+    dir.ok(&["export", "a.pen", "one.pdf", "--page", "second"]);
+    let count = |name: &str| {
+        let text = String::from_utf8_lossy(&std::fs::read(dir.0.join(name)).unwrap()).into_owned();
+        let tail = &text[text.find("/Count ").unwrap() + 7..];
+        tail[..tail.find(' ').unwrap()].parse::<usize>().unwrap()
+    };
+    let (all, one) = (count("all.pdf"), count("one.pdf"));
+    assert!(all > one, "all pages {all}, one page {one}");
+    let message = dir.fail(&["export", "a.pen", "bogus.pdf", "--page", "bogus"]);
+    assert!(message.contains("page not found"), "{message}");
+}

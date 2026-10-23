@@ -112,6 +112,12 @@ pub fn apply_path(
             let replacement = json!({"kind":"path","id":id,"d":d,"closed":closed,"style":{"fill":{"fallback":fill},"stroke":{"fallback":stroke},"stroke_width":{"fallback":width},"stroke_linecap":{"fallback":cap.svg()},"stroke_linejoin":{"fallback":join.svg()},"stroke_miterlimit":{"fallback":miter_limit}}});
             let nodes = layer_nodes_mut(page, &layer)?;
             if let Some(existing) = find_node_in_mut(nodes, &id) {
+                if existing.get("kind").and_then(Value::as_str) != Some("path") {
+                    bail!(
+                        "[invalid-input] node {id} is a {}, not a path; choose another ID or remove it first",
+                        existing.get("kind").and_then(Value::as_str).unwrap_or("node")
+                    )
+                }
                 *existing = replacement;
             } else {
                 if pages_node_ids(page).contains(id.as_str()) {
@@ -1003,12 +1009,17 @@ pub(crate) fn page_mut<'a>(raw: &'a mut Value, id: Option<&str>) -> Result<&'a m
     }
 }
 pub(crate) fn layer_nodes_mut<'a>(page: &'a mut Value, id: &str) -> Result<&'a mut Vec<Value>> {
-    page.get_mut("layers")
+    let layer = page
+        .get_mut("layers")
         .and_then(Value::as_array_mut)
         .unwrap()
         .iter_mut()
         .find(|l| l.get("id").and_then(Value::as_str) == Some(id))
-        .with_context(|| format!("layer not found: {id}"))?
+        .with_context(|| format!("layer not found: {id}"))?;
+    if layer.get("locked").and_then(Value::as_bool) == Some(true) {
+        bail!("layer is locked: {id}")
+    }
+    layer
         .get_mut("nodes")
         .and_then(Value::as_array_mut)
         .context("layer nodes are missing")
@@ -1323,6 +1334,9 @@ pub fn put_shape(
         .iter_mut()
         .find(|l| l.get("id").and_then(Value::as_str) == Some(layer_id))
         .with_context(|| format!("layer not found: {layer_id}"))?;
+    if layer.get("locked").and_then(Value::as_bool) == Some(true) {
+        bail!("layer is locked: {layer_id}")
+    }
     let nodes = layer
         .get_mut("nodes")
         .and_then(Value::as_array_mut)

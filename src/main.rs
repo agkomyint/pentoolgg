@@ -32,7 +32,8 @@ struct Cli {
     /// Select a page for page-aware commands (v3 documents).
     #[arg(long, global = true)]
     page: Option<String>,
-    /// Emit stable machine-readable errors.
+    /// Emit stable machine-readable errors as one JSON object on stderr. Failures then
+    /// exit with status 2; without --json they exit with status 1.
     #[arg(long, global = true)]
     json: bool,
     /// Actor kind recorded in the collaboration log: human (default) or agent.
@@ -3790,9 +3791,30 @@ fn collab_token(flag: Option<String>) -> Result<String> {
 
 fn main() {
     if let Err(error) = cli_main() {
-        eprintln!("Error: {error:#}");
+        eprintln!("Error: {}", user_error_message(&error));
         std::process::exit(1);
     }
+}
+
+/// The error chain without raw `(os error N)` suffixes, naming a fix for permission failures.
+fn user_error_message(error: &anyhow::Error) -> String {
+    let mut message = format!("{error:#}");
+    while let Some(start) = message.find(" (os error ") {
+        let Some(end) = message[start..].find(')') else {
+            break;
+        };
+        message.replace_range(start..start + end + 1, "");
+    }
+    let denied = error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::PermissionDenied);
+    if denied {
+        message.push_str(
+            "; check that the folder and file are writable and not open in another program (the document was left unchanged)",
+        );
+    }
+    message
 }
 
 fn cli_main() -> Result<()> {
@@ -11249,6 +11271,15 @@ async fn execute(cli: Cli) -> Result<()> {
                             .collect()
                     })
                     .unwrap_or_else(|| vec!["page-1".into()]);
+                let page_ids = match selected_page {
+                    Some(id) if wants_pdf && !all_pages => {
+                        if !page_ids.iter().any(|page| page == id) {
+                            bail!("[missing-resource] page not found: {id}; PDF export without --page writes every page")
+                        }
+                        vec![id.to_owned()]
+                    }
+                    _ => page_ids,
+                };
                 let has_images = composite::is_document(&raw)
                     || raw
                         .get("version")
@@ -11512,7 +11543,14 @@ fn write_image_export(
     let scene = if link_images {
         let directory = pentool::resource::document_root(output);
         fs::create_dir_all(directory)?;
-        image::to_svg_linked(raw, input, page, Some(directory))?
+        let linked = image::to_svg_linked(raw, input, page, Some(directory))?;
+        let data_images = linked.svg.matches("href=\"data:").count();
+        if data_images > 0 && linked.svg.matches("href=\"").count() == data_images {
+            anyhow::bail!(
+                "[unsupported-capability] --link-images found no external image to link; this page embeds its pixels, so export without --link-images"
+            )
+        }
+        linked
     } else {
         image::to_svg(raw, input, page)?
     };
