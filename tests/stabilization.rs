@@ -830,3 +830,35 @@ fn export_dash_streams_the_rendered_bytes_to_stdout() {
     let err = dir.fail(&["export", "e.pen", "-"]);
     assert!(err.contains("--format"), "{err}");
 }
+
+#[test]
+fn new_takes_background_name_and_a_revision_guard_for_overwrite() {
+    let dir = Dir::new("new-options");
+    dir.ok(&["new", "n.pen", "--background", "#112233", "--name", "Brand"]);
+    let info = dir.ok(&["info", "n.pen"]);
+    assert!(
+        info.contains("#112233") && info.contains("\"Brand\""),
+        "{info}"
+    );
+    let err = dir.fail(&["new", "n.pen", "--background", "nope", "--overwrite"]);
+    assert!(err.contains("not a color"), "{err}");
+    let before = std::fs::read(dir.0.join("n.pen")).unwrap();
+    let err = dir.fail(&[
+        "new",
+        "n.pen",
+        "--overwrite",
+        "--if-revision",
+        &"0".repeat(64),
+    ]);
+    assert!(err.to_lowercase().contains("revision"), "{err}");
+    assert_eq!(std::fs::read(dir.0.join("n.pen")).unwrap(), before);
+    let revision: serde_json::Value =
+        serde_json::from_str(&dir.ok(&["info", "n.pen", "--revision"])).unwrap();
+    dir.ok(&[
+        "new",
+        "n.pen",
+        "--overwrite",
+        "--if-revision",
+        revision["revision"].as_str().unwrap(),
+    ]);
+}

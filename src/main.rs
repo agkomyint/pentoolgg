@@ -2898,6 +2898,15 @@ Examples:
         /// Replace an existing document; the previous bytes stay recoverable with `undo`
         #[arg(long)]
         overwrite: bool,
+        /// With --overwrite: require this revision (see `info --revision`) before replacing.
+        #[arg(long, requires = "overwrite")]
+        if_revision: Option<String>,
+        /// Page background color, such as #RRGGBB (default #ffffff).
+        #[arg(long)]
+        background: Option<String>,
+        /// Document name (default Untitled).
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Print document metadata as JSON; `--revision` prints only the revision
     /// to pass to `--if-revision`, plus the history depth.
@@ -9632,13 +9641,30 @@ async fn execute(cli: Cli) -> Result<()> {
             width,
             height,
             overwrite,
+            if_revision,
+            background,
+            name,
         } => {
             if !(1..=16384).contains(&width) || !(1..=16384).contains(&height) {
                 anyhow::bail!(
                     "[invalid-input] canvas dimensions must be between 1 and 16384, got {width}x{height}; nothing was written"
                 )
             }
-            let doc = scene::new_document(width, height);
+            let mut doc = scene::new_document(width, height);
+            if let Some(background) = &background {
+                if !scene::is_valid_color(background) {
+                    anyhow::bail!(
+                        "[invalid-input] background {background:?} is not a color; use #RGB, #RGBA, #RRGGBB or #RRGGBBAA; nothing was written"
+                    )
+                }
+                doc["pages"][0]["canvas"]["background"] = serde_json::json!(background);
+            }
+            if let Some(name) = &name {
+                if name.trim().is_empty() || name.len() > 256 {
+                    anyhow::bail!("[invalid-input] document name must contain 1 to 256 bytes; nothing was written")
+                }
+                doc["name"] = serde_json::json!(name.trim());
+            }
             scene::validate(&doc)?;
             if output.exists() {
                 if !overwrite {
@@ -9647,7 +9673,7 @@ async fn execute(cli: Cli) -> Result<()> {
                         output.display()
                     )
                 }
-                transaction::commit_value(&output, "new", false, None, &doc)
+                transaction::commit_value(&output, "new", false, if_revision.as_deref(), &doc)
                     .with_context(|| format!("could not replace {}; the existing file is not a valid Pentool document, so move or delete it explicitly", output.display()))?;
             } else {
                 editing::atomic_write(&output, &serde_json::to_vec_pretty(&doc)?)
