@@ -254,6 +254,11 @@ fn small_cli_fixes() {
     ]);
     let listed: Value = serde_json::from_str(&ok(&["effect", "list", &doc, "im"])).unwrap();
     assert_eq!(listed["effects"][0]["id"], "glow");
+    // #322: an optional EFFECT_ID narrows the listing; an unknown one is an error.
+    let one: Value = serde_json::from_str(&ok(&["effect", "list", &doc, "im", "glow"])).unwrap();
+    assert_eq!(one["effects"].as_array().unwrap().len(), 1);
+    let missing = run(&["effect", "list", &doc, "im", "nope"]);
+    assert!(!missing.status.success());
     // B10: a gradient-overlay without params names the required key.
     let failure = run(&[
         "effect",

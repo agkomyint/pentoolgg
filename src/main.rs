@@ -2360,6 +2360,7 @@ enum Command {
         /// Run the stage-level renderer benchmark (implied by any render option).
         #[arg(long)]
         render: bool,
+        /// Warm-up runs before timing (default 1; not accepted by the scene3d, photo and composite modes).
         #[arg(long, default_value_t = 1)]
         warmups: usize,
         #[arg(long, default_value_t = 5)]
@@ -2851,7 +2852,9 @@ enum Command {
     /// and print one JSON result per line. Documents are read and written as
     /// by single commands; fonts and rendered layers stay warm between lines.
     #[command(
-        after_help = "Each line is a JSON array of arguments, or an object with `args` and an
+        after_help = "Command flags (--actor-kind, --page, --preview, ...) are not accepted on
+`session` itself; repeat them in each line's argument array. Each line is a
+JSON array of arguments, or an object with `args` and an
 optional `id` that the reply repeats. Replies are {\"ok\":true,\"result\":...}
 (or \"text\" for plain output) and {\"ok\":false,\"error\":{...}}.
 
@@ -2963,6 +2966,7 @@ Examples:
     /// Create and attach reusable masks; apply explicitly bakes a content node.
     Mask(Box<MaskArgs>),
     /// Attach or detach explicit consecutive clipping-stack membership.
+    /// OPERATION is `add` (attach; needs --base) or `remove` (detach).
     /// The clipped node must be a following sibling of its base.
     Clip(Box<ClipArgs>),
     /// Edit an immutable-source affine/projective transform stack.
@@ -3159,7 +3163,7 @@ Examples:
         #[arg(long, value_name = "PX")]
         max_size: Option<u32>,
     },
-    /// Render a .pen document to PNG, SVG or PDF (selected by extension).
+    /// Render a .pen document to PNG, SVG, PDF or PSD (selected by extension; `.psd` is flattened unless --layers).
     Export {
         input: PathBuf,
         output: PathBuf,
@@ -9944,17 +9948,24 @@ async fn execute(cli: Cli) -> Result<()> {
         Command::Effect(args) => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
             if args.operation == "list" {
-                if args.effect_id.is_some() {
-                    anyhow::bail!("effect list takes only FILE and NODE_ID")
+                let mut listed = pentool::effects::list(&raw, selected_page, &args.id)?;
+                if let Some(effect_id) = &args.effect_id {
+                    let kept: Vec<serde_json::Value> = listed["effects"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|effect| effect["id"] == *effect_id)
+                        .cloned()
+                        .collect();
+                    if kept.is_empty() {
+                        anyhow::bail!(
+                            "effect {effect_id} not found on {}; run `effect list` without EFFECT_ID to see the stack",
+                            args.id
+                        )
+                    }
+                    listed["effects"] = serde_json::Value::Array(kept);
                 }
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&pentool::effects::list(
-                        &raw,
-                        selected_page,
-                        &args.id
-                    )?)?
-                );
+                println!("{}", serde_json::to_string_pretty(&listed)?);
                 return Ok(());
             }
             let effect_id = args

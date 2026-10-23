@@ -162,7 +162,7 @@ sandboxed extensions with their approved capabilities and limits, then preview
 `GET /api/extensions` and `POST /api/extensions/run` (guarded by the document
 revision, one undoable step). Installing and approving capabilities stay CLI
 actions (`pentool extension add --approve`). Running is disabled while local
-edits are unsaved. Not yet exercised in a live browser. See `docs/extensions-v1.md`.
+edits are unsaved. Exercised in Studio 0.24.1: Preview leaves the revision unchanged and Run commits the expected objects; Studio Undo after a run is tracked in #242. See `docs/extensions-v1.md`.
 
 ### Collaboration (0.20)
 
@@ -185,7 +185,7 @@ commenter: comments, editor and owner: also edit).
   and the overridden value. Resolving means making a new edit; there is no
   one-click "restore overridden value" yet.
 
-Not yet exercised in a live browser.
+Exercised in a live browser with comments on a disposable document: threads display, a removed object's comment target is marked dangling, and a server without `--collab` shows an explicit disabled notice. Conflict resolution and presence cursors remain unverified.
 
 ### Design systems (0.19)
 
