@@ -961,6 +961,9 @@ pub fn paint_field(
                     entry["field"] = pin.clone();
                 }
             }
+            if let Some(summary) = mask.as_ref().map(|m| &m.summary) {
+                stamp_constraints(&mut next, page, id, &result["stroke"], summary);
+            }
             ids.push(stroke_id.to_owned());
         }
     }

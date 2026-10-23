@@ -442,6 +442,7 @@ pub fn paint_path(
             },
         )?;
         dabs += result["dabs"].as_u64().unwrap_or(0);
+        stamp_constraints(&mut next, page, id, &result["stroke"], &resolved_summary);
         results.push(result);
     }
     if let Some(previous) = previous_active {

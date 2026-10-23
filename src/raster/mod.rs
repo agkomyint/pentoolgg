@@ -1455,6 +1455,35 @@ fn page_value<'a>(raw: &'a Value, page: Option<&str>) -> Result<&'a Value> {
     })
 }
 
+/// Record which constraint mask a committed stroke was evaluated against.
+fn stamp_constraints(
+    raw: &mut Value,
+    page: Option<&str>,
+    id: &str,
+    stroke: &Value,
+    summary: &Value,
+) {
+    let Some(stroke_id) = stroke.as_str() else {
+        return;
+    };
+    if summary.is_null() {
+        return;
+    }
+    let Ok(layer) = locate(raw, page, id) else {
+        return;
+    };
+    if let Some(entry) = layer["journal"]
+        .as_array_mut()
+        .and_then(|journal| journal.iter_mut().rev().find(|e| e["id"] == stroke_id))
+    {
+        entry["constraints"] = json!({
+            "mask_hash": summary["mask_hash"],
+            "spec_hash": summary["spec_hash"],
+            "allowed_pixels": summary["allowed_pixels"],
+        });
+    }
+}
+
 fn locate<'a>(raw: &'a mut Value, page: Option<&str>, id: &str) -> Result<&'a mut Value> {
     find_raster_mut(raw, page, id).ok_or_else(|| {
         bad(

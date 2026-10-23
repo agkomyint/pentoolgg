@@ -1101,3 +1101,61 @@ fn paint_scopes_distinguish_layer_group_and_node() {
     assert!(String::from_utf8_lossy(&bad.stderr).contains("not a group"));
     assert!(!sample("layer:g1").status.success());
 }
+
+#[test]
+fn constrained_strokes_record_the_mask_hash_in_the_journal() {
+    let dir = Dir::new("journal-mask");
+    dir.ok(&["new", "d.pen"]);
+    dir.ok(&[
+        "raster", "d.pen", "add", "R", "--width", "128", "--height", "128",
+    ]);
+    dir.ok(&[
+        "raster",
+        "d.pen",
+        "stroke",
+        "R",
+        "--samples",
+        "[[20,20],[90,90]]",
+        "--brush",
+        r#"{"size":30}"#,
+        "--color",
+        "#cc3333",
+    ]);
+    dir.ok(&[
+        "raster",
+        "d.pen",
+        "stroke-path",
+        "R",
+        "--path",
+        "M 20 20 L 100 100",
+        "--constraints",
+        r#"{"opaque_clip":true}"#,
+    ]);
+    let doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.0.join("d.pen")).unwrap()).unwrap();
+    let text = doc.to_string();
+    assert!(
+        text.contains(r#""constraints":{"allowed_pixels""#)
+            || text.contains(r#""mask_hash":"sha256:"#),
+        "{text:.300}"
+    );
+    let journal = doc["pages"][0]["layers"][0]["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|n| n["id"] == "R")
+        .map(|n| n["journal"].clone())
+        .unwrap_or_default();
+    let last = journal
+        .as_array()
+        .and_then(|j| j.last())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        last["constraints"]["mask_hash"]
+            .as_str()
+            .is_some_and(|h| h.starts_with("sha256:")),
+        "{last}"
+    );
+    assert!(last["constraints"]["spec_hash"].is_string(), "{last}");
+}
