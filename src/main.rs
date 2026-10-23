@@ -4432,6 +4432,8 @@ fn error_hint(error: &anyhow::Error) -> String {
         format!("This needs a v{version} or newer document. Run `pentool migrate FILE --target {version}` first.")
     } else if lower.contains("is not in the catalog") || lower.contains("photo") {
         "Check photo IDs with `pentool photo search FILE`; for unsupported camera files, convert to a supported DNG first.".into()
+    } else if lower.contains("icc") && lower.contains("[unsupported-capability]") {
+        "Pick a rendering intent the profile provides (`pentool color profile inspect FILE` lists its tags), or use another profile.".into()
     } else if lower.contains("[unsafe-path]") {
         "Keep file paths inside the document's folder: use a relative path without `..` or a drive/root prefix.".into()
     } else if lower.contains("crops differ in size") {
@@ -4447,6 +4449,8 @@ fn error_code(error: &anyhow::Error) -> &'static str {
     let message = error.to_string();
     if message.contains("[unsafe-path]") {
         "unsafe_path"
+    } else if message.contains("[unsupported-capability]") {
+        "unsupported_capability"
     } else if message.contains("not found") {
         "not_found"
     } else if message.contains("revision mismatch") {
@@ -11889,6 +11893,9 @@ mod error_mapping_tests {
             anyhow::anyhow!("[unsafe-path] external image resolves outside the document root");
         assert_eq!(error_code(&unsafe_path), "unsafe_path");
         assert!(error_hint(&unsafe_path).contains("relative path"));
+        let icc = anyhow::anyhow!("[unsupported-capability] ICC requested A2B1 is missing");
+        assert_eq!(error_code(&icc), "unsupported_capability");
+        assert!(error_hint(&icc).contains("rendering intent"));
         let crops = anyhow::anyhow!("[invalid-request] crops differ in size: 4x4 versus 8x8");
         assert!(error_hint(&crops).contains("same pixel size"));
     }
