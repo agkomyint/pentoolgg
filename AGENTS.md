@@ -40,7 +40,18 @@ Search the implementation and tests before designing a new abstraction. Extend
 the shared scene, transaction, history, rendering, and validation paths instead of
 creating a parallel model for one command.
 
-## Current phase: stabilization (0.2x)
+## Current phase: v0.27.0 selection feature release
+
+Stabilization ended with v0.26.0. The maintainer has opened v0.27.0 as a focused
+feature release on selection, cutout and crop; its scope, invariants and
+acceptance tests are in `docs/roadmap/v0.27.0/TASKS.md`. Work for that release
+may add commands, flags and optional `.pen` fields inside that scope. Anything
+outside it (new dependencies, learned models, time-based media, items under
+"Explicitly deferred") still needs the maintainer's approval. Bug fixes with a
+regression test remain welcome at any time. The stabilization rules below still
+describe how to treat everything that is not part of the v0.27.0 scope.
+
+## Previous phase: stabilization (0.2x)
 
 All roadmap milestones through v0.25.0 have shipped (the v0.20.0 items below are
 the collaboration debt that remains). The product isfeature-complete for now. The job is to make what exists correct, tested,
