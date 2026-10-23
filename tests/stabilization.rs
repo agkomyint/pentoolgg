@@ -862,3 +862,21 @@ fn new_takes_background_name_and_a_revision_guard_for_overwrite() {
         revision["revision"].as_str().unwrap(),
     ]);
 }
+
+#[test]
+fn object_set_addresses_a_grouped_child() {
+    let dir = Dir::new("object-set-nested");
+    dir.fixture("v4-scene.pen");
+    dir.ok(&[
+        "object",
+        "v4-scene.pen",
+        "set",
+        "title",
+        "--layer",
+        "content",
+        "--content",
+        "Nested",
+    ]);
+    let doc = std::fs::read_to_string(dir.0.join("v4-scene.pen")).unwrap();
+    assert!(doc.contains("Nested"), "{doc}");
+}

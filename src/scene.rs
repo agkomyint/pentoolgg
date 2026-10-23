@@ -2593,8 +2593,9 @@ pub fn apply_object(
                     "[unsupported-capability] compositing properties require `migrate --target 6`"
                 )
             }
-            let index = position(page)?;
-            let node = &mut layer_nodes_mut(page, &layer_id)?[index];
+            // Nested group children are addressable by their ID, as in `geometry`.
+            let node = find_node_in_mut(layer_nodes_mut(page, &layer_id)?, &id)
+                .with_context(|| format!("object not found in layer {layer_id}: {id}"))?;
             let kind = node.get("kind").and_then(Value::as_str).unwrap_or_default();
             if composite_change {
                 let path_settings = d.is_some()
