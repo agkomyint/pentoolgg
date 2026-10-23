@@ -177,3 +177,18 @@ fn group_instantiate_rejects_ignored_id_flag() {
     ]);
     assert!(message.contains("--id"), "{message}");
 }
+
+#[test]
+fn selection_query_rejects_duplicate_keys() {
+    // #75: duplicate JSON keys silently collapsed (last wins).
+    let dir = Dir::new("dupkeys");
+    dir.ok(&["new", "a.pen"]);
+    let message = dir.fail(&[
+        "selection",
+        "query",
+        "a.pen",
+        "--query",
+        r#"{"kind":"rectangle","x":0,"y":0,"width":5,"height":5,"width":10}"#,
+    ]);
+    assert!(message.contains("duplicate key"), "{message}");
+}

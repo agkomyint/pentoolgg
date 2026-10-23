@@ -5,6 +5,67 @@ use serde_json::{json, Value};
 use std::path::Path;
 pub const MAX_QUERIES: usize = 128;
 pub const MAX_QUERY_DEPTH: usize = 16;
+
+/// Parse a selection query, rejecting duplicate object keys instead of letting the
+/// last one silently win.
+pub fn parse_query(text: &str) -> Result<Value> {
+    use serde::de::{Deserialize, Deserializer, Error, MapAccess, SeqAccess, Visitor};
+    struct Strict(Value);
+    struct StrictVisitor;
+    impl<'de> Visitor<'de> for StrictVisitor {
+        type Value = Strict;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a JSON value")
+        }
+        fn visit_bool<E>(self, v: bool) -> Result<Strict, E> {
+            Ok(Strict(Value::Bool(v)))
+        }
+        fn visit_i64<E>(self, v: i64) -> Result<Strict, E> {
+            Ok(Strict(json!(v)))
+        }
+        fn visit_u64<E>(self, v: u64) -> Result<Strict, E> {
+            Ok(Strict(json!(v)))
+        }
+        fn visit_f64<E>(self, v: f64) -> Result<Strict, E> {
+            Ok(Strict(json!(v)))
+        }
+        fn visit_str<E>(self, v: &str) -> Result<Strict, E> {
+            Ok(Strict(Value::String(v.to_owned())))
+        }
+        fn visit_unit<E>(self) -> Result<Strict, E> {
+            Ok(Strict(Value::Null))
+        }
+        fn visit_none<E>(self) -> Result<Strict, E> {
+            Ok(Strict(Value::Null))
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Strict, A::Error> {
+            let mut items = Vec::new();
+            while let Some(Strict(item)) = seq.next_element()? {
+                items.push(item);
+            }
+            Ok(Strict(Value::Array(items)))
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Strict, A::Error> {
+            let mut object = serde_json::Map::new();
+            while let Some(key) = map.next_key::<String>()? {
+                let Strict(value) = map.next_value()?;
+                if object.insert(key.clone(), value).is_some() {
+                    return Err(A::Error::custom(format!(
+                        "duplicate key \"{key}\" in selection query"
+                    )));
+                }
+            }
+            Ok(Strict(Value::Object(object)))
+        }
+    }
+    impl<'de> Deserialize<'de> for Strict {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            d.deserialize_any(StrictVisitor)
+        }
+    }
+    let Strict(value) = serde_json::from_str(text).context("selection query must be valid JSON")?;
+    Ok(value)
+}
 fn number(q: &Value, key: &str, default: f64) -> Result<f64> {
     q.get(key).map_or(Ok(default), |v| {
         v.as_f64()

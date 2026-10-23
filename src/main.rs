@@ -9855,7 +9855,7 @@ async fn execute(cli: Cli) -> Result<()> {
         }
         Command::Selection(args) => {
             let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(&args.input)?)?;
-            let query = serde_json::from_str(&args.query)?;
+            let query = pentool::selection::parse_query(&args.query)?;
             let result = match args.operation.as_str() {
                 "query" => {
                     if args.name.is_some() || args.dry_run || args.if_revision.is_some() {
