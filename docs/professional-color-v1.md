@@ -1,10 +1,11 @@
 # Professional color and print engine 1
 
-Status: implementation contract for the v0.12.0 roadmap, under development.
-This document does not claim that the commands or capabilities below have
-shipped. The roadmap remains the completion record. Explicit v8 migration and
-the profile catalog and native vector paints below are implemented in development.
-Native raster interpretation, process/spot plates and production output remain planned. Released RGB rendering
+Status: implementation contract and reference for the color and print engine.
+Explicit v8 migration, the profile catalog, native vector paints, separations,
+preflight, soft proof, print recipes and the draft PDF/X packaging shipped from
+v0.12.0 (`docs/release-v0.12.0.md`, which also lists the limits). Items marked
+planned below, such as native raster interpretation and full production output,
+are not implemented. Released RGB rendering
 behavior remains authoritative for legacy colors, including migrated scenes.
 
 ## Scope and reference standards

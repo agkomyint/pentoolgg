@@ -1,9 +1,11 @@
 # Page layout and typesetting engine 1
 
-Status: frozen specification for the v0.14.0 roadmap (task 1). Nothing below
-claims that a command or capability has shipped; the roadmap remains the
-completion record. Where this document and `docs/roadmap/v0.14.0/TASKS.md`
-disagree, stop and resolve it explicitly (AGENTS.md).
+Status: the current reference for format version 9 page layout. The spread,
+parent, section, override, `layout-grid`, `layout-wrap`, `layout-table`, book,
+IDML, tagged PDF and EPUB commands described here shipped in v0.14.0
+(`docs/release-v0.14.0.md`). Text marked deferred or planned is not implemented.
+Released behavior and tests win over this text; where this document and
+`docs/roadmap/v0.14.0/TASKS.md` disagree, resolve it explicitly (AGENTS.md).
 
 Companion files:
 

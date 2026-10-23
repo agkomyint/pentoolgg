@@ -40,12 +40,12 @@ Search the implementation and tests before designing a new abstraction. Extend
 the shared scene, transaction, history, rendering, and validation paths instead of
 creating a parallel model for one command.
 
-## Current phase: stabilization (0.20.x)
+## Current phase: stabilization (0.2x)
 
-All roadmap milestones through v0.20.0 have shipped. The product is
-feature-complete for now. The job is to make what exists correct, tested,
+All roadmap milestones through v0.25.0 have shipped (the v0.20.0 items below are
+the collaboration debt that remains). The product isfeature-complete for now. The job is to make what exists correct, tested,
 documented and maintainable, and to ship the result as patch releases
-(`0.20.1`, `0.20.2`, ...).
+(patch releases of the current minor).
 
 In scope:
 

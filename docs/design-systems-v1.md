@@ -1,8 +1,10 @@
 # Design systems, brand kits and templates (v1)
 
 Status: normative specification for roadmap v0.19.0 (`docs/roadmap/v0.19.0/TASKS.md`).
-This document defines contracts; it does not claim that any command below has
-shipped. The roadmap checkboxes remain the completion record. Where this spec and
+The `style`, `design token`, `design audit` and `design template` commands and the
+Studio Design systems workspace shipped from v0.19.0 (see the README and
+`docs/studio.md`); contract items without a command remain unimplemented. The
+roadmap checkboxes remain the completion record. Where this spec and
 released behavior disagree, released behavior and `docs/pen-format-v4.schema.json`
 win until this spec is deliberately amended.
 
@@ -536,7 +538,8 @@ as the token's current value) and `set-token {name, token_type, value}` (typed
 JSON value; `set-style` stays string-valued for compatibility). Only
 `exact: true` findings produce fixes; near matches are listed without ops unless
 `--fix-nearest` is passed. A plan is never applied by `audit`; apply it with
-`pentool batch DOC --file plan.json --dry-run` then without. Applying the plan
+`pentool batch DOC plan-operations.json --dry-run` then without, where `plan-operations.json` holds only the
+`plan.operations` array extracted from the report (`batch` takes the operations file positionally and rejects a wrapper object). Applying the plan
 changes only the nodes/properties named in its operations.
 
 Scripting: an extension (v0.18.0) runs `document.search`/`document.get` and
@@ -559,7 +562,7 @@ Scripting: an extension (v0.18.0) runs `document.search`/`document.get` and
 It is the `styles` object plus `schema` and optional `description`. Deterministic
 export: tokens sorted by ID, 2-space indent, trailing newline, `\n` line endings.
 Import validates everything (types, IDs, alias closure, cycles, limits) before
-writing; `design token import FILE DOC.pen [--dry-run] [--if-revision SHA]
+writing; `design token import DOC.pen FILE [--dry-run] [--if-revision SHA]
 [--on-collision fail|skip|overwrite]` default `fail`. Export: `design token export DOC.pen
 [--format native|w3c] [--output FILE]` (stdout if no output; library export
 `design library export PKG`).

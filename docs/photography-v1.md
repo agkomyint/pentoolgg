@@ -1,8 +1,9 @@
 # Photography and RAW development (v0.11, photo engine 1)
 
-Status: **specification frozen for review** (roadmap v0.11.0 item 1). Nothing in this
-file is implemented yet. Later items implement it in order and must not contradict
-it. A deliberate change edits this file and the schema in the same commit.
+Status: **normative contract; shipped in v0.11.0** (catalog, variants, development,
+renders and recipes; see `docs/release-v0.11.0.md`). Where this file and released
+behavior disagree, released behavior and tests win. A deliberate change edits this
+file and the schema in the same commit.
 
 This contract adds a non-destructive photography workflow to the v6 scene graph:
 immutable photo sources, a catalog of photos with editable development settings,

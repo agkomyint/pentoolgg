@@ -1,8 +1,11 @@
 # Pentool collaboration protocol, version 1
 
-Status: **specification only** (v0.20.0 roadmap task 1). Nothing in this document
-is implemented until the phase that owns it in section 13 ships. Where this text
-and released behavior disagree, released behavior and the `.pen` schemas win.
+Status: **normative contract; shipped in v0.20.0** (operation log, comments and
+review, roles, agent attribution, stats and Studio support; see
+`docs/release-v0.20.0.md`). Sections that describe later phases or the known gaps
+listed in the release notes (Ed25519 operation signing, stale-base rejection for
+agents) are not implemented. Where this text and released behavior disagree,
+released behavior and the `.pen` schemas win.
 
 Collaboration lets several people and software agents edit one document without
 giving up the single binary, readable `.pen` JSON, stable IDs or atomic history.
