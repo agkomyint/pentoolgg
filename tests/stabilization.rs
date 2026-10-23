@@ -1466,3 +1466,39 @@ fn import_stdout_omits_fidelity_items_without_a_report() {
     assert!(v["fidelity"]["items_omitted"].as_u64().unwrap() > 0);
     assert!(out.len() < 5000, "{} bytes", out.len());
 }
+
+#[test]
+fn linked_embed_result_omits_the_embedded_payload() {
+    let dir = Dir::new("linked-embed");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    std::fs::copy(root.join("docs/fixtures/v4-scene.pen"), dir.0.join("d.pen")).unwrap();
+    let mut img = ::image::RgbaImage::new(64, 64);
+    for (x, y, px) in img.enumerate_pixels_mut() {
+        let n = (x * 7919 + y * 104_729 + x * y * 31) % 251;
+        *px = ::image::Rgba([n as u8, (n * 3 % 251) as u8, (n * 7 % 251) as u8, 255]);
+    }
+    img.save(dir.0.join("p.png")).unwrap();
+    dir.ok(&[
+        "image",
+        "add",
+        "d.pen",
+        "ext",
+        "--file",
+        "p.png",
+        "--layer",
+        "content",
+        "--width",
+        "64",
+        "--height",
+        "64",
+        "--external",
+    ]);
+    let report = dir.ok(&["linked", "report", "d.pen"]);
+    let digest = serde_json::from_str::<serde_json::Value>(&report).unwrap()["dependencies"][0]
+        ["asset"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let out = dir.ok(&["linked", "embed", "d.pen", &digest]);
+    assert!(!out.contains("\"data\""), "{} bytes: {out}", out.len());
+}

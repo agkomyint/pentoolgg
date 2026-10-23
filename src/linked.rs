@@ -148,7 +148,12 @@ pub fn edit(
     }
     crate::transaction::validate_value(&candidate)?;
     *raw = candidate;
-    Ok(json!({"operation":operation,"asset":id,"storage":raw["image_assets"][id]["storage"]}))
+    // Report the storage kind and digest, never an embedded payload.
+    let mut storage = raw["image_assets"][id]["storage"].clone();
+    if let Some(object) = storage.as_object_mut() {
+        object.remove("data");
+    }
+    Ok(json!({"operation":operation,"asset":id,"storage":storage}))
 }
 
 pub fn locate(raw: &Value, document: &Path, id: &str, paths: &[String]) -> Result<Value> {
