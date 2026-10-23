@@ -2,8 +2,10 @@ import { useState } from "react";
 import { RotateCcw, RotateCw } from "lucide-react";
 import type { Doc, SceneNode } from "@/lib/api";
 import { useStudio } from "@/store";
-import { clone, findNode, pageOf } from "@/lib/model";
+import { clone, findNode, nodeWorldTransform, pageOf } from "@/lib/model";
 import { Button } from "@/components/ui/button";
+import { CROP_RATIOS, cropBlocker, fitRatio, pureOffset, useCrop } from "./cropStore";
+import { commitCrop, cropOf } from "./CropOverlay";
 
 type Params = Record<string, number>;
 type Op = { id: string; kind: string; version?: number; enabled?: boolean; params?: Params };
@@ -113,6 +115,83 @@ export function Slider({
   );
 }
 
+/** Start, steer and finish the on-canvas crop of one image. */
+function CanvasCrop({ node }: { node: SceneNode }) {
+  const crop = useCrop();
+  const { doc, pageId } = useStudio();
+  const found = findNode(pageOf(doc, pageId), node.id);
+  const blocker = found ? cropBlocker(node, nodeWorldTransform(found)) : "Image not found.";
+  const active = crop.nodeId === node.id && crop.draft;
+  const setFit = () => useStudio.getState().edit("Set image fit", (d, { pageId: id }) => {
+    const target = findNode(pageOf(d, id), node.id)?.node;
+    if (target) target.fit = "fill";
+  });
+  if (!active) {
+    return (
+      <div className="space-y-1">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!!blocker}
+          onClick={() => {
+            const offset = found && pureOffset(nodeWorldTransform(found));
+            if (!offset) return;
+            crop.start(node.id, { x: Number(node.x) + offset.dx, y: Number(node.y) + offset.dy, width: Number(node.width), height: Number(node.height) });
+          }}
+        >
+          Crop on canvas
+        </Button>
+        {blocker && <p className="text-[11px] text-muted-foreground">{blocker}</p>}
+        {blocker?.includes("Fit: fill") && (
+          <Button size="sm" variant="ghost" onClick={setFit}>
+            Set Fit to fill
+          </Button>
+        )}
+      </div>
+    );
+  }
+  const draft = crop.draft!;
+  const choose = (ratio: number | null) => {
+    crop.setRatio(ratio);
+    if (ratio) crop.setDraft(fitRatio(draft, ratio));
+  };
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-1">
+        {CROP_RATIOS.map((r) => (
+          <Button key={r.label} size="sm" variant={crop.ratio === r.ratio ? "default" : "outline"} onClick={() => choose(r.ratio)}>
+            {r.label}
+          </Button>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        <Button size="sm" onClick={() => commitCrop()}>
+          Apply
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => crop.stop()}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            const offset = found && pureOffset(nodeWorldTransform(found));
+            const [cx, cy, cw, ch] = cropOf(node);
+            if (!offset) return;
+            const w = Number(node.width) / cw;
+            const h = Number(node.height) / ch;
+            crop.setDraft({ x: Number(node.x) + offset.dx - cx * w, y: Number(node.y) + offset.dy - cy * h, width: w, height: h });
+          }}
+          title="Show the whole source image"
+        >
+          Full image
+        </Button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">Drag the handles; Enter applies, Esc cancels.</p>
+    </div>
+  );
+}
+
 export function ImageAdjust({ node }: { node: SceneNode }) {
   const { live, commit } = useLive(node);
   const ops = opsOf(node);
@@ -192,7 +271,9 @@ export function ImageAdjust({ node }: { node: SceneNode }) {
       </section>
 
       <section className="space-y-2">
-        <h3 className={heading}>Crop (fraction of source)</h3>
+        <h3 className={heading}>Crop</h3>
+        <CanvasCrop node={node} />
+        <p className="text-[11px] text-muted-foreground">Fraction of source</p>
         {(["x", "y", "width", "height"] as const).map((label, i) => (
           <Slider
             key={label}

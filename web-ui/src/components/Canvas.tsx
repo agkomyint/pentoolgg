@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { LayoutOverlay } from "@/workspaces/layout/LayoutOverlay";
 import { RemoteActivity } from "@/components/Presence";
 import { PaintOverlay } from "@/workspaces/PaintOverlay";
+import { CropOverlay } from "@/workspaces/CropOverlay";
 import type { RasterTool } from "@/workspaces/rasterStore";
 import { startPainting } from "@/workspaces/paintLayer";
 import { PHOTO_DRAG_TYPE, usePhoto } from "@/workspaces/photoStore";
@@ -1110,6 +1111,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
               {paintMode && isScene(doc) && (
                 <PaintOverlay canvas={canvas} cssWidth={W} cssHeight={H} renderedDoc={renderedDoc} onPanStart={beginPan} />
               )}
+              <CropOverlay canvas={canvas} px={px} />
             </div>
           )}
         </div>

@@ -55,7 +55,7 @@ export function RasterPanel() {
       const body = await postJson<{ document: Doc; result?: { bounds?: number[] | null; selection?: { bounds?: number[] | null } } }>("/api/raster", { document: doc, page: pageId, id: layer.id, action, args });
       replaceDoc(body.document);
       const bounds = body.result?.bounds ?? body.result?.selection?.bounds;
-      if (action !== "lift") p.set({ selection: bounds ?? null });
+      if (action !== "lift" && action !== "delete-pixels") p.set({ selection: bounds ?? null });
       p.set({ status: done });
     } catch (e) {
       p.set({ status: e instanceof Error ? e.message : "Request rejected." });
@@ -152,9 +152,9 @@ export function RasterPanel() {
         <div className="space-y-1">
           <Range label="Amount" value={p.amount} min={1} max={64} onChange={(amount) => p.set({ amount })} />
           <div className="flex flex-wrap gap-1">
-            {["invert", "feather", "expand", "contract", "smooth"].map((op) => (
+            {["invert", "feather", "expand", "contract", "smooth", "smooth-edge"].map((op) => (
               <Button key={op} size="sm" variant="outline" disabled={!p.selection || p.busy} onClick={() => modify(op)}>
-                {op[0].toUpperCase() + op.slice(1)}
+                {op[0].toUpperCase() + op.slice(1).replace("-", " ")}
               </Button>
             ))}
             <Button size="sm" variant="outline" disabled={!p.selection || p.busy} title="Snap a rough selection to the edges of the subject" onClick={() => void selectionAction("select-refine", { band: Math.min(64, Math.max(1, p.amount * 3)) }, "Selection snapped to image edges.")}>
@@ -165,6 +165,9 @@ export function RasterPanel() {
             </Button>
             <Button size="sm" variant="outline" disabled={!p.selection || p.busy} onClick={() => toNewLayer(true)}>
               Cut to layer
+            </Button>
+            <Button size="sm" variant="outline" disabled={!p.selection || p.busy} title="Erase the selected pixels. Select the subject, invert, then delete to remove a background." onClick={() => void selectionAction("delete-pixels", {}, "Selected pixels deleted.")}>
+              Delete selected
             </Button>
           </div>
         </div>

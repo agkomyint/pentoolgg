@@ -4495,6 +4495,8 @@ enum RasterAction {
         #[arg(long)]
         cut: bool,
     },
+    /// Erase the selected pixels from the layer (for example the background once the subject is inverted).
+    DeletePixels { id: String },
     /// Move the selected pixels and their selection by whole pixels.
     MovePixels {
         id: String,
@@ -9010,6 +9012,10 @@ async fn execute(cli: Cli) -> Result<()> {
                 RasterAction::Lift { id, new_id, cut } => (
                     "raster-lift",
                     raster::lift_pixels(&mut raw, page, &id, &new_id, cut)?,
+                ),
+                RasterAction::DeletePixels { id } => (
+                    "raster-delete-pixels",
+                    raster::delete_selected_pixels(&mut raw, page, &id)?,
                 ),
                 RasterAction::MovePixels { id, dx, dy, copy } => (
                     "raster-move-pixels",

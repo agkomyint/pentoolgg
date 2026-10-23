@@ -71,8 +71,8 @@ pub use input::{
 pub use layer::{crop, duplicate, merge_down, rasterize, resize, trim, Resample};
 use math::{signed_unit, sin_cos_degrees, smoothstep};
 pub use pixels::{
-    lift as lift_pixels, move_pixels, paste as paste_pixels, transform_pixels,
-    Transform as PixelTransform,
+    delete_selected as delete_selected_pixels, lift as lift_pixels, move_pixels,
+    paste as paste_pixels, transform_pixels, Transform as PixelTransform,
 };
 pub use preset::{
     preset_add, preset_export, preset_import, preset_import_gbr, preset_import_mypaint,

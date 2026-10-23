@@ -221,3 +221,48 @@ fn batch_runs_selection_modifiers_saves_and_pixel_moves() {
     let info = ok(&["raster", &doc, "info", "lifted"]);
     assert!(info["tile_map_sha256"].is_string());
 }
+
+#[test]
+fn delete_pixels_erases_the_selection_and_leaves_no_temporary_layer() {
+    let ws = Workspace::new("delete-pixels");
+    let doc = ws.document("d.pen");
+    ok(&[
+        "raster",
+        &doc,
+        "stroke",
+        "p",
+        "--samples",
+        "[[30,30]]",
+        "--brush",
+        r#"{"size":20,"hardness":1,"flow":1}"#,
+        "--color",
+        "#FF0000",
+    ]);
+    let before = layer_hash(&doc);
+    ok(&[
+        "raster",
+        &doc,
+        "select-marquee",
+        "p",
+        "--rect",
+        "20",
+        "20",
+        "20",
+        "20",
+    ]);
+    let out = ok(&["raster", &doc, "delete-pixels", "p"]);
+    assert!(out["result"]["deleted_bounds"].is_array(), "{out}");
+    assert_ne!(before, layer_hash(&doc), "pixels were erased");
+    let raw = fs::read_to_string(&doc).unwrap();
+    assert!(!raw.contains("delete-temp"), "temporary layer left behind");
+    let ops = write(
+        &ws,
+        "ops.json",
+        &serde_json::json!([
+            {"action":"select-marquee","id":"p","args":{"x":0,"y":0,"width":10,"height":10}},
+            {"action":"delete-pixels","id":"p"}
+        ]),
+    );
+    let err = fail(&["raster", &doc, "batch", &ops]);
+    assert!(err.contains("transparent pixels"), "{err}");
+}

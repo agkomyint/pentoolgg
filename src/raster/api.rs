@@ -247,6 +247,7 @@ pub fn apply(
             super::SelectionMode::parse(&text("mode", "replace"))?,
         )?,
         "select-delete" => super::select_delete(raw, id, &text("name", ""))?,
+        "delete-pixels" => super::delete_selected_pixels(raw, page, id)?,
         "lift" => super::lift_pixels(
             raw,
             page,
@@ -289,7 +290,7 @@ pub fn apply(
             args["opacity"].as_f64().unwrap_or(1.0),
         )?,
         other => bail!(
-            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-refine, select-modify, select-save, select-load, select-delete, select-info, select-clear, lift, move-pixels, transform-pixels or paste"
+            "[invalid-input] unknown raster action {other:?}; use info, stroke, stroke-path, quickmask, clone, heal, fill, clear, set-clone-source, select-marquee, select-lasso, select-wand, select-refine, select-modify, select-save, select-load, select-delete, select-info, select-clear, lift, delete-pixels, move-pixels, transform-pixels or paste"
         ),
     };
     Ok(result)

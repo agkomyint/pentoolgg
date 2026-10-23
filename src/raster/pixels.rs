@@ -223,6 +223,24 @@ pub fn lift(
     }))
 }
 
+/// Erase the selected pixels from the layer (cut without keeping a copy), for
+/// example to delete a background once the subject is selected and inverted.
+pub fn delete_selected(raw: &mut Value, page: Option<&str>, id: &str) -> Result<Value> {
+    let mut next = raw.clone();
+    let temp = format!("{id}-delete-temp");
+    let lifted = lift(&mut next, page, id, &temp, true)?;
+    let path = find_path(&next, page, &temp)?;
+    let at = *path.chain.last().unwrap();
+    siblings_mut(&mut next, &path)?.remove(at);
+    let released = collect_garbage(&mut next);
+    crate::scene::validate(&next)?;
+    *raw = next;
+    Ok(json!({
+        "id": id, "deleted_bounds": lifted["bounds"], "algorithm": ALGORITHM,
+        "tiles_released": released,
+    }))
+}
+
 /// Move the selected pixels (and the selection) by whole pixels. `copy` leaves the
 /// original in place.
 pub fn move_pixels(
