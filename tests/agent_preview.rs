@@ -1071,3 +1071,11 @@ fn font_list_cache_never_changes_text_rendering() {
     }
     assert!(!elsewhere.exists());
 }
+
+#[test]
+fn usage_errors_get_a_usage_hint_not_a_scene_id_hint() {
+    let replies = session(&[r#"{"id":"bad","args":["not-a-command"]}"#.to_string()]);
+    let hint = replies[0]["error"]["hint"].as_str().unwrap();
+    assert!(hint.contains("--help"), "{hint}");
+    assert!(!hint.contains("object IDs"), "{hint}");
+}

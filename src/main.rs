@@ -536,16 +536,22 @@ struct LayoutArgs {
     input: PathBuf,
     #[arg(value_enum)]
     operation: layout::Operation,
+    /// Comma-separated object IDs to lay out, e.g. `--ids a,b,c` (as listed by `tree`).
     #[arg(long, value_delimiter = ',')]
     ids: Vec<String>,
+    /// Spacing in document units; required by gap-h and gap-v, optional for grid.
     #[arg(long)]
     gap: Option<f64>,
+    /// Number of grid columns (positive); required by grid.
     #[arg(long)]
     columns: Option<usize>,
+    /// Label echoed in the result so callers can match a batch of layouts.
     #[arg(long)]
     key: Option<String>,
+    /// Report the planned moves without writing the document.
     #[arg(long)]
     dry_run: bool,
+    /// Refuse to write unless the document is still at this revision.
     #[arg(long)]
     if_revision: Option<String>,
 }
@@ -4362,7 +4368,30 @@ fn ai_error_json(error: &anyhow::Error) -> serde_json::Value {
     if let Some(ai) = error.chain().find_map(|e| e.downcast_ref::<ai::AiError>()) {
         return serde_json::json!({"code":ai.code,"message":ai.message,"fix":ai.fix});
     }
-    serde_json::json!({"code":error_code(error),"message":error.to_string(),"context":format!("{error:#}"),"suggestions":error_suggestions(error),"hint":"Run the command with --help and verify page, layer, group, and object IDs."})
+    serde_json::json!({"code":error_code(error),"message":error.to_string(),"context":format!("{error:#}"),"suggestions":error_suggestions(error),"hint":error_hint(error)})
+}
+
+/// Recovery guidance chosen from the error's domain, so agents are not sent to check scene IDs
+/// for a usage, version, or photo-catalog failure.
+fn error_hint(error: &anyhow::Error) -> String {
+    let message = format!("{error:#}");
+    let lower = message.to_ascii_lowercase();
+    if message.contains("Usage:") || lower.contains("unrecognized subcommand") {
+        "Run `pentool --help` to list commands, or `pentool <command> --help` for that command's usage.".into()
+    } else if let Some(version) = lower
+        .split("requires v")
+        .nth(1)
+        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+        .filter(|v| !v.is_empty())
+    {
+        format!("This needs a v{version} or newer document. Run `pentool migrate FILE --target {version}` first.")
+    } else if lower.contains("is not in the catalog") || lower.contains("photo") {
+        "Check photo IDs with `pentool photo search FILE`; for unsupported camera files, convert to a supported DNG first.".into()
+    } else if lower.contains("unknown effect parameter") {
+        "Pass kind-specific values with --params '{\"name\":value}'; `pentool effect add --help` lists the kinds.".into()
+    } else {
+        "Run the command with --help and verify page, layer, group, and object IDs.".into()
+    }
 }
 
 fn error_code(error: &anyhow::Error) -> &'static str {
