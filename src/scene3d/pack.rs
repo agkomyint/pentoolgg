@@ -1635,7 +1635,7 @@ pub fn flat_dieline_svg_with_artwork(
     let mut bleed_synthesized = Vec::new();
     let mut warnings = Vec::new();
     let mut bleed_pixels_used = 0_u64;
-    let bleed_ppi = min_ppi.max(72.0);
+    let bleed_ppi = min_ppi.max(300.0);
     let mut source_cache = std::collections::HashMap::<String, (String, bool, u32, u32)>::new();
     for (panel_index, panel) in panels.iter().enumerate() {
         let Some(source) = panel.get("artwork") else {

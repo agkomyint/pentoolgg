@@ -4056,3 +4056,22 @@ fn uv_layout_on_a_dieline_preview_is_refused_not_a_panic() {
     assert_eq!(std::fs::read(&input).unwrap(), before);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn low_min_ppi_never_lowers_synthesized_bleed_below_300() {
+    let out = Command::new(env!("CARGO_BIN_EXE_pentool"))
+        .args([
+            "pack",
+            "docs/fixtures/v11-product-packaging.pen",
+            "preflight",
+            "shirt-carton",
+            "--json",
+            "--min-ppi",
+            "72",
+        ])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("\"raster_ppi\":300"), "{text}");
+    assert!(!text.contains("\"raster_ppi\":72"), "{text}");
+}

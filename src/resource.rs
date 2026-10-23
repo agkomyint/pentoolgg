@@ -102,8 +102,17 @@ pub fn cache_store(root: &Path, bytes: &[u8]) -> Result<PathBuf> {
     let digest = sha256(bytes);
     verify(bytes, &digest)?;
     let entry = cache_entry(root, &digest)?;
-    if cache_read(root, &digest)?.is_some() {
-        return Ok(entry);
+    match cache_read(root, &digest) {
+        Ok(Some(_)) => return Ok(entry),
+        Ok(None) => {}
+        // The caller holds verified bytes for this digest, so a corrupt entry is replaced (#351).
+        Err(error)
+            if error.to_string().contains("is corrupt")
+                && std::fs::symlink_metadata(&entry).is_ok_and(|m| m.is_file()) =>
+        {
+            std::fs::remove_file(&entry).context("remove corrupt cache entry")?;
+        }
+        Err(error) => return Err(error),
     }
     std::fs::create_dir_all(root)?;
     let canonical_root = root.canonicalize()?;
@@ -249,5 +258,21 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("[hash-mismatch]"));
+    }
+
+    #[test]
+    fn cache_store_replaces_a_corrupt_entry_with_verified_bytes() {
+        let root =
+            std::env::temp_dir().join(format!("pentool-cache-repair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let entry = cache_store(&root, b"payload").unwrap();
+        std::fs::write(&entry, b"garbage").unwrap();
+        assert!(cache_read(&root, &sha256(b"payload")).is_err());
+        cache_store(&root, b"payload").unwrap();
+        assert_eq!(
+            cache_read(&root, &sha256(b"payload")).unwrap().unwrap(),
+            b"payload"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
