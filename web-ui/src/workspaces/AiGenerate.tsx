@@ -30,7 +30,7 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const job = useRef<string | null>(null);
-  const cancelled = useRef(false);
+  const cancelled = useRef(new Set<string>());
   const configured = status.configured.find((p) => p.name === provider) ?? status.configured[0];
   const maxCalls = status.limits?.max_calls ?? 1;
   const blocked = !shared || dirty || !revision;
@@ -58,20 +58,20 @@ export function AiGenerate({ status }: { status: Extract<AiStatus, { enabled: tr
   }
   async function generate() {
     if (!plan) return;
-    setBusy(true); setError(null); cancelled.current = false;
+    setBusy(true); setError(null);
     const id = uid("ai"); job.current = id;
     try {
       const result = await postJson<{ warnings?: string[] }>("/api/ai/generate", { ...plan.body, reviewed_disclosure: plan.report.disclosure, allow_model_call: true, job: id });
-      if (!cancelled.current) { setPlan(null); await refresh(); studio.notify(["Candidates ready. Choose an image to accept.", ...(result.warnings ?? [])].join(" ")); }
-    } catch (e) { if (!cancelled.current) setError(errorMessage(e)); }
-    finally { if (job.current === id) { job.current = null; setBusy(false); } }
+      if (!cancelled.current.has(id)) { setPlan(null); await refresh(); studio.notify(["Candidates ready. Choose an image to accept.", ...(result.warnings ?? [])].join(" ")); }
+    } catch (e) { if (!cancelled.current.has(id)) setError(errorMessage(e)); }
+    finally { cancelled.current.delete(id); if (job.current === id) { job.current = null; setBusy(false); } }
   }
   async function cancelGeneration() {
+    const id = job.current;
     try {
-      const result = await postJson<{ cancelled: boolean }>("/api/ai/cancel", { job: job.current });
-      cancelled.current = result.cancelled;
+      const result = await postJson<{ cancelled: boolean }>("/api/ai/cancel", { job: id });
       // The provider call may take a while to unwind; do not leave the form disabled meanwhile.
-      if (result.cancelled) { job.current = null; setBusy(false); }
+      if (result.cancelled && id) { cancelled.current.add(id); if (job.current === id) job.current = null; setBusy(false); void refresh(); }
       studio.notify(result.cancelled ? "Cancelled. A request already sent may still be billed." : "Cancellation was not acknowledged. Retry if the request is still running.");
     } catch (e) { setError(errorMessage(e)); }
   }
