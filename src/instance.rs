@@ -1599,7 +1599,7 @@ mod tests {
         });
         fs::write(&document_path, serde_json::to_vec(&document).unwrap()).unwrap();
         fs::write(&source_path, serde_json::to_vec(&source).unwrap()).unwrap();
-        update(&document_path, "card", &source_path, false).unwrap();
+        update(&document_path, "card", &source_path, false, None).unwrap();
         let updated: Value = serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
         let layers = updated["pages"][0]["layers"].as_array().unwrap();
         assert_eq!(layers[0]["id"], "back");
@@ -1608,7 +1608,7 @@ mod tests {
         assert_eq!(layers[1]["texts"][0]["id"], "card-label");
         assert_eq!(layers[1]["texts"][0]["content"], "Local label");
         assert_eq!(updated["instances"][0]["asset_version"], "1.1.0");
-        rollback(&document_path, "card", false).unwrap();
+        rollback(&document_path, "card", false, None).unwrap();
         let rolled_back: Value =
             serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
         let rolled_back_layers = rolled_back["pages"][0]["layers"].as_array().unwrap();
@@ -1631,6 +1631,7 @@ mod tests {
             &source_path,
             &resolutions_path,
             false,
+            None,
         )
         .unwrap();
         let resolved: Value = serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
