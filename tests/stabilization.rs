@@ -289,3 +289,16 @@ fn preview_honors_the_global_preview_out_flag() {
     dir.ok(&["preview", "doc.pen", "--preview-out", "requested.png"]);
     assert!(dir.0.join("requested.png").exists());
 }
+
+#[test]
+fn library_doctor_reports_a_missing_enabled_library_folder() {
+    // #233: doctor said ok:true while an enabled library folder no longer existed.
+    let dir = Dir::new("doctor");
+    std::fs::create_dir_all(dir.0.join("lib")).unwrap();
+    dir.ok(&["library", "add", "--name", "gone", "lib"]);
+    dir.ok(&["library", "refresh"]);
+    std::fs::remove_dir_all(dir.0.join("lib")).unwrap();
+    let report = dir.ok(&["library", "doctor"]);
+    assert!(report.contains("missing_folder"), "{report}");
+    assert!(report.contains("\"ok\": false"), "{report}");
+}

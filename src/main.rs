@@ -7136,12 +7136,20 @@ async fn execute(cli: Cli) -> Result<()> {
                     Ok(())
                 }
                 LibraryAction::Doctor { scope } => {
-                    let (_, index) = scope_paths(&cwd, &scope)?;
+                    let (config, index) = scope_paths(&cwd, &scope)?;
                     let idx = library::load_index(&index)?;
+                    let mut warnings = idx.warnings.clone();
+                    // The cached index cannot see a library folder that has since gone missing.
+                    let listing = library::list(&cwd, &config)?;
+                    for lib in listing["libraries"].as_array().into_iter().flatten() {
+                        if lib["enabled"] == true && lib["available"] == false {
+                            warnings.push(serde_json::json!({"library":lib["name"],"code":"missing_folder","path":lib["path"]}));
+                        }
+                    }
                     println!(
                         "{}",
                         json_pretty(
-                            serde_json::json!({"ok":idx.warnings.is_empty(),"assets":idx.assets.len(),"warnings":idx.warnings})
+                            serde_json::json!({"ok":warnings.is_empty(),"assets":idx.assets.len(),"warnings":warnings})
                         )?
                     );
                     Ok(())
