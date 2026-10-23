@@ -353,7 +353,12 @@ fn silhouettes(plane: &Plane, space: Space) -> Vec<Value> {
                 "id": format!("s{n}"),
                 "area": ratio(area, total),
                 "bounds": space.rect(bbox(c, plane.w)),
-                "centroid": [space.x((sx / area) as usize), space.y((sy / area) as usize)],
+                // Pixel centres sit half a pixel past their index; truncating the mean index
+                // biased every centroid toward the top-left (#386).
+                "centroid": [
+                    space.x(((2 * sx + area) / (2 * area)) as usize),
+                    space.y(((2 * sy + area) / (2 * area)) as usize),
+                ],
             })
         })
         .collect()

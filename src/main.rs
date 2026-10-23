@@ -653,6 +653,8 @@ enum SearchKind {
     TextFrame,
     /// v9 graphic frames.
     GraphicFrame,
+    /// v7 catalog photos placed on the canvas.
+    Photo,
 }
 
 impl SearchKind {
@@ -664,6 +666,7 @@ impl SearchKind {
             Self::Raster => "raster",
             Self::TextFrame => "text-frame",
             Self::GraphicFrame => "graphic-frame",
+            Self::Photo => "photo",
         }
     }
     fn legacy(self) -> Result<agent::ObjectKind> {
@@ -678,6 +681,9 @@ impl SearchKind {
             ),
             Self::TextFrame | Self::GraphicFrame => anyhow::bail!(
                 "[unsupported-capability] frame kinds require a v9 document; migrate with `pentool migrate --target 9`"
+            ),
+            Self::Photo => anyhow::bail!(
+                "[unsupported-capability] --kind photo requires a v7 document; migrate with `pentool migrate --target 7`"
             ),
         }
     }

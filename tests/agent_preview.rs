@@ -1079,3 +1079,35 @@ fn usage_errors_get_a_usage_hint_not_a_scene_id_hint() {
     assert!(hint.contains("--help"), "{hint}");
     assert!(!hint.contains("object IDs"), "{hint}");
 }
+
+#[test]
+fn silhouette_centroid_is_the_pixel_centre_and_photo_is_a_kind_filter() {
+    let space = Workspace::new("centroid");
+    let doc = space.0.join("c.pen");
+    let doc = doc.to_str().unwrap();
+    for args in [
+        vec!["new", doc, "--width", "32", "--height", "32"],
+        vec!["migrate", doc, "--target", "6"],
+        vec![
+            "shape", doc, "rect", "rect1", "--layer", "layer-1", "--x", "14", "--y", "14",
+            "--width", "4", "--height", "4", "--fill", "#00ff00",
+        ],
+    ] {
+        assert!(pentool(&args, &[]).status.success(), "{args:?}");
+    }
+    let out = json(&pentool(
+        &[
+            "paint-analyze",
+            doc,
+            "--scope",
+            "node:rect1",
+            "--features",
+            "silhouettes",
+            "--json",
+        ],
+        &[],
+    ));
+    assert!(out.to_string().contains("\"centroid\":[16,16]"), "{out}");
+    let help = String::from_utf8(pentool(&["tree", "--help"], &[]).stdout).unwrap();
+    assert!(help.contains("photo"), "{help}");
+}
