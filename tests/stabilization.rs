@@ -977,3 +977,20 @@ fn paint_score_rejects_layers_of_different_sizes() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn paint_plan_value_range_uses_the_protocol_luma() {
+    let dir = Dir::new("plan-luma");
+    dir.ok(&["new", "f.pen"]);
+    dir.ok(&[
+        "raster", "f.pen", "add", "R", "--width", "32", "--height", "32",
+    ]);
+    std::fs::write(
+        dir.0.join("plan.json"),
+        r##"{"schema":1,"engine":1,"id":"p1","passes":[{"id":"a","target":"R","action":"fill","args":{"x":5,"y":5,"color":"#ff00ff"}}]}"##,
+    )
+    .unwrap();
+    let out = dir.ok(&["paint-plan", "f.pen", "plan.json", "--dry-run", "--json"]);
+    let compact: String = out.split_whitespace().collect();
+    assert!(compact.contains("\"value_range\":[73,73]"), "{out}");
+}

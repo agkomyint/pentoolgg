@@ -81,7 +81,7 @@ pub fn parse_options(object: &Map<String, Value>) -> Result<Options> {
 }
 
 fn luma(p: [u8; 4]) -> u32 {
-    (299 * u32::from(p[0]) + 587 * u32::from(p[1]) + 114 * u32::from(p[2])) / 1000
+    (54 * u32::from(p[0]) + 183 * u32::from(p[1]) + 19 * u32::from(p[2]) + 128) >> 8
 }
 
 fn inside(r: &Rect, x: u32, y: u32) -> bool {
