@@ -2879,6 +2879,33 @@ Examples:
         #[arg(long, required = true)]
         jsonl: bool,
     },
+    /// Print one JSON line whenever DOC changes: new revision, who changed it and which objects.
+    #[command(
+        after_long_help = "Prints {\"event\":\"ready\"} first, then one {\"event\":\"change\"} line per change with
+`revision`, `previous`, `change` (operation, actor, time) and `objects` (added, changed,
+removed ids). Use --once to wait for a single change and exit; --since REV reports a
+change at once when DOC already differs from REV; --timeout-ms ends quietly with
+{\"event\":\"timeout\"}. Run it in the background to be told the moment another agent edits.
+
+Examples:
+  pentool watch car.pen
+  pentool watch car.pen --once --timeout-ms 60000"
+    )]
+    Watch {
+        input: PathBuf,
+        /// Stop after the first change.
+        #[arg(long)]
+        once: bool,
+        /// Report a change immediately if DOC differs from this revision.
+        #[arg(long)]
+        since: Option<String>,
+        /// Stop after this many milliseconds with a timeout event.
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+        /// How often to look at the file (5 to 1000 ms).
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u64).range(5..=1000))]
+        poll_ms: u64,
+    },
     /// Launch the browser editor and JSON API.
     Serve {
         /// Open a shared document for browser viewing and editing.
@@ -4753,7 +4780,8 @@ async fn session_call(line: &str) -> serde_json::Value {
             error.to_string().trim_end()
         )),
         Ok(Cli {
-            command: None | Some(Command::Serve { .. } | Command::Session { .. }),
+            command:
+                None | Some(Command::Serve { .. } | Command::Session { .. } | Command::Watch { .. }),
             ..
         }) => Err(anyhow::anyhow!(
             "[invalid-input] serve and session cannot run inside a session"
@@ -8147,6 +8175,29 @@ async fn execute(cli: Cli) -> Result<()> {
         }
         Command::Session { .. } => {
             bail!("[invalid-input] a session cannot start another session")
+        }
+        Command::Watch {
+            input,
+            once,
+            since,
+            timeout_ms,
+            poll_ms,
+        } => {
+            use std::io::Write;
+            pentool::watch::run(
+                &input,
+                &pentool::watch::Options {
+                    poll: std::time::Duration::from_millis(poll_ms),
+                    once,
+                    since,
+                    timeout: timeout_ms.map(std::time::Duration::from_millis),
+                },
+                |event| {
+                    let mut out = std::io::stdout().lock();
+                    // A closed pipe means the reader is gone, so stop quietly.
+                    writeln!(out, "{event}").and_then(|()| out.flush()).is_ok()
+                },
+            )
         }
         Command::Serve {
             host,

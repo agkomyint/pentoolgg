@@ -101,4 +101,5 @@ pub mod tokens;
 pub mod transaction;
 pub mod transform;
 pub mod typeset;
+pub mod watch;
 pub mod wrap;
