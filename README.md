@@ -93,6 +93,13 @@ edges and cut it into a new transparent layer, from the CLI or Studio:
 `pentool raster DOC cutout PHOTO --id car --box 120 140 400 190 --refine 25`.
 See [Selecting and cutting out](docs/selecting-and-cutting-out.md).
 
+## Reports from data (v0.28.0)
+
+Build a cited, charted report from a JSON spec and CSV/TSV/JSON files:
+`pentool report build spec.json --out report.pen`. Blocks cite sources by id,
+citations are numbered, and a Sources page is generated. See
+[Reports](docs/reports.md); `pentool report example` prints a runnable spec.
+
 ## Studio AI (v0.25.0)
 
 Generate images, preview candidates, and place or replace an image from Studio's
@@ -108,6 +115,7 @@ for the rendering, export, and CLI fixes included in this release.
 
 | I want to… | Start here |
 | --- | --- |
+| Build a cited data report from CSV and other sources | [Reports](docs/reports.md) |
 | Learn drawing, text, and page commands | [Drawing guide](docs/guide-drawing.md) |
 | Automate edits or call the rendering API | [Agent and CLI guide](docs/guide-agents.md) |
 | Work with images, photographs, or brushes | [Image and painting guide](docs/guide-images-and-paint.md) |

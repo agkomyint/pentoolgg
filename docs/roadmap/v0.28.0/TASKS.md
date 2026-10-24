@@ -33,3 +33,17 @@ existing flags and JSON fields keep working (new fields are additive).
 ### Explicitly deferred
 Operation signing, stale-base rejection, learned subject detection, new
 dependencies, time-based media.
+
+### Reports (maintainer-approved addition)
+
+Scope added by the maintainer on 2026-10-25: reports from multiple data sources
+with citations and visualization. Invariants: no new dependency; reuse
+`merge::parse_records`; deterministic output; data paths stay inside the spec
+directory; nothing is written when a build fails.
+
+- [x] `pentool report build|check|data|example` (`src/report.rs`).
+- [x] Sources with kind/publisher/url/date, numbered citations, Sources page.
+- [x] Blocks: heading, text, callout, stats, bar, column, segmented, table.
+- [x] Auto layout with continuation pages; `--strict` warnings.
+- [x] Tests in `tests/report.rs`; docs in `docs/reports.md`.
+- [ ] Studio panel for reports (explicitly deferred: CLI first).

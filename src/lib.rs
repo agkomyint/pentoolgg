@@ -78,6 +78,7 @@ pub mod raster;
 pub mod render;
 pub mod render_cache;
 pub mod replace;
+pub mod report;
 pub mod resource;
 pub mod scene;
 pub mod scene3d;

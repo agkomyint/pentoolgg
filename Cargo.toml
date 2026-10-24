@@ -165,6 +165,10 @@ name = "live_document"
 path = "tests/live_document.rs"
 
 [[test]]
+name = "report"
+path = "tests/report.rs"
+
+[[test]]
 name = "photo_import_studio"
 path = "tests/photo_import_studio.rs"
 

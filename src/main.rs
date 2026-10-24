@@ -2686,6 +2686,12 @@ enum Command {
         #[command(subcommand)]
         action: pentool::merge::AltAction,
     },
+    /// Build a cited, charted report from a JSON spec and CSV/TSV/JSON data
+    /// files; inspect data files; check citations. See docs/reports.md.
+    Report {
+        #[command(subcommand)]
+        action: pentool::report::ReportAction,
+    },
     /// `.penbook` books: ordered members with continuous numbering, style and
     /// swatch synchronization, book-wide TOC/index, preflight, package, export.
     /// Writes are all-or-none across members.
@@ -8511,6 +8517,11 @@ async fn execute(cli: Cli) -> Result<()> {
             if_revision,
             action,
         } => pentool::layout_cli::run_layout_alt(&input, dry_run, if_revision.as_deref(), action),
+        Command::Report { action } => {
+            let result = pentool::report::run(action)?;
+            println!("{result}");
+            Ok(())
+        }
         Command::Book { book, action } => {
             let result = pentool::book::run(&book, action)?;
             println!("{result}");
