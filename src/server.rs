@@ -644,8 +644,12 @@ struct RasterRequest {
 
 /// Stateless raster editing for the canvas: the whole document in, the changed
 /// document and a compact result out. Nothing is written unless it validates.
-async fn raster_command(Json(body): Json<RasterRequest>) -> Response {
-    match raster_apply(body) {
+async fn raster_command(State(state): State<Shared>, Json(body): Json<RasterRequest>) -> Response {
+    let document = state
+        .file
+        .clone()
+        .unwrap_or_else(|| state.project_root.join("untitled.pen"));
+    match raster_apply_in(body, &document) {
         Ok(value) => Json(value).into_response(),
         Err(e) => problem(e),
     }
@@ -1008,8 +1012,37 @@ async fn paint_score_command(Json(body): Json<PaintScoreRequest>) -> Response {
     }
 }
 
+#[cfg(test)]
 fn raster_apply(body: RasterRequest) -> Result<serde_json::Value> {
+    raster_apply_in(body, std::path::Path::new("untitled.pen"))
+}
+
+/// `document` anchors linked images when a node is baked into pixels.
+fn raster_apply_in(body: RasterRequest, document: &std::path::Path) -> Result<serde_json::Value> {
     let mut raw = body.document;
+    if body.action == "rasterize" {
+        // Studio selects on photos by baking the image node into a paint layer first.
+        let new_id = body
+            .args
+            .get("new_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("photo-pixels");
+        let replace = body
+            .args
+            .get("replace")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        let result = crate::raster::rasterize(
+            &mut raw,
+            document,
+            body.page.as_deref(),
+            &body.id,
+            new_id,
+            replace,
+        )?;
+        crate::transaction::validate_value(&raw)?;
+        return Ok(serde_json::json!({"document": raw, "result": result}));
+    }
     if body.action == "add" {
         // Creating the layer is not a pixel operation, so it has no existing id to apply to.
         let canvas_side = |side: &str| -> u32 {
@@ -6925,6 +6958,37 @@ mod tests {
         );
         assert!(bad.is_err());
         assert_eq!(raw, before);
+    }
+
+    #[test]
+    fn raster_endpoint_bakes_a_node_into_pixels_in_place() {
+        let added = super::raster_apply(super::RasterRequest {
+            document: crate::scene::new_document(64, 48),
+            page: None,
+            id: "paint-1".into(),
+            action: "add".into(),
+            args: serde_json::Value::Null,
+        })
+        .unwrap();
+        let painted = super::raster_apply(super::RasterRequest {
+            document: added["document"].clone(),
+            page: None,
+            id: "paint-1".into(),
+            action: "stroke".into(),
+            args: serde_json::json!({"samples": [[10, 10], [30, 20]], "brush": {"size": 6}, "color": "#ff0000"}),
+        })
+        .unwrap();
+        let baked = super::raster_apply(super::RasterRequest {
+            document: painted["document"].clone(),
+            page: None,
+            id: "paint-1".into(),
+            action: "rasterize".into(),
+            args: serde_json::json!({"new_id": "paint-1-pixels", "replace": true}),
+        })
+        .unwrap();
+        let document = &baked["document"];
+        assert!(crate::raster::info(document, None, "paint-1-pixels").is_ok());
+        assert!(crate::raster::info(document, None, "paint-1").is_err());
     }
 
     #[test]

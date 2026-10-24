@@ -3,7 +3,7 @@ import { usePaint } from "./rasterStore";
 import { useRasterLayers } from "./PaintOverlay";
 import { useStudio } from "@/store";
 import { postJson, type Doc } from "@/lib/api";
-import { addPaintLayer } from "./paintLayer";
+import { addPaintLayer, bakeSelectedImage, selectedImage } from "./paintLayer";
 import { PlanPanel } from "./PlanPanel";
 
 const field = "h-7 w-full rounded border bg-card px-1.5 text-xs";
@@ -73,10 +73,18 @@ export function RasterPanel() {
   };
 
   const tool = p.tool;
+  const studioSelection = useStudio((st) => st.selectedIds);
+  const photo = studioSelection.length === 1 ? selectedImage() : null;
   const paints = ["brush", "eraser", "clone", "heal", "quickmask", "selbrush"].includes(tool);
   const selecting = ["marquee", "lasso", "wand", "quickmask", "selbrush"].includes(tool);
   return (
     <div className="space-y-3 text-xs">
+      {photo && (
+        <div className="space-y-1 rounded border border-border p-2">
+          <p className="text-muted-foreground">{photo.id} is a photo. Turn it into pixels to select, move and paint on it.</p>
+          <Button size="sm" onClick={() => void bakeSelectedImage()}>Edit photo pixels</Button>
+        </div>
+      )}
       <label className="block space-y-1">
         <span className="text-muted-foreground">Layer</span>
         <select className={field} value={layer?.id ?? ""} onChange={(e) => p.set({ layerId: e.target.value })}>

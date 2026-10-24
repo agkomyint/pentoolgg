@@ -1,5 +1,5 @@
 import { api, postJson, type Doc, type SceneNode } from "@/lib/api";
-import { pageOf } from "@/lib/model";
+import { findNode, pageOf } from "@/lib/model";
 import { useStudio } from "@/store";
 import { usePaint, type RasterTool } from "./rasterStore";
 
@@ -37,9 +37,43 @@ export async function addPaintLayer(): Promise<string | null> {
   }
 }
 
+/** The one image node currently selected on the page, if any. */
+export function selectedImage(): SceneNode | null {
+  const { doc, pageId, selectedIds } = useStudio.getState();
+  if (!doc || selectedIds.length !== 1) return null;
+  const node = findNode(pageOf(doc, pageId), selectedIds[0]!)?.node;
+  return node && node.kind === "image" ? node : null;
+}
+
+/**
+ * Turn the selected photo into pixels the selection and paint tools can edit, in place
+ * (one undoable step), so a person can select and move parts of an image as in a photo editor.
+ */
+export async function bakeSelectedImage(): Promise<string | null> {
+  const image = selectedImage();
+  const { doc, pageId, replaceDoc, notify } = useStudio.getState();
+  if (!image || !doc) return null;
+  try {
+    let source: Doc = doc;
+    if (source.version < 6) source = (await api.migrate(source, 6)).document;
+    const id = `${image.id}-pixels`;
+    const body = await postJson<{ document: Doc }>("/api/raster", { document: source, page: pageOf(source, pageId)?.id, id: image.id, action: "rasterize", args: { new_id: id, replace: true } });
+    replaceDoc(body.document, "Edit photo pixels");
+    useStudio.setState({ selectedIds: [id], selectedId: id });
+    usePaint.getState().set({ layerId: id, selection: null, mask: null, status: "The photo is now editable pixels: select, move or paint on it. Undo restores the image." });
+    return id;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Could not turn the photo into pixels.";
+    usePaint.getState().set({ status: message });
+    notify(message, true);
+    return null;
+  }
+}
+
 /** Switch the main canvas to a paint tool and show its options. */
 export function startPainting(tool: RasterTool): void {
   usePaint.getState().set({ tool });
+  if (selectedImage()) void bakeSelectedImage();
   const studio = useStudio.getState();
   studio.setPaintMode(true);
   if (studio.workspaceId !== "paint") studio.setWorkspace("paint");
