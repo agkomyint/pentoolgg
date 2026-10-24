@@ -557,6 +557,21 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
         event.preventDefault();
         if (s.selection && layer) void call("select-clear", {});
+      } else if ((event.ctrlKey || event.metaKey) && ["c", "x", "j"].includes(event.key.toLowerCase()) && !event.shiftKey) {
+        // Photoshop keys: Ctrl+C / Ctrl+J copy the selection to a new layer, Ctrl+X cuts it.
+        if (s.selection && layer) {
+          event.preventDefault();
+          const st = useStudio.getState();
+          const taken = new Set(collectRasters(st.doc, st.pageId).map((n) => n.id));
+          let n = 1;
+          while (taken.has(`cutout-${n}`)) n += 1;
+          void call("lift", { new_id: `cutout-${n}`, cut: event.key.toLowerCase() === "x" });
+        }
+      } else if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "i") {
+        if (s.selection && layer) {
+          event.preventDefault();
+          void call("select-modify", { op: "invert", amount: 1 });
+        }
       } else if (!event.ctrlKey && !event.metaKey && (event.key === "Delete" || event.key === "Backspace")) {
         if (s.selection && layer) {
           event.preventDefault();
@@ -603,5 +618,5 @@ const STATUS: Record<string, string> = {
   "select-clear": "Selection cleared.",
   "select-modify": "Selection changed.",
   "select-refine": "Selection snapped to image edges.",
-  lift: "Pixels copied to a new layer.",
+  lift: "Copied or cut to a new layer (Ctrl+C / Ctrl+J copy, Ctrl+X cuts).",
 };
