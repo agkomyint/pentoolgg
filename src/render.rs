@@ -386,6 +386,17 @@ pub(crate) fn scene_to_png_proxy(scene: &crate::image::SceneSvg, scale: f32) -> 
     svg_to_png_with_fonts(&scene.svg, scene.width, scene.height, scale, &scene.fonts)
 }
 
+/// Demultiplies one rasterizer pixel. Blending (opacity, blend modes, edited
+/// raster layers) can round a colour channel one step above alpha; clamp it to
+/// alpha instead of failing the whole render.
+fn demultiply_clamped([r, g, b, a]: [u8; 4]) -> [u8; 4] {
+    let (r, g, b) = (r.min(a), g.min(a), b.min(a));
+    let c = tiny_skia::PremultipliedColorU8::from_rgba(r, g, b, a)
+        .expect("channels are clamped to alpha")
+        .demultiply();
+    [c.red(), c.green(), c.blue(), c.alpha()]
+}
+
 /// The same pixels as `scene_to_png_proxy` without the PNG encode/decode round trip.
 pub(crate) fn scene_to_rgba_proxy(
     scene: &crate::image::SceneSvg,
@@ -400,10 +411,9 @@ pub(crate) fn scene_to_rgba_proxy(
         if pixel[3] == 0 || pixel[3] == 255 {
             continue;
         }
-        let c = tiny_skia::PremultipliedColorU8::from_rgba(pixel[0], pixel[1], pixel[2], pixel[3])
-            .context("rasterizer produced an invalid premultiplied pixel")?
-            .demultiply();
-        pixel.copy_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+        pixel.copy_from_slice(&demultiply_clamped([
+            pixel[0], pixel[1], pixel[2], pixel[3],
+        ]));
     }
     image::RgbaImage::from_raw(width, height, data).context("proxy surface size mismatch")
 }
@@ -635,6 +645,12 @@ fn atomic_write(output: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channels_above_alpha_are_clamped_not_rejected() {
+        assert_eq!(demultiply_clamped([130, 10, 0, 128]), [255, 20, 0, 128]);
+        assert_eq!(demultiply_clamped([5, 5, 5, 0]), [0, 0, 0, 0]);
+    }
 
     /// `scene_to_rgba_proxy` skips transparent and opaque pixels on this basis.
     #[test]

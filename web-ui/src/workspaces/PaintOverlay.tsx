@@ -557,6 +557,11 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
         event.preventDefault();
         if (s.selection && layer) void call("select-clear", {});
+      } else if (!event.ctrlKey && !event.metaKey && (event.key === "Delete" || event.key === "Backspace")) {
+        if (s.selection && layer) {
+          event.preventDefault();
+          void call("delete-pixels", {});
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -588,6 +593,7 @@ const STATUS: Record<string, string> = {
   stroke: "Stroke applied. Undo (Ctrl+Z) reverts it; Save keeps it.",
   clone: "Cloned. Undo (Ctrl+Z) reverts it.",
   heal: "Healed. Undo (Ctrl+Z) reverts it.",
+  "delete-pixels": "Selected pixels deleted. Ctrl+Z undoes.",
   "move-pixels": "Moved the selected pixels. Hold Alt while dragging to copy instead; Ctrl+Z undoes.",
   quickmask: "Quick mask painted into the selection. Brush strokes now stay inside it; Ctrl+D deselects.",
   "set-clone-source": "Clone source set. Paint with Clone or Heal to copy from it.",
