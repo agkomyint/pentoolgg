@@ -109,6 +109,9 @@ export function RasterPanel() {
         </div>
       )}
 
+      {tool === "movesel" && (
+        <p className="text-muted-foreground">Drag to move the selected pixels (the outline follows). Hold Alt as you start to copy instead of move. With any selection tool, Ctrl-drag does the same.</p>
+      )}
       {selecting && (
         <div className="space-y-2">
           <label className="block space-y-1">

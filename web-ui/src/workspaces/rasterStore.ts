@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type RasterTool = "brush" | "eraser" | "clone" | "heal" | "source" | "quickmask" | "selbrush" | "marquee" | "lasso" | "wand";
+export type RasterTool = "brush" | "eraser" | "clone" | "heal" | "source" | "quickmask" | "selbrush" | "movesel" | "marquee" | "lasso" | "wand";
 /** Coverage grid of the active selection from the engine: `cells` is base64 of cols x rows bytes. */
 export type SelMask = { scale: number; cols: number; rows: number; cells: string };
 export type Guide = { axis: "x" | "y"; at: number };

@@ -127,12 +127,14 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
   const overlay = useRef<HTMLCanvasElement>(null);
   const live = useRef<{
     pointer: Pt | null;
-    stroke: null | { samples: { x: number; y: number; pressure: number }[]; preview: Pt[]; lag: Pt } | { lasso: true } | { marquee: Pt };
+    stroke: null | { samples: { x: number; y: number; pressure: number }[]; preview: Pt[]; lag: Pt } | { lasso: true } | { marquee: Pt } | { move: Pt };
+    /** Pixels the selection contents are being dragged by, before the engine commits the move. */
+    shift: { dx: number; dy: number } | null;
     lasso: Pt[];
     marquee: { x: number; y: number; width: number; height: number } | null;
     source: { x: number; y: number } | null;
     pending: Ghost[];
-  }>({ pointer: null, stroke: null, lasso: [], marquee: null, source: null, pending: [] });
+  }>({ pointer: null, stroke: null, lasso: [], marquee: null, source: null, pending: [], shift: null });
   const queue = useRef<Promise<void>>(Promise.resolve());
   /** Alt held when the stroke began: the selection brush then takes pixels out of the selection. */
   const alt = useRef(false);
@@ -245,8 +247,9 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
       ctx.rect(g.lx, g.ly, g.width, g.height);
       ctx.clip();
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(art.image, g.lx, g.ly, p.mask.cols * p.mask.scale, p.mask.rows * p.mask.scale);
-      ctx.translate(g.lx, g.ly);
+      const moved = l.shift ?? { dx: 0, dy: 0 };
+      ctx.drawImage(art.image, g.lx + moved.dx, g.ly + moved.dy, p.mask.cols * p.mask.scale, p.mask.rows * p.mask.scale);
+      ctx.translate(g.lx + moved.dx, g.ly + moved.dy);
       ctx.lineWidth = screenPx;
       ctx.strokeStyle = "#000";
       ctx.stroke(art.edges);
@@ -403,7 +406,7 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
         current.replaceDoc(body.document);
         const shape = body.result && ("bounds" in body.result ? body.result : body.result.selection);
         const bounds = shape?.bounds;
-        if ((action.startsWith("select-") && action !== "select-clear") || action === "quickmask") usePaint.getState().set({ selection: bounds ?? null, mask: shape?.preview ?? null });
+        if ((action.startsWith("select-") && action !== "select-clear") || action === "quickmask" || action === "move-pixels") usePaint.getState().set({ selection: bounds ?? null, mask: shape?.preview ?? null });
         if (action === "select-clear") usePaint.getState().set({ selection: null, mask: null });
         usePaint.getState().set({ status: STATUS[action] ?? "Done." });
         // A successful edit supersedes an earlier error (e.g. "Choose a clone source first").
@@ -452,6 +455,17 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
       useStudio.getState().notify("Choose a clone source first: Alt-click the area to copy from.", true);
       return;
     }
+    const grabbing = s.tool === "movesel" || ((event.ctrlKey || event.metaKey) && ["marquee", "lasso", "wand", "selbrush", "quickmask"].includes(s.tool));
+    if (grabbing) {
+      if (!s.selection) {
+        s.set({ status: "Make a selection first, then drag it to move its pixels." });
+        return;
+      }
+      l.stroke = { move: q };
+      l.shift = { dx: 0, dy: 0 };
+      draw();
+      return;
+    }
     if (s.tool === "wand") {
       void call("select-wand", { x: Math.max(0, Math.round(q.x)), y: Math.max(0, Math.round(q.y)), tolerance: s.tolerance, sample: s.sample, gradient: s.gradient, mode: s.mode });
       return;
@@ -482,7 +496,8 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
         const gy = s.lag.gy * w + q.gy * (1 - w);
         s.lag = { ...q, gx, gy };
         s.preview.push(s.lag);
-      } else if (s && "lasso" in s) l.lasso.push(q);
+      } else if (s && "move" in s) l.shift = { dx: Math.round(q.x - s.move.x), dy: Math.round(q.y - s.move.y) };
+      else if (s && "lasso" in s) l.lasso.push(q);
       else if (s && "marquee" in s) {
         const m = s.marquee;
         let w = q.x - m.x;
@@ -515,6 +530,10 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
           visible ? { pts: s.preview.slice(), size: st.size, kind: st.kind, color: st.color, erase: st.tool === "eraser", hardness: st.hardness, flow: st.flow, clip: st.selection } : undefined,
         );
       }
+    } else if ("move" in s) {
+      const by = l.shift;
+      if (by && (by.dx || by.dy)) void call("move-pixels", { dx: by.dx, dy: by.dy, copy: alt.current });
+      l.shift = null;
     } else if ("lasso" in s && l.lasso.length >= 3) {
       void call("select-lasso", { points: l.lasso.map((q) => [q.x, q.y]), mode: st.mode });
     } else if ("marquee" in s && l.marquee && l.marquee.width > 0 && l.marquee.height > 0) {
@@ -569,6 +588,7 @@ const STATUS: Record<string, string> = {
   stroke: "Stroke applied. Undo (Ctrl+Z) reverts it; Save keeps it.",
   clone: "Cloned. Undo (Ctrl+Z) reverts it.",
   heal: "Healed. Undo (Ctrl+Z) reverts it.",
+  "move-pixels": "Moved the selected pixels. Hold Alt while dragging to copy instead; Ctrl+Z undoes.",
   quickmask: "Quick mask painted into the selection. Brush strokes now stay inside it; Ctrl+D deselects.",
   "set-clone-source": "Clone source set. Paint with Clone or Heal to copy from it.",
   "select-marquee": "Selection made. Brush strokes stay inside it; Ctrl+D deselects.",
