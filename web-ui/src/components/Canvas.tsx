@@ -782,7 +782,7 @@ export function Canvas({ dragToUv = false, active = true }: { dragToUv?: boolean
         commitMove(selectionRoots(), dx, dy);
       } else if (!e.altKey && !e.shiftKey) {
         const map: Record<string, Parameters<typeof s.setTool>[0]> = { v: "select", p: "pen", r: "rect", o: "ellipse", l: "line", t: "text", h: "hand" };
-        const paint: Record<string, RasterTool> = { b: "brush", e: "eraser", m: "marquee", w: "wand", s: "clone", j: "heal", q: "quickmask" };
+        const paint: Record<string, RasterTool> = { b: "brush", e: "eraser", m: "marquee", w: "wand", s: "clone", j: "heal", q: "quickmask", a: "selbrush" };
         const next = map[key];
         if (next) s.setTool(next);
         else if (paint[key] && isScene(useStudio.getState().doc)) startPainting(paint[key]);

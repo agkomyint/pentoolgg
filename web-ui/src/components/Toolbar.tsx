@@ -1,4 +1,4 @@
-import { Brush, Circle, Copy, Crosshair, Eraser, Hand, HeartPulse, Lasso, MousePointer2, PenTool, ScanLine, Slash, Square, SquareDashed, Type, Wand2 } from "lucide-react";
+import { Brush, Circle, Copy, Crosshair, Eraser, Hand, HeartPulse, Highlighter, Lasso, MousePointer2, PenTool, ScanLine, Slash, Square, SquareDashed, Type, Wand2 } from "lucide-react";
 import { Fragment } from "react";
 import type { LucideIcon } from "lucide-react";
 import { isScene, type Tool } from "@/lib/model";
@@ -35,6 +35,7 @@ const PAINT_TOOLS: { id: RasterTool; label: string; key?: string; icon: LucideIc
   { id: "heal", label: "Heal", key: "J", icon: HeartPulse },
   { id: "source", label: "Clone source", icon: Crosshair },
   { id: "quickmask", label: "Quick mask", key: "Q", icon: ScanLine },
+  { id: "selbrush", label: "Selection brush", key: "A", icon: Highlighter },
   { id: "marquee", label: "Marquee", key: "M", icon: SquareDashed },
   { id: "lasso", label: "Lasso", icon: Lasso },
   { id: "wand", label: "Magic wand", key: "W", icon: Wand2 },

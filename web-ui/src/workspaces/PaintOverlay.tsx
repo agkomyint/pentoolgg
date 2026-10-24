@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { postJson, type Doc } from "@/lib/api";
 import { apply, findNode, invert, nodeWorldTransform, pageOf, type Matrix } from "@/lib/model";
 import { useStudio } from "@/store";
-import { usePaint } from "./rasterStore";
+import { usePaint, type SelMask } from "./rasterStore";
 import { addPaintLayer, collectRasters, type RasterNode } from "./paintLayer";
 
 export type { RasterNode } from "./paintLayer";
@@ -18,8 +18,44 @@ type Ghost = { pts: Pt[]; size: number; kind: string; color: string; erase: bool
 type Geometry = { node: RasterNode | null; lx: number; ly: number; width: number; height: number; world: Matrix; inverse: Matrix };
 
 const SNAP = 6;
-const CURSOR_TOOLS = ["brush", "eraser", "clone", "heal", "quickmask"];
-const STROKE_ACTIONS: Record<string, string> = { brush: "stroke", eraser: "stroke", clone: "clone", heal: "heal", quickmask: "quickmask" };
+const CURSOR_TOOLS = ["brush", "eraser", "clone", "heal", "quickmask", "selbrush"];
+const STROKE_ACTIONS: Record<string, string> = { brush: "stroke", eraser: "stroke", clone: "clone", heal: "heal", quickmask: "quickmask", selbrush: "quickmask" };
+
+type MaskArt = { image: HTMLCanvasElement; edges: Path2D };
+const maskArt = new WeakMap<SelMask, MaskArt>();
+
+/** The selection tint and its outline, built once per mask: edges lie where coverage crosses one half. */
+function artOf(m: SelMask): MaskArt {
+  const cached = maskArt.get(m);
+  if (cached) return cached;
+  const bytes = Uint8Array.from(atob(m.cells), (c) => c.charCodeAt(0));
+  const image = document.createElement("canvas");
+  image.width = m.cols;
+  image.height = m.rows;
+  const px = image.getContext("2d")!.createImageData(m.cols, m.rows);
+  const edges = new Path2D();
+  const on = (x: number, y: number) => x >= 0 && y >= 0 && x < m.cols && y < m.rows && bytes[y * m.cols + x]! >= 128;
+  for (let y = 0; y < m.rows; y++) {
+    for (let x = 0; x < m.cols; x++) {
+      const v = bytes[y * m.cols + x]!;
+      const at = (y * m.cols + x) * 4;
+      px.data[at] = 10;
+      px.data[at + 1] = 132;
+      px.data[at + 2] = 255;
+      px.data[at + 3] = Math.round(v * 0.3);
+      if (!on(x, y)) continue;
+      const s = m.scale;
+      if (!on(x - 1, y)) { edges.moveTo(x * s, y * s); edges.lineTo(x * s, (y + 1) * s); }
+      if (!on(x + 1, y)) { edges.moveTo((x + 1) * s, y * s); edges.lineTo((x + 1) * s, (y + 1) * s); }
+      if (!on(x, y - 1)) { edges.moveTo(x * s, y * s); edges.lineTo((x + 1) * s, y * s); }
+      if (!on(x, y + 1)) { edges.moveTo(x * s, (y + 1) * s); edges.lineTo((x + 1) * s, (y + 1) * s); }
+    }
+  }
+  image.getContext("2d")!.putImageData(px, 0, 0);
+  const art = { image, edges };
+  maskArt.set(m, art);
+  return art;
+}
 /** Largest overlay backing store; beyond it the overlay is upscaled like the preview. */
 const MAX_BACKING = 8192;
 
@@ -98,6 +134,8 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
     pending: Ghost[];
   }>({ pointer: null, stroke: null, lasso: [], marquee: null, source: null, pending: [] });
   const queue = useRef<Promise<void>>(Promise.resolve());
+  /** Alt held when the stroke began: the selection brush then takes pixels out of the selection. */
+  const alt = useRef(false);
   const inflight = useRef(0);
   const commits = useRef(new WeakMap<object, number>());
   const nextOrder = useRef(1);
@@ -200,7 +238,23 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
         ctx.restore();
       }
     };
-    if (p.selection && !l.marquee) {
+    if (p.mask && p.selection && !l.marquee) {
+      const art = artOf(p.mask);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(g.lx, g.ly, g.width, g.height);
+      ctx.clip();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(art.image, g.lx, g.ly, p.mask.cols * p.mask.scale, p.mask.rows * p.mask.scale);
+      ctx.translate(g.lx, g.ly);
+      ctx.lineWidth = screenPx;
+      ctx.strokeStyle = "#000";
+      ctx.stroke(art.edges);
+      ctx.strokeStyle = "#fff";
+      ctx.setLineDash([4 * screenPx, 4 * screenPx]);
+      ctx.stroke(art.edges);
+      ctx.restore();
+    } else if (p.selection && !l.marquee) {
       const [x0, y0, x1, y1] = p.selection as [number, number, number, number];
       ants(g.lx + x0, g.ly + y0, x1 - x0, y1 - y0);
     }
@@ -244,9 +298,9 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
     const s = l.stroke;
     if (s && "samples" in s) {
       const erase = p.tool === "eraser";
-      const color = p.tool === "quickmask" ? "#ff3b30" : p.color;
+      const color = p.tool === "quickmask" ? "#ff3b30" : p.tool === "selbrush" ? "#0a84ff" : p.color;
       if (p.tool === "brush" || erase) clipped(p.selection, () => dabs(ctx, s.preview.map(toParent), p.size, p.kind, erase ? paper : rgbOf(color), p.hardness, p.flow));
-      else if (p.tool === "quickmask") dabs(ctx, s.preview.map(toParent), p.size, p.kind, rgbOf(color), p.hardness, 0.5);
+      else if (p.tool === "quickmask" || p.tool === "selbrush") dabs(ctx, s.preview.map(toParent), p.size, p.kind, rgbOf(color), p.hardness, 0.5);
       if (p.stabilizer > 0 && s.preview.length) {
         const last = s.preview.at(-1)!;
         const from = toParent(s.lag);
@@ -287,12 +341,12 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
   }, [doc]);
   // The selection outline belongs to one layer.
   useEffect(() => {
-    usePaint.getState().set({ selection: null });
+    usePaint.getState().set({ selection: null, mask: null });
     live.current.source = null;
   }, [layer?.id, pageId]);
   useEffect(() => {
     draw();
-  }, [draw, backingW, backingH, paint.tool, paint.size, paint.rulers, paint.guides, paint.shape, paint.selection]);
+  }, [draw, backingW, backingH, paint.tool, paint.size, paint.rulers, paint.guides, paint.shape, paint.selection, paint.mask]);
 
   const toLayer = (event: { clientX: number; clientY: number }): Pt | null => {
     const g = geometry();
@@ -338,7 +392,7 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
         if (!id) throw new Error("Could not add a paint layer to this page.");
         const current = useStudio.getState();
         if (!current.doc) return;
-        const body = await postJson<{ document: Doc; result?: { bounds?: number[] | null; selection?: { bounds?: number[] | null } } }>("/api/raster", { document: current.doc, page: current.pageId, id, action, args });
+        const body = await postJson<{ document: Doc; result?: { bounds?: number[] | null; preview?: SelMask | null; selection?: { bounds?: number[] | null; preview?: SelMask | null } } }>("/api/raster", { document: current.doc, page: current.pageId, id, action, args });
         if (useStudio.getState().doc !== current.doc) throw new Error("The project changed while this edit was processing. Try the edit again.");
         const order = nextOrder.current++;
         commits.current.set(body.document, order);
@@ -347,9 +401,10 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
           entry.order = order;
         }
         current.replaceDoc(body.document);
-        const bounds = body.result && ("bounds" in body.result ? body.result.bounds : body.result.selection?.bounds);
-        if ((action.startsWith("select-") && action !== "select-clear") || action === "quickmask") usePaint.getState().set({ selection: bounds ?? null });
-        if (action === "select-clear") usePaint.getState().set({ selection: null });
+        const shape = body.result && ("bounds" in body.result ? body.result : body.result.selection);
+        const bounds = shape?.bounds;
+        if ((action.startsWith("select-") && action !== "select-clear") || action === "quickmask") usePaint.getState().set({ selection: bounds ?? null, mask: shape?.preview ?? null });
+        if (action === "select-clear") usePaint.getState().set({ selection: null, mask: null });
         usePaint.getState().set({ status: STATUS[action] ?? "Done." });
         // A successful edit supersedes an earlier error (e.g. "Choose a clone source first").
         if (useStudio.getState().message?.error) useStudio.setState({ message: null });
@@ -383,6 +438,7 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
     q = snap(q);
     event.preventDefault();
     el.setPointerCapture(event.pointerId);
+    alt.current = event.altKey;
     const l = live.current;
     // Alt-click with clone or heal picks the source, as in other editors.
     if (s.tool === "source" || ((s.tool === "clone" || s.tool === "heal") && event.altKey)) {
@@ -455,7 +511,7 @@ export function PaintOverlay({ canvas, cssWidth, cssHeight, renderedDoc, onPanSt
         const visible = st.tool === "brush" || st.tool === "eraser";
         void call(
           action,
-          { brush, color: st.color, seed: 0, samples: s.samples, blend: st.tool === "eraser" ? "erase" : "normal", erase: st.tool === "quickmask" && st.mode === "subtract" },
+          { brush, color: st.color, seed: 0, samples: s.samples, blend: st.tool === "eraser" ? "erase" : "normal", erase: (st.tool === "quickmask" || st.tool === "selbrush") && (st.mode === "subtract" || alt.current) },
           visible ? { pts: s.preview.slice(), size: st.size, kind: st.kind, color: st.color, erase: st.tool === "eraser", hardness: st.hardness, flow: st.flow, clip: st.selection } : undefined,
         );
       }

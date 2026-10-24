@@ -208,6 +208,45 @@ pub fn combine(mode: Mode, old: Option<&Surface>, new: &Surface) -> Result<Surfa
     Ok(out)
 }
 
+/// The longest edge of a selection preview grid.
+const PREVIEW_EDGE: u32 = 256;
+
+/// A bounded coverage grid so a client can draw the real selection shape, not just
+/// its bounding box: `cells` is base64 of `cols * rows` mean-coverage bytes, where each
+/// cell covers `scale` x `scale` layer pixels. `null` when nothing is selected.
+fn preview(selection: &Surface) -> Value {
+    use base64::Engine as _;
+    if selection.width == 0 || selection.height == 0 || selection.tiles.is_empty() {
+        return Value::Null;
+    }
+    let scale = selection
+        .width
+        .max(selection.height)
+        .div_ceil(PREVIEW_EDGE)
+        .max(1);
+    let (cols, rows) = (
+        selection.width.div_ceil(scale),
+        selection.height.div_ceil(scale),
+    );
+    let mut sums = vec![0u32; (cols * rows) as usize];
+    selection.for_each_painted(|x, y, p| {
+        if x < selection.width && y < selection.height {
+            sums[((y / scale) * cols + x / scale) as usize] += u32::from(p[3]);
+        }
+    });
+    let area = scale * scale;
+    let data: Vec<u8> = sums
+        .iter()
+        .map(|sum| ((sum + area / 2) / area).min(255) as u8)
+        .collect();
+    json!({
+        "scale": scale,
+        "cols": cols,
+        "rows": rows,
+        "cells": base64::engine::general_purpose::STANDARD.encode(data),
+    })
+}
+
 /// Selected-area summary for `select-info` and command results.
 pub fn summary(selection: &Surface) -> Value {
     let (mut pixels, mut full) = (0u64, 0u64);
@@ -219,6 +258,7 @@ pub fn summary(selection: &Surface) -> Value {
     });
     let bounds = selection.painted_bounds();
     json!({
+        "preview": preview(selection),
         "width": selection.width,
         "height": selection.height,
         "selected_pixels": pixels,
@@ -314,6 +354,27 @@ mod tests {
             set_coverage(&mut s, x, y, v);
         }
         s
+    }
+
+    #[test]
+    fn summary_carries_a_preview_grid_of_the_real_shape() {
+        use base64::Engine as _;
+        let mut sel = Surface::empty(600, 40);
+        for x in 0..10 {
+            set_coverage(&mut sel, x, 0, 255);
+        }
+        let preview = summary(&sel)["preview"].clone();
+        assert_eq!(preview["scale"], 3);
+        assert_eq!(preview["cols"], 200);
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(preview["cells"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(data.len(), 200 * 14);
+        assert_eq!(data[0], 85); // 3 of 9 pixels selected in the first cell
+        assert_eq!(data[2], 85);
+        assert_eq!(data[3], 28);
+        assert_eq!(data[4], 0);
+        assert!(summary(&Surface::empty(8, 8))["preview"].is_null());
     }
 
     #[test]

@@ -33,7 +33,7 @@ const TOOLS: [Tool, string, string][] = [
 ];
 const PAINT: [RasterTool, string, string][] = [
   ["brush", "Brush", "B"], ["eraser", "Eraser", "E"], ["clone", "Clone stamp", "S"], ["heal", "Heal", "J"],
-  ["quickmask", "Quick mask", "Q"], ["marquee", "Marquee select", "M"], ["lasso", "Lasso select", ""], ["wand", "Magic wand", "W"],
+  ["quickmask", "Quick mask", "Q"], ["selbrush", "Selection brush", "A"], ["marquee", "Marquee select", "M"], ["lasso", "Lasso select", ""], ["wand", "Magic wand", "W"],
 ];
 const ALIGN: [Align, string][] = [
   ["left", "Align left"], ["hcenter", "Align horizontal centers"], ["right", "Align right"],

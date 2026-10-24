@@ -73,8 +73,8 @@ export function RasterPanel() {
   };
 
   const tool = p.tool;
-  const paints = ["brush", "eraser", "clone", "heal", "quickmask"].includes(tool);
-  const selecting = ["marquee", "lasso", "wand", "quickmask"].includes(tool);
+  const paints = ["brush", "eraser", "clone", "heal", "quickmask", "selbrush"].includes(tool);
+  const selecting = ["marquee", "lasso", "wand", "quickmask", "selbrush"].includes(tool);
   return (
     <div className="space-y-3 text-xs">
       <label className="block space-y-1">
@@ -119,6 +119,9 @@ export function RasterPanel() {
               ))}
             </select>
           </label>
+          {tool === "selbrush" && (
+            <p className="text-muted-foreground">Paint over the subject to add it to the selection. Hold Alt, or set the mode to subtract, to take areas out. The tinted shape is the real selection.</p>
+          )}
           {tool === "marquee" && (
             <label className="block space-y-1">
               <span className="text-muted-foreground">Marquee</span>

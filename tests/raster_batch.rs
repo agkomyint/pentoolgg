@@ -266,3 +266,36 @@ fn delete_pixels_erases_the_selection_and_leaves_no_temporary_layer() {
     let err = fail(&["raster", &doc, "batch", &ops]);
     assert!(err.contains("transparent pixels"), "{err}");
 }
+
+#[test]
+fn selection_results_carry_a_preview_of_the_real_shape() {
+    let ws = Workspace::new("preview");
+    let doc = ws.document("v.pen");
+    let out = ok(&[
+        "raster",
+        &doc,
+        "select-marquee",
+        "p",
+        "--rect",
+        "10",
+        "10",
+        "30",
+        "20",
+        "--shape",
+        "ellipse",
+    ]);
+    let preview = &out["result"]["preview"];
+    assert_eq!(preview["cols"], 100, "{out}");
+    assert_eq!(preview["rows"], 60, "{out}");
+    let brush = ok(&[
+        "raster",
+        &doc,
+        "select-quickmask",
+        "p",
+        "--samples",
+        "[[70,30]]",
+        "--brush",
+        r#"{"size":10,"hardness":1,"flow":1}"#,
+    ]);
+    assert!(brush["result"]["preview"]["cells"].is_string(), "{brush}");
+}

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
-export type RasterTool = "brush" | "eraser" | "clone" | "heal" | "source" | "quickmask" | "marquee" | "lasso" | "wand";
+export type RasterTool = "brush" | "eraser" | "clone" | "heal" | "source" | "quickmask" | "selbrush" | "marquee" | "lasso" | "wand";
+/** Coverage grid of the active selection from the engine: `cells` is base64 of cols x rows bytes. */
+export type SelMask = { scale: number; cols: number; rows: number; cells: string };
 export type Guide = { axis: "x" | "y"; at: number };
 
 type State = {
@@ -22,6 +24,8 @@ type State = {
   amount: number;
   /** Active selection bounds from the engine, in layer pixels [x0, y0, x1, y1]. */
   selection: number[] | null;
+  /** The real selection shape, so the outline and tint follow it instead of its bounding box. */
+  mask: SelMask | null;
   rulers: boolean;
   snap: boolean;
   grid: number;
@@ -49,6 +53,7 @@ export const usePaint = create<State>((set) => ({
   gradient: 0,
   amount: 2,
   selection: null,
+  mask: null,
   rulers: false,
   snap: false,
   grid: 0,
