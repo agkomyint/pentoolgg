@@ -19,7 +19,7 @@ exclude = ["fuzz"]
 
 [workspace.package]
 # Single source of truth: `env!("CARGO_PKG_VERSION")` in the core must equal the binary.
-version = "0.27.0"
+version = "0.28.0"
 
 [features]
 default = []
