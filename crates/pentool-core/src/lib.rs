@@ -1,0 +1,103 @@
+//! Browser-independent document, editing, geometry, and rendering engine.
+//!
+//! This is the `pentool-core` crate (see `docs/architecture.md`). The `pentool`
+//! crate re-exports every module here under its original path.
+
+/// Command output goes through `preview::print`, so `--preview` can add its
+/// result to the command's JSON. Without previews it prints at once, unchanged.
+macro_rules! println {
+    ($($arg:tt)*) => { $crate::preview::print(format!($($arg)*)) };
+}
+
+pub mod agent;
+pub mod asset;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod benchmark;
+pub mod blend;
+pub mod book;
+pub mod collab;
+pub mod color;
+pub mod comments;
+pub mod compose;
+pub mod composite;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod design;
+pub mod diff;
+pub mod document;
+pub mod editing;
+pub mod effects;
+mod fig_binary;
+pub mod figma_import;
+pub mod fill;
+pub mod font_cache;
+pub mod fonts;
+pub mod geometry;
+pub mod grids;
+pub mod history;
+pub mod idml;
+pub mod idml_export;
+pub mod image;
+pub mod imageops;
+pub mod import;
+pub mod inspect;
+pub mod instance;
+pub mod interchange;
+pub mod json;
+pub mod layout;
+pub mod layout_cli;
+pub mod layout_preflight;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod library;
+pub mod linked;
+pub mod longdoc;
+pub mod mask;
+pub mod merge;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod package;
+pub mod page;
+pub mod paint_analysis;
+pub mod paint_bundle;
+pub mod paint_constraints;
+pub mod paint_fields;
+pub mod paint_guide;
+pub mod paint_media;
+pub mod paint_palette;
+pub mod paint_plan;
+pub mod paint_review;
+pub mod paint_score;
+pub mod pdf;
+pub mod pdf_import;
+pub mod photo;
+pub mod preset;
+pub mod preview;
+pub mod psd_export;
+pub mod psd_import;
+pub mod publish;
+pub mod raster;
+pub mod render;
+pub mod render_cache;
+pub mod replace;
+pub mod report;
+pub mod resource;
+pub mod scene;
+pub mod scene3d;
+pub mod selection;
+pub mod shaping;
+pub mod sketch_import;
+pub mod spreads;
+pub mod stale;
+pub mod stories;
+pub mod style;
+pub mod style_eval;
+pub mod styles;
+pub mod svg_import;
+pub mod svg_paint;
+pub mod tables;
+pub mod text;
+pub mod threads;
+pub mod tokens;
+pub mod transaction;
+pub mod transform;
+pub mod typeset;
+pub mod watch;
+pub mod wrap;

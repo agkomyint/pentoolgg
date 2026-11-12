@@ -947,7 +947,7 @@ mod linear_fill_tests {
     #[test]
     fn cancellation_at_each_working_fill_row_discards_private_output() {
         let mut raw: Value =
-            serde_json::from_slice(include_bytes!("../docs/fixtures/print-v8.pen")).unwrap();
+            serde_json::from_slice(include_bytes!("../../../docs/fixtures/print-v8.pen")).unwrap();
         raw["pages"][0]["canvas"] = json!({"width":1,"height":3,"background":"#00000000"});
         raw["pages"][0]["layers"][0]["nodes"] = json!([{"kind":"fill","id":"paint","x":0,"y":0,"width":1,"height":3,
             "fill":{"kind":"solid","color":{"space":"srgb:linear","channels":[0.2,0.4,0.6],"alpha":0.123456789}}}]);

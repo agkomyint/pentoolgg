@@ -15,25 +15,25 @@ pub const BUNDLED: [(&str, u16, bool, &[u8]); 4] = [
         "regular",
         400,
         false,
-        include_bytes!("../assets/fonts/AtkinsonHyperlegible-Regular.ttf"),
+        include_bytes!("../../../assets/fonts/AtkinsonHyperlegible-Regular.ttf"),
     ),
     (
         "bold",
         700,
         false,
-        include_bytes!("../assets/fonts/AtkinsonHyperlegible-Bold.ttf"),
+        include_bytes!("../../../assets/fonts/AtkinsonHyperlegible-Bold.ttf"),
     ),
     (
         "italic",
         400,
         true,
-        include_bytes!("../assets/fonts/AtkinsonHyperlegible-Italic.ttf"),
+        include_bytes!("../../../assets/fonts/AtkinsonHyperlegible-Italic.ttf"),
     ),
     (
         "bold-italic",
         700,
         true,
-        include_bytes!("../assets/fonts/AtkinsonHyperlegible-BoldItalic.ttf"),
+        include_bytes!("../../../assets/fonts/AtkinsonHyperlegible-BoldItalic.ttf"),
     ),
 ];
 

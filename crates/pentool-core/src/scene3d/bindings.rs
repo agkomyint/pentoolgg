@@ -2540,7 +2540,7 @@ mod tests {
     #[test]
     fn triplanar_surface_binding_renders_without_source_uvs() {
         let raw: Value = serde_json::from_str(include_str!(
-            "../../docs/fixtures/v11-product-packaging.pen"
+            "../../../../docs/fixtures/v11-product-packaging.pen"
         ))
         .unwrap();
         let node = json!({"id":"triplanar-preview","width":96,"height":96,
@@ -2599,7 +2599,7 @@ mod tests {
     #[test]
     fn uv_island_surface_graphic_duplicates_only_owned_triangles() {
         let mut raw: Value = serde_json::from_str(include_str!(
-            "../../docs/fixtures/v11-product-packaging.pen"
+            "../../../../docs/fixtures/v11-product-packaging.pen"
         ))
         .unwrap();
         let form_id = "perfume-bottle";
@@ -2756,7 +2756,7 @@ mod tests {
     #[test]
     fn nested_clipped_node_sources_keep_their_ancestor_transform_and_clip_base() {
         let mut raw: Value = serde_json::from_str(include_str!(
-            "../../docs/fixtures/v11-product-packaging.pen"
+            "../../../../docs/fixtures/v11-product-packaging.pen"
         ))
         .unwrap();
         raw["pages"][0]["layers"][0]["nodes"] = json!([{

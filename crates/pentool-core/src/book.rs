@@ -1671,7 +1671,7 @@ mod tests {
 
     #[test]
     fn fixture_manifest_is_valid() {
-        let text = include_str!("../docs/fixtures/penbook-valid.penbook");
+        let text = include_str!("../../../docs/fixtures/penbook-valid.penbook");
         let value: Value = serde_json::from_str(text).unwrap();
         validate_manifest(&value).unwrap();
     }

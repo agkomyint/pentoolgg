@@ -22,8 +22,9 @@ pub fn run_scene3d_cache(repetitions: usize) -> Result<Value> {
         (1..=20).contains(&repetitions),
         "scene3d cache benchmark repetitions must be 1..=20"
     );
-    let mut document: Value =
-        serde_json::from_str(include_str!("../docs/fixtures/v11-product-packaging.pen"))?;
+    let mut document: Value = serde_json::from_str(include_str!(
+        "../../../docs/fixtures/v11-product-packaging.pen"
+    ))?;
     let page = document["pages"]
         .as_array_mut()
         .context("fixture pages are missing")?

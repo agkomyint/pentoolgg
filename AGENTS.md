@@ -125,17 +125,27 @@ Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
 
 ## Repository map
 
+Two crates in one workspace (decision record: `docs/architecture.md`).
+`crates/pentool-core/src/` is the engine: document model, editing, geometry,
+rendering, imports and exports, transactions, history, the collaboration
+operation log. `src/` is the `pentool` crate: the CLI, the HTTP server, AI,
+extensions and networked collaboration. `pentool` re-exports every core module,
+so `pentool::scene` and friends keep working for tests, fuzzing and `wasm/`.
+`pentool-core` must never depend on `pentool`. New engine code goes in the core;
+only code that needs the server, sockets or the CLI belongs in `src/`.
+`env!("CARGO_PKG_VERSION")` is shared through `[workspace.package]`.
+
 - `src/main.rs`: CLI definitions and command routing. Keep business logic out when
   it can live in a focused library module.
-- `src/scene.rs`: v4 scene graph, semantic nodes, migration, validation, grouping,
-  bounds, and v4 inspection.
-- `src/document.rs`: legacy v1-v3 typed document model.
-- `src/transaction.rs` and `src/history.rs`: atomic writes and recovery.
-- `src/render.rs`, `src/pdf.rs`, and `src/fonts.rs`: export pipeline.
-- `src/agent.rs`, `src/editing.rs`, `src/geometry.rs`, and `src/text.rs`: discovery
-  and editing behavior.
-- `src/asset.rs`, `src/instance.rs`, `src/library.rs`, and `src/package.rs`: reusable
-  assets and packages.
+- `crates/pentool-core/src/scene.rs`: v4 scene graph, semantic nodes, migration,
+  validation, grouping, bounds, and v4 inspection.
+- `crates/pentool-core/src/document.rs`: legacy v1-v3 typed document model.
+- `crates/pentool-core/src/transaction.rs` and `history.rs`: atomic writes and recovery.
+- `crates/pentool-core/src/render.rs`, `pdf.rs`, and `fonts.rs`: export pipeline.
+- `crates/pentool-core/src/agent.rs`, `editing.rs`, `geometry.rs`, and `text.rs`:
+  discovery and editing behavior.
+- `crates/pentool-core/src/asset.rs`, `instance.rs`, `library.rs`, and `package.rs`:
+  reusable assets and packages.
 - `web/`: browser UI shipped inside the binary.
 - `web-ui/`: TypeScript source (Vite, React, Tailwind, shadcn-style) of Pentool Studio;
   `bun run build` refreshes the committed, embedded `web/studio.html`. See
@@ -170,10 +180,10 @@ Follow semantic versioning (`MAJOR.MINOR.PATCH`, no leading zeros):
 
 | Area | Code | Tests |
 | --- | --- | --- |
-| Scene graph, tree/search | `src/scene.rs`, `src/agent.rs` | `tests/suites/`, `docs/fixtures/` |
-| Transactions, history | `src/transaction.rs`, `src/history.rs`, `src/stale.rs` | `tests/suites/` |
-| Rendering, text, PDF | `src/render.rs`, `src/text.rs`, `src/pdf.rs`, `src/fonts.rs` | goldens in `tests/`, `examples/` |
-| Collaboration | `src/collab/*` (op, log, merge, sync, perm, token, stats, presence), `src/comments.rs` | `tests/collab_*.rs`, `tests/comments.rs` |
+| Scene graph, tree/search | `crates/pentool-core/src/scene.rs`, `agent.rs` | `tests/suites/`, `docs/fixtures/` |
+| Transactions, history | `crates/pentool-core/src/{transaction,history,stale}.rs` | `tests/suites/` |
+| Rendering, text, PDF | `crates/pentool-core/src/{render,text,pdf,fonts}.rs` | goldens in `tests/`, `examples/` |
+| Collaboration | `crates/pentool-core/src/collab/` (op, log, merge, claims, hlc, stats, comments), `src/collab/` (sync, perm, token, presence, evidence) | `tests/collab_*.rs`, `tests/comments.rs` |
 | Studio UI | `web-ui/src/`, built to `web/studio.html` | `bun run typecheck`, embed checks in `tests/` |
 | Server | `src/server.rs` | route scan in `tests/collab_sync.rs` |
 
@@ -198,7 +208,8 @@ separate binary, so target the one file or test you touched:
 
 ```sh
 cargo test --test <touched_test_file> --locked
-cargo test --lib <name_filter> --locked
+cargo test -p pentool-core --lib <name_filter> --locked   # engine unit tests
+cargo test -p pentool --lib <name_filter> --locked        # server/collab-sync unit tests
 cargo check --all-targets --locked
 ```
 
@@ -338,7 +349,8 @@ requires a successful CI run for the tagged commit, then builds the release
 binaries and smoke-tests them. Before tagging:
 
 1. choose a new semantic version; never move or reuse a published tag;
-2. update both `Cargo.toml` and the `pentool` package entry in `Cargo.lock`;
+2. update `[workspace.package] version` in `Cargo.toml` and both the `pentool` and
+   `pentool-core` package entries in `Cargo.lock`;
 3. ensure the exact commit has passed regular CI;
 4. verify release smoke coverage includes the changed behavior;
 5. create the tag only from that passing commit;

@@ -146,7 +146,7 @@ pub fn lock(dir: &Path) -> Result<Lock> {
     )
 }
 
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let temp = path.with_extension(format!("{}.tmp", std::process::id()));
     {
         let mut file = File::create(&temp)?;

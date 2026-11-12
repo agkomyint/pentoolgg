@@ -41,7 +41,8 @@ media is out of scope (see `AGENTS.md`).
   `wasm32-unknown-unknown`; record binary size, cold start, and the list of
   dependencies that do not compile. Decision record in `docs/architecture.md`.
   Nothing else starts until this is measured.
-- [ ] **2. Core crate split.** Extract the platform-independent core
+- [ ] **2. Core crate split.** (Implemented on branch `core-split`; decision record
+  in `docs/architecture.md`; tick after the three-OS CI run is green.) Extract the platform-independent core
   (`pentool-core`) from the binary crate behind the existing public behavior;
   file, process and network access stay in the binary. Existing tests pass
   unchanged.

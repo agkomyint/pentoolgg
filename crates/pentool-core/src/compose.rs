@@ -39,35 +39,74 @@ struct Patterns {
 const SETS: [(&str, &[u8]); 17] = [
     (
         "en-us",
-        include_bytes!("../assets/hyphenation/en-us.pat.gz"),
+        include_bytes!("../../../assets/hyphenation/en-us.pat.gz"),
     ),
     (
         "en-gb",
-        include_bytes!("../assets/hyphenation/en-gb.pat.gz"),
+        include_bytes!("../../../assets/hyphenation/en-gb.pat.gz"),
     ),
     (
         "de-1996",
-        include_bytes!("../assets/hyphenation/de-1996.pat.gz"),
+        include_bytes!("../../../assets/hyphenation/de-1996.pat.gz"),
     ),
-    ("fr", include_bytes!("../assets/hyphenation/fr.pat.gz")),
-    ("es", include_bytes!("../assets/hyphenation/es.pat.gz")),
-    ("it", include_bytes!("../assets/hyphenation/it.pat.gz")),
-    ("pt", include_bytes!("../assets/hyphenation/pt.pat.gz")),
-    ("nl", include_bytes!("../assets/hyphenation/nl.pat.gz")),
-    ("sv", include_bytes!("../assets/hyphenation/sv.pat.gz")),
-    ("da", include_bytes!("../assets/hyphenation/da.pat.gz")),
-    ("nb", include_bytes!("../assets/hyphenation/nb.pat.gz")),
-    ("fi", include_bytes!("../assets/hyphenation/fi.pat.gz")),
-    ("pl", include_bytes!("../assets/hyphenation/pl.pat.gz")),
-    ("ru", include_bytes!("../assets/hyphenation/ru.pat.gz")),
-    ("uk", include_bytes!("../assets/hyphenation/uk.pat.gz")),
+    (
+        "fr",
+        include_bytes!("../../../assets/hyphenation/fr.pat.gz"),
+    ),
+    (
+        "es",
+        include_bytes!("../../../assets/hyphenation/es.pat.gz"),
+    ),
+    (
+        "it",
+        include_bytes!("../../../assets/hyphenation/it.pat.gz"),
+    ),
+    (
+        "pt",
+        include_bytes!("../../../assets/hyphenation/pt.pat.gz"),
+    ),
+    (
+        "nl",
+        include_bytes!("../../../assets/hyphenation/nl.pat.gz"),
+    ),
+    (
+        "sv",
+        include_bytes!("../../../assets/hyphenation/sv.pat.gz"),
+    ),
+    (
+        "da",
+        include_bytes!("../../../assets/hyphenation/da.pat.gz"),
+    ),
+    (
+        "nb",
+        include_bytes!("../../../assets/hyphenation/nb.pat.gz"),
+    ),
+    (
+        "fi",
+        include_bytes!("../../../assets/hyphenation/fi.pat.gz"),
+    ),
+    (
+        "pl",
+        include_bytes!("../../../assets/hyphenation/pl.pat.gz"),
+    ),
+    (
+        "ru",
+        include_bytes!("../../../assets/hyphenation/ru.pat.gz"),
+    ),
+    (
+        "uk",
+        include_bytes!("../../../assets/hyphenation/uk.pat.gz"),
+    ),
     (
         "el-monoton",
-        include_bytes!("../assets/hyphenation/el-monoton.pat.gz"),
+        include_bytes!("../../../assets/hyphenation/el-monoton.pat.gz"),
     ),
-    ("tr", include_bytes!("../assets/hyphenation/tr.pat.gz")),
+    (
+        "tr",
+        include_bytes!("../../../assets/hyphenation/tr.pat.gz"),
+    ),
 ];
-const EN_US_EXCEPTIONS: &[u8] = include_bytes!("../assets/hyphenation/en-us.hyp.gz");
+const EN_US_EXCEPTIONS: &[u8] = include_bytes!("../../../assets/hyphenation/en-us.hyp.gz");
 
 /// Map a BCP 47 tag onto a bundled pattern set.
 pub fn pattern_set(language: &str) -> Option<&'static str> {

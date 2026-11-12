@@ -13,7 +13,7 @@ mod effect;
 thread_local! { static CANCEL: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
 thread_local! { static TRIP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
-pub(crate) fn check_cancelled() -> Result<()> {
+pub fn check_cancelled() -> Result<()> {
     #[cfg(test)]
     if TRIP.with(|t| {
         let left = t.get();
@@ -210,10 +210,7 @@ fn store(key: [u8; 32], mut entry: CachedSurface) {
     });
 }
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn with_cancel<T>(
-    flag: Arc<AtomicBool>,
-    operation: impl FnOnce() -> Result<T>,
-) -> Result<T> {
+pub fn with_cancel<T>(flag: Arc<AtomicBool>, operation: impl FnOnce() -> Result<T>) -> Result<T> {
     struct Reset(Option<Arc<AtomicBool>>);
     impl Drop for Reset {
         fn drop(&mut self) {
@@ -3042,7 +3039,7 @@ mod node_cache_tests {
     #[test]
     fn cached_node_surfaces_render_the_same_bytes_and_budget() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v6-composite.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v6-composite.pen")).unwrap();
         let blurred = json!({"kind":"ellipse","id":"cloud","cx":3.5,"cy":2.5,"radius_x":2.5,"radius_y":1.5,
             "style":{"fill":{"fallback":"#ffffff"}},
             "effects":[{"id":"soft","kind":"blur","enabled":true,"opacity":1,"blend_mode":"normal","params":{"radius":1.5}}]});
@@ -3075,7 +3072,7 @@ mod node_cache_tests {
     fn a_hit_that_would_cross_a_limit_renders_and_fails_the_same_way() {
         cache_node_surfaces(64 << 20);
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v6-composite.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v6-composite.pen")).unwrap();
         raw["pages"].as_array_mut().unwrap().truncate(1);
         scene(&raw, "composite");
         let key = NODE_CACHE.with(|c| c.borrow().as_ref().unwrap().entries.len());

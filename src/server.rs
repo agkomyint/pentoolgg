@@ -5153,6 +5153,8 @@ fn problem(error: anyhow::Error) -> Response {
 
 #[cfg(test)]
 mod tests {
+    /// Serializes tests that read the process-wide scene3d PNG cache counters.
+    static PNG_CACHE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     #[tokio::test]
     async fn empty_404_and_405_responses_get_json_bodies() {
         use axum::response::IntoResponse;
@@ -6824,7 +6826,7 @@ mod tests {
 
     #[tokio::test]
     async fn scene3d_cache_endpoint_reports_and_clears_process_local_entries() {
-        let _cache_guard = crate::scene3d::node::PNG_CACHE_TEST_LOCK.lock().await;
+        let _cache_guard = PNG_CACHE_TEST_LOCK.lock().await;
         let status = super::scene3d_cache_status().await;
         let body = axum::body::to_bytes(status.into_body(), usize::MAX)
             .await

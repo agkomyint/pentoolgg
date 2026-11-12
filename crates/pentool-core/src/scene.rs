@@ -998,7 +998,7 @@ fn reorder_node(page: &mut Value, id: &str, requested: usize) -> Result<usize> {
     bail!("group not found")
 }
 
-pub(crate) fn page_mut<'a>(raw: &'a mut Value, id: Option<&str>) -> Result<&'a mut Value> {
+pub fn page_mut<'a>(raw: &'a mut Value, id: Option<&str>) -> Result<&'a mut Value> {
     let pages = raw.get_mut("pages").and_then(Value::as_array_mut).unwrap();
     match id {
         Some(id) => pages
@@ -3471,7 +3471,7 @@ mod tests {
     #[test]
     fn fixture_flattens_to_a_valid_renderable_v3_document() {
         let raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let flattened = flatten_to_v3(&raw).unwrap();
         let doc: crate::document::Document = serde_json::from_value(flattened).unwrap();
         doc.validate().unwrap();
@@ -3483,7 +3483,7 @@ mod tests {
     #[test]
     fn semantic_shapes_are_canonical_and_flattenable() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         raw["pages"][0]["layers"][0]["nodes"] = json!([]);
         put_shape(
             &mut raw,
@@ -3510,7 +3510,7 @@ mod tests {
     #[test]
     fn add_child_rejects_existing_member() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         apply_group(&mut raw, None, GroupAction::Ungroup { id: "card".into() }).unwrap();
         apply_group(
             &mut raw,
@@ -3542,7 +3542,7 @@ mod tests {
     #[test]
     fn put_shape_rejects_negative_stroke_width() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let err = put_shape(
             &mut raw,
             None,
@@ -3570,7 +3570,7 @@ mod tests {
     #[test]
     fn group_reorder_rejects_out_of_range_index() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let err = apply_group(
             &mut raw,
             None,
@@ -3601,7 +3601,7 @@ mod tests {
     #[test]
     fn groups_move_duplicate_and_ungroup_without_losing_children() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         apply_group(
             &mut raw,
             None,
@@ -3648,7 +3648,7 @@ mod tests {
     #[test]
     fn removing_a_missing_page_reports_not_found_before_last_page_guard() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let err = apply_page(
             &mut raw,
             crate::page::PageAction::Remove {
@@ -3678,7 +3678,7 @@ mod tests {
     #[test]
     fn v4_inspection_is_compact_and_paginates_nested_nodes() {
         let raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let first = inspect_paginated_v4(&raw, None, None, None, None, 0, 1).unwrap();
         assert_eq!(first["matches"], 3);
         assert_eq!(first["returned"], 1);
@@ -3701,7 +3701,7 @@ mod tests {
     #[test]
     fn v4_search_matches_text_and_maps_path_filter_to_shapes() {
         let raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let text =
             inspect_paginated_v4(&raw, None, Some("semantic"), Some("text"), None, 0, 10).unwrap();
         assert_eq!(text["matches"], 1);
@@ -3715,7 +3715,7 @@ mod tests {
     #[test]
     fn renaming_a_page_to_an_empty_name_is_rejected() {
         let mut raw: Value =
-            serde_json::from_str(include_str!("../docs/fixtures/v4-scene.pen")).unwrap();
+            serde_json::from_str(include_str!("../../../docs/fixtures/v4-scene.pen")).unwrap();
         let err = apply_page(
             &mut raw,
             crate::page::PageAction::Rename {

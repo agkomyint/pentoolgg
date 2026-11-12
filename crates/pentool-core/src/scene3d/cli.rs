@@ -948,7 +948,7 @@ pub fn run_pack(
     run(input, dry_run, revision, Scene3dAction::Pack { action })
 }
 
-pub(crate) fn verify_pack_bundle(bundle: &Path) -> Result<Value> {
+pub fn verify_pack_bundle(bundle: &Path) -> Result<Value> {
     let root = bundle.canonicalize().with_context(|| {
         format!(
             "[missing-resource] packaging bundle {} does not exist",
@@ -2521,18 +2521,18 @@ fn batch_queue(
     }))
 }
 
-pub(crate) struct PackBundleOptions<'a> {
-    pub(crate) dieline_id: &'a str,
-    pub(crate) out: &'a Path,
-    pub(crate) min_ppi: f64,
-    pub(crate) ppi: f64,
-    pub(crate) bits: u8,
-    pub(crate) fold: f64,
-    pub(crate) source_revision: &'a str,
-    pub(crate) dry_run: bool,
+pub struct PackBundleOptions<'a> {
+    pub dieline_id: &'a str,
+    pub out: &'a Path,
+    pub min_ppi: f64,
+    pub ppi: f64,
+    pub bits: u8,
+    pub fold: f64,
+    pub source_revision: &'a str,
+    pub dry_run: bool,
 }
 
-pub(crate) fn write_pack_bundle(
+pub fn write_pack_bundle(
     raw: &Value,
     input: &Path,
     options: PackBundleOptions<'_>,
@@ -2837,7 +2837,7 @@ fn detect_format(path: &Path, forced: Option<&str>) -> Result<String> {
     Ok(name)
 }
 
-pub(crate) fn add(
+pub fn add(
     raw: &mut Value,
     input: &Path,
     args: (

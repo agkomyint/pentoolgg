@@ -303,7 +303,7 @@ fn find_node_mut<'a>(page: &'a mut Value, id: &str) -> Option<&'a mut Value> {
         .find_map(|layer| find(layer.get_mut("nodes")?.as_array_mut()?, id))
 }
 
-pub(crate) fn document_references_asset(raw: &Value, digest: &str) -> bool {
+pub fn document_references_asset(raw: &Value, digest: &str) -> bool {
     fn references(value: &Value, digest: &str) -> bool {
         match value {
             Value::Object(object) => {
@@ -1226,7 +1226,7 @@ pub fn decode_source(bytes: &[u8]) -> Result<SourceInfo> {
     decode_source_pixels(bytes).map(|(info, _)| info)
 }
 
-pub(crate) fn decode_source_pixels(bytes: &[u8]) -> Result<(SourceInfo, image::RgbaImage)> {
+pub fn decode_source_pixels(bytes: &[u8]) -> Result<(SourceInfo, image::RgbaImage)> {
     if bytes.is_empty() || bytes.len() as u64 > MAX_SOURCE_BYTES {
         bail!("[limit-exceeded] image source must contain 1 byte–128 MiB")
     }
@@ -1593,7 +1593,7 @@ pub fn load_asset_bytes_for_document(
     load_asset_bytes(raw, crate::resource::document_root(document), digest)
 }
 
-pub(crate) fn load_asset_bytes(raw: &Value, document_dir: &Path, digest: &str) -> Result<Vec<u8>> {
+pub fn load_asset_bytes(raw: &Value, document_dir: &Path, digest: &str) -> Result<Vec<u8>> {
     let asset = raw["image_assets"]
         .get(digest)
         .and_then(Value::as_object)

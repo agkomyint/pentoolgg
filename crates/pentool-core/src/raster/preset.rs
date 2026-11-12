@@ -529,7 +529,7 @@ mod tests {
     use super::*;
 
     fn base() -> Value {
-        serde_json::from_str(include_str!("../../docs/fixtures/v4-scene.pen")).unwrap()
+        serde_json::from_str(include_str!("../../../../docs/fixtures/v4-scene.pen")).unwrap()
     }
 
     #[test]

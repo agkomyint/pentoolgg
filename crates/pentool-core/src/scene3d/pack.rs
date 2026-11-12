@@ -7139,7 +7139,7 @@ mod tests {
     #[test]
     fn packaging_preflight_reports_hinge_and_wrap_seam_measurements() {
         let mut raw: Value = serde_json::from_str(include_str!(
-            "../../docs/fixtures/v11-product-packaging.pen"
+            "../../../../docs/fixtures/v11-product-packaging.pen"
         ))
         .unwrap();
         add_pouch(
@@ -8240,7 +8240,7 @@ mod tests {
     #[test]
     fn per_crease_angle_changes_only_its_fold_target_and_is_failure_atomic() {
         let mut document: Value = serde_json::from_str(include_str!(
-            "../../docs/fixtures/v11-product-packaging.pen"
+            "../../../../docs/fixtures/v11-product-packaging.pen"
         ))
         .unwrap();
         let original = document.clone();

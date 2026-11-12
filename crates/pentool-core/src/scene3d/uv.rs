@@ -651,7 +651,7 @@ fn apply_islands(prim: &mut Primitive, islands: &[IslandSpec]) -> Result<()> {
 /// Pack editable UV islands into a padded unit square while preserving each
 /// island's aspect ratio, rotation and mirror state. The mesh supplied here is
 /// already loaded with the existing overlay applied.
-pub(crate) fn pack_islands(prim: &Primitive, overlay: &Value, padding: f64) -> Result<Value> {
+pub fn pack_islands(prim: &Primitive, overlay: &Value, padding: f64) -> Result<Value> {
     ensure!(
         padding.is_finite() && (0.0..0.25).contains(&padding),
         "[invalid-input] UV pack padding must be finite and in 0..0.25"

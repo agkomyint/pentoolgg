@@ -2615,7 +2615,7 @@ mod tests {
     #[test]
     fn inherits_svg_gradient_attributes_and_stops_with_cycle_guard() {
         let imported = import_svg(
-            include_bytes!("../docs/fixtures/svg-conformance/gradient-inheritance.svg"),
+            include_bytes!("../../../docs/fixtures/svg-conformance/gradient-inheritance.svg"),
             "gradient-inheritance.svg",
             ImportLimits::default(),
         )

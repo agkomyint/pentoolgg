@@ -2523,7 +2523,8 @@ mod tests {
     #[test]
     fn rendered_png_imports_and_keeps_photo_edits_nondestructive() {
         let mut raw: Value =
-            serde_json::from_slice(include_bytes!("../../docs/fixtures/photo-v7.pen")).unwrap();
+            serde_json::from_slice(include_bytes!("../../../../docs/fixtures/photo-v7.pen"))
+                .unwrap();
         let image = image::RgbaImage::from_pixel(8, 4, image::Rgba([96, 128, 160, 255]));
         let mut bytes = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image)
